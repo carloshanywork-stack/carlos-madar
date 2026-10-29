@@ -1718,6 +1718,191 @@ api.delete('/employees/:id', requireAuth, allowRoles('admin'), asyncRoute(async 
   res.json({ ok: true })
 }))
 
+function employeeHistoryData(employeeId, fromDate = null, toDate = null) {
+  const employee = db.prepare(`SELECT e.id,e.name,e.department,e.phone,e.monthly_salary_cents,e.active,e.created_at,e.deleted_at,
+      u.username,u.active AS user_active
+    FROM employees e LEFT JOIN users u ON u.employee_id=e.id AND u.deleted_at IS NULL
+    WHERE e.id=?`).get(employeeId)
+  if (!employee) return null
+  const from = fromDate ? `${fromDate} 00:00:00` : null
+  const to = toDate ? `${toDate} 23:59:59` : null
+  const rangeClause = (column) => `(? IS NULL OR ${column}>=?) AND (? IS NULL OR ${column}<=?)`
+  const orders = db.prepare(`SELECT DISTINCT o.id,o.code,o.type,o.status,o.created_at,
+      COALESCE(a.assigned_at,o.created_at) AS assigned_at,c.name AS client_name
+    FROM orders o JOIN clients c ON c.id=o.client_id
+      LEFT JOIN order_employee_assignments a ON a.order_id=o.id AND a.employee_id=?
+    WHERE (o.assigned_employee_id=? OR a.employee_id IS NOT NULL) AND o.deleted_at IS NULL
+      AND ${rangeClause('COALESCE(a.assigned_at,o.created_at)')}
+    ORDER BY assigned_at DESC,o.id DESC`).all(employeeId, employeeId, from, from, to, to)
+  const payrollRows = db.prepare(`SELECT p.* FROM payroll_records p WHERE p.employee_id=?
+      AND ${rangeClause('p.updated_at')} ORDER BY p.period DESC,p.id DESC`)
+    .all(employeeId, from, from, to, to)
+  const advanceRows = db.prepare(`SELECT a.*,u.full_name AS actor_name,p.period FROM employee_advance_events a
+      LEFT JOIN users u ON u.id=a.created_by LEFT JOIN payroll_records p ON p.id=a.payroll_id
+    WHERE a.employee_id=? AND ${rangeClause('a.created_at')} ORDER BY a.created_at DESC,a.id DESC`)
+    .all(employeeId, from, from, to, to)
+  const treasuryRows = db.prepare(`SELECT t.*,u.full_name AS actor_name FROM treasury_transactions t
+      LEFT JOIN users u ON u.id=t.created_by WHERE t.employee_id=? AND ${rangeClause('t.created_at')}
+    ORDER BY t.created_at DESC,t.id DESC`)
+    .all(employeeId, from, from, to, to)
+  const auditRows = db.prepare(`SELECT a.*,u.full_name AS actor_name FROM audit_log a LEFT JOIN users u ON u.id=a.user_id
+    WHERE ((a.entity='employee' AND a.entity_id=?)
+      OR (a.entity='user' AND CAST(a.entity_id AS INTEGER) IN (SELECT id FROM users WHERE employee_id=?))
+      OR (a.entity='payroll' AND CAST(a.entity_id AS INTEGER) IN (SELECT id FROM payroll_records WHERE employee_id=?)))
+      AND ${rangeClause('a.created_at')} ORDER BY a.created_at DESC,a.id DESC`)
+    .all(String(employeeId), employeeId, employeeId, from, from, to, to)
+
+  const events = [
+    ...orders.map((row) => ({ id: `order-${row.id}`, type: 'order', date: row.assigned_at,
+      title: 'إسناد أمر تشغيل', description: `${row.code} · ${row.client_name} · ${row.type === 'maintenance' ? 'صيانة' : 'تشغيل'} · ${row.status}` })),
+    ...payrollRows.map((row) => ({ id: `payroll-${row.id}`, type: 'payroll', date: row.updated_at,
+      title: `مسير رواتب ${row.period}`, description: `الحالة: ${row.status === 'finalized' ? 'مقفل' : 'مسودة'} · مستحق ${row.net_entitlement_cents} قرش · مدفوع ${row.cash_paid_cents} قرش · غير مسدد ${row.unpaid_salary_cents} قرش`,
+      amountCents: Number(row.net_entitlement_cents), payrollId: row.id, period: row.period })),
+    ...advanceRows.map((row) => ({ id: `advance-${row.id}`, type: 'advance', date: row.created_at,
+      title: ({ issued: 'صرف سلفة', applied: 'تسوية سلفة من الراتب', overpayment: 'زيادة دفعة راتب' })[row.event_type] || row.event_type,
+      description: `${row.notes || '—'}${row.period ? ` · ${row.period}` : ''}${row.actor_name ? ` · ${row.actor_name}` : ''}`,
+      amountCents: Number(row.amount_cents), eventType: row.event_type })),
+    ...treasuryRows.map((row) => ({ id: `treasury-${row.id}`, type: 'treasury', date: row.created_at,
+      title: row.category || (row.kind === 'income' ? 'وارد خزينة' : 'منصرف خزينة'),
+      description: `${row.kind === 'income' ? 'وارد' : 'منصرف'} · ${row.reference || '—'} · ${row.notes || '—'}${row.actor_name ? ` · ${row.actor_name}` : ''}`,
+      amountCents: Math.round(Number(row.amount) * 100), transactionId: row.id, kind: row.kind })),
+    ...auditRows.map((row) => ({ id: `audit-${row.id}`, type: 'audit', date: row.created_at,
+      title: `${row.action} · ${row.entity}`, description: `${row.details || ''}${row.actor_name ? ` · ${row.actor_name}` : ''}`,
+      oldValues: row.old_values ? JSON.parse(row.old_values) : null,
+      newValues: row.new_values ? JSON.parse(row.new_values) : null })),
+  ].sort((left, right) => String(right.date).localeCompare(String(left.date)) || right.id.localeCompare(left.id))
+
+  const sum = (rows, field) => rows.reduce((total, row) => total + Number(row[field] || 0), 0)
+  const summary = {
+    assignedOrderCount: orders.length,
+    payrollPeriodCount: payrollRows.length,
+    payrollEntitlementCents: sum(payrollRows, 'net_entitlement_cents'),
+    payrollCashPaidCents: sum(payrollRows, 'cash_paid_cents'),
+    unpaidSalaryCents: sum(payrollRows, 'unpaid_salary_cents'),
+    advancesIssuedCents: advanceRows.filter((row) => ['issued', 'overpayment'].includes(row.event_type))
+      .reduce((total, row) => total + Number(row.amount_cents), 0),
+    advancesAppliedCents: sum(advanceRows.filter((row) => row.event_type === 'applied'), 'amount_cents'),
+    treasuryIncomeCents: Math.round(sum(treasuryRows.filter((row) => row.kind === 'income'), 'amount') * 100),
+    treasuryExpenseCents: Math.round(sum(treasuryRows.filter((row) => row.kind === 'expense'), 'amount') * 100),
+    currentAdvanceBalanceCents: employeeAdvanceBalanceCents(employeeId),
+  }
+  return { employee, summary, events, from: fromDate, to: toDate }
+}
+
+function parseEmployeeHistoryRange(query) {
+  const from = parseAnalysisDate(query.from, 'البداية')
+  const to = parseAnalysisDate(query.to, 'النهاية')
+  if (from && to && from > to) throw apiError(400, 'تاريخ البداية يجب أن يسبق تاريخ النهاية.')
+  return { from, to }
+}
+
+api.get('/employees/:id/history', requireAuth, allowRoles('admin'), (req, res) => {
+  const employeeId = Number(req.params.id)
+  if (!Number.isSafeInteger(employeeId) || employeeId < 1) return sendError(res, 400, 'رقم الموظف غير صالح.')
+  try {
+    const range = parseEmployeeHistoryRange(req.query)
+    const history = employeeHistoryData(employeeId, range.from, range.to)
+    if (!history) return sendError(res, 404, 'الموظف غير موجود.')
+    res.json(history)
+  } catch (error) { return sendError(res, error.status || 400, error.message) }
+})
+
+api.get('/employees/:id/history.xlsx', requireAuth, allowRoles('admin'), (req, res) => {
+  const employeeId = Number(req.params.id)
+  if (!Number.isSafeInteger(employeeId) || employeeId < 1) return sendError(res, 400, 'رقم الموظف غير صالح.')
+  try {
+    const range = parseEmployeeHistoryRange(req.query)
+    const history = employeeHistoryData(employeeId, range.from, range.to)
+    if (!history) return sendError(res, 404, 'الموظف غير موجود.')
+    const workbook = XLSX.utils.book_new()
+    const summaryRows = [
+      ['الموظف', history.employee.name], ['القسم', history.employee.department], ['الهاتف', history.employee.phone || ''],
+      ['الحالة', history.employee.deleted_at ? 'موقوف / محذوف منطقيًا' : history.employee.active ? 'نشط' : 'موقوف'],
+      ['من', history.from || 'كل الفترات'], ['إلى', history.to || 'كل الفترات'],
+      ['أوامر مسندة', history.summary.assignedOrderCount], ['فترات رواتب', history.summary.payrollPeriodCount],
+      ['إجمالي الاستحقاقات (ج.م)', history.summary.payrollEntitlementCents / 100],
+      ['مدفوع رواتب (ج.م)', history.summary.payrollCashPaidCents / 100],
+      ['رواتب غير مسددة (ج.م)', history.summary.unpaidSalaryCents / 100],
+      ['سلف وزيادات مصروفة (ج.م)', history.summary.advancesIssuedCents / 100],
+      ['سلف مسوّاة (ج.م)', history.summary.advancesAppliedCents / 100],
+      ['رصيد السلف الحالي (ج.م)', history.summary.currentAdvanceBalanceCents / 100],
+      ['وارد خزينة مرتبط (ج.م)', history.summary.treasuryIncomeCents / 100],
+      ['منصرف خزينة مرتبط (ج.م)', history.summary.treasuryExpenseCents / 100],
+    ]
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(summaryRows), 'ملخص الموظف')
+    const eventRows = [['التاريخ', 'النوع', 'الحدث', 'التفاصيل', 'المبلغ (ج.م)', 'القيم السابقة', 'القيم الجديدة']]
+    for (const event of history.events) eventRows.push([
+      event.date, event.type, event.title, event.description, event.amountCents == null ? '' : event.amountCents / 100,
+      event.oldValues == null ? '' : JSON.stringify(event.oldValues),
+      event.newValues == null ? '' : JSON.stringify(event.newValues),
+    ])
+    const eventSheet = XLSX.utils.aoa_to_sheet(eventRows)
+    eventSheet['!cols'] = [{ wch: 22 }, { wch: 16 }, { wch: 28 }, { wch: 80 }, { wch: 18 }, { wch: 60 }, { wch: 60 }]
+    XLSX.utils.book_append_sheet(workbook, eventSheet, 'السجل الوظيفي')
+    const buffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'buffer' })
+    res.set({ 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': `attachment; filename="employee-${employeeId}-history.xlsx"`, 'Cache-Control': 'private, no-store' })
+      .send(buffer)
+  } catch (error) { return sendError(res, error.status || 400, error.message) }
+})
+
+function buildEmployeeHistoryPdf(history) {
+  const fontPath = internalReportFontPath()
+  if (!fontPath) throw apiError(500, 'خط عربي صالح لتقرير PDF غير متاح. عيّن MADAR_PDF_FONT_PATH إلى مسار ملف TTF محلي.')
+  const boldFontPath = internalReportFontPath(true) || fontPath
+  return new Promise((resolve, reject) => {
+    const pdf = new PDFDocument({ size: 'A4', layout: 'landscape', margins: { top: 34, right: 34, bottom: 34, left: 34 } })
+    const chunks = []
+    pdf.on('data', (chunk) => chunks.push(chunk))
+    pdf.on('error', reject)
+    pdf.on('end', () => resolve(Buffer.concat(chunks)))
+    const width = pdf.page.width - pdf.page.margins.left - pdf.page.margins.right
+    const right = pdf.page.width - pdf.page.margins.right
+    const bottom = () => pdf.page.height - pdf.page.margins.bottom
+    const formatMoney = (amount) => new Intl.NumberFormat('ar-EG', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(amount || 0))
+    let y = 110
+    const heading = () => {
+      pdf.font(boldFontPath).fontSize(17).fillColor('#173a66').text('السجل الوظيفي وتحليل الأداء', pdf.page.margins.left, 35,
+        { width, align: 'right', features: ['rtla', 'rtlm'] })
+      pdf.font(fontPath).fontSize(11).fillColor('#344b62').text(`${history.employee.name} · ${history.employee.department}`,
+        pdf.page.margins.left, 62, { width, align: 'right', features: ['rtla', 'rtlm'] })
+      pdf.font(fontPath).fontSize(9).fillColor('#60758a').text(`الفترة: ${history.from || 'كل الفترات'} — ${history.to || 'حتى الآن'} · الأحداث: ${history.events.length}`,
+        pdf.page.margins.left, 81, { width, align: 'right', features: ['rtla', 'rtlm'] })
+      y = 110
+    }
+    heading()
+    const summaryLine = `أوامر مسندة: ${history.summary.assignedOrderCount} · فترات رواتب: ${history.summary.payrollPeriodCount} · `
+      + `استحقاقات: ${formatMoney(history.summary.payrollEntitlementCents / 100)} ج.م · مدفوع: ${formatMoney(history.summary.payrollCashPaidCents / 100)} ج.م · `
+      + `غير مسدد: ${formatMoney(history.summary.unpaidSalaryCents / 100)} ج.م · رصيد السلف: ${formatMoney(history.summary.currentAdvanceBalanceCents / 100)} ج.م`
+    pdf.font(boldFontPath).fontSize(9).fillColor('#173a66').text(summaryLine, pdf.page.margins.left, y,
+      { width, align: 'right', lineGap: 3, features: ['rtla', 'rtlm'] })
+    y += pdf.heightOfString(summaryLine, { width, font: boldFontPath, fontSize: 9, lineGap: 3 }) + 14
+    for (const event of history.events) {
+      const detail = `${event.description || '—'}${event.amountCents == null ? '' : ` · ${formatMoney(event.amountCents / 100)} ج.م`}`
+      const height = pdf.heightOfString(detail, { width: width - 18, font: fontPath, fontSize: 8, lineGap: 2 }) + 28
+      if (y + height > bottom()) { pdf.addPage(); heading() }
+      pdf.save().roundedRect(pdf.page.margins.left, y, width, height, 4).fill('#f1f6f8').restore()
+      pdf.font(boldFontPath).fontSize(9).fillColor('#173a66').text(`${event.date} · ${event.title}`,
+        right - width + 9, y + 5, { width: width - 18, align: 'right', features: ['rtla', 'rtlm'] })
+      pdf.font(fontPath).fontSize(8).fillColor('#344b62').text(detail, right - width + 9, y + 20,
+        { width: width - 18, align: 'right', lineGap: 2, features: ['rtla', 'rtlm'] })
+      y += height + 6
+    }
+    pdf.end()
+  })
+}
+
+api.get('/employees/:id/history.pdf', requireAuth, allowRoles('admin'), asyncRoute(async (req, res) => {
+  const employeeId = Number(req.params.id)
+  if (!Number.isSafeInteger(employeeId) || employeeId < 1) return sendError(res, 400, 'رقم الموظف غير صالح.')
+  const range = parseEmployeeHistoryRange(req.query)
+  const history = employeeHistoryData(employeeId, range.from, range.to)
+  if (!history) return sendError(res, 404, 'الموظف غير موجود.')
+  const buffer = await buildEmployeeHistoryPdf(history)
+  res.set({ 'Content-Type': 'application/pdf', 'Content-Length': String(buffer.length),
+    'Content-Disposition': `attachment; filename="employee-${employeeId}-history.pdf"`, 'Cache-Control': 'private, no-store' }).send(buffer)
+}))
+
 api.get('/workers', requireAuth, allowRoles('admin'), asyncRoute(async (_req, res) => {
   const workers = await models.Worker.findAll({ order: [['name', 'ASC']] })
   res.json(workers.map((worker) => ({
@@ -4054,6 +4239,274 @@ api.post('/inventory/purchases', requireAuth, allowRoles('admin', 'purchasing'),
   }
 })
 
+function currentPurchaseRevision(invoiceId) {
+  return db.prepare(`SELECT * FROM purchase_invoice_revisions WHERE invoice_id=?
+    ORDER BY revision_number DESC LIMIT 1`).get(invoiceId) || null
+}
+
+function currentPurchaseSnapshot(invoice) {
+  const revision = currentPurchaseRevision(invoice.id)
+  if (revision) return JSON.parse(revision.revised_values)
+  const items = db.prepare(`SELECT ii.material_id,m.code,m.name,m.specification,m.unit,ii.quantity,ii.unit_cost
+    FROM invoice_items ii JOIN materials m ON m.id=ii.material_id
+    WHERE ii.invoice_id=? ORDER BY ii.id`).all(invoice.id).map((item) => {
+    const unitCostCents = Math.round(Number(item.unit_cost) * 100)
+    return {
+      materialId: item.material_id, code: item.code, name: item.name, specification: item.specification || '',
+      unit: item.unit, quantity: Number(item.quantity), unitCostCents, unitCost: unitCostCents / 100,
+      lineTotalCents: Number(item.quantity) * unitCostCents,
+    }
+  })
+  return {
+    supplier: invoice.supplier || '', notes: invoice.notes || '', employeeId: invoice.employee_id || null,
+    totalCents: Math.round(Number(invoice.total) * 100), items,
+  }
+}
+
+function currentPurchaseLotSource(invoiceId) {
+  const revision = currentPurchaseRevision(invoiceId)
+  return revision
+    ? { sourceType: 'purchase_invoice_revision', sourceId: String(revision.id), revisionNumber: revision.revision_number }
+    : { sourceType: 'purchase_invoice', sourceId: String(invoiceId), revisionNumber: 0 }
+}
+
+function purchaseRevisionEligibility(invoice, snapshot = currentPurchaseSnapshot(invoice)) {
+  if (invoice.status === 'corrected' || db.prepare('SELECT 1 FROM purchase_corrections WHERE invoice_id=?').get(invoice.id)) {
+    return { eligible: false, reason: 'الفاتورة مصححة ولا يمكن تعديلها مرة أخرى.' }
+  }
+  if (Math.round(Number(invoice.paid_total || 0) * 100) !== Math.round(Number(invoice.total || 0) * 100)
+    || Math.round(Number(invoice.remaining || 0) * 100) !== 0) {
+    return { eligible: false, reason: 'تتطلب المراجعة فاتورة شراء مسددة بالكامل.' }
+  }
+  if (!snapshot.items?.length) return { eligible: false, reason: 'لا توجد بنود موثقة للمراجعة.' }
+
+  const source = currentPurchaseLotSource(invoice.id)
+  const expectedByMaterial = new Map()
+  for (const item of snapshot.items) {
+    const materialId = Number(item.materialId)
+    expectedByMaterial.set(materialId, (expectedByMaterial.get(materialId) || 0) + Number(item.quantity))
+  }
+  const lots = db.prepare(`SELECT l.id,l.material_id,l.received_quantity,l.remaining_quantity,
+      COALESCE(SUM(c.quantity),0) AS consumed
+    FROM inventory_lots l LEFT JOIN inventory_lot_consumptions c ON c.lot_id=l.id
+    WHERE l.invoice_id=? AND l.source_type=? AND l.source_id=? AND l.warehouse='main'
+    GROUP BY l.id ORDER BY l.id`).all(invoice.id, source.sourceType, source.sourceId)
+  if (!lots.length) return { eligible: false, reason: 'لا يمكن إثبات مصدر دفعات المخزون لهذه الفاتورة.' }
+
+  const receivedByMaterial = new Map()
+  let untouched = true
+  for (const lot of lots) {
+    const materialId = Number(lot.material_id)
+    receivedByMaterial.set(materialId, (receivedByMaterial.get(materialId) || 0) + Number(lot.received_quantity))
+    if (Math.abs(Number(lot.received_quantity) - Number(lot.remaining_quantity)) > 0.000001
+      || Number(lot.consumed) > 0.000001) untouched = false
+  }
+  const materialsMatch = expectedByMaterial.size === receivedByMaterial.size
+    && [...expectedByMaterial].every(([materialId, quantity]) =>
+      Math.abs(quantity - (receivedByMaterial.get(materialId) || 0)) <= 0.000001)
+  if (!untouched || !materialsMatch) {
+    return { eligible: false, reason: 'لا يمكن مراجعة الفاتورة بعد صرف أي جزء من دفعاتها أو تغيّر مصدرها.' }
+  }
+  return { eligible: true, reason: '', source, lots }
+}
+
+function purchaseRevisionHistory(invoiceId) {
+  const invoice = db.prepare(`SELECT * FROM invoices WHERE id=? AND kind='purchase' AND deleted_at IS NULL`).get(invoiceId)
+  if (!invoice) return null
+  const currentValues = currentPurchaseSnapshot(invoice)
+  const eligibility = purchaseRevisionEligibility(invoice, currentValues)
+  const revisions = db.prepare(`SELECT r.*,u.full_name AS actor_name FROM purchase_invoice_revisions r
+    LEFT JOIN users u ON u.id=r.created_by WHERE r.invoice_id=? ORDER BY r.revision_number DESC`).all(invoiceId)
+    .map((revision) => ({ ...revision,
+      previous_values: JSON.parse(revision.previous_values), revised_values: JSON.parse(revision.revised_values),
+      stock_movements: JSON.parse(revision.stock_movements || '[]'),
+    }))
+  return {
+    invoice: { id: invoice.id, code: invoice.code, supplier: invoice.supplier || '', notes: invoice.notes || '',
+      total: Number(invoice.total), paidTotal: Number(invoice.paid_total), remaining: Number(invoice.remaining),
+      paymentStatus: invoice.payment_status, status: invoice.status, createdAt: invoice.created_at },
+    currentValues, revisionNumber: currentPurchaseRevision(invoiceId)?.revision_number || 0,
+    canRevise: eligibility.eligible, revisionBlockedReason: eligibility.reason, revisions,
+  }
+}
+
+api.get('/inventory/purchases/:id', requireAuth, allowRoles('admin', 'purchasing'), (req, res) => {
+  const invoiceId = Number(req.params.id)
+  if (!Number.isSafeInteger(invoiceId) || invoiceId < 1) return sendError(res, 400, 'رقم الفاتورة غير صالح.')
+  const history = purchaseRevisionHistory(invoiceId)
+  if (!history) return sendError(res, 404, 'فاتورة الشراء غير موجودة.')
+  res.json(history)
+})
+
+api.get('/inventory/purchases/:id/revisions', requireAuth, allowRoles('admin', 'purchasing'), (req, res) => {
+  const invoiceId = Number(req.params.id)
+  if (!Number.isSafeInteger(invoiceId) || invoiceId < 1) return sendError(res, 400, 'رقم الفاتورة غير صالح.')
+  const history = purchaseRevisionHistory(invoiceId)
+  if (!history) return sendError(res, 404, 'فاتورة الشراء غير موجودة.')
+  res.json(history)
+})
+
+api.put('/inventory/purchases/:id/revisions', requireAuth, allowRoles('admin'), (req, res) => {
+  const invoiceId = Number(req.params.id)
+  const reason = String(req.body?.reason || '').trim().slice(0, 1000)
+  const expectedRevision = Number(req.body?.expectedRevision)
+  const supplier = String(req.body?.supplier || '').trim().slice(0, 200)
+  const notes = String(req.body?.notes || '').trim().slice(0, 2000)
+  const requestedItems = Array.isArray(req.body?.items) ? req.body.items : []
+  const items = requestedItems.map((item) => {
+    const unitCostCents = parseCurrencyCents(item?.unitCost, { allowZero: true })
+    const rawMaterialId = item?.materialId == null || item.materialId === '' || Number(item.materialId) === 0
+      ? null : Number(item.materialId)
+    return { ...item, materialId: rawMaterialId, unitCostCents }
+  })
+  if (!Number.isSafeInteger(invoiceId) || invoiceId < 1 || !reason || !Number.isSafeInteger(expectedRevision)
+    || expectedRevision < 0 || !items.length || items.length > 200 || items.some((item) =>
+      (item.materialId !== null && (!Number.isSafeInteger(item.materialId) || item.materialId < 1))
+      || (item.materialId === null && (!String(item.name || '').trim() || !String(item.unit || '').trim()))
+      || !Number.isSafeInteger(Number(item.quantity)) || Number(item.quantity) <= 0 || item.unitCostCents === null)) {
+    return sendError(res, 400, 'تحقق من رقم الفاتورة ورقم المراجعة والسبب وبنود المخزون والكميات والأسعار.')
+  }
+  const totalCentsBig = items.reduce((sum, item) => sum + BigInt(Number(item.quantity)) * BigInt(item.unitCostCents), 0n)
+  if (totalCentsBig <= 0n || totalCentsBig > BigInt(Number.MAX_SAFE_INTEGER)) {
+    return sendError(res, 400, 'إجمالي الفاتورة المعدّلة يتجاوز الحد المالي المدعوم أو يساوي صفرًا.')
+  }
+  const totalCents = Number(totalCentsBig)
+  const total = currencyAmountFromCents(totalCents)
+  if (total === null) return sendError(res, 400, 'إجمالي الفاتورة يتجاوز دقة المبالغ المالية المدعومة.')
+
+  try {
+    const revise = db.transaction(() => {
+      const invoice = db.prepare(`SELECT * FROM invoices WHERE id=? AND kind='purchase' AND deleted_at IS NULL`).get(invoiceId)
+      if (!invoice) throw apiError(404, 'فاتورة الشراء غير موجودة.')
+      const currentRevision = currentPurchaseRevision(invoiceId)
+      const currentRevisionNumber = currentRevision?.revision_number || 0
+      if (expectedRevision !== currentRevisionNumber) throw apiError(409, 'تغيّرت الفاتورة منذ فتح شاشة المراجعة؛ أعد تحميلها قبل الحفظ.')
+      const before = currentPurchaseSnapshot(invoice)
+      const eligibility = purchaseRevisionEligibility(invoice, before)
+      if (!eligibility.eligible) throw apiError(409, eligibility.reason)
+      const oldTotalCents = Math.round(Number(invoice.total) * 100)
+      const cashDeltaCents = totalCents - oldTotalCents
+      if (cashDeltaCents < 0 && req.body?.supplierRefundReceived !== true) {
+        throw apiError(400, 'أكد استلام المورد فرق التخفيض قبل حفظ المراجعة.')
+      }
+      if (cashDeltaCents > 0 && cashboxBalanceCents() < cashDeltaCents) {
+        throw apiError(409, 'رصيد صندوق المصنع لا يكفي لسداد فرق الزيادة في الفاتورة.')
+      }
+
+      const outputItems = []
+      for (const item of items) {
+        const selectedMaterial = item.materialId == null ? null
+          : db.prepare('SELECT * FROM materials WHERE id=? AND active=1 AND deleted_at IS NULL').get(item.materialId)
+        if (item.materialId !== null && !selectedMaterial) throw apiError(400, `الخامة غير موجودة: ${item.materialId}`)
+        if (selectedMaterial) assertMaterialUnlocked(selectedMaterial.id)
+        const variant = {
+          name: String(item.name ?? selectedMaterial?.name ?? '').trim(),
+          specification: String(item.specification ?? selectedMaterial?.specification ?? '').trim().slice(0, 300),
+          unit: String(item.unit ?? selectedMaterial?.unit ?? '').trim(),
+          unitCostCents: item.unitCostCents,
+        }
+        if (!variant.name || !variant.unit) throw apiError(400, 'اسم الخامة والمواصفة والوحدة مطلوبة.')
+        const variantKey = materialVariantKey(variant)
+        let material = db.prepare('SELECT * FROM materials WHERE variant_key=?').get(variantKey)
+        if (material) {
+          assertMaterialUnlocked(material.id)
+          if (material.deleted_at || !material.active) {
+            db.prepare('UPDATE materials SET active=1,deleted_at=NULL WHERE id=?').run(material.id)
+            material = db.prepare('SELECT * FROM materials WHERE id=?').get(material.id)
+          }
+        } else {
+          const materialCode = nextCode('material', 'MAT')
+          const inserted = db.prepare(`INSERT INTO materials(code,name,specification,unit,stock,unit_cost,min_stock,active,sub_stock,variant_key)
+            VALUES (?,?,?,?,0,?,?,1,0,?)`).run(materialCode, variant.name, variant.specification, variant.unit,
+            item.unitCostCents / 100, selectedMaterial?.min_stock || 0, variantKey)
+          material = db.prepare('SELECT * FROM materials WHERE id=?').get(inserted.lastInsertRowid)
+        }
+        outputItems.push({ materialId: material.id, code: material.code, name: material.name,
+          specification: material.specification || '', unit: material.unit, quantity: Number(item.quantity),
+          unitCostCents: item.unitCostCents, unitCost: item.unitCostCents / 100,
+          lineTotalCents: Number(item.quantity) * item.unitCostCents })
+      }
+
+      const after = { supplier, notes, employeeId: invoice.employee_id || null, totalCents, items: outputItems }
+      const insertedRevision = db.prepare(`INSERT INTO purchase_invoice_revisions(invoice_id,revision_number,reason,
+        previous_values,revised_values,cash_delta_cents,created_by) VALUES (?,?,?,?,?,?,?)`)
+        .run(invoiceId, currentRevisionNumber + 1, reason, JSON.stringify(before), JSON.stringify(after), cashDeltaCents, req.user.id)
+      const revisionId = insertedRevision.lastInsertRowid
+      const sourceId = String(revisionId)
+      const movementIds = []
+      const oldByMaterial = new Map()
+      for (const item of before.items) {
+        const materialId = Number(item.materialId)
+        oldByMaterial.set(materialId, (oldByMaterial.get(materialId) || 0) + Number(item.quantity))
+      }
+      for (const [materialId, quantity] of oldByMaterial) {
+        const material = db.prepare('SELECT stock FROM materials WHERE id=?').get(materialId)
+        if (!material || Number(material.stock) + 0.000001 < quantity) throw apiError(409, 'رصيد المخزون لا يطابق دفعات الفاتورة؛ رُفضت المراجعة.')
+        const movementId = db.prepare(`INSERT INTO inventory_movements(material_id,kind,quantity,reference,notes,created_by,warehouse,invoice_id,source_type,source_id)
+          VALUES (?,'adjustment',?,?,?,?,'main',?,'purchase_invoice_revision',?)`).run(materialId, -quantity,
+          invoice.code, `عكس دفعة قبل مراجعة فاتورة ${invoice.code}: ${reason}`, req.user.id, invoiceId, sourceId).lastInsertRowid
+        for (const lot of eligibility.lots.filter((row) => Number(row.material_id) === materialId)) {
+          // Reversing an untouched receipt is not a stock issue; leave the FIFO
+          // consumption ledger reserved for actual issue movements.
+          db.prepare('UPDATE inventory_lots SET remaining_quantity=0 WHERE id=?').run(lot.id)
+        }
+        db.prepare('UPDATE materials SET stock=stock-? WHERE id=?').run(quantity, materialId)
+        movementIds.push({ movementId, materialId, quantity: -quantity })
+      }
+
+      const newByMaterial = new Map()
+      for (const item of outputItems) newByMaterial.set(item.materialId, (newByMaterial.get(item.materialId) || 0) + item.quantity)
+      for (const [materialId, quantity] of newByMaterial) {
+        db.prepare('UPDATE materials SET stock=stock+? WHERE id=?').run(quantity, materialId)
+        const movementId = db.prepare(`INSERT INTO inventory_movements(material_id,kind,quantity,reference,notes,created_by,warehouse,invoice_id,source_type,source_id)
+          VALUES (?,'purchase',?,?,?,?, 'main',?,'purchase_invoice_revision',?)`).run(materialId, quantity,
+          invoice.code, `توريد دفعة المراجعة ${currentRevisionNumber + 1} للفاتورة ${invoice.code}`, req.user.id, invoiceId, sourceId).lastInsertRowid
+        movementIds.push({ movementId, materialId, quantity })
+      }
+      for (const item of outputItems) {
+        createInventoryLot({ materialId: item.materialId, invoiceId, sourceType: 'purchase_invoice_revision', sourceId: revisionId,
+          warehouse: 'main', quantity: item.quantity, unitCostCents: item.unitCostCents })
+      }
+
+      db.prepare(`UPDATE invoices SET supplier=?,notes=?,total=?,paid_total=?,remaining=0,payment_status='paid' WHERE id=?`)
+        .run(supplier, notes, total, total, invoiceId)
+
+      let treasuryTransactionId = null
+      let journal = null
+      if (cashDeltaCents !== 0) {
+        const amountCents = Math.abs(cashDeltaCents)
+        const isIncrease = cashDeltaCents > 0
+        const amount = currencyAmountFromCents(amountCents)
+        treasuryTransactionId = db.prepare(`INSERT INTO treasury_transactions(kind,amount,category,reference,notes,invoice_id,created_by,employee_id)
+          VALUES (?,?,?,?,?,?,?,?)`).run(isIncrease ? 'expense' : 'income', amount,
+          isIncrease ? 'زيادة قيمة فاتورة شراء معدّلة' : 'رد فرق تعديل فاتورة شراء', invoice.code, reason,
+          invoiceId, req.user.id, invoice.employee_id).lastInsertRowid
+        journal = queueJournalEntry(db, {
+          sourceType: 'purchase_invoice_revision', sourceId: revisionId, sourceKey: `purchase-invoice-revision:${revisionId}`,
+          description: `تسوية فرق مراجعة فاتورة شراء ${invoice.code}`, createdBy: req.user.id,
+          postings: isIncrease ? [
+            { mappingKey: 'inventory', debitCents: amountCents, description: `زيادة مخزون ${invoice.code}` },
+            { mappingKey: 'factory_cashbox', creditCents: amountCents, description: `سداد فرق ${invoice.code}` },
+          ] : [
+            { mappingKey: 'factory_cashbox', debitCents: amountCents, description: `استرداد فرق ${invoice.code}` },
+            { mappingKey: 'inventory', creditCents: amountCents, description: `تخفيض قيمة مخزون ${invoice.code}` },
+          ],
+        })
+      }
+      db.prepare(`UPDATE purchase_invoice_revisions SET stock_movements=?,treasury_transaction_id=?,journal_entry_id=? WHERE id=?`)
+        .run(JSON.stringify(movementIds), treasuryTransactionId, journal?.id || null, revisionId)
+      audit(req.user.id, 'revise-purchase', 'invoice', invoiceId, `revision=${currentRevisionNumber + 1}; journal=${journal?.id || ''}`,
+        before, { ...after, revisionId, revisionNumber: currentRevisionNumber + 1, cashDeltaCents,
+          treasuryTransactionId, journalEntryId: journal?.id || null, stockMovements: movementIds })
+      return { id: invoiceId, code: invoice.code, revisionId, revisionNumber: currentRevisionNumber + 1,
+        total, cashDeltaCents, treasuryTransactionId, journalEntryId: journal?.id || null, items: outputItems }
+    })
+    const result = revise.immediate()
+    io.to('role:treasury').emit('treasury:purchase-revised', result)
+    res.status(201).json(result)
+  } catch (error) { return sendError(res, error.status || 400, error.message) }
+})
+
 api.get('/other-invoices', requireAuth, allowRoles('admin', 'purchasing'), (_req, res) => {
   const invoices = db.prepare(`SELECT oi.*,e.name AS employee_name,u.full_name AS created_by_name
     FROM other_invoices oi LEFT JOIN employees e ON e.id=oi.employee_id LEFT JOIN users u ON u.id=oi.created_by
@@ -4078,14 +4531,19 @@ api.post('/inventory/purchases/:id/correction', requireAuth, allowRoles('admin')
       if (Math.round(Number(invoice.paid_total || 0) * 100) !== Math.round(Number(invoice.total) * 100)) {
         throw apiError(409, 'لا يمكن تصحيح فاتورة شراء قبل استيفاء دفعها بالكامل.')
       }
-      const items = db.prepare(`SELECT ii.material_id,SUM(ii.quantity) AS quantity
-        FROM invoice_items ii WHERE ii.invoice_id=? GROUP BY ii.material_id ORDER BY ii.material_id`).all(invoiceId)
+      const snapshot = currentPurchaseSnapshot(invoice)
+      const groupedItems = new Map()
+      for (const item of snapshot.items) groupedItems.set(Number(item.materialId),
+        (groupedItems.get(Number(item.materialId)) || 0) + Number(item.quantity))
+      const items = [...groupedItems].map(([material_id, quantity]) => ({ material_id, quantity }))
       if (!items.length) throw apiError(409, 'لا توجد بنود مخزون لإثبات مصدر الفاتورة.')
+      const activeSource = currentPurchaseLotSource(invoiceId)
       for (const item of items) {
         assertMaterialUnlocked(item.material_id)
         const lots = db.prepare(`SELECT COALESCE(SUM(received_quantity),0) AS received,
             COALESCE(SUM(remaining_quantity),0) AS remaining
-          FROM inventory_lots WHERE invoice_id=? AND material_id=? AND warehouse='main'`).get(invoiceId, item.material_id)
+          FROM inventory_lots WHERE invoice_id=? AND material_id=? AND warehouse='main' AND source_type=? AND source_id=?`)
+          .get(invoiceId, item.material_id, activeSource.sourceType, activeSource.sourceId)
         if (Math.abs(Number(lots.received) - Number(item.quantity)) > 0.000001
           || Math.abs(Number(lots.remaining) - Number(item.quantity)) > 0.000001) {
           throw apiError(409, `تعذر إثبات أن كامل رصيد فاتورة ${invoice.code} ما زال غير مصروف؛ رُفض التصحيح.`)
@@ -4106,12 +4564,13 @@ api.post('/inventory/purchases/:id/correction', requireAuth, allowRoles('admin')
         if (!material || Number(material.stock) + 0.000001 < quantity) throw apiError(409, 'رصيد المخزون لا يطابق إثبات التوريد؛ رُفض التصحيح.')
         const movementId = movement.run(item.material_id, -quantity, invoice.code, `رد كامل غير مصروف من فاتورة ${invoice.code}: ${reason}`,
           req.user.id, invoice.id, String(correctionId)).lastInsertRowid
-        db.prepare(`UPDATE inventory_lots SET remaining_quantity=0 WHERE invoice_id=? AND material_id=? AND warehouse='main'`)
-          .run(invoice.id, item.material_id)
+        db.prepare(`UPDATE inventory_lots SET remaining_quantity=0 WHERE invoice_id=? AND material_id=? AND warehouse='main' AND source_type=? AND source_id=?`)
+          .run(invoice.id, item.material_id, activeSource.sourceType, activeSource.sourceId)
         db.prepare('UPDATE materials SET stock=stock-? WHERE id=?').run(quantity, item.material_id)
         // Keep a consumption link so a correction can never be repeated against the same source lot.
-        const lots = db.prepare(`SELECT id,received_quantity FROM inventory_lots WHERE invoice_id=? AND material_id=? AND warehouse='main' ORDER BY id`)
-          .all(invoice.id, item.material_id)
+        const lots = db.prepare(`SELECT id,received_quantity FROM inventory_lots WHERE invoice_id=? AND material_id=? AND warehouse='main'
+          AND source_type=? AND source_id=? ORDER BY id`)
+          .all(invoice.id, item.material_id, activeSource.sourceType, activeSource.sourceId)
         for (const lot of lots) {
           const already = db.prepare('SELECT COALESCE(SUM(quantity),0) AS quantity FROM inventory_lot_consumptions WHERE lot_id=?').get(lot.id).quantity
           const remaining = Math.max(0, Number(lot.received_quantity) - Number(already))
@@ -4745,12 +5204,55 @@ api.put('/accounting/mappings/:mappingKey', requireAuth, allowRoles('admin'), (r
   } catch (error) { return sendError(res, 400, error.message) }
 })
 
+function journalSourceHref(entry) {
+  const sourceId = String(entry.source_id || '')
+  const numericId = Number(sourceId)
+  if (!Number.isSafeInteger(numericId) || numericId < 1) return null
+  switch (entry.source_type) {
+    case 'purchase_invoice': return `/finance#purchase-invoice-${numericId}`
+    case 'purchase_invoice_revision': {
+      const revision = db.prepare('SELECT invoice_id FROM purchase_invoice_revisions WHERE id=?').get(numericId)
+      return revision ? `/finance#purchase-invoice-${revision.invoice_id}` : '/finance'
+    }
+    case 'purchase_correction': {
+      const correction = db.prepare('SELECT invoice_id FROM purchase_corrections WHERE id=?').get(numericId)
+      return correction ? `/finance#purchase-invoice-${correction.invoice_id}` : '/finance'
+    }
+    case 'sales_invoice': return `/finance#sales-invoice-${numericId}`
+    case 'other_invoice': return `/finance#other-invoice-${numericId}`
+    case 'customer_receipt': {
+      const transaction = db.prepare('SELECT invoice_id FROM treasury_transactions WHERE id=?').get(numericId)
+      return transaction?.invoice_id ? `/finance#sales-invoice-${transaction.invoice_id}` : `/finance#treasury-entry-${numericId}`
+    }
+    case 'treasury_transaction':
+    case 'company_funding':
+    case 'payroll_payment': return `/finance#treasury-entry-${numericId}`
+    case 'inventory_issue': {
+      const issue = db.prepare('SELECT order_id FROM inventory_issues WHERE id=?').get(numericId)
+      if (issue?.order_id) return `/orders/${issue.order_id}`
+      const movement = db.prepare(`SELECT id FROM inventory_movements WHERE issue_id=? ORDER BY id LIMIT 1`).get(numericId)
+      return movement ? `/inventory#inventory-movement-${movement.id}` : '/inventory'
+    }
+    case 'work_order_cogs_recognition': return `/orders/${numericId}`
+    case 'inventory_adjustment': return `/inventory#inventory-movement-${numericId}`
+    case 'stock_count': return `/inventory#stock-count-${numericId}`
+    case 'payroll': return `/accounting#payroll-record-${numericId}`
+    case 'employee_advance': {
+      const event = db.prepare('SELECT employee_id FROM employee_advance_events WHERE id=?').get(numericId)
+      return event ? `/employees#employee-record-${event.employee_id}` : '/employees'
+    }
+    case 'opening_balance': return `/accounting#opening-balance-${numericId}`
+    default: return null
+  }
+}
+
 api.get('/accounting/journal', requireAuth, allowRoles('admin'), (req, res) => {
   const conditions = []
   const params = []
   if (req.query.from) { conditions.push('je.created_at>=?'); params.push(`${String(req.query.from).slice(0,10)} 00:00:00`) }
   if (req.query.to) { conditions.push("je.created_at<datetime(?,'+1 day')"); params.push(String(req.query.to).slice(0,10)) }
   if (req.query.sourceType) { conditions.push('je.source_type=?'); params.push(String(req.query.sourceType).slice(0,80)) }
+  if (req.query.sourceId) { conditions.push('je.source_id=?'); params.push(String(req.query.sourceId).trim().slice(0,100)) }
   if (req.query.accountId && Number.isSafeInteger(Number(req.query.accountId))) {
     conditions.push('EXISTS(SELECT 1 FROM journal_lines f WHERE f.journal_entry_id=je.id AND f.account_id=?)')
     params.push(Number(req.query.accountId))
@@ -4761,7 +5263,7 @@ api.get('/accounting/journal', requireAuth, allowRoles('admin'), (req, res) => {
     ORDER BY je.id DESC LIMIT ?`).all(...params, limit)
   const lines = db.prepare(`SELECT jl.*,a.code AS account_code,a.name AS account_name FROM journal_lines jl
     JOIN accounts a ON a.id=jl.account_id WHERE jl.journal_entry_id=? ORDER BY jl.line_number`)
-  res.json(entries.map((entry) => ({ ...entry, lines: lines.all(entry.id) })))
+  res.json(entries.map((entry) => ({ ...entry, source_href: journalSourceHref(entry), lines: lines.all(entry.id) })))
 })
 
 api.get('/accounting/ledger', requireAuth, allowRoles('admin'), (req, res) => {
@@ -5108,6 +5610,7 @@ api.get('/finance/dashboard', requireAuth, allowRoles('admin'), (req, res) => {
     ORDER BY t.id DESC LIMIT 100`).all(from, from, to, to)
   const invoices = db.prepare(`SELECT i.id,i.code,i.kind,i.total,i.paid_total,i.remaining,i.payment_status,i.notes,i.status,i.created_at,i.supplier,
       i.subtotal_cents,i.tax_cents,i.tax_rate_basis_points,i.sale_type,
+      (SELECT COUNT(*) FROM purchase_invoice_revisions pr WHERE pr.invoice_id=i.id) AS revision_count,
     c.name AS client_name,o.code AS order_code,e.name AS employee_name
     FROM invoices i LEFT JOIN clients c ON c.id=i.client_id LEFT JOIN orders o ON o.id=i.order_id
     LEFT JOIN employees e ON e.id=i.employee_id
@@ -5118,6 +5621,8 @@ api.get('/finance/dashboard', requireAuth, allowRoles('admin'), (req, res) => {
   const receivables = db.prepare(`SELECT i.id,i.code,i.total,i.paid_total,i.remaining,i.payment_status,i.created_at,c.name AS client_name
     FROM invoices i JOIN clients c ON c.id=i.client_id WHERE i.kind='sales' AND i.remaining>0 AND i.deleted_at IS NULL
     ORDER BY i.created_at,i.id LIMIT 100`).all()
+  const totalReceivableCents = Number(db.prepare(`SELECT COALESCE(SUM(ROUND(remaining*100)),0) AS cents FROM invoices
+    WHERE kind='sales' AND remaining>0 AND deleted_at IS NULL`).get().cents)
   res.json({
     summary: { income: totals.income, expense: totals.expense, cashBalance: currencyAmountFromCents(cashboxBalanceCents()),
       ownerFunding: totals.owner_funding, inventoryValue,
@@ -5128,7 +5633,7 @@ api.get('/finance/dashboard', requireAuth, allowRoles('admin'), (req, res) => {
       profitStatus: workOrderFinancials.profitStatus,
       unclassifiedHistoricalIssueCount: workOrderFinancials.unclassifiedHistoricalIssueCount,
       pendingWorkOrderCogsEntries: workOrderFinancials.pendingJournalEntries,
-      expectedProfit: workOrderFinancials.grossProfitCents / 100 },
+       expectedProfit: workOrderFinancials.grossProfitCents / 100, totalReceivableCents },
     monthly, entries, invoices, otherInvoices, receivables,
   })
 })

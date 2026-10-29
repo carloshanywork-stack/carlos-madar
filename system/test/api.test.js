@@ -527,6 +527,9 @@ test('purchase, fractional issue, sales and treasury stay in sync in SQLite', as
   const issueJournal = (await request('/accounting/journal?sourceType=inventory_issue')).data
     .find((entry) => entry.source_key === `inventory-issue:${orderIssueRow.id}`)
   assert.equal(issueJournal.status, 'posted')
+  assert.equal(issueJournal.source_href, `/orders/${orderCreate.data.id}`)
+  const filteredIssueJournal = await request(`/accounting/journal?sourceType=inventory_issue&sourceId=${orderIssueRow.id}&accountId=${manufacturingAccountIds.inventory}`)
+  assert.deepEqual(filteredIssueJournal.data.map((entry) => entry.id), [issueJournal.id])
   assert.ok(issueJournal.lines.some((line) => line.account_id === manufacturingAccountIds.work_order_wip
     && line.debit_cents === 2512))
   await new Promise((resolve) => setTimeout(resolve, 1050))
@@ -1432,19 +1435,94 @@ test('purchase, fractional issue, sales and treasury stay in sync in SQLite', as
     method: 'POST', form: invalidEvidenceForm,
   })).response.status, 415)
 
+  const revisionPurchase = standalonePurchase
+  const revisionInitial = await request(`/inventory/purchases/${revisionPurchase.data.id}`)
+  assert.equal(revisionInitial.data.revisionNumber, 0)
+  assert.equal(revisionInitial.data.currentValues.totalCents, 4000)
+  assert.equal(revisionInitial.data.canRevise, true)
+  assert.equal((await request(`/inventory/purchases/${revisionPurchase.data.id}`, { authCookie: salesCookie })).response.status, 403)
+  const missingRefundConfirmation = await request(`/inventory/purchases/${revisionPurchase.data.id}/revisions`, {
+    method: 'PUT', body: { expectedRevision: 0, reason: 'Correct supplier unit cost', supplier: 'Revision supplier', notes: '',
+      items: [{ materialId: revisionPurchase.data.items[0].materialId, name: 'Revision fixture material',
+        specification: 'API fixture', unit: 'piece', quantity: 2, unitCost: 18 }] },
+  })
+  assert.equal(missingRefundConfirmation.response.status, 400)
+  const firstRevision = await request(`/inventory/purchases/${revisionPurchase.data.id}/revisions`, {
+    method: 'PUT', body: { expectedRevision: 0, reason: 'Supplier corrected the unit price', supplier: 'Revision supplier corrected',
+      notes: 'First auditable revision', supplierRefundReceived: true,
+      items: [{ materialId: revisionPurchase.data.items[0].materialId, name: 'Revision fixture material',
+        specification: 'API fixture', unit: 'piece', quantity: 2, unitCost: 18 }] },
+  })
+  assert.equal(firstRevision.response.status, 201, firstRevision.data.error)
+  assert.deepEqual([firstRevision.data.revisionNumber, firstRevision.data.total, firstRevision.data.cashDeltaCents], [1, 36, -400])
+  const secondRevision = await request(`/inventory/purchases/${revisionPurchase.data.id}/revisions`, {
+    method: 'PUT', body: { expectedRevision: 1, reason: 'Additional units received', supplier: 'Revision supplier corrected',
+      notes: 'Second auditable revision', items: [{ materialId: firstRevision.data.items[0].materialId,
+        name: 'Revision fixture material', specification: 'API fixture', unit: 'piece', quantity: 3, unitCost: 18 }] },
+  })
+  assert.equal(secondRevision.response.status, 201, secondRevision.data.error)
+  assert.deepEqual([secondRevision.data.revisionNumber, secondRevision.data.total, secondRevision.data.cashDeltaCents], [2, 54, 1800])
+  const staleRevision = await request(`/inventory/purchases/${revisionPurchase.data.id}/revisions`, {
+    method: 'PUT', body: { expectedRevision: 1, reason: 'Stale edit', supplier: 'stale', notes: '',
+      items: [{ materialId: secondRevision.data.items[0].materialId, name: 'Revision fixture material',
+        specification: 'API fixture', unit: 'piece', quantity: 1, unitCost: 18 }] },
+  })
+  assert.equal(staleRevision.response.status, 409)
+  const revisionHistory = await request(`/inventory/purchases/${revisionPurchase.data.id}/revisions`)
+  assert.deepEqual(revisionHistory.data.revisions.map((row) => row.revision_number), [2, 1])
+  assert.deepEqual([revisionHistory.data.revisions[0].previous_values.totalCents,
+    revisionHistory.data.revisions[0].revised_values.totalCents], [3600, 5400])
+  assert.equal(revisionHistory.data.currentValues.items[0].quantity, 3)
+  const revisedMaterial = (await request('/materials')).data.find((item) => item.id === secondRevision.data.items[0].materialId)
+  assert.equal(revisedMaterial.stock, 3)
+  const revisionJournalFilter = await request(`/accounting/journal?sourceType=purchase_invoice_revision&sourceId=${secondRevision.data.revisionId}`)
+  assert.equal(revisionJournalFilter.data.length, 1)
+  assert.equal(revisionJournalFilter.data[0].source_href, `/finance#purchase-invoice-${revisionPurchase.data.id}`)
+  const revisionAudit = (await request('/audit?entity=invoice&action=revise-purchase')).data
+    .find((row) => row.entity_id === String(revisionPurchase.data.id))
+  assert.equal(revisionAudit.new_values.revisionNumber, 2)
+  const issuedRevisionStock = await request('/inventory/issue', {
+    method: 'POST', body: { materialId: secondRevision.data.items[0].materialId, quantity: 1, classification: 'general' },
+  })
+  assert.equal(issuedRevisionStock.response.status, 200)
+  const issuedRevisionEdit = await request(`/inventory/purchases/${revisionPurchase.data.id}/revisions`, {
+    method: 'PUT', body: { expectedRevision: 2, reason: 'Attempt to revise issued stock', supplier: 'Revision supplier', notes: '',
+      items: [{ materialId: secondRevision.data.items[0].materialId, name: 'Revision fixture material',
+        specification: 'API fixture', unit: 'piece', quantity: 2, unitCost: 18 }] },
+  })
+  assert.equal(issuedRevisionEdit.response.status, 409)
+  const revisionLedgerDb = new Database(path.join(tempRoot, 'test.sqlite'), { readonly: true })
+  try {
+    const entries = revisionLedgerDb.prepare(`SELECT id,status,total_debit_cents,total_credit_cents FROM journal_entries
+      WHERE source_type='purchase_invoice_revision' AND source_id IN (?,?) ORDER BY id`)
+      .all(String(firstRevision.data.revisionId), String(secondRevision.data.revisionId))
+    assert.equal(entries.length, 2)
+    assert.ok(entries.every((entry) => entry.status === 'posted' && entry.total_debit_cents === entry.total_credit_cents))
+    const revisionMovements = revisionLedgerDb.prepare(`SELECT source_id,quantity FROM inventory_movements
+      WHERE invoice_id=? AND source_type='purchase_invoice_revision' ORDER BY id`).all(revisionPurchase.data.id)
+    assert.deepEqual(revisionMovements.map((row) => row.quantity), [-2, 2, -2, 3])
+  } finally { revisionLedgerDb.close() }
+
   assert.equal((await request(`/inventory/purchases/${purchase.data.id}/correction`, {
     method: 'POST', body: { reason: 'Issued source lot', supplierRefundReceived: true },
   })).response.status, 409)
-  assert.equal((await request(`/inventory/purchases/${standalonePurchase.data.id}/correction`, {
+  await new Promise((resolve) => setTimeout(resolve, 1050))
+  const correctionPurchase = await request('/inventory/purchases', {
+    method: 'POST', body: { supplier: 'Refund fixture supplier', items: [{ materialId: null, name: 'Refund fixture material',
+      specification: 'API fixture', unit: 'piece', quantity: 2, unitCost: 20 }] },
+  })
+  assert.equal(correctionPurchase.response.status, 201, correctionPurchase.data.error)
+  const correctionMaterialId = correctionPurchase.data.items[0].materialId
+  assert.equal((await request(`/inventory/purchases/${correctionPurchase.data.id}/correction`, {
     method: 'POST', body: { reason: 'No refund confirmation' },
   })).response.status, 400)
-  const correction = await request(`/inventory/purchases/${standalonePurchase.data.id}/correction`, {
+  const correction = await request(`/inventory/purchases/${correctionPurchase.data.id}/correction`, {
     method: 'POST', body: { reason: 'Supplier refunded the unissued purchase', supplierRefundReceived: true },
   })
   assert.equal(correction.response.status, 201, correction.data.error)
   assert.equal(correction.data.refundedAmount, 40)
-  assert.equal((await request('/materials')).data.find((item) => item.id === standaloneMaterialId).stock, 0)
-  const correctedInvoice = (await request('/finance/dashboard')).data.invoices.find((invoice) => invoice.id === standalonePurchase.data.id)
+  assert.equal((await request('/materials')).data.find((item) => item.id === correctionMaterialId).stock, 0)
+  const correctedInvoice = (await request('/finance/dashboard')).data.invoices.find((invoice) => invoice.id === correctionPurchase.data.id)
   assert.equal(correctedInvoice.status, 'corrected')
 
   const stockCount = await request('/inventory/stock-counts', {
@@ -1541,6 +1619,34 @@ test('purchase, fractional issue, sales and treasury stay in sync in SQLite', as
   const salaryPayment = await request(`/payroll/${payrollDraft.data.id}/payments`, { method: 'POST', body: { amount: 30 } })
   assert.equal(salaryPayment.response.status, 201)
   assert.equal(salaryPayment.data.unpaidSalaryCents, 0)
+  const employeeHistory = await request(`/employees/${maintenanceEmployee.data.id}/history`)
+  assert.equal(employeeHistory.response.status, 200, employeeHistory.data.error)
+  assert.equal(employeeHistory.data.employee.id, maintenanceEmployee.data.id)
+  assert.equal(employeeHistory.data.summary.payrollPeriodCount, 1)
+  assert.equal(employeeHistory.data.summary.payrollEntitlementCents, 10000)
+  assert.equal(employeeHistory.data.summary.advancesIssuedCents, 2000)
+  assert.equal(employeeHistory.data.summary.advancesAppliedCents, 2000)
+  assert.equal(employeeHistory.data.summary.currentAdvanceBalanceCents, 0)
+  assert.ok(employeeHistory.data.events.some((event) => event.type === 'payroll' && event.payrollId === payrollDraft.data.id))
+  assert.ok(employeeHistory.data.events.some((event) => event.type === 'advance' && event.eventType === 'issued'))
+  assert.ok(employeeHistory.data.events.some((event) => event.type === 'treasury' && event.transactionId))
+  assert.ok(employeeHistory.data.events.some((event) => event.type === 'audit' && event.oldValues && event.newValues))
+  assert.equal((await request(`/employees/${maintenanceEmployee.data.id}/history`, { authCookie: salesCookie })).response.status, 403)
+  assert.equal((await request(`/employees/${maintenanceEmployee.data.id}/history?from=2026-02-30`)).response.status, 400)
+  const futureHistory = await request(`/employees/${maintenanceEmployee.data.id}/history?from=2999-01-01`)
+  assert.equal(futureHistory.response.status, 200)
+  assert.equal(futureHistory.data.events.length, 0)
+  const employeeHistoryXlsx = await request(`/employees/${maintenanceEmployee.data.id}/history.xlsx`)
+  assert.equal(employeeHistoryXlsx.response.status, 200, employeeHistoryXlsx.response.headers.get('content-type'))
+  assert.match(employeeHistoryXlsx.response.headers.get('content-type'), /spreadsheetml\.sheet/)
+  const employeeWorkbook = XLSX.read(Buffer.from(employeeHistoryXlsx.data), { type: 'buffer' })
+  assert.deepEqual(employeeWorkbook.SheetNames, ['ملخص الموظف', 'السجل الوظيفي'])
+  assert.ok(XLSX.utils.sheet_to_json(employeeWorkbook.Sheets['السجل الوظيفي'], { header: 1 })
+    .some((row) => String(row[2] || '').includes('مسير رواتب 2026-09')))
+  const employeeHistoryPdf = await request(`/employees/${maintenanceEmployee.data.id}/history.pdf`)
+  assert.equal(employeeHistoryPdf.response.status, 200, employeeHistoryPdf.data.toString().slice(0, 200))
+  assert.match(employeeHistoryPdf.response.headers.get('content-type'), /application\/pdf/)
+  assert.ok(Buffer.from(employeeHistoryPdf.data).subarray(0, 5).equals(Buffer.from('%PDF-')))
 
   const openingBatch = await request('/accounting/opening-balances', {
     method: 'POST', body: { cutoverDate: '2025-01-01', lines: [
@@ -1931,7 +2037,8 @@ test('purchase, fractional issue, sales and treasury stay in sync in SQLite', as
   cookie = adminCookie
   const auditLog = await request('/audit?limit=200')
   assert.equal(auditLog.response.status, 200)
-  const issueAudit = auditLog.data.find((row) => row.action === 'issue' && row.entity === 'material' && row.old_values?.stock === 3)
+  const issueAudit = auditLog.data.find((row) => row.action === 'issue' && row.entity === 'material'
+    && row.entity_id === String(purchase.data.items[0].materialId) && row.old_values?.stock === 3)
   assert.deepEqual(issueAudit.old_values, { stock: 3, subStock: 0 })
   assert.deepEqual(issueAudit.new_values, { stock: 1, subStock: 0.25 })
 

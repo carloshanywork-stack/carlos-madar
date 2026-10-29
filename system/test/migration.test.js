@@ -143,6 +143,8 @@ test('migrates legacy fractional balances into offcuts and backfills invoice cas
     assert.ok(migrated.prepare('SELECT 1 FROM schema_migrations WHERE name=?').get('manufacturing-account-mappings-v1'))
     assert.ok(migrated.prepare('SELECT 1 FROM schema_migrations WHERE name=?').get('other-invoice-attachments-schema-v6'))
     assert.ok(migrated.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='other_invoice_attachments'").get())
+    assert.ok(migrated.prepare('SELECT 1 FROM schema_migrations WHERE name=?').get('purchase-invoice-revisions-schema-v7'))
+    assert.ok(migrated.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='purchase_invoice_revisions'").get())
     assert.ok(migrated.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='inventory_issues'").get())
     assert.ok(migrated.pragma('table_info(inventory_movements)').some((column) => column.name === 'issue_id'))
     const manufacturingMappings = migrated.prepare(`SELECT am.mapping_key,am.account_id,am.approved,a.system_key

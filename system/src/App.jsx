@@ -345,7 +345,7 @@ export default function App() {
           <Route path="/orders/:orderId" element={selectedOrder && String(selectedOrder.id) === routeOrderId ? <OrderDetail order={selectedOrder} data={data} user={user} onBack={() => navigate('orders')} onRefresh={async () => { await refresh(); setSelectedOrder(normalizeOrderAreas(await api(`/orders/${selectedOrder.id}`))) }} onEdit={() => setModal({ type: 'edit-order', order: selectedOrder })} onDelete={async () => { await refresh(); navigate('orders') }} notify={notify} onPreview={(photo, side, photos) => setLightbox({ photo, side, photos })} onAddMachine={() => setModal({ type: 'add-machine', order: selectedOrder })} onIssue={() => setModal({ type: 'issue', order: selectedOrder })} /> : <div className="panel loading-inline">جارٍ تحميل الأمر...</div>} />
          <Route path="/machines" element={<MachinesPage data={data} search={search} setSearch={setSearch} onAdd={() => setModal('machine')} onRefresh={refresh} notify={notify} apiClient={api} />} />
           <Route path="/inventory" element={<InventoryPage data={data} user={user} onAdd={() => setModal('material')} onPurchase={() => setModal('purchase')} onIssue={() => setModal('issue')} onOtherInvoice={() => setModal('other-invoice')} onRefresh={refresh} notify={notify} />} />
-          <Route path="/finance" element={<FinancePage user={user} data={data} notify={notify} onCreateSale={() => setModal('sale')} onAddTreasury={() => setModal('treasury')} onAddFunding={() => setModal('funding')} onOtherInvoice={() => setModal('other-invoice')} onRecordReceipt={(invoice) => setModal({ type: 'receipt', invoice })} onCorrectPurchase={(invoice) => setModal({ type: 'purchase-correction', invoice })} />} />
+          <Route path="/finance" element={<FinancePage user={user} data={data} notify={notify} onCreateSale={() => setModal('sale')} onAddTreasury={() => setModal('treasury')} onAddFunding={() => setModal('funding')} onOtherInvoice={() => setModal('other-invoice')} onRecordReceipt={(invoice) => setModal({ type: 'receipt', invoice })} onCorrectPurchase={(invoice) => setModal({ type: 'purchase-correction', invoice })} onRevisePurchase={(invoice) => setModal({ type: 'purchase-revision', invoice })} onViewPurchaseHistory={(invoice) => setModal({ type: 'purchase-history', invoice })} />} />
           <Route path="/accounting" element={<AccountingPage apiClient={api} data={data} notify={notify} onRefresh={refresh} />} />
           <Route path="/archive" element={<ReportsPage data={data} />} />
           <Route path="/analysis" element={<ArchiveAnalysisPage data={data} apiClient={api} onProcessMissing={(area) => setModal({
@@ -361,6 +361,8 @@ export default function App() {
     </main>
     {modal && (isOrderModal(modal)
       ? <OrderFormModal key={(typeof modal === 'string' ? modal : modal.type) + '-' + (typeof modal === 'object' ? modal.order?.id || '' : '')} modal={modal} data={data} apiClient={api} onClose={() => setModal(null)} onRefresh={refresh} onOrderUpdated={async (id) => setSelectedOrder(normalizeOrderAreas(await api(`/orders/${id}`)))} notify={notify} />
+      : ['purchase-revision','purchase-history'].includes(typeof modal === 'object' ? modal.type : '')
+        ? <PurchaseInvoiceModal key={`${modal.type}:${modal.invoice?.id || ''}`} modal={modal} data={data} onClose={() => setModal(null)} onRefresh={refresh} notify={notify} />
       : <ModalHost key={`${typeof modal === 'string' ? modal : modal.type}:${typeof modal === 'object' ? modal.order?.id || '' : ''}`} modal={modal} setModal={setModal} data={data} onRefresh={refresh} run={run} notify={notify} />)}
     {commandOpen && <CommandPalette data={data} onClose={() => setCommandOpen(false)} onSelect={(item) => {
       setCommandOpen(false)
@@ -444,6 +446,15 @@ function Lightbox({ lightbox, onClose, onChange }) {
 }
 
 function Overview({ data, user, onNavigate, onOpenOrder }) {
+  const [financeDashboard, setFinanceDashboard] = useState(null)
+  const [financeError, setFinanceError] = useState('')
+  useEffect(() => {
+    if (user.role !== 'admin') { setFinanceDashboard(null); setFinanceError(''); return undefined }
+    let active = true
+    api('/finance/dashboard').then((result) => { if (active) setFinanceDashboard(result) })
+      .catch((error) => { if (active) setFinanceError(error.message || 'تعذر تحميل المؤشرات المالية.') })
+    return () => { active = false }
+  }, [user.role, data])
   const stats = [
     { label: 'إجمالي العملاء', value: data.stats.clients, sub: 'ملفات العملاء النشطة', icon: Building2, color: 'blue', link: 'clients' },
     { label: 'أوامر قيد التنفيذ', value: data.stats.activeOrders, sub: `${data.stats.pendingReview} بانتظار الاعتماد`, icon: ClipboardList, color: 'orange', link: 'orders' },
@@ -453,8 +464,28 @@ function Overview({ data, user, onNavigate, onOpenOrder }) {
   const orders = data.orders.filter((order) => order.status !== 'archived').slice(0, 5)
   return <div className="page-enter">
     <section className="welcome-banner"><div className="welcome-copy"><div className="eyebrow"><span className="live-dot" /> مساحة تشغيل موحدة</div><h2>أهلًا، {user.fullName.split(' ')[0]} <span className="wave">✦</span></h2><p>نظرة سريعة على أداء التشغيل والصيانة اليوم.</p><button className="button button-white" onClick={() => onNavigate(user.role === 'purchasing' ? 'inventory' : 'orders')}>استكشف أوامر التشغيل <ArrowLeft size={16} /></button></div><div className="welcome-art"><div className="orb orb-one"/><div className="orb orb-two"/><div className="dashboard-illustration"><div className="illustration-top"><span/><span/><span/></div><div className="illustration-body"><div className="illustration-side"/><div className="illustration-content"><i/><i/><div><b/><b/><b/><b/></div></div></div><div className="illustration-check"><Check size={16}/></div></div><div className="welcome-spark spark-a">✳</div><div className="welcome-spark spark-b">✦</div></div><div className="banner-index">01 <i /> OVERVIEW</div></section>
-    <section className="stats-grid">{stats.map((item) => { const Icon = item.icon; return <button key={item.label} className="stat-card" onClick={() => onNavigate(item.link)}><div className={`stat-icon ${item.color}`}><Icon size={19}/></div><div className="stat-meta"><span>{item.label}</span><small>{item.sub}</small></div><strong className="stat-value">{item.value}</strong><span className="stat-arrow"><ArrowUpRight size={16}/></span></button> })}</section>
-    <section className="content-grid overview-grid"><div className="panel recent-panel"><div className="panel-heading"><div><span className="section-eyebrow">متابعة العمل</span><h3>أحدث أوامر التشغيل</h3></div><button className="text-button" onClick={() => onNavigate('orders')}>عرض الكل <ArrowLeft size={15}/></button></div>{orders.length ? <div className="table-wrap"><table><thead><tr><th>رقم الأمر</th><th>العميل</th><th>النوع</th><th>الحالة</th><th>التاريخ</th><th /></tr></thead><tbody>{orders.map((order) => <tr key={order.id} onClick={() => onOpenOrder(order)} className="clickable-row"><td><strong className="code-cell">{order.code}</strong></td><td>{order.clientName}</td><td>{order.type === 'maintenance' ? 'صيانة' : 'تشغيل'}</td><td><StatusBadge status={order.status}/></td><td>{date(order.createdAt)}</td><td><ArrowLeft size={14} className="muted"/></td></tr>)}</tbody></table></div> : <EmptyState icon={ClipboardList} title="لا توجد أوامر بعد" description="أنشئ أول أمر تشغيل لبدء متابعة العمل." action={<button className="button button-primary button-small" onClick={() => onNavigate('orders')}>الذهاب للأوامر</button>} />}</div>
+     <section className="stats-grid">{stats.map((item) => { const Icon = item.icon; return <button key={item.label} className="stat-card" onClick={() => onNavigate(item.link)}><div className={`stat-icon ${item.color}`}><Icon size={19}/></div><div className="stat-meta"><span>{item.label}</span><small>{item.sub}</small></div><strong className="stat-value">{item.value}</strong><span className="stat-arrow"><ArrowUpRight size={16}/></span></button> })}</section>
+    {user.role === 'admin' && <>
+      {financeError && <div className="inline-error" role="status">{financeError}</div>}
+      {financeDashboard && <>
+        <section className="finance-summary-grid overview-finance-summary">
+          <FinanceStat label="رصيد صندوق المصنع الحالي" value={financeDashboard.summary.cashBalance} icon={CircleDollarSign} tone="blue"/>
+          <FinanceStat label="الوارد النقدي دون التمويل" value={financeDashboard.summary.income} icon={ArrowDownLeft} tone="green"/>
+          <FinanceStat label="المنصرف النقدي" value={financeDashboard.summary.expense} icon={ArrowUpRight} tone="orange"/>
+          <FinanceStat label="قيمة أصول المخزون" value={financeDashboard.summary.inventoryValue} icon={Boxes} tone="purple"/>
+          <FinanceStat label="ذمم العملاء المفتوحة" value={Number(financeDashboard.summary.totalReceivableCents || 0) / 100} icon={Building2} tone="gold"/>
+          <div className="finance-stat"><div className="finance-stat-icon gold"><Activity size={18}/></div><div><span>ربح إجمالي للأوامر المرتبطة</span><strong>{money(financeDashboard.summary.grossProfit)} <small>ج.م</small></strong><small>{financeDashboard.summary.profitStatus === 'complete' ? 'إيرادات الفواتير المرتبطة − تكلفة FIFO' : `${financeDashboard.summary.unclassifiedHistoricalIssueCount} صرف تاريخي غير مصنف`}</small></div></div>
+        </section>
+        <section className="panel overview-finance-panel"><div className="panel-heading"><div><span className="section-eyebrow">التشغيل والماليات في لوحة واحدة</span><h3>مؤشرات السيولة خلال آخر ستة أشهر</h3></div><button className="text-button" onClick={() => onNavigate('finance')}>تفاصيل المالية <ArrowLeft size={15}/></button></div>
+          <div className="cashflow-chart">{financeDashboard.monthly.map((month) => {
+            const max = Math.max(1, ...financeDashboard.monthly.flatMap((item) => [item.income, item.expense]))
+            return <button type="button" className="cashflow-month" key={month.month} title={`${month.label} · وارد ${money(month.income)} · منصرف ${money(month.expense)}`} onClick={() => onNavigate('finance')}><div className="cashflow-bars"><div className="cashflow-bar income-bar" style={{ height: `${Math.max(month.income ? 5 : 0, month.income / max * 100)}%` }}/><div className="cashflow-bar expense-bar" style={{ height: `${Math.max(month.expense ? 5 : 0, month.expense / max * 100)}%` }}/></div><span>{month.label}</span></button>
+          })}</div>
+          <div className="chart-legend"><span><i className="legend-income"/>وارد غير تمويلي</span><span><i className="legend-expense"/>منصرف</span><span>الربح مرتبط بأوامر التشغيل المؤرشفة/المفوترة</span></div>
+        </section>
+      </>}
+    </>}
+     <section className="content-grid overview-grid"><div className="panel recent-panel"><div className="panel-heading"><div><span className="section-eyebrow">متابعة العمل</span><h3>أحدث أوامر التشغيل</h3></div><button className="text-button" onClick={() => onNavigate('orders')}>عرض الكل <ArrowLeft size={15}/></button></div>{orders.length ? <div className="table-wrap"><table><thead><tr><th>رقم الأمر</th><th>العميل</th><th>النوع</th><th>الحالة</th><th>التاريخ</th><th /></tr></thead><tbody>{orders.map((order) => <tr key={order.id} onClick={() => onOpenOrder(order)} className="clickable-row"><td><strong className="code-cell">{order.code}</strong></td><td>{order.clientName}</td><td>{order.type === 'maintenance' ? 'صيانة' : 'تشغيل'}</td><td><StatusBadge status={order.status}/></td><td>{date(order.createdAt)}</td><td><ArrowLeft size={14} className="muted"/></td></tr>)}</tbody></table></div> : <EmptyState icon={ClipboardList} title="لا توجد أوامر بعد" description="أنشئ أول أمر تشغيل لبدء متابعة العمل." action={<button className="button button-primary button-small" onClick={() => onNavigate('orders')}>الذهاب للأوامر</button>} />}</div>
       <div className="panel quick-panel"><div className="panel-heading"><div><span className="section-eyebrow">وصول سريع</span><h3>اختصارات العمل</h3></div><div className="panel-icon"><Sparkles size={18}/></div></div><div className="quick-list"><QuickAction icon={Building2} label="إضافة عميل جديد" detail="إنشاء ملف ومجلد عميل" onClick={() => onNavigate('clients')}/><QuickAction icon={ClipboardList} label="إنشاء أمر تشغيل" detail="ابدأ أمرًا جديدًا" onClick={() => onNavigate('orders')}/><QuickAction icon={HardDrive} label="تحديث الماكينات" detail="استيراد ملف بيانات" onClick={() => onNavigate('machines')}/><QuickAction icon={Boxes} label="متابعة المخزون" detail={`${data.stats.lowStock} أصناف منخفضة`} onClick={() => onNavigate('inventory')}/></div><div className="local-note"><ShieldCheck size={16}/><span>تتم معالجة ملفاتك محليًا، وتبقى الصور داخل مجلد التخزين الآمن.</span></div></div></section>
     <div className="bottom-meta"><span><Activity size={14}/> مَدَار — منصة إدارة التشغيل والصيانة</span><span>قاعدة البيانات محلية وكلمات المرور محفوظة بتجزئة آمنة</span>{user.role==='admin'&&<span>هامش الربح المتوقع: {money(data.stats.totalProfit)} ج.م</span>}</div>
   </div>
@@ -990,6 +1021,7 @@ function PhotoTile({ cardId, side, photo, canOperate, selected, onToggleSelectio
 }
 
 function InventoryPage({ data, user, onAdd, onPurchase, onIssue, onOtherInvoice, onRefresh, notify }) {
+  const location=useLocation()
   const canManage=['admin','purchasing'].includes(user.role)
   const isAdmin=user.role==='admin'
   const [importing,setImporting]=useState(false)
@@ -1008,6 +1040,7 @@ function InventoryPage({ data, user, onAdd, onPurchase, onIssue, onOtherInvoice,
   useEffect(()=>{loadStockCounts()},[isAdmin,data])
   useEffect(()=>{if(!canManage)return;api('/other-invoices').then(setOtherInvoices).catch((error)=>notify(error.message))},[canManage,data])
   useEffect(()=>{setSelectedCountMaterialIds((current)=>current.filter((id)=>data.materials.some((material)=>material.id===id)))},[data.materials])
+  useEffect(()=>{if(!location.hash)return;requestAnimationFrame(()=>document.getElementById(decodeURIComponent(location.hash.slice(1)))?.scrollIntoView({behavior:'smooth',block:'center'}))},[location.hash,movements,stockCounts])
   const openStockCount=async(count)=>{try{const detail=await api(`/inventory/stock-counts/${count.id}`);setActiveCount(detail);setCountItems(detail.items.map((item)=>({...item,counted_stock:item.counted_stock??'',counted_sub_stock:item.counted_sub_stock??''})))}catch(error){notify(error.message)}}
   const createStockCount=async()=>{if(!countReason.trim()){notify('اذكر سبب الجرد قبل فتح المحضر.');return}if(!selectedCountMaterialIds.length){notify('حدد صنفًا واحدًا على الأقل للجرد.');return}setCountBusy(true);try{const result=await api('/inventory/stock-counts',{method:'POST',body:json({reason:countReason,materialIds:selectedCountMaterialIds})});setCountReason('');setSelectedCountMaterialIds([]);await loadStockCounts();await openStockCount(result);notify(`تم فتح ${result.code} وقفل ${result.itemCount} صنفًا للحركة.`)}catch(error){notify(error.message)}finally{setCountBusy(false)}}
   const toggleCountMaterial=(materialId)=>setSelectedCountMaterialIds((current)=>current.includes(materialId)?current.filter((id)=>id!==materialId):[...current,materialId])
@@ -1045,14 +1078,15 @@ function InventoryPage({ data, user, onAdd, onPurchase, onIssue, onOtherInvoice,
     {canManage&&<section className="panel invoice-list-panel"><div className="panel-heading"><div><span className="section-eyebrow">مستندات المصروف</span><h3>فواتير المصروفات الأخرى وإثباتاتها</h3></div><span className="result-count">{otherInvoices.length} فاتورة</span></div>{otherInvoices.length?<div className="table-wrap"><table><thead><tr><th>الكود</th><th>المورد</th><th>الإجمالي</th><th>البنود</th><th>الإثبات</th><th>التاريخ</th></tr></thead><tbody>{otherInvoices.map((invoice)=><tr key={invoice.id}><td><strong className="code-cell">{invoice.code}</strong></td><td>{invoice.supplier||'—'}</td><td>{money(invoice.total_cents/100)} ج.م</td><td>{invoice.lines?.length||0}</td><td><OtherInvoiceEvidence invoice={invoice} notify={notify}/></td><td>{date(invoice.created_at)}</td></tr>)}</tbody></table></div>:<div className="empty-inline">لا توجد فواتير مصروفات أخرى.</div>}</section>}
     {isAdmin&&<section className="panel inventory-panel"><div className="panel-heading"><div><span className="section-eyebrow">جرد مضبوط</span><h3>محاضر الجرد وقفل الحركة</h3></div><span className="result-count">{stockCounts.filter((count)=>count.status==='open').length} مفتوح</span></div>
       <div className="form-row stock-count-open"><label className="field"><span>سبب الجرد</span><input maxLength="1000" required value={countReason} onChange={(event)=>setCountReason(event.target.value)} placeholder="جرد دوري، مطابقة..."/></label><button className="button button-primary" disabled={countBusy||!countReason.trim()||!selectedCountMaterialIds.length} onClick={createStockCount}><Plus size={15}/> فتح محضر للأصناف المحددة ({selectedCountMaterialIds.length})</button></div>
-      {stockCounts.length?<div className="table-wrap"><table><thead><tr><th>المحضر</th><th>السبب</th><th>الحالة</th><th>الأصناف</th><th>غير معدود</th><th>التاريخ</th><th/></tr></thead><tbody>{stockCounts.map((count)=><tr key={count.id}><td>{count.code}</td><td>{count.reason||'—'}</td><td>{count.status==='open'?'مفتوح ومقفل':count.status==='approved'?'معتمد':'ملغى'}</td><td>{count.item_count}</td><td>{count.uncounted}</td><td>{date(count.created_at)}</td><td><button className="button button-ghost button-small" onClick={()=>openStockCount(count)}>{count.status==='open'?'إدخال / مراجعة':'عرض'}</button></td></tr>)}</tbody></table></div>:<div className="empty-inline">لا توجد محاضر جرد.</div>}
+       {stockCounts.length?<div className="table-wrap"><table><thead><tr><th>المحضر</th><th>السبب</th><th>الحالة</th><th>الأصناف</th><th>غير معدود</th><th>التاريخ</th><th/></tr></thead><tbody>{stockCounts.map((count)=><tr key={count.id} id={`stock-count-${count.id}`}><td>{count.code}</td><td>{count.reason||'—'}</td><td>{count.status==='open'?'مفتوح ومقفل':count.status==='approved'?'معتمد':'ملغى'}</td><td>{count.item_count}</td><td>{count.uncounted}</td><td>{date(count.created_at)}</td><td><button className="button button-ghost button-small" onClick={()=>openStockCount(count)}>{count.status==='open'?'إدخال / مراجعة':'عرض'}</button></td></tr>)}</tbody></table></div>:<div className="empty-inline">لا توجد محاضر جرد.</div>}
       {activeCount&&<div className="stock-count-detail"><div className="panel-heading"><div><span className="section-eyebrow">{activeCount.code} · {activeCount.reason}</span><h3>الكميات الفعلية مقابل الدفترية والفروقات</h3></div><button className="icon-button" onClick={()=>setActiveCount(null)} aria-label="إغلاق"><X size={18}/></button></div><div className="table-wrap"><table><thead><tr><th>الصنف</th><th>أساسي دفتري</th><th>أساسي فعلي</th><th>فرق الأساسي</th><th>بواقي دفتري</th><th>بواقي فعلي</th><th>فرق البواقي</th><th>فرق الإجمالي</th></tr></thead><tbody>{countItems.map((item,index)=>{const mainVariance=item.counted_stock===''||item.counted_stock==null?null:Number((Number(item.counted_stock)-Number(item.recorded_stock)).toFixed(6));const subVariance=item.counted_sub_stock===''||item.counted_sub_stock==null?null:Number((Number(item.counted_sub_stock)-Number(item.recorded_sub_stock)).toFixed(6));const totalVariance=mainVariance==null||subVariance==null?null:Number((mainVariance+subVariance).toFixed(6));const varianceCell=(value)=><td className={value==null?'':value<0?'movement-negative':'movement-positive'}>{value==null?'—':`${value>0?'+':''}${quantity(value)}`}</td>;return <tr key={item.id}><td>{item.code} — {item.name} {item.specification&&`· ${item.specification}`}</td><td>{quantity(item.recorded_stock)}</td><td><input aria-label={`الأساسي الفعلي ${item.name}`} type="number" min="0" step="1" placeholder={String(item.recorded_stock)} disabled={activeCount.status!=='open'} value={item.counted_stock} onChange={(event)=>setCountItems((current)=>current.map((row,i)=>i===index?{...row,counted_stock:event.target.value}:row))}/></td>{varianceCell(mainVariance)}<td>{quantity(item.recorded_sub_stock)}</td><td><input aria-label={`البواقي الفعلية ${item.name}`} type="number" min="0" step="0.000001" placeholder={String(item.recorded_sub_stock)} disabled={activeCount.status!=='open'} value={item.counted_sub_stock} onChange={(event)=>setCountItems((current)=>current.map((row,i)=>i===index?{...row,counted_sub_stock:event.target.value}:row))}/></td>{varianceCell(subVariance)}{varianceCell(totalVariance)}</tr>})}</tbody></table></div>{activeCount.status==='open'&&<div className="modal-actions"><button className="button button-ghost" disabled={countBusy} onClick={saveCountItems}><Save size={15}/> حفظ الكميات</button><button className="button button-primary" disabled={countBusy} onClick={approveCount}><Check size={15}/> اعتماد وتسوية</button><button className="button button-danger" disabled={countBusy} onClick={cancelCount}>إلغاء وفك القفل</button></div>}</div>}
     </section>}
-     <div className="panel inventory-panel movement-panel"><div className="panel-heading"><div><span className="section-eyebrow">سجل الحركة</span><h3>آخر حركات المخزون</h3></div><span className="result-count">آخر {movements.length} حركة</span></div>{movements.length?<div className="table-wrap"><table><thead><tr><th>التاريخ</th><th>الخامة</th><th>الحركة</th><th>المخزن</th><th>الكمية</th><th>التصنيف / الأمر</th><th>المرجع</th><th>ملاحظات</th></tr></thead><tbody>{movements.slice(0,40).map((movement)=><tr key={movement.id}><td>{date(movement.created_at)}</td><td>{movement.material_name}</td><td>{movementName[movement.kind]||movement.kind}</td><td>{movement.warehouse==='sub'?'البواقي':'الأساسي'}</td><td className={movement.quantity<0?'movement-negative':'movement-positive'}>{quantity(movement.quantity)}</td><td>{movement.order_code|| (movement.issue_classification==='general'?'استهلاك عام':movement.issue_classification==='order'?'أمر تشغيل':'—')}</td><td>{movement.reference||'—'}</td><td className="movement-notes">{movement.notes||'—'}</td></tr>)}</tbody></table></div>:<div className="empty-inline">لا توجد حركات مسجلة حتى الآن.</div>}</div>
+     <div className="panel inventory-panel movement-panel"><div className="panel-heading"><div><span className="section-eyebrow">سجل الحركة</span><h3>آخر حركات المخزون</h3></div><span className="result-count">آخر {movements.length} حركة</span></div>{movements.length?<div className="table-wrap"><table><thead><tr><th>التاريخ</th><th>الخامة</th><th>الحركة</th><th>المخزن</th><th>الكمية</th><th>التصنيف / الأمر</th><th>المرجع</th><th>ملاحظات</th></tr></thead><tbody>{movements.slice(0,40).map((movement)=><tr key={movement.id} id={`inventory-movement-${movement.id}`}><td>{date(movement.created_at)}</td><td>{movement.material_name}</td><td>{movementName[movement.kind]||movement.kind}</td><td>{movement.warehouse==='sub'?'البواقي':'الأساسي'}</td><td className={movement.quantity<0?'movement-negative':'movement-positive'}>{quantity(movement.quantity)}</td><td>{movement.order_code|| (movement.issue_classification==='general'?'استهلاك عام':movement.issue_classification==='order'?'أمر تشغيل':'—')}</td><td>{movement.reference||'—'}</td><td className="movement-notes">{movement.notes||'—'}</td></tr>)}</tbody></table></div>:<div className="empty-inline">لا توجد حركات مسجلة حتى الآن.</div>}</div>
   </div>
 }
 
-function FinancePage({ user, data, notify, onCreateSale, onAddTreasury, onAddFunding, onOtherInvoice, onRecordReceipt, onCorrectPurchase }) {
+function FinancePage({ user, data, notify, onCreateSale, onAddTreasury, onAddFunding, onOtherInvoice, onRecordReceipt, onCorrectPurchase, onRevisePurchase, onViewPurchaseHistory }) {
+  const location=useLocation()
   const [dashboard,setDashboard]=useState(null)
   const [salesInvoices,setSalesInvoices]=useState([])
   const [from,setFrom]=useState('')
@@ -1068,6 +1102,7 @@ function FinancePage({ user, data, notify, onCreateSale, onAddTreasury, onAddFun
       .catch((reason)=>{if(active)setError(reason.message)}).finally(()=>{if(active)setLoading(false)})
     return()=>{active=false}
   },[isAdmin,data,from,to])
+  useEffect(()=>{if(!location.hash||loading)return;requestAnimationFrame(()=>document.getElementById(decodeURIComponent(location.hash.slice(1)))?.scrollIntoView({behavior:'smooth',block:'center'}))},[location.hash,loading,dashboard,salesInvoices])
   const invoices=isAdmin?(dashboard?.invoices||[]).filter((invoice)=>invoice.kind==='sales'):salesInvoices
   const maximum=Math.max(1,...(dashboard?.monthly||[]).flatMap((month)=>[month.income,month.expense]))
   return <div className="page-enter">
@@ -1093,13 +1128,125 @@ function FinancePage({ user, data, notify, onCreateSale, onAddTreasury, onAddFun
            <div className="cashflow-chart">{dashboard.monthly.map((month)=><button type="button" className="cashflow-month" key={month.month} title="اضغط لتصفية الحركات بهذا الشهر" onClick={()=>{setFrom(`${month.month}-01`);setTo(`${month.month}-${new Date(Number(month.month.slice(0,4)),Number(month.month.slice(5,7)),0).getDate()}`)}}><div className="cashflow-bars"><div className="cashflow-bar income-bar" style={{height:`${Math.max(month.income?5:0,month.income/maximum*100)}%`}} title={`وارد: ${money(month.income)} ج.م`}/><div className="cashflow-bar expense-bar" style={{height:`${Math.max(month.expense?5:0,month.expense/maximum*100)}%`}} title={`منصرف: ${money(month.expense)} ج.م`}/></div><span>{month.label}</span></button>)}</div>
           <div className="cashflow-totals"><span>الوارد خلال الفترة <strong>{money(dashboard.monthly.reduce((sum,item)=>sum+item.income,0))} ج.م</strong></span><span>المنصرف خلال الفترة <strong>{money(dashboard.monthly.reduce((sum,item)=>sum+item.expense,0))} ج.م</strong></span></div>
         </section>
-        <section className="panel treasury-panel"><div className="panel-heading"><div><span className="section-eyebrow">حركة الصندوق</span><h3>أحدث حركات الخزينة</h3></div><span className="result-count">{dashboard.entries.length} حركة</span></div>{dashboard.entries.length?<div className="table-wrap"><table><thead><tr><th>التاريخ</th><th>النوع</th><th>التصنيف</th><th>الموظف</th><th>المبلغ</th><th>المرجع</th><th>المسجل</th></tr></thead><tbody>{dashboard.entries.slice(0,30).map((entry)=><tr key={entry.id}><td>{date(entry.created_at)}</td><td><span className={entry.kind==='income'?'cash-in':'cash-out'}>{entry.kind==='income'?'وارد':'منصرف'}</span></td><td>{entry.category}</td><td>{entry.employee_name||'—'}</td><td>{money(entry.amount)} ج.م</td><td>{entry.invoice_code||entry.reference||'—'}</td><td>{entry.user_name||'—'}</td></tr>)}</tbody></table></div>:<div className="empty-inline">لا توجد حركات مالية؛ ستظهر هنا السندات والحركات النقدية اليدوية بعد تسجيلها.</div>}</section>
+        <section className="panel treasury-panel"><div className="panel-heading"><div><span className="section-eyebrow">حركة الصندوق</span><h3>أحدث حركات الخزينة</h3></div><span className="result-count">{dashboard.entries.length} حركة</span></div>{dashboard.entries.length?<div className="table-wrap"><table><thead><tr><th>التاريخ</th><th>النوع</th><th>التصنيف</th><th>الموظف</th><th>المبلغ</th><th>المرجع</th><th>المسجل</th></tr></thead><tbody>{dashboard.entries.slice(0,30).map((entry)=><tr key={entry.id} id={`treasury-entry-${entry.id}`}><td>{date(entry.created_at)}</td><td><span className={entry.kind==='income'?'cash-in':'cash-out'}>{entry.kind==='income'?'وارد':'منصرف'}</span></td><td>{entry.category}</td><td>{entry.employee_name||'—'}</td><td>{money(entry.amount)} ج.م</td><td>{entry.invoice_code||entry.reference||'—'}</td><td>{entry.user_name||'—'}</td></tr>)}</tbody></table></div>:<div className="empty-inline">لا توجد حركات مالية؛ ستظهر هنا السندات والحركات النقدية اليدوية بعد تسجيلها.</div>}</section>
       </>}
-        <section className="panel invoice-list-panel"><div className="panel-heading"><div><span className="section-eyebrow">فواتير المبيعات</span><h3>المستحقات والتحصيل</h3></div><span className="result-count">{invoices.length} فاتورة</span></div>{invoices.length?<div className="table-wrap"><table><thead><tr><th>رقم الفاتورة</th><th>العميل</th><th>أمر التشغيل</th><th>قبل الضريبة</th><th>الضريبة</th><th>الإجمالي</th><th>محصل</th><th>متبقي</th><th>الحالة</th><th>إجراء</th></tr></thead><tbody>{invoices.map((invoice)=><tr key={invoice.id}><td><strong className="code-cell">{invoice.code}</strong></td><td>{invoice.client_name||'—'}</td><td>{invoice.order_code||'—'}</td><td>{money(invoice.subtotal_cents==null?invoice.total:invoice.subtotal_cents/100)} ج.م</td><td>{money((invoice.tax_cents||0)/100)} ج.م</td><td>{money(invoice.total)} ج.م</td><td>{money(invoice.paid_total)} ج.م</td><td>{money(invoice.remaining)} ج.م</td><td>{invoice.payment_status==='paid'?'مدفوعة':invoice.payment_status==='partial'?'جزئية':'غير مدفوعة'}</td><td>{Number(invoice.remaining)>0&&<button className="button button-ghost button-small" onClick={()=>onRecordReceipt(invoice)}>سند قبض</button>}</td></tr>)}</tbody></table></div>:<EmptyState icon={CircleDollarSign} title="لا توجد فواتير مبيعات" description="أنشئ أول فاتورة لبدء تسجيل الإيرادات." action={<button className="button button-primary button-small" onClick={onCreateSale}><Plus size={15}/> إصدار فاتورة</button>}/>}</section>
-        {isAdmin&&dashboard&&<section className="panel invoice-list-panel"><div className="panel-heading"><div><span className="section-eyebrow">فواتير المشتريات</span><h3>مسددة ومرفقات الإثبات</h3></div></div>{dashboard.invoices.filter((invoice)=>invoice.kind==='purchase').length?<div className="table-wrap"><table><thead><tr><th>رقم الفاتورة</th><th>المورد</th><th>الموظف</th><th>القيمة</th><th>الحالة</th><th>الإثبات والتصحيح</th><th>التاريخ</th></tr></thead><tbody>{dashboard.invoices.filter((invoice)=>invoice.kind==='purchase').slice(0,15).map((invoice)=><tr key={invoice.id}><td><strong className="code-cell">{invoice.code}</strong></td><td>{invoice.supplier||'—'}</td><td>{invoice.employee_name||'—'}</td><td>{money(invoice.total)} ج.م</td><td>{invoice.status==='corrected'?'مصَححة':'مدفوعة'}</td><td><PurchaseEvidence invoice={invoice} notify={notify}/>{invoice.status!=='corrected'&&<button className="button button-danger button-small" onClick={()=>onCorrectPurchase(invoice)}>تصحيح</button>}</td><td>{date(invoice.created_at)}</td></tr>)}</tbody></table></div>:<div className="empty-inline">لا توجد فواتير مشتريات حتى الآن.</div>}</section>}
+        <section className="panel invoice-list-panel"><div className="panel-heading"><div><span className="section-eyebrow">فواتير المبيعات</span><h3>المستحقات والتحصيل</h3></div><span className="result-count">{invoices.length} فاتورة</span></div>{invoices.length?<div className="table-wrap"><table><thead><tr><th>رقم الفاتورة</th><th>العميل</th><th>أمر التشغيل</th><th>قبل الضريبة</th><th>الضريبة</th><th>الإجمالي</th><th>محصل</th><th>متبقي</th><th>الحالة</th><th>إجراء</th></tr></thead><tbody>{invoices.map((invoice)=><tr key={invoice.id} id={`sales-invoice-${invoice.id}`}><td><strong className="code-cell">{invoice.code}</strong></td><td>{invoice.client_name||'—'}</td><td>{invoice.order_code||'—'}</td><td>{money(invoice.subtotal_cents==null?invoice.total:invoice.subtotal_cents/100)} ج.م</td><td>{money((invoice.tax_cents||0)/100)} ج.م</td><td>{money(invoice.total)} ج.م</td><td>{money(invoice.paid_total)} ج.م</td><td>{money(invoice.remaining)} ج.م</td><td>{invoice.payment_status==='paid'?'مدفوعة':invoice.payment_status==='partial'?'جزئية':'غير مدفوعة'}</td><td>{Number(invoice.remaining)>0&&<button className="button button-ghost button-small" onClick={()=>onRecordReceipt(invoice)}>سند قبض</button>}</td></tr>)}</tbody></table></div>:<EmptyState icon={CircleDollarSign} title="لا توجد فواتير مبيعات" description="أنشئ أول فاتورة لبدء تسجيل الإيرادات." action={<button className="button button-primary button-small" onClick={onCreateSale}><Plus size={15}/> إصدار فاتورة</button>}/>}</section>
+        {isAdmin&&dashboard&&<section className="panel invoice-list-panel"><div className="panel-heading"><div><span className="section-eyebrow">فواتير المشتريات</span><h3>مسددة ومرفقات الإثبات</h3></div></div>{dashboard.invoices.filter((invoice)=>invoice.kind==='purchase').length?<div className="table-wrap"><table><thead><tr><th>رقم الفاتورة</th><th>المورد</th><th>الموظف</th><th>القيمة</th><th>الحالة</th><th>الإثبات والتصحيح والمراجعة</th><th>التاريخ</th></tr></thead><tbody>{dashboard.invoices.filter((invoice)=>invoice.kind==='purchase').slice(0,15).map((invoice)=><tr key={invoice.id} id={`purchase-invoice-${invoice.id}`}><td><strong className="code-cell">{invoice.code}</strong></td><td>{invoice.supplier||'—'}</td><td>{invoice.employee_name||'—'}</td><td>{money(invoice.total)} ج.م</td><td>{invoice.status==='corrected'?'مصَححة':'مدفوعة'}{Number(invoice.revision_count)>0&&<small> · {invoice.revision_count} مراجعة</small>}</td><td><PurchaseEvidence invoice={invoice} notify={notify}/><div className="worker-actions"><button className="button button-ghost button-small" onClick={()=>onViewPurchaseHistory(invoice)}>السجل</button>{invoice.status!=='corrected'&&<><button className="button button-secondary button-small" onClick={()=>onRevisePurchase(invoice)}>مراجعة</button><button className="button button-danger button-small" onClick={()=>onCorrectPurchase(invoice)}>تصحيح / رد</button></>}</div></td><td>{date(invoice.created_at)}</td></tr>)}</tbody></table></div>:<div className="empty-inline">لا توجد فواتير مشتريات حتى الآن.</div>}</section>}
         {isAdmin&&dashboard&&<section className="panel invoice-list-panel"><div className="panel-heading"><div><span className="section-eyebrow">ذمم العملاء</span><h3>المبالغ المستحقة</h3></div></div>{dashboard.receivables.length?<div className="table-wrap"><table><thead><tr><th>العميل</th><th>الفاتورة</th><th>الإجمالي</th><th>المتبقي</th><th>إجراء</th></tr></thead><tbody>{dashboard.receivables.map((invoice)=><tr key={invoice.id}><td>{invoice.client_name}</td><td>{invoice.code}</td><td>{money(invoice.total)}</td><td>{money(invoice.remaining)}</td><td><button className="button button-ghost button-small" onClick={()=>onRecordReceipt(invoice)}>سند قبض</button></td></tr>)}</tbody></table></div>:<div className="empty-inline">لا توجد ذمم مفتوحة.</div>}</section>}
-        {isAdmin&&dashboard&&<section className="panel invoice-list-panel"><div className="panel-heading"><div><span className="section-eyebrow">مصروفات غير مخزنية</span><h3>فواتير أخرى مدفوعة</h3></div></div>{dashboard.otherInvoices?.length?<div className="table-wrap"><table><thead><tr><th>الكود</th><th>المورد</th><th>الموظف</th><th>الإجمالي</th><th>التاريخ</th></tr></thead><tbody>{dashboard.otherInvoices.map((invoice)=><tr key={invoice.id}><td>{invoice.code}</td><td>{invoice.supplier||'—'}</td><td>{invoice.employee_name||'—'}</td><td>{money(invoice.total_cents/100)} ج.م</td><td>{date(invoice.created_at)}</td></tr>)}</tbody></table></div>:<div className="empty-inline">لا توجد فواتير مصروفات أخرى.</div>}</section>}
+        {isAdmin&&dashboard&&<section className="panel invoice-list-panel"><div className="panel-heading"><div><span className="section-eyebrow">مصروفات غير مخزنية</span><h3>فواتير أخرى مدفوعة</h3></div></div>{dashboard.otherInvoices?.length?<div className="table-wrap"><table><thead><tr><th>الكود</th><th>المورد</th><th>الموظف</th><th>الإجمالي</th><th>التاريخ</th></tr></thead><tbody>{dashboard.otherInvoices.map((invoice)=><tr key={invoice.id} id={`other-invoice-${invoice.id}`}><td>{invoice.code}</td><td>{invoice.supplier||'—'}</td><td>{invoice.employee_name||'—'}</td><td>{money(invoice.total_cents/100)} ج.م</td><td>{date(invoice.created_at)}</td></tr>)}</tbody></table></div>:<div className="empty-inline">لا توجد فواتير مصروفات أخرى.</div>}</section>}
     </>}
+  </div>
+}
+
+function PurchaseInvoiceModal({ modal, data, onClose, onRefresh, notify }) {
+  const historyOnly = modal.type === 'purchase-history'
+  const invoice = modal.invoice
+  const [detail, setDetail] = useState(null)
+  const [lines, setLines] = useState([])
+  const [supplier, setSupplier] = useState('')
+  const [notes, setNotes] = useState('')
+  const [reason, setReason] = useState('')
+  const [supplierRefundReceived, setSupplierRefundReceived] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    let active = true
+    setLoading(true)
+    api(`/inventory/purchases/${invoice.id}${historyOnly ? '/revisions' : ''}`).then((result) => {
+      if (!active) return
+      setDetail(result)
+      setSupplier(result.currentValues.supplier || '')
+      setNotes(result.currentValues.notes || '')
+      setLines(result.currentValues.items.map((item) => ({
+        materialId: String(item.materialId), code: item.code || '', name: item.name || '',
+        specification: item.specification || '', unit: item.unit || '', quantity: String(item.quantity),
+        unitCost: (Number(item.unitCostCents) / 100).toFixed(2),
+      })))
+    }).catch((requestError) => {
+      if (active) setError(requestError.message || 'تعذر تحميل بيانات فاتورة الشراء.')
+    }).finally(() => { if (active) setLoading(false) })
+    return () => { active = false }
+  }, [invoice.id, historyOnly])
+
+  const lineTotals = lines.map((line) => {
+    const qtyText = String(line.quantity || '').trim()
+    const qty = /^\d+$/.test(qtyText) ? BigInt(qtyText) : null
+    const unitCost = currencyInputCents(line.unitCost)
+    return qty === null || unitCost === null ? null : qty * unitCost
+  })
+  const revisedTotalCents = lineTotals.length && lineTotals.every((value) => value !== null)
+    ? lineTotals.reduce((sum, value) => sum + value, 0n) : null
+  const currentTotalCents = detail?.currentValues?.totalCents ?? Math.round(Number(invoice.total || 0) * 100)
+  const cashDeltaCents = revisedTotalCents === null ? null : revisedTotalCents - BigInt(currentTotalCents)
+  const formatMoney = (cents) => new Intl.NumberFormat('ar-EG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    .format(Number(cents || 0) / 100)
+  const setLine = (index, patch) => setLines((current) => current.map((line, i) => i === index ? { ...line, ...patch } : line))
+
+  const submit = async (event) => {
+    event.preventDefault()
+    if (saving || !detail) return
+    setSaving(true)
+    setError('')
+    try {
+      const result = await api(`/inventory/purchases/${invoice.id}/revisions`, {
+        method: 'PUT',
+        body: json({ expectedRevision: detail.revisionNumber, reason, supplier, notes,
+          supplierRefundReceived, items: lines.map((line) => ({
+            materialId: line.materialId ? Number(line.materialId) : null, name: line.name,
+            specification: line.specification, unit: line.unit, quantity: Number(line.quantity), unitCost: Number(line.unitCost),
+          })) }),
+      })
+      await onRefresh()
+      notify(`تم حفظ مراجعة ${result.code} رقم ${result.revisionNumber} مع تحديث المخزون وتسوية فرق النقد.`)
+      onClose()
+    } catch (requestError) {
+      setError(requestError.message || 'تعذر حفظ مراجعة الفاتورة.')
+      notify?.(requestError.message || 'تعذر حفظ مراجعة الفاتورة.')
+    } finally { setSaving(false) }
+  }
+
+  const title = historyOnly ? `سجل مراجعات ${invoice.code}` : `مراجعة فاتورة ${invoice.code}`
+  return <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+    <section className="modal-card purchase-revision-modal"><div className="modal-header"><div><span className="section-eyebrow">مَدَار · سجل المشتريات</span><h2>{title}</h2></div><button className="icon-button" onClick={onClose} aria-label="إغلاق"><X size={19}/></button></div>
+      {loading ? <div className="loading-inline">جارٍ تحميل الفاتورة وسجلها...</div> : detail && <>
+        <div className="modal-hint">الإصدار الحالي {detail.revisionNumber} · الإجمالي {formatMoney(currentTotalCents)} ج.م. تُحفظ المراجعات كتاريخ مستقل، ولا تُقبل إلا إذا بقيت دفعات الإصدار الحالي كاملة وغير مصروفة.</div>
+        {error && <div className="inline-error" role="alert">{error}</div>}
+        {historyOnly ? <section className="panel invoice-list-panel purchase-history-list">
+          {detail.revisions.length ? detail.revisions.map((revision) => <article className="purchase-history-entry" key={revision.id}>
+            <div className="panel-heading"><div><span className="section-eyebrow">مراجعة رقم {revision.revision_number} · {date(revision.created_at)}</span><h3>{revision.reason}</h3></div><strong>{formatMoney(revision.revised_values.totalCents)} ج.م</strong></div>
+            <div className="purchase-history-delta"><span>قبل: {formatMoney(revision.previous_values.totalCents)} ج.م</span><span>بعد: {formatMoney(revision.revised_values.totalCents)} ج.م</span><span>فرق النقد: {revision.cash_delta_cents > 0 ? '+' : ''}{formatMoney(revision.cash_delta_cents)} ج.م</span><span>المسجل: {revision.actor_name || '—'}</span></div>
+            <details><summary>عرض البنود قبل وبعد المراجعة</summary><pre className="audit-json">{JSON.stringify({ before: revision.previous_values.items, after: revision.revised_values.items,
+              stockMovements: revision.stock_movements, treasuryTransactionId: revision.treasury_transaction_id,
+              journalEntryId: revision.journal_entry_id }, null, 2)}</pre></details>
+          </article>) : <div className="empty-inline">لا توجد مراجعات سابقة؛ النسخة المعروضة هي الفاتورة الأصلية.</div>}
+        </section> : <form className="modal-form" onSubmit={submit}>
+          {!detail.canRevise && <div className="inline-error" role="status">{detail.revisionBlockedReason}</div>}
+          <fieldset disabled={!detail.canRevise || saving} className="purchase-revision-fields">
+            <Field label="المورد"><input value={supplier} maxLength={200} onChange={(event) => setSupplier(event.target.value)}/></Field>
+            <Field label="ملاحظات الفاتورة"><textarea rows="2" maxLength={2000} value={notes} onChange={(event) => setNotes(event.target.value)}/></Field>
+            {lines.map((line, index) => <section className="purchase-line panel" key={index}>
+              <div className="panel-heading"><strong>بند {index + 1}</strong>{lines.length > 1 && <button type="button" className="button button-ghost button-small" onClick={() => setLines((current) => current.filter((_, i) => i !== index))}>حذف</button>}</div>
+              <Field label="قالب صنف من المخزون (اختياري)"><select value={line.materialId} onChange={(event) => {
+                const selected = data.materials.find((material) => String(material.id) === event.target.value)
+                setLine(index, selected ? { materialId: event.target.value, code: selected.code, name: selected.name,
+                  specification: selected.specification || line.specification, unit: selected.unit || line.unit }
+                  : { materialId: '', code: '', name: '', specification: '', unit: 'قطعة' })
+              }}><option value="">صنف جديد / تخصيص البند</option>{line.materialId && !data.materials.some((material) => String(material.id) === line.materialId) && <option value={line.materialId}>{line.code} — {line.name}</option>}{data.materials.map((material) => <option value={material.id} key={material.id}>{material.code} — {material.name} · {material.unit}</option>)}</select></Field>
+              <div className="form-row"><Field label="اسم الصنف" required><input required value={line.name} onChange={(event) => setLine(index, { name: event.target.value, materialId: '' })}/></Field><Field label="المواصفة"><input value={line.specification} onChange={(event) => setLine(index, { specification: event.target.value })}/></Field></div>
+              <div className="form-row"><Field label="الوحدة" required><input required value={line.unit} onChange={(event) => setLine(index, { unit: event.target.value })}/></Field><Field label="الكمية الكاملة" required><input required type="number" min="1" step="1" value={line.quantity} onChange={(event) => setLine(index, { quantity: event.target.value })}/></Field><Field label="سعر الوحدة (ج.م)" required><input required type="number" min="0" step="0.01" value={line.unitCost} onChange={(event) => setLine(index, { unitCost: event.target.value })}/></Field></div>
+              <div className="purchase-line-total">إجمالي البند: {lineTotals[index] === null ? '—' : `${formatCurrencyCents(lineTotals[index])} ج.م`}</div>
+            </section>)}
+            <button type="button" className="button button-ghost" onClick={() => setLines((current) => [...current, { materialId: '', code: '', name: '', specification: '', unit: 'قطعة', quantity: '1', unitCost: '' }])}><Plus size={15}/> إضافة بند</button>
+            <Field label="سبب المراجعة" required><textarea required rows="3" maxLength={1000} value={reason} onChange={(event) => setReason(event.target.value)}/></Field>
+            <section className="purchase-calculation-summary"><strong>الإجمالي المعدّل: {revisedTotalCents === null ? '—' : `${formatCurrencyCents(revisedTotalCents)} ج.م`}</strong><span>فرق التسوية النقدية: {cashDeltaCents === null ? '—' : `${cashDeltaCents > 0n ? '+' : ''}${formatCurrencyCents(cashDeltaCents)} ج.م`}</span><small>{cashDeltaCents > 0n ? 'سيُسجل فرق الزيادة كمصروف شراء وقيد مخزون/صندوق.' : cashDeltaCents < 0n ? 'يتطلب التخفيض تأكيد استلام فرق المبلغ من المورد.' : 'لا يوجد فرق نقدي؛ سيُسجل التغيير المخزني فقط.'}</small></section>
+            {cashDeltaCents !== null && cashDeltaCents < 0n && <label className="custom-tax-option"><input type="checkbox" checked={supplierRefundReceived} onChange={(event) => setSupplierRefundReceived(event.target.checked)}/> أؤكد استلام فرق التخفيض من المورد</label>}
+          </fieldset>
+          <div className="modal-actions"><button type="button" className="button button-ghost" onClick={onClose}>إلغاء</button><button type="submit" className="button button-primary" disabled={saving || !detail.canRevise || !reason.trim() || revisedTotalCents === null || (cashDeltaCents !== null && cashDeltaCents < 0n && !supplierRefundReceived)}>{saving ? 'جارٍ حفظ المراجعة...' : 'حفظ كمراجعة جديدة'}<ArrowLeft size={15}/></button></div>
+        </form>}
+      </>}
+    </section>
   </div>
 }
 

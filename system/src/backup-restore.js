@@ -295,6 +295,14 @@ async function validateDatabaseSnapshot(databasePath, { manifest = null } = {}) 
           throw new Error('قاعدة البيانات تفتقد جدول مرفقات فواتير المصروفات المطلوب لمخطط v6.')
         }
       }
+      if (schemaVersion >= 7) {
+        if (!migrations.has('purchase-invoice-revisions-schema-v7')) {
+          throw new Error('قاعدة البيانات تفتقد ترحيل سجل مراجعات فواتير الشراء لمخطط v7.')
+        }
+        if (!tables.has('purchase_invoice_revisions')) {
+          throw new Error('قاعدة البيانات تفتقد جدول مراجعات فواتير الشراء المطلوب لمخطط v7.')
+        }
+      }
     }
     if (manifest?.schemaVersion !== undefined && manifest.schemaVersion !== schemaVersion) {
       throw new Error('إصدار مخطط قاعدة البيانات لا يطابق بيان النسخة الاحتياطية.')

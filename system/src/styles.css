@@ -647,3 +647,58 @@ html[data-theme="dark"] .preselected-machines li { border-color: #354857; backgr
   .archive-analysis-filter-grid { grid-template-columns: 1fr; }
   .preselected-machines > div { flex-direction: column; }
 }
+
+.employee-history-modal { width: min(100%, 1120px); }
+.purchase-revision-modal { width: min(100%, 940px); }
+.employee-history-summary { margin: 15px 18px; }
+.employee-history-summary .finance-stat { min-width: 0; }
+.employee-history-modal > .filter-panel { margin: 14px 18px; }
+.employee-history-modal > .invoice-list-panel { margin: 0 18px 14px; }
+.employee-history-modal > .invoice-list-panel .table-wrap { max-height: 48vh; }
+.employee-history-modal > .modal-actions { margin: 0 18px 16px; }
+.employee-history-modal td { white-space: normal; }
+.employee-history-modal td:nth-child(3) { min-width: 320px; }
+.employee-history-modal td:nth-child(3) > span { color: var(--muted); font-size: 10px; line-height: 1.7; }
+.purchase-revision-fields { display: grid; gap: 13px; min-width: 0; margin: 0; padding: 0; border: 0; }
+.purchase-revision-fields:disabled { opacity: .68; }
+.purchase-revision-fields > .field { min-width: 0; }
+.purchase-revision-fields > .button { justify-self: start; }
+.purchase-line .form-row { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.purchase-line-total { padding-top: 8px; border-top: 1px solid var(--line); color: var(--text); font-size: 11px; font-weight: 700; }
+.purchase-calculation-summary > span,.purchase-calculation-summary > small { color: var(--muted); }
+.purchase-history-list { margin: 14px 18px; padding: 0 14px; }
+.purchase-history-entry { padding: 14px 0; border-bottom: 1px solid var(--line); }
+.purchase-history-entry:last-child { border-bottom: 0; }
+.purchase-history-entry .panel-heading { padding: 0 0 10px; }
+.purchase-history-entry .panel-heading h3 { max-width: 650px; line-height: 1.6; }
+.purchase-history-delta { display: flex; flex-wrap: wrap; gap: 7px 17px; color: var(--muted); font-size: 10px; }
+.purchase-history-entry details { margin-top: 10px; }
+.purchase-history-entry details summary { color: #397397; cursor: pointer; font-size: 10px; }
+.purchase-history-entry .audit-json { max-width: 100%; max-height: 280px; margin-top: 7px; padding: 10px; border-radius: 7px; background: var(--soft); font-size: 9px; }
+.text-link { padding: 0; border: 0; color: inherit; background: none; cursor: pointer; text-align: right; }
+.text-link:hover { color: #2764a7; text-decoration: underline; }
+.overview-finance-summary { margin-top: 15px; }
+.overview-finance-panel { margin-bottom: 16px; padding: 17px; }
+.overview-finance-panel .panel-heading { margin-bottom: 4px; }
+.overview-finance-panel .cashflow-chart { height: 165px; }
+.overview-finance-panel .chart-legend { flex-wrap: wrap; margin-top: 11px; }
+tr[id^="employee-record-"],tr[id^="purchase-invoice-"],tr[id^="sales-invoice-"],tr[id^="other-invoice-"],tr[id^="inventory-movement-"],tr[id^="treasury-entry-"],tr[id^="stock-count-"],tr[id^="payroll-record-"],tr[id^="opening-balance-"] { scroll-margin-top: 90px; }
+html[data-theme="dark"] .purchase-line-total,html[data-theme="dark"] .purchase-history-entry { border-color: var(--line); }
+html[data-theme="dark"] .purchase-calculation-summary { border-color: #344555; background: #111b25; }
+html[data-theme="dark"] .purchase-history-entry .audit-json { background: #111b25; }
+html[data-theme="dark"] .text-link:hover,html[data-theme="dark"] .purchase-history-entry details summary { color: #82b2d8; }
+@media (max-width: 760px) {
+  .purchase-line .form-row { grid-template-columns: 1fr; }
+  .employee-history-modal > .filter-panel,.employee-history-modal > .invoice-list-panel,.purchase-history-list { margin-right: 10px; margin-left: 10px; }
+  .employee-history-summary { margin-right: 10px; margin-left: 10px; }
+  .employee-history-modal > .modal-actions { margin-right: 10px; margin-left: 10px; }
+  .employee-history-modal td:nth-child(3) { min-width: 220px; }
+  .purchase-history-list { padding-right: 10px; padding-left: 10px; }
+}
+@media (max-width: 600px) {
+  .overview-finance-panel { padding: 12px 9px; }
+  .overview-finance-panel .panel-heading { align-items: flex-start; flex-direction: column; }
+  .overview-finance-panel .cashflow-chart { height: 130px; }
+  .employee-history-modal,.purchase-revision-modal { max-height: 94vh; }
+  .purchase-history-delta { display: grid; grid-template-columns: 1fr 1fr; }
+}

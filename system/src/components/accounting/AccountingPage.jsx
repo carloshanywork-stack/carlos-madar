@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { BookOpenCheck, RefreshCw, Save, Wallet, Plus, CircleDollarSign } from 'lucide-react'
 
 const mappingLabels = {
@@ -28,6 +29,8 @@ const blankOpeningLine = () => ({ lineType: 'account', accountId: '', side: 'deb
   clientId: '', materialId: '', employeeId: '', invoiceCode: '', quantity: '', originalDate: '', dueDate: '' })
 
 export default function AccountingPage({ apiClient, data, notify, onRefresh }) {
+  const navigate = useNavigate()
+  const location = useLocation()
   const [tab, setTab] = useState('reports')
   const [setup, setSetup] = useState({ accounts: [], mappings: [], pending: [] })
   const [reports, setReports] = useState(null)
@@ -39,6 +42,8 @@ export default function AccountingPage({ apiClient, data, notify, onRefresh }) {
   const [journalEntries, setJournalEntries] = useState([])
   const [auditEntries, setAuditEntries] = useState([])
   const [journalSourceType, setJournalSourceType] = useState('')
+  const [journalSourceId, setJournalSourceId] = useState('')
+  const [journalAccountId, setJournalAccountId] = useState('')
   const [auditEntity, setAuditEntity] = useState('')
   const [auditAction, setAuditAction] = useState('')
   const [loading, setLoading] = useState(true)
@@ -62,6 +67,8 @@ export default function AccountingPage({ apiClient, data, notify, onRefresh }) {
       if (to) query.set('to', to)
       const journalQuery = new URLSearchParams(query)
       if (journalSourceType) journalQuery.set('sourceType', journalSourceType)
+      if (journalSourceId.trim()) journalQuery.set('sourceId', journalSourceId.trim())
+      if (journalAccountId) journalQuery.set('accountId', journalAccountId)
       journalQuery.set('limit', '200')
       const auditQuery = new URLSearchParams(query)
       if (auditEntity) auditQuery.set('entity', auditEntity)
@@ -85,7 +92,16 @@ export default function AccountingPage({ apiClient, data, notify, onRefresh }) {
     finally { setLoading(false) }
   }
 
-  useEffect(() => { load() }, [apiClient, from, to, period, journalSourceType, auditEntity, auditAction])
+  useEffect(() => { load() }, [apiClient, from, to, period, journalSourceType, journalSourceId, journalAccountId, auditEntity, auditAction])
+
+  useEffect(() => {
+    if (location.hash.startsWith('#payroll-record-')) setTab('payroll')
+    else if (location.hash.startsWith('#opening-balance-')) setTab('opening')
+  }, [location.hash])
+  useEffect(() => {
+    if (!location.hash) return
+    requestAnimationFrame(() => document.getElementById(decodeURIComponent(location.hash.slice(1)))?.scrollIntoView({ behavior: 'smooth', block: 'center' }))
+  }, [location.hash, tab, payroll.records, openingBatches])
 
   const activeAccounts = useMemo(() => setup.accounts.filter((account) => account.active), [setup.accounts])
   const submit = async (action, success) => {
@@ -183,11 +199,13 @@ export default function AccountingPage({ apiClient, data, notify, onRefresh }) {
       {tab === 'journal' && <>
         <section className="filter-panel panel"><div className="filter-fields">
           <label><span>نوع المصدر</span><input value={journalSourceType} onChange={(event) => setJournalSourceType(event.target.value)} placeholder="مثال: sales_invoice"/></label>
+          <label><span>رقم المصدر</span><input value={journalSourceId} onChange={(event) => setJournalSourceId(event.target.value)} placeholder="رقم الفاتورة أو الحركة"/></label>
+          <label><span>الحساب</span><select value={journalAccountId} onChange={(event) => setJournalAccountId(event.target.value)}><option value="">كل الحسابات</option>{setup.accounts.filter((account) => account.active).map((account) => <option key={account.id} value={account.id}>{account.code} — {account.name}</option>)}</select></label>
         </div></section>
         <section className="panel invoice-list-panel"><div className="panel-heading"><div><span className="section-eyebrow">دفتر القيود العام</span><h3>القيود المرحّلة والمعلّقة</h3></div><span className="result-count">{journalEntries.length} قيد</span></div>
           {journalEntries.length ? <div className="table-wrap"><table><thead><tr><th>التاريخ</th><th>الحالة</th><th>مرجع المصدر</th><th>الوصف</th><th>مدين</th><th>دائن</th><th>المنشئ</th><th>السطور</th></tr></thead><tbody>
             {journalEntries.map((entry) => <tr key={entry.id}><td>{entry.created_at}</td><td>{journalStatusLabels[entry.status] || entry.status}</td>
-              <td><strong>{entry.source_type} · {entry.source_id}</strong><br/><code>{entry.source_key}</code></td><td>{entry.description || '—'}</td>
+              <td>{entry.source_href ? <button className="text-link" onClick={() => navigate(entry.source_href)} title="فتح شاشة المصدر"><strong>{entry.source_type} · {entry.source_id}</strong></button> : <strong>{entry.source_type} · {entry.source_id}</strong>}<br/><code>{entry.source_key}</code></td><td>{entry.description || '—'}</td>
               <td>{money(entry.total_debit_cents)} ج.م</td><td>{money(entry.total_credit_cents)} ج.م</td><td>{entry.actor_name || '—'}</td>
               <td><details><summary>{entry.lines?.length || 0} سطر</summary>{entry.lines?.length ? <div className="journal-line-list">{entry.lines.map((line) => <div key={line.id}><strong>{line.account_code} — {line.account_name}</strong><span>{line.description || '—'}</span><span>مدين {money(line.debit_cents)} · دائن {money(line.credit_cents)} ج.م</span></div>)}</div> : <span>لا توجد سطور مرحّلة.</span>}</details></td></tr>)}
           </tbody></table></div> : <div className="empty-inline">لا توجد قيود ضمن الفلاتر المحددة.</div>}
@@ -218,7 +236,7 @@ export default function AccountingPage({ apiClient, data, notify, onRefresh }) {
           <button className="button button-primary" disabled={saving}><Save size={15}/> إنشاء المسير وإقفاله</button>
         </form></div>
         <div className="panel modal-form"><h3>صرف سلفة موظف</h3><form className="form-row" onSubmit={createAdvance}><label className="field"><span>الموظف</span><select required value={advanceForm.employeeId} onChange={(event) => setAdvanceForm({ ...advanceForm, employeeId: event.target.value })}><option value="">اختر موظفًا</option>{payroll.employees.map((employee) => <option value={employee.id} key={employee.id}>{employee.name}</option>)}</select></label><label className="field"><span>المبلغ (ج.م)</span><input required type="number" min="0.01" step="0.01" value={advanceForm.amount} onChange={(event) => setAdvanceForm({ ...advanceForm, amount: event.target.value })}/></label><label className="field"><span>ملاحظات</span><input value={advanceForm.notes} onChange={(event) => setAdvanceForm({ ...advanceForm, notes: event.target.value })}/></label><button className="button button-secondary" disabled={saving}><Wallet size={15}/> صرف السلفة</button></form></div>
-         <div className="panel invoice-list-panel"><div className="panel-heading"><div><span className="section-eyebrow">سجل الرواتب</span><h3>تفصيل استحقاقات الموظفين للفترة</h3></div></div><div className="table-wrap"><table><thead><tr><th>الموظف</th><th>أساسي</th><th>إضافي عادي</th><th>إضافي عطلات</th><th>مكافأة</th><th>خصم</th><th>تسوية سلف</th><th>صافي الاستحقاق</th><th>مدفوع</th><th>راتب غير مسدد</th><th>رصيد السلفة</th><th>حالة</th><th/></tr></thead><tbody>{payroll.records.map((record) => <tr key={record.id}><td>{record.employee_name}</td><td>{money(record.base_salary_cents)}</td><td>{money(record.ordinary_overtime_cents)}</td><td>{money(record.holiday_overtime_cents)}</td><td>{money(record.bonus_cents)}</td><td>{money(record.deduction_cents)}</td><td>{money(record.advances_applied_cents)}</td><td>{money(record.net_entitlement_cents)}</td><td>{money(record.cash_paid_cents)}</td><td>{money(record.unpaid_salary_cents)}</td><td>{money(record.advance_balance_cents)}</td><td>{record.status === 'finalized' ? 'مقفل' : 'مسودة'}</td><td>{record.unpaid_salary_cents > 0 && <button className="button button-ghost button-small" disabled={saving} onClick={() => { const amount = window.prompt('مبلغ سداد مستحقات الراتب بالجنيه:'); if (amount) submit(() => apiClient(`/payroll/${record.id}/payments`, { method: 'POST', body: JSON.stringify({ amount }) }), 'تم تسجيل سداد الراتب.') }}>سداد مستحق</button>}</td></tr>)}</tbody></table></div></div>
+          <div className="panel invoice-list-panel"><div className="panel-heading"><div><span className="section-eyebrow">سجل الرواتب</span><h3>تفصيل استحقاقات الموظفين للفترة</h3></div></div><div className="table-wrap"><table><thead><tr><th>الموظف</th><th>أساسي</th><th>إضافي عادي</th><th>إضافي عطلات</th><th>مكافأة</th><th>خصم</th><th>تسوية سلف</th><th>صافي الاستحقاق</th><th>مدفوع</th><th>راتب غير مسدد</th><th>رصيد السلفة</th><th>حالة</th><th/></tr></thead><tbody>{payroll.records.map((record) => <tr key={record.id} id={`payroll-record-${record.id}`}><td>{record.employee_name}</td><td>{money(record.base_salary_cents)}</td><td>{money(record.ordinary_overtime_cents)}</td><td>{money(record.holiday_overtime_cents)}</td><td>{money(record.bonus_cents)}</td><td>{money(record.deduction_cents)}</td><td>{money(record.advances_applied_cents)}</td><td>{money(record.net_entitlement_cents)}</td><td>{money(record.cash_paid_cents)}</td><td>{money(record.unpaid_salary_cents)}</td><td>{money(record.advance_balance_cents)}</td><td>{record.status === 'finalized' ? 'مقفل' : 'مسودة'}</td><td>{record.unpaid_salary_cents > 0 && <button className="button button-ghost button-small" disabled={saving} onClick={() => { const amount = window.prompt('مبلغ سداد مستحقات الراتب بالجنيه:'); if (amount) submit(() => apiClient(`/payroll/${record.id}/payments`, { method: 'POST', body: JSON.stringify({ amount }) }), 'تم تسجيل سداد الراتب.') }}>سداد مستحق</button>}</td></tr>)}</tbody></table></div></div>
       </>}
       {tab === 'opening' && <>
         <section className="invoice-note"><CircleDollarSign size={17}/><span>لا يُستورد أي تاريخ سابق. جهّز جداول الأرصدة عند تاريخ قطع معتمد، ثم اعتمد قيد افتتاحي متوازن فقط.</span></section>
@@ -240,7 +258,7 @@ export default function AccountingPage({ apiClient, data, notify, onRefresh }) {
           </div>)}
            <div className="modal-actions"><button type="button" className="button button-ghost" onClick={() => setOpeningLines((current) => [...current, blankOpeningLine()])}><Plus size={15}/> إضافة سطر</button><button type="submit" className="button button-primary" disabled={saving}><Save size={15}/> حفظ المسودة</button></div>
          </fieldset></form></div>
-        <div className="panel invoice-list-panel"><div className="panel-heading"><div><span className="section-eyebrow">جدول القطع</span><h3>الأرصدة المحفوظة</h3></div></div><div className="table-wrap"><table><thead><tr><th>التاريخ</th><th>الحالة</th><th>عدد السطور</th><th>مدين</th><th>دائن</th><th/></tr></thead><tbody>{openingBatches.map((batch) => { const debit = batch.lines.filter((line) => line.side === 'debit').reduce((sum, line) => sum + line.amount_cents, 0); const credit = batch.lines.filter((line) => line.side === 'credit').reduce((sum, line) => sum + line.amount_cents, 0); return <tr key={batch.id}><td>{batch.cutover_date}</td><td>{batch.status}</td><td>{batch.lines.length}</td><td>{money(debit)}</td><td>{money(credit)}</td><td>{batch.status === 'draft' && <button className="button button-primary button-small" disabled={saving} onClick={() => submit(() => apiClient(`/accounting/opening-balances/${batch.id}/post`, { method: 'POST', body: '{}' }), 'تم ترحيل الأرصدة الافتتاحية.')}>اعتماد</button>}</td></tr> })}</tbody></table></div></div>
+         <div className="panel invoice-list-panel"><div className="panel-heading"><div><span className="section-eyebrow">جدول القطع</span><h3>الأرصدة المحفوظة</h3></div></div><div className="table-wrap"><table><thead><tr><th>التاريخ</th><th>الحالة</th><th>عدد السطور</th><th>مدين</th><th>دائن</th><th/></tr></thead><tbody>{openingBatches.map((batch) => { const debit = batch.lines.filter((line) => line.side === 'debit').reduce((sum, line) => sum + line.amount_cents, 0); const credit = batch.lines.filter((line) => line.side === 'credit').reduce((sum, line) => sum + line.amount_cents, 0); return <tr key={batch.id} id={`opening-balance-${batch.id}`}><td>{batch.cutover_date}</td><td>{batch.status}</td><td>{batch.lines.length}</td><td>{money(debit)}</td><td>{money(credit)}</td><td>{batch.status === 'draft' && <button className="button button-primary button-small" disabled={saving} onClick={() => submit(() => apiClient(`/accounting/opening-balances/${batch.id}/post`, { method: 'POST', body: '{}' }), 'تم ترحيل الأرصدة الافتتاحية.')}>اعتماد</button>}</td></tr> })}</tbody></table></div></div>
       </>}
     </>}
   </div>

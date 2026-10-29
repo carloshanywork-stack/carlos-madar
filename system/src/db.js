@@ -881,6 +881,29 @@ if (!db.prepare('SELECT 1 FROM schema_migrations WHERE name=?').get(otherInvoice
     db.prepare('INSERT INTO schema_migrations(name) VALUES (?)').run(otherInvoiceAttachmentsSchemaMigration)
   })()
 }
+const purchaseInvoiceRevisionsMigration = 'purchase-invoice-revisions-schema-v7'
+if (!db.prepare('SELECT 1 FROM schema_migrations WHERE name=?').get(purchaseInvoiceRevisionsMigration)) {
+  db.transaction(() => {
+    db.exec(`CREATE TABLE IF NOT EXISTS purchase_invoice_revisions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      invoice_id INTEGER NOT NULL REFERENCES invoices(id),
+      revision_number INTEGER NOT NULL CHECK(revision_number > 0),
+      reason TEXT NOT NULL,
+      previous_values TEXT NOT NULL,
+      revised_values TEXT NOT NULL,
+      cash_delta_cents INTEGER NOT NULL,
+      stock_movements TEXT NOT NULL DEFAULT '[]',
+      treasury_transaction_id INTEGER REFERENCES treasury_transactions(id),
+      journal_entry_id INTEGER REFERENCES journal_entries(id),
+      created_by INTEGER REFERENCES users(id),
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(invoice_id,revision_number)
+    );
+    CREATE INDEX IF NOT EXISTS idx_purchase_invoice_revisions_invoice
+      ON purchase_invoice_revisions(invoice_id,revision_number);`)
+    db.prepare('INSERT INTO schema_migrations(name) VALUES (?)').run(purchaseInvoiceRevisionsMigration)
+  })()
+}
 const workOrderCogsMigration = 'work-order-cogs-v1'
 if (!db.prepare('SELECT 1 FROM schema_migrations WHERE name=?').get(workOrderCogsMigration)) {
   db.transaction(() => {

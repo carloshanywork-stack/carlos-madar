@@ -29,7 +29,8 @@ test('validates restore schema markers and rejects foreign-key violations', asyn
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'madar-restore-validation-test-'))
   const createSnapshot = (name, { applicationId = MADAR_APPLICATION_ID, schemaVersion = CURRENT_SCHEMA_VERSION,
     orphan = false, financeMigrations = true, manufacturingMappingsMigration = true,
-    otherInvoiceAttachmentsMigration = true, otherInvoiceAttachmentsTable = true } = {}) => {
+    otherInvoiceAttachmentsMigration = true, otherInvoiceAttachmentsTable = true,
+    purchaseInvoiceRevisionsMigration = true, purchaseInvoiceRevisionsTable = true } = {}) => {
     const databasePath = path.join(tempRoot, name)
     const database = new Database(databasePath)
     database.exec(`
@@ -44,6 +45,9 @@ test('validates restore schema markers and rejects foreign-key violations', asyn
       if (applicationId === MADAR_APPLICATION_ID && schemaVersion >= 6 && otherInvoiceAttachmentsTable) {
         database.exec(`CREATE TABLE other_invoices(id INTEGER PRIMARY KEY);
           CREATE TABLE other_invoice_attachments(id INTEGER PRIMARY KEY, other_invoice_id INTEGER REFERENCES other_invoices(id));`)
+      }
+      if (applicationId === MADAR_APPLICATION_ID && schemaVersion >= 7 && purchaseInvoiceRevisionsTable) {
+        database.exec('CREATE TABLE purchase_invoice_revisions(id INTEGER PRIMARY KEY)')
       }
       if (applicationId === MADAR_APPLICATION_ID && schemaVersion >= 1) {
         database.prepare('INSERT INTO schema_migrations(name) VALUES (?)').run('schema-version-markers-v1')
@@ -63,6 +67,9 @@ test('validates restore schema markers and rejects foreign-key violations', asyn
       }
       if (applicationId === MADAR_APPLICATION_ID && schemaVersion >= 6 && otherInvoiceAttachmentsMigration) {
         database.prepare('INSERT INTO schema_migrations(name) VALUES (?)').run('other-invoice-attachments-schema-v6')
+      }
+      if (applicationId === MADAR_APPLICATION_ID && schemaVersion >= 7 && purchaseInvoiceRevisionsMigration) {
+        database.prepare('INSERT INTO schema_migrations(name) VALUES (?)').run('purchase-invoice-revisions-schema-v7')
       }
       if (orphan) {
         database.pragma('foreign_keys = OFF')
@@ -99,6 +106,14 @@ test('validates restore schema markers and rejects foreign-key violations', asyn
       otherInvoiceAttachmentsTable: false,
     })
     await assert.rejects(validateDatabaseSnapshot(missingOtherInvoiceAttachmentsTablePath), /جدول مرفقات فواتير المصروفات المطلوب لمخطط v6/)
+    const missingPurchaseRevisionMigration = createSnapshot('missing-purchase-revision-migration.sqlite', {
+      purchaseInvoiceRevisionsMigration: false,
+    })
+    await assert.rejects(validateDatabaseSnapshot(missingPurchaseRevisionMigration), /سجل مراجعات فواتير الشراء لمخطط v7/)
+    const missingPurchaseRevisionTable = createSnapshot('missing-purchase-revision-table.sqlite', {
+      purchaseInvoiceRevisionsTable: false,
+    })
+    await assert.rejects(validateDatabaseSnapshot(missingPurchaseRevisionTable), /جدول مراجعات فواتير الشراء المطلوب لمخطط v7/)
     const orphanPath = createSnapshot('orphan.sqlite', { orphan: true })
     await assert.rejects(validateDatabaseSnapshot(orphanPath), /مخالفة مفاتيح خارجية/)
     const futurePath = createSnapshot('future.sqlite', { schemaVersion: CURRENT_SCHEMA_VERSION + 1 })
