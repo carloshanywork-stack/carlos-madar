@@ -1,0 +1,97 @@
+const assert = require('node:assert/strict')
+const fs = require('node:fs')
+const os = require('node:os')
+const path = require('node:path')
+const { test } = require('node:test')
+const { createSqliteSequelize, defineModels, initializeSqlite, resolveSqliteStorage } = require('../src/models')
+
+test('Sequelize maps existing ERP relations, enables WAL and keeps paranoid deletes', async () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'madar-sequelize-test-'))
+  const projectRoot = path.resolve(__dirname, '..', '..')
+  assert.equal(resolveSqliteStorage({ dbPath: './signage.sqlite' }), path.join(projectRoot, 'signage.sqlite'))
+  assert.equal(resolveSqliteStorage({ databaseUrl: 'file:./system/data/madar.sqlite' }),
+    path.join(projectRoot, 'system', 'data', 'madar.sqlite'))
+  const sequelize = createSqliteSequelize({ storage: path.join(tempRoot, 'models.sqlite') })
+  try {
+    const models = defineModels(sequelize)
+    await initializeSqlite(sequelize)
+    await sequelize.sync()
+
+    const [journalRows] = await sequelize.query('PRAGMA journal_mode')
+    const [timeoutRows] = await sequelize.query('PRAGMA busy_timeout')
+    assert.equal(journalRows[0].journal_mode.toLowerCase(), 'wal')
+    assert.equal(timeoutRows[0].timeout, 5000)
+    assert.equal(models.Client.options.paranoid, true)
+    assert.equal(models.Machine.options.paranoid, true)
+    assert.equal(models.Machine.rawAttributes.area.field, 'area')
+    assert.equal(models.Machine.rawAttributes.region, undefined)
+    assert.equal(models.Machine.rawAttributes.governorate, undefined)
+    assert.equal(models.Material.options.paranoid, true)
+    assert.equal(models.Order.options.paranoid, true)
+    assert.equal(models.AreaFolder.options.paranoid, true)
+    assert.equal(models.AreaFolder.rawAttributes.deletedAt.field, 'deleted_at')
+    assert.equal(models.User.options.paranoid, true)
+    assert.equal(models.Worker.options.paranoid, true)
+    assert.equal(models.Employee.options.paranoid, true)
+    assert.deepEqual(models.Employee.rawAttributes.department.validate.isIn[0], ['Maintenance', 'Sales', 'Purchasing', 'Operation'])
+    assert.equal(models.Order.rawAttributes.assignedWorkerId.field, 'assigned_worker_id')
+    assert.equal(models.Order.rawAttributes.assignedEmployeeId.field, 'assigned_employee_id')
+    assert.equal(models.Order.rawAttributes.title, undefined)
+    for (const key of ['totalCost', 'materialCost', 'operatingCost', 'sellingPrice', 'profit']) {
+      assert.equal(models.Order.rawAttributes[key].allowNull, true)
+    }
+    assert.ok(models.Client.associations.orders)
+    assert.ok(models.Order.associations.machines)
+    assert.ok(models.Machine.associations.orders)
+    assert.ok(models.Order.associations.areaFolders)
+    assert.ok(models.Machine.associations.areaFolders)
+    assert.ok(models.Material.associations.invoiceItems)
+    assert.ok(models.Material.associations.movements)
+    assert.ok(models.Worker.associations.invoices)
+    assert.ok(models.Worker.associations.treasuryTransactions)
+    assert.ok(models.Invoice.associations.worker)
+    assert.ok(models.TreasuryTransaction.associations.worker)
+    assert.ok(models.Employee.associations.user)
+    assert.ok(models.User.associations.employee)
+    assert.ok(models.Employee.associations.invoices)
+    assert.ok(models.Employee.associations.treasuryTransactions)
+    assert.ok(models.Employee.associations.orders)
+
+    const client = await models.Client.create({ code: 'C-TEST', name: 'Test client' })
+    const order = await client.createOrder({ code: 'OP-TEST', type: 'operation' })
+    assert.equal(order.profit, null)
+    const maintenanceOrder = await client.createOrder({ code: 'MN-TEST', type: 'maintenance' })
+    assert.equal(maintenanceOrder.materialCost, null)
+    assert.equal(maintenanceOrder.profit, null)
+    const machine = await models.Machine.create({ code: 'M-TEST', nameAr: 'Test machine', area: 'North' })
+    assert.equal(machine.area, 'North')
+    await order.addMachine(machine)
+    const [areaFolder, createdAreaFolder] = await models.AreaFolder.findOrCreate({
+      where: { orderId: order.id, folderKey: 'unknown' },
+      defaults: { folderName: 'Unknown area', imagePaths: '[]' },
+    })
+    assert.equal(createdAreaFolder, true)
+    assert.equal(areaFolder.folderName, 'Unknown area')
+    await areaFolder.destroy()
+    assert.equal(await models.AreaFolder.findByPk(areaFolder.id), null)
+    assert.ok(await models.AreaFolder.findByPk(areaFolder.id, { paranoid: false }))
+    const idempotencyKey = await models.IdempotencyKey.create({
+      userId: 1, scope: 'test', key: 'test-key', requestHash: 'hash',
+      responseStatus: 102, responseBody: '{}', createdAtMs: Date.now(),
+    })
+    assert.equal(idempotencyKey.responseStatus, 102)
+    const orderWithMachines = await models.Order.findByPk(order.id, { include: [{ model: models.Machine, as: 'machines' }] })
+    assert.equal(orderWithMachines.machines[0].id, machine.id)
+
+    const material = await models.Material.create({ code: 'MAT-TEST', name: 'Test material' })
+    const movement = await material.createMovement({ kind: 'adjustment', quantity: 1 })
+    assert.equal(movement.materialId, material.id)
+
+    await client.destroy()
+    assert.equal(await models.Client.findByPk(client.id), null)
+    assert.ok(await models.Client.findByPk(client.id, { paranoid: false }))
+  } finally {
+    await sequelize.close()
+    await fs.promises.rm(tempRoot, { recursive: true, force: true })
+  }
+})
