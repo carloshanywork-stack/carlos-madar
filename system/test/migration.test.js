@@ -27,13 +27,13 @@ test('migrates legacy fractional balances into offcuts and backfills invoice cas
     CREATE TABLE invoices (
       id INTEGER PRIMARY KEY AUTOINCREMENT, code TEXT NOT NULL UNIQUE,
       kind TEXT NOT NULL, supplier TEXT DEFAULT '', client_id INTEGER,
-      total REAL NOT NULL DEFAULT 0, notes TEXT DEFAULT '', created_by INTEGER, worker_id INTEGER,
+       total REAL NOT NULL DEFAULT 0, notes TEXT DEFAULT '', created_by INTEGER, worker_id INTEGER REFERENCES workers(id),
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
     CREATE TABLE treasury_transactions (
       id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, amount REAL NOT NULL,
       category TEXT NOT NULL DEFAULT '', reference TEXT DEFAULT '', notes TEXT DEFAULT '',
-       invoice_id INTEGER UNIQUE, created_by INTEGER, worker_id INTEGER, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        invoice_id INTEGER UNIQUE, created_by INTEGER, worker_id INTEGER REFERENCES workers(id), created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
     CREATE TABLE users (
       id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL,
@@ -132,7 +132,11 @@ test('migrates legacy fractional balances into offcuts and backfills invoice cas
     assert.equal(migrated.prepare('SELECT COUNT(*) AS count FROM order_machines WHERE order_id=?').get(1).count, 1)
     assert.ok(migrated.prepare('SELECT 1 FROM schema_migrations WHERE name=?').get('orders-assigned-worker-v1'))
     assert.ok(migrated.prepare('SELECT 1 FROM schema_migrations WHERE name=?').get('workers-financial-links-and-user-controls-v1'))
-    assert.ok(migrated.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='workers'").get())
+    assert.equal(Boolean(migrated.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='workers'").get()), false)
+    assert.ok(migrated.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='legacy_worker_history'").get())
+    assert.equal(migrated.prepare('SELECT name FROM legacy_worker_history WHERE id=22').get().name, 'Legacy technician')
+    assert.ok(migrated.prepare('SELECT 1 FROM schema_migrations WHERE name=?').get('retire-legacy-workers-table-v12'))
+    assert.ok(migrated.pragma('foreign_key_list(invoices)').some((foreignKey) => foreignKey.table === 'legacy_worker_history'))
     assert.ok(migrated.pragma('table_info(invoices)').some((column) => column.name === 'worker_id'))
     assert.ok(migrated.pragma('table_info(treasury_transactions)').some((column) => column.name === 'worker_id'))
     assert.ok(migrated.prepare('SELECT 1 FROM schema_migrations WHERE name=?').get('employees-users-orders-financial-links-v1'))
@@ -145,6 +149,47 @@ test('migrates legacy fractional balances into offcuts and backfills invoice cas
     assert.ok(migrated.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='other_invoice_attachments'").get())
     assert.ok(migrated.prepare('SELECT 1 FROM schema_migrations WHERE name=?').get('purchase-invoice-revisions-schema-v7'))
     assert.ok(migrated.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='purchase_invoice_revisions'").get())
+    assert.ok(migrated.prepare('SELECT 1 FROM schema_migrations WHERE name=?').get('payroll-attendance-schema-v8'))
+    assert.ok(migrated.pragma('table_info(payroll_records)').some((column) => column.name === 'absence_days'))
+    assert.ok(migrated.pragma('table_info(payroll_records)').some((column) => column.name === 'absence_deduction_cents'))
+    assert.ok(migrated.prepare('SELECT 1 FROM schema_migrations WHERE name=?')
+      .get('operational-domains-secondary-warehouse-schema-v9'))
+    for (const table of ['maintenance_orders', 'manufacturing_orders', 'secondary_warehouse_offcuts',
+      'secondary_warehouse_scrap_sales', 'secondary_warehouse_scrap_sale_items']) {
+      assert.ok(migrated.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table), `missing ${table}`)
+    }
+    assert.deepEqual(migrated.prepare('SELECT id,name,department,base_salary,standard_daily_hours,standard_monthly_days,can_login,is_active FROM employees WHERE id=22').get(), {
+      id: 22, name: 'Legacy technician', department: 'Maintenance', base_salary: 0,
+      standard_daily_hours: 9, standard_monthly_days: 26, can_login: 0, is_active: 1,
+    })
+    assert.deepEqual(migrated.prepare('SELECT id,code,type FROM orders WHERE id=1').get(), {
+      id: 1, code: 'OP-OLD', type: 'operation',
+    })
+    const scrapTreasuryId = migrated.prepare(`INSERT INTO treasury_transactions(kind,amount,category)
+      VALUES ('income',15,'')`).run().lastInsertRowid
+    migrated.prepare(`INSERT INTO secondary_warehouse_scrap_sales(amount_cents,treasury_transaction_id)
+      VALUES (?,?)`).run(1500, scrapTreasuryId)
+    assert.equal(migrated.prepare('SELECT category FROM treasury_transactions WHERE id=?').get(scrapTreasuryId).category,
+      'إيرادات بيع خردة ومخلفات تشغيل')
+    const expenseTreasuryId = migrated.prepare(`INSERT INTO treasury_transactions(kind,amount,category)
+      VALUES ('expense',15,'')`).run().lastInsertRowid
+    assert.throws(() => migrated.prepare(`INSERT INTO secondary_warehouse_scrap_sales(amount_cents,treasury_transaction_id)
+      VALUES (?,?)`).run(1500, expenseTreasuryId), /scrap sale must link an income/)
+    assert.ok(migrated.prepare('SELECT 1 FROM schema_migrations WHERE name=?').get('staff-attendance-tool-custody-schema-v10'))
+    for (const table of ['employee_daily_attendance', 'employee_tool_custody']) {
+      assert.ok(migrated.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table), `missing ${table}`)
+    }
+    assert.ok(migrated.prepare('SELECT 1 FROM schema_migrations WHERE name=?').get('secondary-warehouse-stock-count-schema-v11'))
+    assert.ok(migrated.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='stock_count_offcut_items'").get())
+    const staffId = migrated.prepare(`INSERT INTO employees(name,department) VALUES ('Custody test','Maintenance')`).run().lastInsertRowid
+    migrated.prepare(`INSERT INTO employee_daily_attendance(employee_id,attendance_date,status,overtime_minutes)
+      VALUES (?,?,?,?)`).run(staffId, '2026-10-01', 'present', 60)
+    assert.equal(migrated.prepare('SELECT overtime_minutes FROM employee_daily_attendance WHERE employee_id=?').get(staffId).overtime_minutes, 60)
+    const custodyId = migrated.prepare(`INSERT INTO employee_tool_custody(employee_id,tool_name,serial_number)
+      VALUES (?,'Drill','DR-TEST-1')`).run(staffId).lastInsertRowid
+    assert.throws(() => migrated.prepare('UPDATE employees SET active=0 WHERE id=?').run(staffId), /employee has outstanding tool custody/)
+    migrated.prepare(`UPDATE employee_tool_custody SET return_status='returned',returned_at=CURRENT_TIMESTAMP WHERE id=?`).run(custodyId)
+    assert.equal(migrated.prepare('UPDATE employees SET active=0 WHERE id=?').run(staffId).changes, 1)
     assert.ok(migrated.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='inventory_issues'").get())
     assert.ok(migrated.pragma('table_info(inventory_movements)').some((column) => column.name === 'issue_id'))
     const manufacturingMappings = migrated.prepare(`SELECT am.mapping_key,am.account_id,am.approved,a.system_key

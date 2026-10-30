@@ -54,6 +54,9 @@ const {
 } = require('./accounting')
 const { Op, Transaction } = require('sequelize')
 const { createSqliteSequelize, defineModels, initializeSqlite } = require('./models')
+const { registerStaffRoutes } = require('./routes/staff')
+const { registerWarehouseRoutes } = require('./routes/warehouse')
+const { registerManufacturingRoutes } = require('./routes/manufacturing')
 const { calculateIssue } = require('./inventory')
 const { resolvePhotoTimestamp, splitTimedPhotos } = require('./photo-time')
 const { renameAreaFolder } = require('./area-folder-rename')
@@ -756,6 +759,8 @@ function employeeDto(employee, user = null, includeAccess = true) {
     id: employee.id, name: employee.name, department: employee.department, phone: employee.phone,
     jobTitle: employee.jobTitle || '', active: Boolean(employee.active),
     monthlySalaryCents: Number(employee.monthlySalaryCents || 0),
+    canLogin: Boolean(employee.canLogin),
+    loginRole: employee.loginRole || user?.role || '',
     ...(includeAccess ? {
       username: user?.username || '', userActive: Boolean(user?.active && !user?.deleted_at), userDeleted: Boolean(user?.deleted_at),
     } : {}),
@@ -852,6 +857,12 @@ function orderSummary(order, includeCogs = false) {
     updatedAt: order.updated_at,
     archivedAt: order.archived_at,
     machineCount: Number(order.machine_count || 0),
+    areaNames: order.area_names || '',
+    pettyCashAmountCents: Number(order.petty_cash_amount_cents || 0),
+    actualExpensesCents: Number(order.actual_expenses_cents || 0),
+    pettyCashSettled: Boolean(order.petty_cash_settled),
+    warrantyPeriodMonths: order.warranty_period_months == null ? null : Number(order.warranty_period_months),
+    warrantyExpiresAt: order.warranty_expires_at || null,
     ...(includeCogs ? {
       actualMaterialCogsCents: Number(order.actual_material_cogs_cents || 0),
       actualMaterialCogs: Number(order.actual_material_cogs_cents || 0) / 100,
@@ -860,6 +871,13 @@ function orderSummary(order, includeCogs = false) {
 }
 
 const api = express.Router()
+registerStaffRoutes(api, { db, requireAuth, allowRoles, sendError })
+registerWarehouseRoutes(api, {
+  db, requireAuth, allowRoles, sendError, parseCurrencyCents, currencyAmountFromCents, queueJournalEntry,
+})
+registerManufacturingRoutes(api, { db, requireAuth, allowRoles, sendError, nextCode, audit, storageRoot, fs, path, crypto, multer,
+  safeStorageFile, relativeStoragePath, storagePathUsesSymlink, parseCurrencyCents, currencyAmountFromCents,
+  queueJournalEntry, assertMaterialUnlocked, consumeInventoryLots })
 
 const activeApiRequestTokens = new Set()
 const snapshotDrainWaiters = new Set()
@@ -1528,18 +1546,23 @@ api.get('/bootstrap', requireAuth, (req, res) => {
   const orders = db.prepare(`SELECT o.*, c.name AS client_name, c.code AS client_code, u.full_name AS assigned_worker_name,
     e.name AS assigned_employee_name,
     (SELECT COUNT(*) FROM order_machines om WHERE om.order_id=o.id AND om.excluded_at IS NULL) AS machine_count,
+    (SELECT group_concat(DISTINCT m.area) FROM order_machines om JOIN machines m ON m.id=om.machine_id
+      WHERE om.order_id=o.id AND om.excluded_at IS NULL AND m.area IS NOT NULL AND trim(m.area)!='') AS area_names,
     (SELECT COALESCE(SUM(ii.cogs_cents),0) FROM inventory_issues ii WHERE ii.order_id=o.id) AS actual_material_cogs_cents,
     (SELECT group_concat(a.employee_id, ',') FROM order_employee_assignments a WHERE a.order_id=o.id) AS employee_ids,
     (SELECT group_concat(ee.name, '|') FROM order_employee_assignments a JOIN employees ee ON ee.id=a.employee_id WHERE a.order_id=o.id) AS employee_names
     FROM orders o JOIN clients c ON c.id=o.client_id LEFT JOIN users u ON u.id=o.assigned_worker_id
     LEFT JOIN employees e ON e.id=o.assigned_employee_id
-    WHERE o.deleted_at IS NULL ORDER BY o.id DESC`).all().map((order) => orderSummary(order, req.user.role === 'admin'))
+     WHERE o.deleted_at IS NULL ORDER BY o.id DESC`).all().map((order) => orderSummary(order, req.user.role === 'admin'))
+  const manufacturingOrders = db.prepare(`SELECT o.*, c.name AS client_name, c.code AS client_code, i.code AS invoice_code
+    FROM manufacturing_orders o JOIN clients c ON c.id=o.client_id
+    LEFT JOIN invoices i ON i.id=o.sales_invoice_id
+    WHERE o.deleted_at IS NULL ORDER BY o.id DESC LIMIT 100`).all()
   const assignedUsers = db.prepare('SELECT id,full_name,role FROM users WHERE active=1 AND deleted_at IS NULL ORDER BY full_name COLLATE NOCASE').all()
     .map((assignedUser) => ({ id: assignedUser.id, fullName: assignedUser.full_name, role: assignedUser.role }))
-  const workers = db.prepare(`SELECT id,name,job_title AS jobTitle,phone
-    FROM workers WHERE active=1 AND deleted_at IS NULL ORDER BY name COLLATE NOCASE`).all()
   const employees = db.prepare(`SELECT id,name,department,phone,job_title AS jobTitle
     FROM employees WHERE active=1 AND deleted_at IS NULL ORDER BY name COLLATE NOCASE`).all()
+    .map(({ id, name, department, jobTitle, phone }) => ({ id, name, department, jobTitle, phone }))
   const materials = db.prepare('SELECT * FROM materials WHERE active=1 AND deleted_at IS NULL ORDER BY name').all().map((material) => ({
     id: material.id, code: material.code, name: material.name, unit: material.unit,
     stock: material.stock, subStock: material.sub_stock || 0,
@@ -1554,11 +1577,15 @@ api.get('/bootstrap', requireAuth, (req, res) => {
     lowStock: materials.filter((material) => material.stock + material.subStock <= material.minStock).length,
     pendingReview: db.prepare("SELECT COUNT(*) AS count FROM orders WHERE status='review' AND deleted_at IS NULL").get().count,
     archived: db.prepare("SELECT COUNT(*) AS count FROM orders WHERE status='archived' AND deleted_at IS NULL").get().count,
+    activeMaintenanceOrders: db.prepare("SELECT COUNT(*) AS count FROM orders WHERE type='maintenance' AND status!='archived' AND deleted_at IS NULL").get().count,
+    pendingReviewMaintenance: db.prepare("SELECT COUNT(*) AS count FROM orders WHERE type='maintenance' AND status='review' AND deleted_at IS NULL").get().count,
+    activeManufacturingOrders: db.prepare("SELECT COUNT(*) AS count FROM manufacturing_orders WHERE status='in_production' AND deleted_at IS NULL").get().count,
+    readyManufacturingOrders: db.prepare("SELECT COUNT(*) AS count FROM manufacturing_orders WHERE status='ready' AND deleted_at IS NULL").get().count,
     totalProfit: ['admin', 'sales'].includes(req.user.role)
       ? db.prepare('SELECT COALESCE(SUM(selling_price-total_cost),0) AS total FROM orders WHERE deleted_at IS NULL').get().total
       : 0,
   }
-  res.json({ user: userDto(req.user), clients, machines, orders, assignedUsers, workers, employees, materials, reasons, stats })
+  res.json({ user: userDto(req.user), clients, machines, orders, manufacturingOrders, assignedUsers, employees, materials, reasons, stats })
 })
 
 api.get('/employees', requireAuth, asyncRoute(async (req, res) => {
@@ -1575,30 +1602,37 @@ api.get('/employees', requireAuth, asyncRoute(async (req, res) => {
   res.json(employees.map((employee) => employeeDto(employee, employee.user, req.user.role === 'admin')))
 }))
 
-api.post('/employees', requireAuth, allowRoles('admin'), asyncRoute(async (req, res) => {
+api.post(['/employees', '/staff'], requireAuth, allowRoles('admin'), asyncRoute(async (req, res) => {
   const name = String(req.body?.name || '').trim()
+  const jobTitle = String(req.body?.jobTitle || '').trim()
   const department = String(req.body?.department || '').trim()
   const phone = String(req.body?.phone || '').trim()
   const usernameValue = String(req.body?.username || '').trim().toLocaleLowerCase('en')
   const password = String(req.body?.password || '')
   const monthlySalaryCents = req.body?.monthlyBaseSalary == null || req.body.monthlyBaseSalary === ''
     ? 0 : parseCurrencyCents(req.body.monthlyBaseSalary, { allowZero: true })
-  const requiresLogin = Object.hasOwn(employeeUserRoles, department)
-  if (!name || name.length > 150 || phone.length > 80 || !employeeDepartments.has(department) || monthlySalaryCents === null) {
+  if (req.body?.canLogin !== undefined && typeof req.body.canLogin !== 'boolean') return sendError(res, 400, 'اختيار تسجيل الدخول غير صالح.')
+  const requiresLogin = req.body?.canLogin === undefined ? Object.hasOwn(employeeUserRoles, department) : req.body.canLogin
+  const loginRole = String(req.body?.role || req.body?.loginRole || employeeUserRoles[department] || 'operations')
+  if (!name || name.length > 150 || jobTitle.length > 150 || phone.length > 80 || !employeeDepartments.has(department) || monthlySalaryCents === null) {
     return sendError(res, 400, 'أدخل اسمًا صالحًا واختر قسمًا ورقم هاتف ضمن الحدود المسموحة.')
   }
-  if (department === 'Maintenance' && (usernameValue || password)) return sendError(res, 400, 'موظفو الصيانة الميدانيون لا يملكون حسابات دخول.')
+  if (requiresLogin && !['admin', 'operations', 'sales', 'purchasing'].includes(loginRole)) return sendError(res, 400, 'دور حساب الدخول غير صالح.')
+  if (!requiresLogin && (usernameValue || password)) return sendError(res, 400, 'لا ترسل بيانات الدخول عندما يكون حساب النظام معطلاً.')
   if (requiresLogin && (usernameValue.length < 3 || usernameValue.length > 100 || password.length < 10 || password.length > 200)) {
     return sendError(res, 400, 'موظفو هذا القسم يحتاجون اسم دخول من 3 أحرف وكلمة مرور من 10 أحرف على الأقل.')
   }
   const passwordHash = requiresLogin ? await bcrypt.hash(password, 12) : null
   try {
     const created = await sequelize.transaction({ type: Transaction.TYPES.IMMEDIATE }, async (transaction) => {
-      const employee = await models.Employee.create({ name, department, phone, monthlySalaryCents }, { transaction })
+      const employee = await models.Employee.create({ name, department, phone, jobTitle, monthlySalaryCents,
+        baseSalaryCents: monthlySalaryCents, standardDailyHours: 9, standardMonthlyDays: 26,
+        canLogin: requiresLogin, loginUsername: requiresLogin ? usernameValue : null,
+        loginRole: requiresLogin ? loginRole : null, isActive: true }, { transaction })
       let user = null
       if (requiresLogin) {
         user = await models.User.create({
-          username: usernameValue, passwordHash, fullName: name, role: employeeUserRoles[department], active: true, employeeId: employee.id,
+          username: usernameValue, passwordHash, fullName: name, role: loginRole, active: true, employeeId: employee.id,
         }, { transaction })
       }
       await sequelizeAudit({ userId: req.user.id, action: 'create', entity: 'employee', entityId: employee.id,
@@ -1614,42 +1648,69 @@ api.post('/employees', requireAuth, allowRoles('admin'), asyncRoute(async (req, 
   }
 }))
 
-api.patch('/employees/:id', requireAuth, allowRoles('admin'), asyncRoute(async (req, res) => {
+api.patch(['/employees/:id', '/staff/:id'], requireAuth, allowRoles('admin'), asyncRoute(async (req, res) => {
   const employeeId = Number(req.params.id)
   if (!Number.isInteger(employeeId) || employeeId <= 0) return sendError(res, 400, 'رقم الموظف غير صالح.')
   const department = String(req.body?.department || '').trim()
   if (!employeeDepartments.has(department)) return sendError(res, 400, 'القسم المحدد غير صالح.')
   const name = String(req.body?.name || '').trim()
+  const jobTitle = String(req.body?.jobTitle || '').trim()
   const phone = String(req.body?.phone || '').trim()
   const usernameValue = String(req.body?.username || '').trim().toLocaleLowerCase('en')
   const password = String(req.body?.password || '')
   const monthlySalaryCents = req.body?.monthlyBaseSalary === undefined
     ? null : parseCurrencyCents(req.body.monthlyBaseSalary, { allowZero: true })
-  const requiresLogin = Object.hasOwn(employeeUserRoles, department)
-  if (!name || name.length > 150 || phone.length > 80 || (req.body?.monthlyBaseSalary !== undefined && monthlySalaryCents === null)) {
+  if (req.body?.canLogin !== undefined && typeof req.body.canLogin !== 'boolean') return sendError(res, 400, 'اختيار تسجيل الدخول غير صالح.')
+  if (req.body?.active !== undefined && typeof req.body.active !== 'boolean') return sendError(res, 400, 'حالة الموظف غير صالحة.')
+  const requiresLogin = req.body?.canLogin === undefined ? Object.hasOwn(employeeUserRoles, department) : req.body.canLogin
+  const loginRole = String(req.body?.role || req.body?.loginRole || employeeUserRoles[department] || 'operations')
+  if (!name || name.length > 150 || jobTitle.length > 150 || phone.length > 80 || (req.body?.monthlyBaseSalary !== undefined && monthlySalaryCents === null)) {
     return sendError(res, 400, 'اسم الموظف مطلوب وتحقق من الهاتف والراتب الأساسي.')
   }
-  if (department === 'Maintenance' && (usernameValue || password)) return sendError(res, 400, 'موظفو الصيانة الميدانيون لا يملكون حسابات دخول.')
+  if (requiresLogin && !['admin', 'operations', 'sales', 'purchasing'].includes(loginRole)) return sendError(res, 400, 'دور حساب الدخول غير صالح.')
+  if (!requiresLogin && (usernameValue || password)) return sendError(res, 400, 'لا ترسل بيانات الدخول عندما يكون حساب النظام معطلاً.')
   if (password && (password.length < 10 || password.length > 200)) return sendError(res, 400, 'كلمة المرور يجب أن تكون بين 10 و200 حرف.')
 
   try {
     const updated = await sequelize.transaction({ type: Transaction.TYPES.IMMEDIATE }, async (transaction) => {
-      const employee = await models.Employee.findByPk(employeeId, { transaction })
-      if (!employee) return null
-      const linkedUser = await models.User.findOne({ where: { employeeId }, paranoid: false, transaction })
-      if (department === 'Maintenance' && linkedUser) {
-        throw apiError(409, 'لا يمكن نقل حساب مرتبط إلى قسم الصيانة؛ أنشئ سجل صيانة ميدانيًا مستقلًا بدلًا من ذلك.')
-      }
-       const oldValues = { name: employee.name, department: employee.department, phone: employee.phone,
+        const employee = await models.Employee.findByPk(employeeId, { transaction })
+        if (!employee) return null
+        const updatedJobTitle = req.body?.jobTitle === undefined ? employee.jobTitle : jobTitle
+       const linkedUser = await models.User.findOne({ where: { employeeId }, paranoid: false, transaction })
+       const employeeActive = req.body?.active === undefined ? Boolean(employee.active) : req.body.active === true
+       if (employee.active && !employeeActive) {
+         const outstanding = db.prepare(`SELECT COUNT(*) AS count FROM employee_tool_custody
+           WHERE employee_id=? AND return_status='issued'`).get(employeeId).count
+         if (outstanding) throw apiError(409, 'يجب استلام جميع الأدوات والعهد المسجلة قبل إيقاف الموظف.')
+       }
+         const oldValues = { name: employee.name, jobTitle: employee.jobTitle, department: employee.department, phone: employee.phone,
          monthlySalaryCents: Number(employee.monthlySalaryCents || 0), active: Boolean(employee.active) }
-      employee.name = name
+       employee.name = name
+       employee.jobTitle = updatedJobTitle
       employee.department = department
        employee.phone = phone
-       if (monthlySalaryCents !== null) employee.monthlySalaryCents = monthlySalaryCents
-      await employee.save({ transaction })
+       if (monthlySalaryCents !== null) {
+         employee.monthlySalaryCents = monthlySalaryCents
+         employee.baseSalaryCents = monthlySalaryCents
+       }
+       employee.active = employeeActive
+       employee.isActive = employeeActive
+       employee.canLogin = requiresLogin
+       employee.loginUsername = requiresLogin ? (usernameValue || linkedUser?.username || null) : employee.loginUsername
+       employee.loginRole = requiresLogin ? loginRole : employee.loginRole
+       await employee.save({ transaction })
 
-      let user = linkedUser
-      if (requiresLogin) {
+       let user = linkedUser
+       if (!requiresLogin && linkedUser) {
+         const wasActive = Boolean(linkedUser.active)
+         linkedUser.active = false
+         await linkedUser.save({ transaction })
+         await sequelize.query('DELETE FROM sessions WHERE user_id=?', { replacements: [linkedUser.id], transaction })
+         if (wasActive) await sequelizeAudit({ userId: req.user.id, action: 'disable-login', entity: 'user', entityId: linkedUser.id,
+           oldValues: { username: linkedUser.username, role: linkedUser.role, active: true },
+           newValues: { username: linkedUser.username, role: linkedUser.role, active: false }, transaction })
+       }
+       if (requiresLogin) {
         const username = usernameValue || linkedUser?.username || ''
         if (username.length < 3 || username.length > 100) throw apiError(400, 'اسم الدخول مطلوب ويجب أن يكون بين 3 و100 حرف.')
         if (!linkedUser && password.length < 10) throw apiError(400, 'أدخل كلمة مرور من 10 أحرف على الأقل لإنشاء حساب الدخول.')
@@ -1658,25 +1719,33 @@ api.patch('/employees/:id', requireAuth, allowRoles('admin'), asyncRoute(async (
           const oldUserValues = { username: linkedUser.username, role: linkedUser.role, active: Boolean(linkedUser.active) }
           linkedUser.username = username
           linkedUser.fullName = name
-          linkedUser.role = employeeUserRoles[department]
+          linkedUser.role = loginRole
+          employee.loginUsername = username
+          employee.loginRole = linkedUser.role
           if (password) linkedUser.passwordHash = await bcrypt.hash(password, 12)
           if (linkedUser.deleted_at) {
             linkedUser.deleted_at = null
             linkedUser.active = true
           }
+          linkedUser.active = employeeActive
           await linkedUser.save({ transaction })
+          if (!employeeActive) await sequelize.query('DELETE FROM sessions WHERE user_id=?', { replacements: [linkedUser.id], transaction })
           await sequelizeAudit({ userId: req.user.id, action: password ? 'password-reset' : 'update', entity: 'user', entityId: linkedUser.id,
             oldValues: oldUserValues, newValues: { username, role: linkedUser.role, active: Boolean(linkedUser.active), passwordUpdated: Boolean(password) }, transaction })
           user = linkedUser
         } else {
           user = await models.User.create({ username, passwordHash: await bcrypt.hash(password, 12), fullName: name,
-            role: employeeUserRoles[department], active: true, employeeId: employee.id }, { transaction })
+             role: loginRole, active: employeeActive, employeeId: employee.id }, { transaction })
+          employee.loginUsername = username
+          employee.loginRole = user.role
+          employee.canLogin = true
+          await employee.save({ transaction })
           await sequelizeAudit({ userId: req.user.id, action: 'create', entity: 'user', entityId: user.id,
-            newValues: { username, role: user.role, active: true, employeeId: employee.id }, transaction })
+            newValues: { username, role: user.role, active: employeeActive, employeeId: employee.id }, transaction })
         }
       }
        await sequelizeAudit({ userId: req.user.id, action: 'update', entity: 'employee', entityId: employee.id,
-         oldValues, newValues: { name, department, phone, monthlySalaryCents: Number(employee.monthlySalaryCents || 0), username: user?.username || null }, transaction })
+          oldValues, newValues: { name, jobTitle: updatedJobTitle, department, phone, monthlySalaryCents: Number(employee.monthlySalaryCents || 0), username: user?.username || null }, transaction })
       return { employee, user }
     })
     if (!updated) return sendError(res, 404, 'الموظف غير موجود.')
@@ -1689,15 +1758,19 @@ api.patch('/employees/:id', requireAuth, allowRoles('admin'), asyncRoute(async (
   }
 }))
 
-api.delete('/employees/:id', requireAuth, allowRoles('admin'), asyncRoute(async (req, res) => {
+api.delete(['/employees/:id', '/staff/:id'], requireAuth, allowRoles('admin'), asyncRoute(async (req, res) => {
   const employeeId = Number(req.params.id)
   if (!Number.isInteger(employeeId) || employeeId <= 0) return sendError(res, 400, 'رقم الموظف غير صالح.')
   const deleted = await sequelize.transaction({ type: Transaction.TYPES.IMMEDIATE }, async (transaction) => {
-    const employee = await models.Employee.findByPk(employeeId, { transaction })
-    if (!employee) return false
-    const user = await models.User.findOne({ where: { employeeId }, paranoid: false, transaction })
+     const employee = await models.Employee.findByPk(employeeId, { transaction })
+     if (!employee) return false
+     const outstandingTools = db.prepare(`SELECT COUNT(*) AS count FROM employee_tool_custody
+       WHERE employee_id=? AND return_status='issued'`).get(employeeId).count
+     if (outstandingTools) throw apiError(409, 'يجب استلام جميع الأدوات والعهد المسجلة قبل إيقاف الموظف.')
+     const user = await models.User.findOne({ where: { employeeId }, paranoid: false, transaction })
     const oldValues = { name: employee.name, department: employee.department, phone: employee.phone, active: Boolean(employee.active) }
     employee.active = false
+    employee.isActive = false
     await employee.save({ transaction })
     await employee.destroy({ transaction })
     if (user) {
@@ -1796,7 +1869,7 @@ function parseEmployeeHistoryRange(query) {
   return { from, to }
 }
 
-api.get('/employees/:id/history', requireAuth, allowRoles('admin'), (req, res) => {
+api.get(['/employees/:id/history', '/staff/:id/history'], requireAuth, allowRoles('admin'), (req, res) => {
   const employeeId = Number(req.params.id)
   if (!Number.isSafeInteger(employeeId) || employeeId < 1) return sendError(res, 400, 'رقم الموظف غير صالح.')
   try {
@@ -1807,7 +1880,7 @@ api.get('/employees/:id/history', requireAuth, allowRoles('admin'), (req, res) =
   } catch (error) { return sendError(res, error.status || 400, error.message) }
 })
 
-api.get('/employees/:id/history.xlsx', requireAuth, allowRoles('admin'), (req, res) => {
+api.get(['/employees/:id/history.xlsx', '/staff/:id/history.xlsx'], requireAuth, allowRoles('admin'), (req, res) => {
   const employeeId = Number(req.params.id)
   if (!Number.isSafeInteger(employeeId) || employeeId < 1) return sendError(res, 400, 'رقم الموظف غير صالح.')
   try {
@@ -1892,7 +1965,7 @@ function buildEmployeeHistoryPdf(history) {
   })
 }
 
-api.get('/employees/:id/history.pdf', requireAuth, allowRoles('admin'), asyncRoute(async (req, res) => {
+api.get(['/employees/:id/history.pdf', '/staff/:id/history.pdf'], requireAuth, allowRoles('admin'), asyncRoute(async (req, res) => {
   const employeeId = Number(req.params.id)
   if (!Number.isSafeInteger(employeeId) || employeeId < 1) return sendError(res, 400, 'رقم الموظف غير صالح.')
   const range = parseEmployeeHistoryRange(req.query)
@@ -1903,77 +1976,30 @@ api.get('/employees/:id/history.pdf', requireAuth, allowRoles('admin'), asyncRou
     'Content-Disposition': `attachment; filename="employee-${employeeId}-history.pdf"`, 'Cache-Control': 'private, no-store' }).send(buffer)
 }))
 
-api.get('/workers', requireAuth, allowRoles('admin'), asyncRoute(async (_req, res) => {
-  const workers = await models.Worker.findAll({ order: [['name', 'ASC']] })
-  res.json(workers.map((worker) => ({
-    id: worker.id, name: worker.name, jobTitle: worker.jobTitle, phone: worker.phone,
-    active: Boolean(worker.active), createdAt: worker.created_at,
-  })))
-}))
-
-api.post('/workers', requireAuth, allowRoles('admin'), asyncRoute(async (req, res) => {
-  const name = String(req.body?.name || '').trim()
-  const jobTitle = String(req.body?.jobTitle || '').trim()
-  const phone = String(req.body?.phone || '').trim()
-  if (!name || name.length > 150 || jobTitle.length > 150 || phone.length > 80) {
-    return sendError(res, 400, 'اسم العامل مطلوب، وتحقق من حدود طول المسمى الوظيفي ورقم الهاتف.')
-  }
-  const worker = await sequelize.transaction({ type: Transaction.TYPES.IMMEDIATE }, async (transaction) => {
-    const created = await models.Worker.create({ name, jobTitle, phone }, { transaction })
-    await sequelizeAudit({ userId: req.user.id, action: 'create', entity: 'worker', entityId: created.id,
-      newValues: { name, jobTitle, phone }, transaction })
-    return created
-  })
-  res.status(201).json({ id: worker.id, name: worker.name, jobTitle: worker.jobTitle, phone: worker.phone, active: true })
-}))
-
-api.patch('/workers/:id', requireAuth, allowRoles('admin'), asyncRoute(async (req, res) => {
-  const workerId = Number(req.params.id)
-  if (!Number.isInteger(workerId) || workerId <= 0) return sendError(res, 400, 'رقم العامل غير صالح.')
-  const updated = await sequelize.transaction({ type: Transaction.TYPES.IMMEDIATE }, async (transaction) => {
-    const worker = await models.Worker.findByPk(workerId, { transaction })
-    if (!worker) return null
-    const oldValues = { name: worker.name, jobTitle: worker.jobTitle, phone: worker.phone, active: Boolean(worker.active) }
-    const name = String(req.body?.name ?? worker.name).trim()
-    const jobTitle = String(req.body?.jobTitle ?? worker.jobTitle).trim()
-    const phone = String(req.body?.phone ?? worker.phone).trim()
-    const active = req.body?.active === undefined ? Boolean(worker.active) : Boolean(req.body.active)
-    if (!name || name.length > 150 || jobTitle.length > 150 || phone.length > 80) throw apiError(400, 'اسم العامل مطلوب، وتحقق من حدود طول المسمى الوظيفي ورقم الهاتف.')
-    worker.name = name
-    worker.jobTitle = jobTitle
-    worker.phone = phone
-    worker.active = active
-    await worker.save({ transaction })
-    await sequelizeAudit({ userId: req.user.id, action: 'update', entity: 'worker', entityId: worker.id,
-      oldValues, newValues: { name, jobTitle, phone, active }, transaction })
-    return worker
-  })
-  if (!updated) return sendError(res, 404, 'العامل غير موجود.')
-  res.json({ id: updated.id, name: updated.name, jobTitle: updated.jobTitle, phone: updated.phone, active: Boolean(updated.active) })
-}))
-
-api.delete('/workers/:id', requireAuth, allowRoles('admin'), asyncRoute(async (req, res) => {
-  const workerId = Number(req.params.id)
-  if (!Number.isInteger(workerId) || workerId <= 0) return sendError(res, 400, 'رقم العامل غير صالح.')
-  const removed = await sequelize.transaction({ type: Transaction.TYPES.IMMEDIATE }, async (transaction) => {
-    const worker = await models.Worker.findByPk(workerId, { transaction })
-    if (!worker) return false
-    const oldValues = { name: worker.name, jobTitle: worker.jobTitle, phone: worker.phone, active: Boolean(worker.active) }
-    worker.active = false
-    await worker.save({ transaction })
-    await worker.destroy({ transaction })
-    await sequelizeAudit({ userId: req.user.id, action: 'soft-delete', entity: 'worker', entityId: worker.id,
-      oldValues, newValues: { ...oldValues, active: false, deletedAt: new Date().toISOString() }, transaction })
-    return true
-  })
-  if (!removed) return sendError(res, 404, 'العامل غير موجود.')
-  res.json({ ok: true })
-}))
-
 api.get('/clients', requireAuth, asyncRoute(async (_req, res) => {
   const clients = await models.Client.findAll({ order: [['name', 'ASC']] })
   res.json(clients.map(clientApiRecord))
 }))
+
+api.get('/clients/:id/statement', requireAuth, allowRoles('admin', 'sales'), (req, res) => {
+  const clientId = Number(req.params.id)
+  if (!Number.isSafeInteger(clientId) || clientId < 1) return sendError(res, 400, 'رقم العميل غير صالح.')
+  const client = db.prepare('SELECT id,code,name FROM clients WHERE id=? AND deleted_at IS NULL').get(clientId)
+  if (!client) return sendError(res, 404, 'العميل غير موجود.')
+  const totals = db.prepare(`SELECT COALESCE(SUM(total),0) AS total_billed,
+      COALESCE(SUM(paid_total),0) AS total_paid,COALESCE(SUM(remaining),0) AS outstanding_balance
+    FROM invoices WHERE client_id=? AND kind='sales' AND status<>'corrected' AND deleted_at IS NULL`).get(clientId)
+  const overdueInvoices = db.prepare(`SELECT id,code,total,paid_total,remaining,created_at
+    FROM invoices WHERE client_id=? AND kind='sales' AND status<>'corrected' AND deleted_at IS NULL
+      AND remaining>0.000001 AND datetime(created_at)<=datetime('now','-60 days')
+    ORDER BY created_at,id`).all(clientId).map((invoice) => ({
+    ...invoice,
+    days_overdue: Math.max(60, Math.floor((Date.now() - new Date(`${String(invoice.created_at).replace(' ', 'T')}Z`).valueOf()) / 86_400_000)),
+  }))
+  res.json({ client, total_billed: Number(totals.total_billed), total_paid: Number(totals.total_paid),
+    outstanding_balance: Number(totals.outstanding_balance), overdue_60_days: overdueInvoices.length > 0,
+    overdue_invoice_count: overdueInvoices.length, overdue_invoices: overdueInvoices })
+})
 
 api.post('/clients', requireAuth, allowRoles('admin', 'sales'), asyncRoute(async (req, res) => {
   const body = req.body || {}
@@ -2855,6 +2881,27 @@ api.post('/orders', requireAuth, allowRoles('admin', 'sales', 'operations'), cre
 api.put('/orders/:id', requireAuth, allowRoles('admin', 'sales', 'operations'), asyncRoute(async (req, res) => {
   const order = await models.Order.findByPk(req.params.id)
   if (!order) return sendError(res, 404, 'الأمر غير موجود.')
+  if (order.status === 'archived' && req.user.role !== 'admin') {
+    return sendError(res, 403, 'تعديل الأوامر المؤرشفة متاح للمدير فقط.')
+  }
+
+  const archivedOrderSnapshot = async (transaction) => {
+    const select = async (sql) => {
+      const [rows] = await sequelize.query(sql, { replacements: [order.id], transaction })
+      return rows
+    }
+    const [orderRows, assignments, cards, folders, issues, custodyTransactions, invoices] = await Promise.all([
+      select('SELECT * FROM orders WHERE id=?'),
+      select('SELECT * FROM order_employee_assignments WHERE order_id=? ORDER BY employee_id'),
+      select('SELECT * FROM order_machines WHERE order_id=? ORDER BY id'),
+      select('SELECT * FROM area_folders WHERE order_id=? ORDER BY id'),
+      select('SELECT * FROM inventory_issues WHERE order_id=? ORDER BY id'),
+      select('SELECT * FROM treasury_transactions WHERE order_id=? ORDER BY id'),
+      select('SELECT * FROM invoices WHERE order_id=? ORDER BY id'),
+    ])
+    return { order: orderRows[0] || null, employee_assignments: assignments, machine_cards: cards,
+      area_folders: folders, inventory_issues: issues, custody_transactions: custodyTransactions, invoices }
+  }
 
   const rawClientId = req.body?.clientId ?? req.body?.client_id
   const clientId = Number(rawClientId)
@@ -2915,6 +2962,7 @@ api.put('/orders/:id', requireAuth, allowRoles('admin', 'sales', 'operations'), 
     areaPath: relativeStoragePath(newOrderDirectory),
   }
   await sequelize.transaction({ type: Transaction.TYPES.IMMEDIATE }, async (transaction) => {
+    const beforeSnapshot = order.status === 'archived' ? await archivedOrderSnapshot(transaction) : null
     await order.update({
       clientId, type, notes: newValues.notes, assignedWorkerId, assignedEmployeeId,
       totalCost, materialCost, operatingCost, sellingPrice, areaPath: newValues.areaPath,
@@ -2923,6 +2971,21 @@ api.put('/orders/:id', requireAuth, allowRoles('admin', 'sales', 'operations'), 
     for (const employeeId of employeeIds) {
       await sequelize.query('INSERT INTO order_employee_assignments(order_id,employee_id) VALUES (?,?)', {
         replacements: [order.id, employeeId], transaction,
+      })
+    }
+    if (beforeSnapshot) {
+      const [versionRows] = await sequelize.query(`SELECT COUNT(*) AS versions FROM audit_log
+        WHERE entity='order' AND entity_id=? AND action='admin-edit-archived-order'`, {
+        replacements: [String(order.id)], transaction,
+      })
+      const versionNumber = Number(versionRows[0]?.versions || 0) + 1
+      const afterSnapshot = await archivedOrderSnapshot(transaction)
+      await sequelizeAudit({
+        userId: req.user.id, action: 'admin-edit-archived-order', entity: 'order', entityId: order.id,
+        details: `code=${order.code}; version=${versionNumber}`,
+        oldValues: { version_number: versionNumber - 1, before_snapshot: beforeSnapshot },
+        newValues: { actor_id: req.user.id, timestamp: new Date().toISOString(),
+          version_number: versionNumber, after_snapshot: afterSnapshot }, transaction,
       })
     }
     await sequelizeAudit({
@@ -2961,19 +3024,26 @@ api.get('/orders/:id', requireAuth, (req, res) => {
      })
     const employees = db.prepare(`SELECT e.id,e.name,e.department FROM order_employee_assignments a
       JOIN employees e ON e.id=a.employee_id WHERE a.order_id=? ORDER BY e.name COLLATE NOCASE`).all(order.id)
-    const allInventoryIssues = db.prepare(`SELECT ii.id,ii.classification,ii.reference,ii.requested_quantity,ii.gross_cost_cents,
+     const allInventoryIssues = db.prepare(`SELECT ii.id,ii.classification,ii.reference,ii.requested_quantity,ii.gross_cost_cents,
         ii.offcut_cost_cents,ii.cogs_cents,ii.created_at,je.status AS journal_status
         ,(SELECT m.code || ' — ' || m.name FROM inventory_movements im JOIN materials m ON m.id=im.material_id
           WHERE im.issue_id=ii.id AND im.kind='issue' ORDER BY im.id LIMIT 1) AS material_label
       FROM inventory_issues ii LEFT JOIN journal_entries je ON je.id=ii.journal_entry_id
-      WHERE ii.order_id=? ORDER BY ii.created_at DESC,ii.id DESC`).all(order.id)
+       WHERE ii.order_id=? ORDER BY ii.created_at DESC,ii.id DESC`).all(order.id)
+     const custodyMaterials = db.prepare(`SELECT im.material_id,ROUND(SUM(ABS(im.quantity)),6) AS issued_quantity,
+         m.code AS material_code,m.name AS material_name,m.unit
+       FROM inventory_issues ii JOIN inventory_movements im ON im.issue_id=ii.id
+         JOIN materials m ON m.id=im.material_id
+       WHERE ii.order_id=? AND ii.classification='order' AND im.kind='issue' AND im.warehouse='main'
+       GROUP BY im.material_id ORDER BY im.material_id`).all(order.id)
     const actualMaterialCogsCents = allInventoryIssues.reduce((sum, issue) => sum + Number(issue.cogs_cents), 0)
     const includeCogs = req.user.role === 'admin'
     const inventoryIssues = includeCogs ? allInventoryIssues : allInventoryIssues.map(({
       id, classification, reference, requested_quantity, created_at, material_label,
     }) => ({ id, classification, reference, requested_quantity, created_at, material_label }))
     res.json({ ...orderSummary({ ...order, machine_count: cards.length, actual_material_cogs_cents: actualMaterialCogsCents }, includeCogs),
-      inventoryIssues, employees, employeeIds: employees.map((employee) => employee.id), client: {
+       inventoryIssues, custodyMaterials, materialsIssued: parseJsonArray(order.materials_issued),
+       materialsReconciled: parseJsonArray(order.materials_reconciled), employees, employeeIds: employees.map((employee) => employee.id), client: {
     id: order.client_id, name: order.client_name, code: order.client_code,
     primaryColor: order.primary_color, secondaryColor: order.secondary_color, logoPath: order.client_logo_path,
   }, cards, unrecognizedFolders: folders })
@@ -3785,10 +3855,104 @@ api.delete('/orders/:id', requireAuth, allowRoles('admin'), asyncRoute(async (re
   }
 }))
 
+api.post('/orders/:id/petty-cash', requireAuth, allowRoles('admin', 'operations'), (req, res) => {
+  const orderId = Number(req.params.id)
+  const amountCents = parseCurrencyCents(req.body?.amount)
+  if (!Number.isSafeInteger(orderId) || orderId < 1 || !Number.isSafeInteger(amountCents) || amountCents <= 0) {
+    return sendError(res, 400, 'أدخل رقم أمر ومبلغ عهدة نقدية صالحين.')
+  }
+  try {
+    const result = db.transaction(() => {
+      const order = db.prepare('SELECT * FROM orders WHERE id=? AND deleted_at IS NULL').get(orderId)
+      if (!order) throw apiError(404, 'الأمر غير موجود.')
+      if (order.type !== 'maintenance' || order.status === 'archived') throw apiError(409, 'العهدة النقدية متاحة لأوامر الصيانة غير المؤرشفة فقط.')
+      if (Number(order.petty_cash_amount_cents || 0) > 0
+        || db.prepare("SELECT 1 FROM treasury_transactions WHERE order_id=? AND category='عهدة صيانة'").get(orderId)) {
+        throw apiError(409, 'سبق صرف عهدة نقدية لهذا الأمر.')
+      }
+      if (cashboxBalanceCents() < amountCents) throw apiError(409, 'رصيد صندوق المصنع لا يكفي لصرف العهدة.')
+      const transactionId = db.prepare(`INSERT INTO treasury_transactions(kind,amount,category,reference,notes,created_by,order_id)
+        VALUES ('expense',?,'عهدة صيانة',?,?,?,?)`).run(currencyAmountFromCents(amountCents), order.code,
+        String(req.body?.notes || '').trim().slice(0, 1000), req.user.id, orderId).lastInsertRowid
+      db.prepare('UPDATE orders SET petty_cash_amount_cents=?,petty_cash_settled=0,updated_at=CURRENT_TIMESTAMP WHERE id=?')
+        .run(amountCents, orderId)
+      audit(req.user.id, 'issue-petty-cash', 'order', orderId, `treasury=${transactionId}`,
+        { petty_cash_amount_cents: 0 }, { petty_cash_amount_cents: amountCents, treasury_transaction_id: transactionId })
+      return { orderId, amount: currencyAmountFromCents(amountCents), treasuryTransactionId: transactionId }
+    })()
+    res.status(201).json(result)
+  } catch (error) { return sendError(res, error.status || 400, error.message) }
+})
+
+function addCalendarMonths(date, months) {
+  const year = date.getUTCFullYear()
+  const month = date.getUTCMonth() + months
+  const day = date.getUTCDate()
+  const firstOfTarget = new Date(Date.UTC(year, month, 1))
+  const lastDay = new Date(Date.UTC(firstOfTarget.getUTCFullYear(), firstOfTarget.getUTCMonth() + 1, 0)).getUTCDate()
+  return new Date(Date.UTC(firstOfTarget.getUTCFullYear(), firstOfTarget.getUTCMonth(), Math.min(day, lastDay),
+    date.getUTCHours(), date.getUTCMinutes(), date.getUTCSeconds(), date.getUTCMilliseconds()))
+}
+
 api.post('/orders/:id/archive', requireAuth, allowRoles('admin', 'operations'), createRateLimiter('POST /orders/:id/archive'), asyncRoute(async (req, res) => {
   const storageContext = getOrderStorageContext(req.params.id)
   const order = storageContext.order
   if (order.status === 'archived') return sendError(res, 409, 'الأمر مؤرشف بالفعل.')
+  const maintenance = order.type === 'maintenance'
+  const requestedWarrantyMonths = req.body?.warrantyPeriodMonths == null || req.body.warrantyPeriodMonths === ''
+    ? 3 : Number(req.body.warrantyPeriodMonths)
+  if (maintenance && ![3, 6].includes(requestedWarrantyMonths)) {
+    return sendError(res, 400, 'مدة الضمان يجب أن تكون 3 أو 6 أشهر.')
+  }
+  const requestedExpensesCents = maintenance && req.body?.actualExpenses !== undefined
+    ? parseCurrencyCents(req.body.actualExpenses, { allowZero: true })
+    : Number(order.actual_expenses_cents || 0)
+  if (maintenance && (!Number.isSafeInteger(requestedExpensesCents) || requestedExpensesCents < 0)) {
+    return sendError(res, 400, 'قيمة المصروفات الفعلية غير صالحة.')
+  }
+  const rawReconciliation = req.body?.materialsReconciled
+  if (maintenance && rawReconciliation !== undefined && (!Array.isArray(rawReconciliation) || rawReconciliation.length > 1000)) {
+    return sendError(res, 400, 'قائمة تسوية الخامات غير صالحة.')
+  }
+  const reconciliationInput = maintenance && Array.isArray(rawReconciliation) ? rawReconciliation.map((item) => ({
+    materialId: Number(item?.materialId),
+    consumedQuantity: Number(item?.consumedQuantity ?? item?.quantity),
+  })) : null
+  if (reconciliationInput && (reconciliationInput.some((item) => !Number.isSafeInteger(item.materialId) || item.materialId < 1
+    || !Number.isFinite(item.consumedQuantity) || item.consumedQuantity < 0)
+    || new Set(reconciliationInput.map((item) => item.materialId)).size !== reconciliationInput.length)) {
+    return sendError(res, 400, 'أدخل كميات استهلاك صحيحة وغير مكررة لكل خامة.')
+  }
+  const issuedMainMaterials = maintenance ? db.prepare(`SELECT im.material_id,ROUND(SUM(ABS(im.quantity)),6) AS issued_quantity,
+      m.code AS material_code,m.name AS material_name,m.unit
+    FROM inventory_issues ii JOIN inventory_movements im ON im.issue_id=ii.id
+      JOIN materials m ON m.id=im.material_id
+    WHERE ii.order_id=? AND ii.classification='order' AND im.kind='issue' AND im.warehouse='main'
+    GROUP BY im.material_id ORDER BY im.material_id`).all(order.id) : []
+  const issuedByMaterial = new Map(issuedMainMaterials.map((item) => [Number(item.material_id), Number(item.issued_quantity)]))
+  if (reconciliationInput && reconciliationInput.some((item) => !issuedByMaterial.has(item.materialId))) {
+    return sendError(res, 400, 'تتضمن التسوية خامة لم تُصرف من المخزن الرئيسي لهذا الأمر.')
+  }
+  const reconciledByMaterial = new Map((reconciliationInput || []).map((item) => [item.materialId, item.consumedQuantity]))
+  for (const item of issuedMainMaterials) {
+    const consumed = reconciliationInput ? (reconciledByMaterial.get(Number(item.material_id)) ?? Number(item.issued_quantity))
+      : Number(item.issued_quantity)
+    if (consumed > Number(item.issued_quantity) + 0.000001 || Math.abs(consumed - Math.round(consumed)) > 0.000001) {
+      return sendError(res, 400, `كمية الاستهلاك للخامة ${item.material_code} يجب أن تكون عددًا صحيحًا ولا تتجاوز المصروف.`)
+    }
+  }
+  const pettyCashAmountCents = maintenance ? Number(order.petty_cash_amount_cents || 0) : 0
+  if (maintenance && requestedExpensesCents > pettyCashAmountCents) {
+    return sendError(res, 400, 'المصروفات الفعلية لا يمكن أن تتجاوز العهدة النقدية المصروفة.')
+  }
+  if (maintenance && pettyCashAmountCents > 0
+    && !db.prepare("SELECT id FROM treasury_transactions WHERE order_id=? AND kind='expense' AND category='عهدة صيانة'").get(order.id)) {
+    return sendError(res, 409, 'تعذر إثبات سند صرف العهدة النقدية لهذا الأمر؛ أوقف النظام التسوية.')
+  }
+  const archiveTimestamp = new Date()
+  const warrantyExpiresAt = maintenance
+    ? addCalendarMonths(archiveTimestamp, requestedWarrantyMonths).toISOString().slice(0, 10)
+    : null
   const cards = db.prepare('SELECT * FROM order_machines WHERE order_id=? AND excluded_at IS NULL').all(order.id)
   const excludedCards = db.prepare('SELECT * FROM order_machines WHERE order_id=? AND excluded_at IS NOT NULL').all(order.id)
   if (!cards.length) return sendError(res, 400, 'أضف ماكينة واحدة على الأقل قبل الاعتماد والأرشفة.')
@@ -3812,6 +3976,7 @@ api.post('/orders/:id/archive', requireAuth, allowRoles('admin', 'operations'), 
   const archivedCards = []
   const excludedMachines = []
   const photoUpdates = []
+  const returnedMaterials = []
   let committed = false
   try {
     const movePhotoSet = async (list, machineRoot, subfolder) => {
@@ -3860,12 +4025,86 @@ api.post('/orders/:id/archive', requireAuth, allowRoles('admin', 'operations'), 
         db.prepare('UPDATE order_machines SET before_photos=?,after_photos=? WHERE id=?')
           .run(JSON.stringify(photos.before), JSON.stringify(photos.after), photos.id)
       }
-      db.prepare("UPDATE orders SET status='archived',archived_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(order.id)
+      let totalMaterialReturnCostCents = 0
+      if (maintenance) {
+        const updateMaterialStock = db.prepare('UPDATE materials SET stock=stock+? WHERE id=?')
+        const insertMovement = db.prepare(`INSERT INTO inventory_movements(material_id,kind,quantity,reference,notes,created_by,warehouse,source_type,source_id)
+          VALUES (?,'adjustment',?,?,?,?,'main','maintenance_material_return',?)`)
+        for (const item of issuedMainMaterials) {
+          const materialId = Number(item.material_id)
+          const issuedQuantity = Number(item.issued_quantity)
+          const consumedQuantity = reconciliationInput
+            ? (reconciledByMaterial.get(materialId) ?? issuedQuantity) : issuedQuantity
+          const returnedQuantity = Number((issuedQuantity - consumedQuantity).toFixed(6))
+          if (returnedQuantity <= 0) continue
+          assertMaterialUnlocked(materialId)
+          const material = db.prepare('SELECT * FROM materials WHERE id=? AND deleted_at IS NULL').get(materialId)
+          if (!material) throw apiError(409, `الخامة ${item.material_code} لم تعد متاحة للتسوية.`)
+          const sourceCost = db.prepare(`SELECT COALESCE(SUM(c.quantity*l.unit_cost_cents),0) AS total_cost
+            FROM inventory_issues ii JOIN inventory_movements im ON im.issue_id=ii.id
+            JOIN inventory_lot_consumptions c ON c.movement_id=im.id
+            JOIN inventory_lots l ON l.id=c.lot_id
+            WHERE ii.order_id=? AND ii.classification='order' AND im.material_id=? AND im.kind='issue' AND im.warehouse='main'`)
+            .get(order.id, materialId)
+          const issuedCostCents = Math.round(Number(sourceCost.total_cost || 0))
+          const returnCostCents = Math.round(issuedCostCents * returnedQuantity / issuedQuantity)
+          const movementId = insertMovement.run(materialId, returnedQuantity, order.code,
+            `إرجاع خامة غير مستخدمة من أمر الصيانة ${order.code}`, req.user.id, String(order.id)).lastInsertRowid
+          updateMaterialStock.run(returnedQuantity, materialId)
+          createInventoryLot({ materialId, sourceType: 'maintenance_material_return', sourceId: movementId,
+            warehouse: 'main', quantity: returnedQuantity,
+            unitCostCents: returnCostCents > 0 ? Math.round(returnCostCents / returnedQuantity) : Math.round(Number(material.unit_cost || 0) * 100) })
+          totalMaterialReturnCostCents += returnCostCents
+          returnedMaterials.push({ materialId, code: item.material_code, name: item.material_name, unit: item.unit,
+            issuedQuantity, consumedQuantity, returnedQuantity, movementId, returnCostCents })
+        }
+      }
+      db.prepare(`UPDATE orders SET status='archived',archived_at=?,updated_at=CURRENT_TIMESTAMP,
+          actual_expenses_cents=?,petty_cash_settled=?,materials_issued=?,materials_reconciled=?,
+          warranty_period_months=?,warranty_expires_at=? WHERE id=?`)
+        .run(archiveTimestamp.toISOString(), requestedExpensesCents, maintenance ? 1 : 0,
+          JSON.stringify(issuedMainMaterials.map((item) => ({ materialId: Number(item.material_id),
+            code: item.material_code, quantity: Number(item.issued_quantity), unit: item.unit }))),
+          JSON.stringify(returnedMaterials), maintenance ? requestedWarrantyMonths : null, warrantyExpiresAt, order.id)
+      let cashRefundTransactionId = null
+      const refundCents = Math.max(0, pettyCashAmountCents - requestedExpensesCents)
+      if (maintenance && refundCents > 0) {
+        cashRefundTransactionId = db.prepare(`INSERT INTO treasury_transactions(kind,amount,category,reference,notes,created_by,order_id)
+          VALUES ('income',?,'رد متبقي العهدة النقدية',?,?,?,?)`).run(currencyAmountFromCents(refundCents), order.code,
+          `رد العهدة بعد اعتماد مصروفات قدرها ${currencyAmountFromCents(requestedExpensesCents)} جنيه`, req.user.id, order.id).lastInsertRowid
+      }
       recognizeCompletedWorkOrderIssues(db, { orderId: order.id })
+      if (totalMaterialReturnCostCents > 0) {
+        const journal = queueJournalEntry(db, {
+          sourceType: 'maintenance_material_return', sourceId: order.id,
+          sourceKey: `maintenance-material-return:${order.id}`,
+          description: `إرجاع خامات غير مستخدمة من أمر الصيانة ${order.code}`, createdBy: req.user.id,
+          postings: [
+            { mappingKey: 'inventory', debitCents: totalMaterialReturnCostCents, description: `إرجاع مخزون ${order.code}` },
+            { mappingKey: 'work_order_cogs', creditCents: totalMaterialReturnCostCents, description: `تخفيض تكلفة خامات ${order.code}` },
+          ],
+        })
+        if (journal.id) returnedMaterials.push({ journalEntryId: journal.id })
+        db.prepare('UPDATE orders SET materials_reconciled=? WHERE id=?').run(JSON.stringify(returnedMaterials), order.id)
+      }
+      if (maintenance) {
+        db.prepare(`INSERT INTO maintenance_order_settlements(order_id,petty_cash_amount_cents,actual_expenses_cents,
+            cash_refund_transaction_id,material_returns,warranty_period_months,warranty_expires_at,actor_id)
+          VALUES (?,?,?,?,?,?,?,?)`).run(order.id, pettyCashAmountCents, requestedExpensesCents, cashRefundTransactionId,
+          JSON.stringify(returnedMaterials), requestedWarrantyMonths, warrantyExpiresAt, req.user.id)
+      }
       audit(req.user.id, 'archive', 'order', order.id, order.code, { status: order.status }, { status: 'archived' })
+      if (maintenance) audit(req.user.id, 'settle-maintenance-custody', 'order', order.id, order.code,
+        { petty_cash_amount_cents: pettyCashAmountCents, materials_issued: issuedMainMaterials },
+        { actual_expenses_cents: requestedExpensesCents, cash_refund_cents: refundCents,
+          cash_refund_transaction_id: cashRefundTransactionId, material_returns: returnedMaterials,
+          warranty_period_months: requestedWarrantyMonths, warranty_expires_at: warrantyExpiresAt })
     })()
     committed = true
-    res.json({ ok: true, archivePath: relativeStoragePath(archiveRoot) })
+    res.json({ ok: true, archivePath: relativeStoragePath(archiveRoot), ...(maintenance ? {
+      pettyCashRefund: currencyAmountFromCents(Math.max(0, pettyCashAmountCents - requestedExpensesCents)),
+      materialReturns: returnedMaterials, warrantyPeriodMonths: requestedWarrantyMonths, warrantyExpiresAt,
+    } : {}) })
   } catch (error) {
     if (!committed) await fs.promises.rm(archiveRoot, { recursive: true, force: true }).catch(() => {})
     return sendError(res, 500, `تعذرت الأرشفة بالكامل؛ راجع الملفات قبل إعادة المحاولة. ${error.message}`)
@@ -4865,8 +5104,9 @@ api.post('/inventory/sales', requireAuth, allowRoles('admin', 'sales'), createRa
 api.get('/sales/invoices', requireAuth, allowRoles('admin', 'sales'), (req, res) => {
   const invoices = db.prepare(`SELECT i.id,i.code,i.kind,i.total,i.paid_total,i.remaining,i.payment_status,i.notes,i.status,i.created_at,
     i.subtotal_cents,i.tax_cents,i.tax_rate_basis_points,i.sale_type,
-    c.name AS client_name,o.code AS order_code
+    c.name AS client_name,COALESCE(mo.order_code,o.code) AS order_code
     FROM invoices i LEFT JOIN clients c ON c.id=i.client_id LEFT JOIN orders o ON o.id=i.order_id
+    LEFT JOIN manufacturing_orders mo ON mo.id=i.manufacturing_order_id
     WHERE i.kind='sales' AND i.deleted_at IS NULL ORDER BY i.id DESC LIMIT 200`).all()
   res.json(invoices)
 })
@@ -5233,6 +5473,7 @@ function journalSourceHref(entry) {
       const movement = db.prepare(`SELECT id FROM inventory_movements WHERE issue_id=? ORDER BY id LIMIT 1`).get(numericId)
       return movement ? `/inventory#inventory-movement-${movement.id}` : '/inventory'
     }
+    case 'manufacturing_material_issue': return '/manufacturing'
     case 'work_order_cogs_recognition': return `/orders/${numericId}`
     case 'inventory_adjustment': return `/inventory#inventory-movement-${numericId}`
     case 'stock_count': return `/inventory#stock-count-${numericId}`
@@ -5390,22 +5631,36 @@ function employeeAdvanceBalanceCents(employeeId) {
     FROM employee_advance_events WHERE employee_id=?`).get(employeeId).balance)
 }
 
-function parsePayrollInputs(body, employee, outstandingAdvanceCents) {
+function monthlyAttendanceSummary(employeeId, period) {
+  const [year, month] = period.split('-').map(Number)
+  const startDate = `${period}-01`
+  const endDate = new Date(Date.UTC(year, month, 1)).toISOString().slice(0, 10)
+  return db.prepare(`SELECT
+      COALESCE(SUM(CASE WHEN status='absent' THEN 1 ELSE 0 END),0) AS absence_days,
+      COALESCE(SUM(overtime_minutes),0) AS ordinary_overtime_minutes,
+      COALESCE(SUM(holiday_overtime_minutes),0) AS holiday_overtime_minutes
+    FROM employee_daily_attendance WHERE employee_id=? AND attendance_date>=? AND attendance_date<?`)
+    .get(employeeId, startDate, endDate)
+}
+
+function parsePayrollInputs(body, employee, outstandingAdvanceCents, attendance) {
   const baseSalaryCents = body.baseSalary === undefined
     ? Number(employee.monthly_salary_cents || 0)
     : parseCurrencyCents(body.baseSalary, { allowZero: true })
-  const ordinaryOvertimeMinutes = Number(body.ordinaryOvertimeMinutes || 0)
-  const holidayOvertimeMinutes = Number(body.holidayOvertimeMinutes || 0)
+  const absenceDays = Number(attendance.absence_days || 0)
+  const ordinaryOvertimeMinutes = Number(attendance.ordinary_overtime_minutes || 0)
+  const holidayOvertimeMinutes = Number(attendance.holiday_overtime_minutes || 0)
   const bonusCents = body.bonus === undefined || body.bonus === '' ? 0 : parseCurrencyCents(body.bonus, { allowZero: true })
   const deductionCents = body.deduction === undefined || body.deduction === '' ? 0 : parseCurrencyCents(body.deduction, { allowZero: true })
-  if (![baseSalaryCents, bonusCents, deductionCents].every(Number.isSafeInteger)
+  if (![baseSalaryCents, absenceDays, bonusCents, deductionCents].every(Number.isSafeInteger)
+    || absenceDays < 0 || absenceDays > 26
     || !Number.isSafeInteger(ordinaryOvertimeMinutes) || ordinaryOvertimeMinutes < 0
     || !Number.isSafeInteger(holidayOvertimeMinutes) || holidayOvertimeMinutes < 0) {
     throw apiError(400, 'تحقق من الراتب والإضافي والخصم؛ الساعات الإضافية تُدخل بالدقائق كأعداد صحيحة.')
   }
-  const calculated = calculatePayroll({ baseSalaryCents, ordinaryOvertimeMinutes, holidayOvertimeMinutes,
+  const calculated = calculatePayroll({ baseSalaryCents, absenceDays, ordinaryOvertimeMinutes, holidayOvertimeMinutes,
     bonusCents, deductionCents, outstandingAdvanceCents, cashPaidCents: 0 })
-  return { baseSalaryCents, ordinaryOvertimeMinutes, holidayOvertimeMinutes, bonusCents, deductionCents, calculated }
+  return { baseSalaryCents, absenceDays, ordinaryOvertimeMinutes, holidayOvertimeMinutes, bonusCents, deductionCents, calculated }
 }
 
 api.get('/payroll', requireAuth, allowRoles('admin'), (req, res) => {
@@ -5415,10 +5670,14 @@ api.get('/payroll', requireAuth, allowRoles('admin'), (req, res) => {
       COALESCE((SELECT SUM(CASE WHEN a.event_type IN ('issued','overpayment') THEN a.amount_cents ELSE -a.amount_cents END)
         FROM employee_advance_events a WHERE a.employee_id=e.id),0) AS advance_balance_cents
     FROM employees e WHERE e.active=1 AND e.deleted_at IS NULL ORDER BY e.name COLLATE NOCASE`).all()
+  const employeesWithAttendance = employees.map((employee) => ({
+    ...employee,
+    attendance: period ? monthlyAttendanceSummary(employee.id, period) : null,
+  }))
   const records = db.prepare(`SELECT p.*,e.name AS employee_name,e.department FROM payroll_records p
     JOIN employees e ON e.id=p.employee_id ${period ? 'WHERE p.period=?' : ''}
     ORDER BY p.period DESC,e.name COLLATE NOCASE`).all(...(period ? [period] : []))
-  res.json({ employees, records })
+  res.json({ employees: employeesWithAttendance, records })
 })
 
 api.post('/payroll', requireAuth, allowRoles('admin'), (req, res) => {
@@ -5435,22 +5694,23 @@ api.post('/payroll', requireAuth, allowRoles('admin'), (req, res) => {
       const existing = db.prepare('SELECT * FROM payroll_records WHERE employee_id=? AND period=?').get(employeeId, period)
       if (existing?.status === 'finalized') throw apiError(409, 'تم إقفال مسير هذا الموظف للشهر المحدد.')
       const outstandingAdvanceCents = employeeAdvanceBalanceCents(employeeId)
-      const inputs = parsePayrollInputs(req.body || {}, employee, outstandingAdvanceCents)
+      const attendance = monthlyAttendanceSummary(employeeId, period)
+      const inputs = parsePayrollInputs(req.body || {}, employee, outstandingAdvanceCents, attendance)
       const c = inputs.calculated
       if (existing) {
-        db.prepare(`UPDATE payroll_records SET base_salary_cents=?,ordinary_overtime_minutes=?,holiday_overtime_minutes=?,
+        db.prepare(`UPDATE payroll_records SET absence_days=?,absence_deduction_cents=?,base_salary_cents=?,ordinary_overtime_minutes=?,holiday_overtime_minutes=?,
           ordinary_overtime_cents=?,holiday_overtime_cents=?,bonus_cents=?,deduction_cents=?,net_entitlement_cents=?,
           advances_applied_cents=?,cash_paid_cents=0,unpaid_salary_cents=?,advance_balance_cents=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
-          .run(inputs.baseSalaryCents, inputs.ordinaryOvertimeMinutes, inputs.holidayOvertimeMinutes,
+          .run(inputs.absenceDays, c.absenceDeductionCents, inputs.baseSalaryCents, inputs.ordinaryOvertimeMinutes, inputs.holidayOvertimeMinutes,
             c.ordinaryOvertimeCents, c.holidayOvertimeCents, inputs.bonusCents, inputs.deductionCents,
             c.netEntitlementCents, c.advancesAppliedCents, c.unpaidSalaryCents, c.advanceBalanceCents, existing.id)
         audit(req.user.id, 'update-draft', 'payroll', existing.id, period, existing, { ...inputs, calculated: c })
         return db.prepare('SELECT * FROM payroll_records WHERE id=?').get(existing.id)
       }
-      const inserted = db.prepare(`INSERT INTO payroll_records(employee_id,period,base_salary_cents,ordinary_overtime_minutes,holiday_overtime_minutes,
+      const inserted = db.prepare(`INSERT INTO payroll_records(employee_id,period,absence_days,absence_deduction_cents,base_salary_cents,ordinary_overtime_minutes,holiday_overtime_minutes,
         ordinary_overtime_cents,holiday_overtime_cents,bonus_cents,deduction_cents,advances_applied_cents,net_entitlement_cents,
         cash_paid_cents,unpaid_salary_cents,advance_balance_cents,created_by)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,0,?,?,?)`).run(employeeId, period, inputs.baseSalaryCents,
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?)`).run(employeeId, period, inputs.absenceDays, c.absenceDeductionCents, inputs.baseSalaryCents,
         inputs.ordinaryOvertimeMinutes, inputs.holidayOvertimeMinutes, c.ordinaryOvertimeCents, c.holidayOvertimeCents,
         inputs.bonusCents, inputs.deductionCents, c.advancesAppliedCents, c.netEntitlementCents,
         c.unpaidSalaryCents, c.advanceBalanceCents, req.user.id)
@@ -5475,6 +5735,7 @@ api.post('/payroll/:id/finalize', requireAuth, allowRoles('admin'), (req, res) =
       const outstanding = employeeAdvanceBalanceCents(payroll.employee_id)
       const settlement = calculatePayroll({
         baseSalaryCents: payroll.base_salary_cents,
+        absenceDays: payroll.absence_days,
         ordinaryOvertimeMinutes: payroll.ordinary_overtime_minutes,
         holidayOvertimeMinutes: payroll.holiday_overtime_minutes,
         bonusCents: payroll.bonus_cents,
@@ -5492,9 +5753,9 @@ api.post('/payroll/:id/finalize', requireAuth, allowRoles('admin'), (req, res) =
         VALUES (?,?,?,?,?,?)`)
       if (settlement.advancesAppliedCents > 0) insertEvent.run(payroll.employee_id, id, 'applied', settlement.advancesAppliedCents, req.user.id, `تسوية سلفة شهر ${payroll.period}`)
       if (settlement.overpaymentCents > 0) insertEvent.run(payroll.employee_id, id, 'overpayment', settlement.overpaymentCents, req.user.id, `زيادة دفعة رواتب شهر ${payroll.period}`)
-      db.prepare(`UPDATE payroll_records SET advances_applied_cents=?,net_entitlement_cents=?,cash_paid_cents=?,
+      db.prepare(`UPDATE payroll_records SET absence_deduction_cents=?,advances_applied_cents=?,net_entitlement_cents=?,cash_paid_cents=?,
         unpaid_salary_cents=?,advance_balance_cents=?,status='finalized',updated_at=CURRENT_TIMESTAMP WHERE id=?`)
-        .run(settlement.advancesAppliedCents, settlement.netEntitlementCents, cashPaidCents,
+        .run(settlement.absenceDeductionCents, settlement.advancesAppliedCents, settlement.netEntitlementCents, cashPaidCents,
           settlement.unpaidSalaryCents, settlement.advanceBalanceCents, id)
       const postings = []
       if (settlement.netEntitlementCents > 0) postings.push({ mappingKey: 'payroll_expense', debitCents: settlement.netEntitlementCents, description: `رواتب ${payroll.period}` })
@@ -5611,8 +5872,9 @@ api.get('/finance/dashboard', requireAuth, allowRoles('admin'), (req, res) => {
   const invoices = db.prepare(`SELECT i.id,i.code,i.kind,i.total,i.paid_total,i.remaining,i.payment_status,i.notes,i.status,i.created_at,i.supplier,
       i.subtotal_cents,i.tax_cents,i.tax_rate_basis_points,i.sale_type,
       (SELECT COUNT(*) FROM purchase_invoice_revisions pr WHERE pr.invoice_id=i.id) AS revision_count,
-    c.name AS client_name,o.code AS order_code,e.name AS employee_name
+    c.name AS client_name,COALESCE(mo.order_code,o.code) AS order_code,e.name AS employee_name
     FROM invoices i LEFT JOIN clients c ON c.id=i.client_id LEFT JOIN orders o ON o.id=i.order_id
+    LEFT JOIN manufacturing_orders mo ON mo.id=i.manufacturing_order_id
     LEFT JOIN employees e ON e.id=i.employee_id
     WHERE i.deleted_at IS NULL AND (? IS NULL OR i.created_at>=?) AND (? IS NULL OR i.created_at<=?) ORDER BY i.id DESC LIMIT 50`).all(from, from, to, to)
   const otherInvoices = db.prepare(`SELECT oi.*,e.name AS employee_name FROM other_invoices oi
@@ -5988,34 +6250,62 @@ api.post('/inventory/issue', requireAuth, allowRoles('admin', 'purchasing', 'ope
   const classification = String(req.body?.classification || '')
   const rawOrderId = req.body?.orderId
   const orderId = rawOrderId == null || rawOrderId === '' ? null : Number(rawOrderId)
+  const orderType = String(req.body?.orderType || '')
   if (!['order', 'general'].includes(classification)) return sendError(res, 400, 'صنّف الصرف كأمر تشغيل أو استهلاك عام.')
+  if (orderType && !['legacy', 'manufacturing'].includes(orderType)) return sendError(res, 400, 'نوع الأمر المحدد للصرف غير صالح.')
   if ((classification === 'order' && (!Number.isSafeInteger(orderId) || orderId < 1))
-    || (classification === 'general' && orderId !== null)) {
+    || (classification === 'general' && (orderId !== null || orderType))) {
     return sendError(res, 400, 'اختر أمرًا صحيحًا للصرف المرتبط به، أو صنّف الصرف كاستهلاك عام فقط.')
   }
   const issue = db.transaction(() => {
     const material = db.prepare('SELECT * FROM materials WHERE id=? AND active=1 AND deleted_at IS NULL').get(materialId)
     if (!material) throw apiError(404, 'الخامة غير موجودة.')
     assertMaterialUnlocked(materialId)
-    const order = classification === 'order'
-      ? db.prepare("SELECT id,code FROM orders WHERE id=? AND deleted_at IS NULL AND status<>'archived'").get(orderId)
-      : null
+    let legacyOrder = null
+    let manufacturingOrder = null
+    if (classification === 'order') {
+      const selectLegacyOrder = () => db.prepare("SELECT id,code FROM orders WHERE id=? AND deleted_at IS NULL AND status<>'archived'").get(orderId)
+      const selectManufacturingOrder = () => db.prepare(`SELECT id,order_code,status,materials_used FROM manufacturing_orders
+        WHERE id=? AND deleted_at IS NULL AND status!='delivered_archived'`).get(orderId)
+      if (orderType === 'manufacturing') manufacturingOrder = selectManufacturingOrder()
+      else if (orderType === 'legacy') legacyOrder = selectLegacyOrder()
+      else {
+        legacyOrder = selectLegacyOrder()
+        if (!legacyOrder) manufacturingOrder = selectManufacturingOrder()
+      }
+    }
+    const isManufacturingOrder = Boolean(manufacturingOrder)
+    const order = legacyOrder || manufacturingOrder
+    const orderCode = isManufacturingOrder ? manufacturingOrder.order_code : legacyOrder?.code
     if (classification === 'order' && !order) throw apiError(404, 'أمر التشغيل المحدد غير موجود.')
+    if (isManufacturingOrder && manufacturingOrder.status !== 'in_production') {
+      throw apiError(409, 'صرف الخامات لأمر الورشة متاح أثناء مرحلة التشغيل فقط.')
+    }
     const result = calculateIssue({ mainStock: material.stock, subStock: material.sub_stock || 0, quantity, warehouse })
-    const reference = String(req.body.reference || order?.code || '').trim().slice(0, 120)
+    const reference = isManufacturingOrder ? orderCode
+      : String(req.body.reference || orderCode || '').trim().slice(0, 120)
     const notes = String(req.body.notes || '').trim().slice(0, 1000)
-    const issueId = db.prepare(`INSERT INTO inventory_issues(classification,order_id,reference,requested_quantity,created_by)
-      VALUES (?,?,?,?,?)`).run(classification, orderId, reference, quantity, req.user.id).lastInsertRowid
+    const issueId = isManufacturingOrder ? null : db.prepare(`INSERT INTO inventory_issues(classification,order_id,reference,requested_quantity,created_by)
+      VALUES (?,?,?,?,?)`).run(classification, legacyOrder?.id || null, reference, quantity, req.user.id).lastInsertRowid
     db.prepare('UPDATE materials SET stock=?,sub_stock=? WHERE id=?').run(result.stock, result.subStock, material.id)
     const insertMovement = db.prepare(`INSERT INTO inventory_movements(material_id,kind,quantity,reference,notes,created_by,warehouse,source_type,source_id,issue_id)
-      VALUES (?,?,?,?,?,?,?,'inventory_issue',?,?)`)
+      VALUES (?,?,?,?,?,?,?,?,?,?)`)
+    const movementSourceType = isManufacturingOrder ? 'manufacturing_order' : 'inventory_issue'
+    const movementSourceId = isManufacturingOrder ? String(manufacturingOrder.id) : String(issueId)
+    const movementIssueId = isManufacturingOrder ? null : issueId
     const remaining = Math.max(0, quantity - result.subUsed)
     let grossCostCents = 0
     let offcutCostCents = 0
+    let mainCostCents = 0
+    let subCostCents = 0
+    let mainMovementId = null
+    let subMovementId = null
     if (result.mainDeducted) {
-      const movementId = insertMovement.run(material.id, 'issue', -result.mainDeducted, reference,
-        `استهلاك فعلي ${remaining} ${material.unit}. ${notes}`.trim(), req.user.id, 'main', issueId, issueId).lastInsertRowid
-      const consumption = consumeInventoryLots(material.id, 'main', result.mainDeducted, movementId)
+      mainMovementId = insertMovement.run(material.id, 'issue', -result.mainDeducted, reference,
+        `استهلاك فعلي ${remaining} ${material.unit}. ${notes}`.trim(), req.user.id, 'main', movementSourceType,
+        movementSourceId, movementIssueId).lastInsertRowid
+      const consumption = consumeInventoryLots(material.id, 'main', result.mainDeducted, mainMovementId)
+      mainCostCents = consumption.totalCostCents
       grossCostCents += consumption.totalCostCents
       if (result.offcutCreated > 0) {
         offcutCostCents = Math.min(consumption.totalCostCents,
@@ -6023,15 +6313,17 @@ api.post('/inventory/issue', requireAuth, allowRoles('admin', 'purchasing', 'ope
       }
     }
     if (result.subUsed) {
-      const movementId = insertMovement.run(material.id, 'issue', -result.subUsed, reference,
-        `استخدام بواقي ${result.subUsed} ${material.unit}. ${notes}`.trim(), req.user.id, 'sub', issueId, issueId).lastInsertRowid
-      const consumption = consumeInventoryLots(material.id, 'sub', result.subUsed, movementId)
+      subMovementId = insertMovement.run(material.id, 'issue', -result.subUsed, reference,
+        `استخدام بواقي ${result.subUsed} ${material.unit}. ${notes}`.trim(), req.user.id, 'sub', movementSourceType,
+        movementSourceId, movementIssueId).lastInsertRowid
+      const consumption = consumeInventoryLots(material.id, 'sub', result.subUsed, subMovementId)
+      subCostCents = consumption.totalCostCents
       grossCostCents += consumption.totalCostCents
     }
     if (result.offcutCreated > 0) {
       const offcutMovementId = insertMovement.run(material.id, 'adjustment', result.offcutCreated, reference,
-        `باقٍ صالح لإعادة الاستخدام بعد صرف ${quantity} ${material.unit}.`, req.user.id, 'sub', issueId, issueId).lastInsertRowid
-      const mainMovementId = db.prepare(`SELECT id FROM inventory_movements WHERE issue_id=? AND kind='issue' AND warehouse='main' ORDER BY id DESC LIMIT 1`).get(issueId)?.id
+        `باقٍ صالح لإعادة الاستخدام بعد صرف ${quantity} ${material.unit}.`, req.user.id, 'sub', movementSourceType,
+        movementSourceId, movementIssueId).lastInsertRowid
       const lastConsumption = mainMovementId
         ? db.prepare(`SELECT l.unit_cost_cents FROM inventory_lot_consumptions c JOIN inventory_lots l ON l.id=c.lot_id
             WHERE c.movement_id=? ORDER BY c.id DESC LIMIT 1`).get(mainMovementId)
@@ -6040,20 +6332,60 @@ api.post('/inventory/issue', requireAuth, allowRoles('admin', 'purchasing', 'ope
         warehouse: 'sub', quantity: result.offcutCreated, unitCostCents: Number(lastConsumption?.unit_cost_cents || 0) })
     }
     const cogsCents = Math.max(0, grossCostCents - offcutCostCents)
-    db.prepare('UPDATE inventory_issues SET gross_cost_cents=?,offcut_cost_cents=?,cogs_cents=? WHERE id=?')
-      .run(grossCostCents, offcutCostCents, cogsCents, issueId)
-    const journal = queueInventoryIssueJournal(db, {
-      issueId, classification, grossCostCents, offcutCostCents,
-      description: `${classification === 'order' ? `تكلفة مواد ${order.code}` : 'استهلاك مخزون عام'} — ${material.code}`,
-      createdBy: req.user.id,
-    })
-    if (journal.id) db.prepare('UPDATE inventory_issues SET journal_entry_id=? WHERE id=?').run(journal.id, issueId)
-    audit(req.user.id, 'issue', 'inventory-issue', issueId,
-      `material=${materialId}; quantity=${quantity}; classification=${classification}; orderId=${orderId || ''}; journal=${journal.id || ''}`,
-      null, { materialId, quantity, warehouse, classification, orderId, grossCostCents, offcutCostCents, cogsCents, journalEntryId: journal.id })
+    let journal = { id: null, status: 'zero_cost' }
+    let manufacturingConsumptions = []
+    if (isManufacturingOrder) {
+      const addManufacturingConsumption = (sourceWarehouse, usedQuantity, costCents, movementId) => {
+        if (!(usedQuantity > 0)) return
+        const unitCostCents = Math.max(0, Math.round(costCents / usedQuantity))
+        const id = db.prepare(`INSERT INTO manufacturing_material_consumptions(order_id,source_warehouse,material_id,quantity,
+          unit_cost_cents,movement_id,created_by) VALUES (?,?,?,?,?,?,?)`)
+          .run(manufacturingOrder.id, sourceWarehouse, material.id, usedQuantity, unitCostCents, movementId, req.user.id).lastInsertRowid
+        manufacturingConsumptions.push({ id, sourceWarehouse, materialId: material.id, offcutId: null, quantity: usedQuantity,
+          unitCostCents, costCents, movementId, journalEntryId: null })
+      }
+      addManufacturingConsumption('sub', result.subUsed, subCostCents, subMovementId)
+      addManufacturingConsumption('main', result.mainDeducted ? remaining : 0,
+        result.mainDeducted ? mainCostCents - offcutCostCents : 0, mainMovementId)
+      if (grossCostCents > 0 && manufacturingConsumptions.length) {
+        const postings = []
+        if (cogsCents > 0) postings.push({ mappingKey: 'work_order_wip', debitCents: cogsCents,
+          description: `مواد تحت التشغيل ${orderCode}` })
+        if (offcutCostCents > 0) postings.push({ mappingKey: 'inventory', debitCents: offcutCostCents,
+          description: `إعادة تصنيف قيمة باقي ${orderCode}` })
+        postings.push({ mappingKey: 'inventory', creditCents: grossCostCents, description: `صرف مخزون ${orderCode}` })
+        journal = queueJournalEntry(db, {
+          sourceType: 'manufacturing_material_issue', sourceId: manufacturingConsumptions[0].id,
+          sourceKey: `manufacturing-material-issue:${manufacturingConsumptions[0].id}`,
+          description: `صرف خامة لأمر التشغيل ${orderCode} — ${material.code}`,
+          createdBy: req.user.id, postings,
+        })
+        manufacturingConsumptions = manufacturingConsumptions.map((consumption) => ({ ...consumption, journalEntryId: journal.id }))
+      }
+      const oldMaterialsUsed = JSON.parse(manufacturingOrder.materials_used || '[]')
+      const materialsUsed = [...oldMaterialsUsed, ...manufacturingConsumptions]
+      db.prepare('UPDATE manufacturing_orders SET materials_used=?,updated_at=CURRENT_TIMESTAMP WHERE id=?')
+        .run(JSON.stringify(materialsUsed), manufacturingOrder.id)
+      audit(req.user.id, 'issue-materials', 'manufacturing-order', manufacturingOrder.id, orderCode,
+        { materials_used: oldMaterialsUsed }, { materials_used: materialsUsed, journalEntryId: journal.id })
+    } else {
+      db.prepare('UPDATE inventory_issues SET gross_cost_cents=?,offcut_cost_cents=?,cogs_cents=? WHERE id=?')
+        .run(grossCostCents, offcutCostCents, cogsCents, issueId)
+      journal = queueInventoryIssueJournal(db, {
+        issueId, classification, grossCostCents, offcutCostCents,
+        description: `${classification === 'order' ? `تكلفة مواد ${orderCode}` : 'استهلاك مخزون عام'} — ${material.code}`,
+        createdBy: req.user.id,
+      })
+      if (journal.id) db.prepare('UPDATE inventory_issues SET journal_entry_id=? WHERE id=?').run(journal.id, issueId)
+      audit(req.user.id, 'issue', 'inventory-issue', issueId,
+        `material=${materialId}; quantity=${quantity}; classification=${classification}; orderId=${orderId || ''}; journal=${journal.id || ''}`,
+        null, { materialId, quantity, warehouse, classification, orderId, grossCostCents, offcutCostCents, cogsCents, journalEntryId: journal.id })
+    }
     audit(req.user.id, 'issue', 'material', materialId, `quantity=${quantity}; warehouse=${warehouse}; main=${result.mainDeducted}; offcut=${result.offcutCreated}`,
       { stock: material.stock, subStock: material.sub_stock || 0 }, { stock: result.stock, subStock: result.subStock })
-    return { ...result, issueId, orderId, classification, grossCostCents, offcutCostCents, cogsCents, journalStatus: journal.status }
+    return { ...result, issueId, orderId: order?.id ?? null, manufacturingOrderId: manufacturingOrder?.id ?? null,
+      orderType: isManufacturingOrder ? 'manufacturing' : legacyOrder ? 'legacy' : null,
+      classification, grossCostCents, offcutCostCents, cogsCents, journalStatus: journal.status }
   })
   try {
     const result = issue()
@@ -6065,16 +6397,21 @@ api.post('/inventory/issue', requireAuth, allowRoles('admin', 'purchasing', 'ope
 
 api.get('/inventory/movements', requireAuth, allowRoles('admin', 'purchasing', 'operations'), (_req, res) => {
   res.json(db.prepare(`SELECT im.*,m.code AS material_code,m.name AS material_name,u.full_name AS user_name,
-      ii.classification AS issue_classification,o.code AS order_code
+      COALESCE(ii.classification,CASE WHEN im.source_type='manufacturing_order' THEN 'order' ELSE NULL END) AS issue_classification,
+      COALESCE(o.code,mo.order_code,CASE WHEN im.source_type='manufacturing_order' THEN im.reference ELSE NULL END) AS order_code
     FROM inventory_movements im JOIN materials m ON m.id=im.material_id LEFT JOIN users u ON u.id=im.created_by
     LEFT JOIN inventory_issues ii ON ii.id=im.issue_id LEFT JOIN orders o ON o.id=ii.order_id
+    LEFT JOIN manufacturing_orders mo ON mo.id=CAST(im.source_id AS INTEGER) AND im.source_type='manufacturing_order'
     ORDER BY im.id DESC LIMIT 300`).all())
 })
 
 api.get('/inventory/stock-counts', requireAuth, allowRoles('admin'), (_req, res) => {
   res.json(db.prepare(`SELECT c.*,u.full_name AS created_by_name,au.full_name AS approved_by_name,
-      COUNT(i.id) AS item_count,SUM(CASE WHEN i.counted_stock IS NULL OR i.counted_sub_stock IS NULL THEN 1 ELSE 0 END) AS uncounted
+      COUNT(DISTINCT i.id) AS item_count,COUNT(DISTINCT oi.id) AS offcut_count,
+      (SELECT COUNT(*) FROM stock_count_items si WHERE si.count_id=c.id AND (si.counted_stock IS NULL OR si.counted_sub_stock IS NULL))
+        +(SELECT COUNT(*) FROM stock_count_offcut_items so WHERE so.count_id=c.id AND so.counted_quantity IS NULL) AS uncounted
     FROM stock_counts c LEFT JOIN stock_count_items i ON i.count_id=c.id
+      LEFT JOIN stock_count_offcut_items oi ON oi.count_id=c.id
       LEFT JOIN users u ON u.id=c.created_by LEFT JOIN users au ON au.id=c.approved_by
     GROUP BY c.id ORDER BY c.id DESC LIMIT 100`).all())
 })
@@ -6085,7 +6422,11 @@ api.get('/inventory/stock-counts/:id', requireAuth, allowRoles('admin'), (req, r
   if (!count) return sendError(res, 404, 'محضر الجرد غير موجود.')
   const items = db.prepare(`SELECT i.*,m.code,m.name,m.specification,m.unit,m.unit_cost FROM stock_count_items i
     JOIN materials m ON m.id=i.material_id WHERE i.count_id=? ORDER BY m.name COLLATE NOCASE,m.code`).all(countId)
-  res.json({ ...count, items })
+  const offcuts = db.prepare(`SELECT i.*,o.material_id,o.name,o.dimensions,o.unit,o.status,
+      COALESCE(m.code,'') AS material_code,COALESCE(m.unit_cost,0) AS unit_cost
+    FROM stock_count_offcut_items i JOIN secondary_warehouse_offcuts o ON o.id=i.offcut_id
+    LEFT JOIN materials m ON m.id=o.material_id WHERE i.count_id=? ORDER BY o.name COLLATE NOCASE,o.id`).all(countId)
+  res.json({ ...count, items, offcuts })
 })
 
 api.post('/inventory/stock-counts', requireAuth, allowRoles('admin'), (req, res) => {
@@ -6109,13 +6450,23 @@ api.post('/inventory/stock-counts', requireAuth, allowRoles('admin'), (req, res)
       const inserted = db.prepare(`INSERT INTO stock_counts(code,reason,created_by) VALUES (?,?,?)`).run(code, reason, req.user.id)
       const insertItem = db.prepare(`INSERT INTO stock_count_items(count_id,material_id,recorded_stock,recorded_sub_stock)
         VALUES (?,?,?,?)`)
+      const offcuts = db.prepare(`SELECT id,quantity FROM secondary_warehouse_offcuts
+        WHERE status='available' ORDER BY id`).all()
+      const insertOffcut = db.prepare(`INSERT INTO stock_count_offcut_items(count_id,offcut_id,recorded_quantity)
+        VALUES (?,?,?)`)
       for (const material of materials) {
         assertMaterialUnlocked(material.id)
         insertItem.run(inserted.lastInsertRowid, material.id, material.stock, material.sub_stock)
       }
+      for (const offcut of offcuts) {
+        if (db.prepare('SELECT 1 FROM stock_count_offcut_items WHERE offcut_id=? AND released_at IS NULL').get(offcut.id)) {
+          throw apiError(409, `الباقي رقم ${offcut.id} مقفل في محضر جرد آخر.`)
+        }
+        insertOffcut.run(inserted.lastInsertRowid, offcut.id, offcut.quantity)
+      }
       audit(req.user.id, 'open', 'stock-count', inserted.lastInsertRowid, code, null,
-        { reason, itemCount: materials.length, locksInventory: true })
-      return { id: inserted.lastInsertRowid, code, status: 'open', itemCount: materials.length }
+        { reason, itemCount: materials.length, offcutCount: offcuts.length, locksInventory: true })
+      return { id: inserted.lastInsertRowid, code, status: 'open', itemCount: materials.length, offcutCount: offcuts.length }
     })()
     res.status(201).json(count)
   } catch (error) { return sendError(res, error.status || 409, error.message) }
@@ -6124,7 +6475,9 @@ api.post('/inventory/stock-counts', requireAuth, allowRoles('admin'), (req, res)
 api.put('/inventory/stock-counts/:id/items', requireAuth, allowRoles('admin'), (req, res) => {
   const countId = Number(req.params.id)
   const requested = Array.isArray(req.body?.items) ? req.body.items : []
-  if (!Number.isSafeInteger(countId) || countId < 1 || !requested.length || requested.length > 5000) {
+  const requestedOffcuts = Array.isArray(req.body?.offcuts) ? req.body.offcuts : []
+  if (!Number.isSafeInteger(countId) || countId < 1 || (!requested.length && !requestedOffcuts.length)
+    || requested.length > 5000 || requestedOffcuts.length > 5000) {
     return sendError(res, 400, 'أدخل كميات الجرد لمحضر صالح.')
   }
   const counts = requested.map((item) => ({ materialId: Number(item?.materialId), stock: Number(item?.stock), subStock: Number(item?.subStock) }))
@@ -6133,6 +6486,13 @@ api.put('/inventory/stock-counts/:id/items', requireAuth, allowRoles('admin'), (
     || !Number.isFinite(item.subStock) || item.subStock < 0 || Math.abs(item.subStock * 1_000_000 - Math.round(item.subStock * 1_000_000)) > 0.000001)
     || new Set(counts.map((item) => item.materialId)).size !== counts.length) {
     return sendError(res, 400, 'الرصيد الأساسي يجب أن يكون عددًا صحيحًا، ورصيد البواقي غير سالب وبحد أقصى ست منازل عشرية.')
+  }
+  const offcutCounts = requestedOffcuts.map((item) => ({ offcutId: Number(item?.offcutId), quantity: Number(item?.quantity) }))
+  if (offcutCounts.some((item) => !Number.isSafeInteger(item.offcutId) || item.offcutId < 1
+    || !Number.isFinite(item.quantity) || item.quantity < 0 || item.quantity > 1_000_000
+    || Math.abs(item.quantity * 1_000_000 - Math.round(item.quantity * 1_000_000)) > 0.000001)
+    || new Set(offcutCounts.map((item) => item.offcutId)).size !== offcutCounts.length) {
+    return sendError(res, 400, 'كميات البواقي الفعلية يجب أن تكون غير سالبة وبحد أقصى ست منازل عشرية.')
   }
   try {
     db.transaction(() => {
@@ -6152,10 +6512,20 @@ api.put('/inventory/stock-counts/:id/items', requireAuth, allowRoles('admin'), (
       }
       const newItems = counts.map((item) => ({ material_id: item.materialId, counted_stock: item.stock,
         counted_sub_stock: item.subStock }))
+      const offcutUpdate = db.prepare('UPDATE stock_count_offcut_items SET counted_quantity=? WHERE count_id=? AND offcut_id=?')
+      const beforeOffcuts = []
+      for (const item of offcutCounts) {
+        const existing = db.prepare(`SELECT i.offcut_id,i.recorded_quantity,i.counted_quantity,o.name,o.dimensions
+          FROM stock_count_offcut_items i JOIN secondary_warehouse_offcuts o ON o.id=i.offcut_id
+          WHERE i.count_id=? AND i.offcut_id=?`).get(countId, item.offcutId)
+        if (!existing) throw apiError(400, 'يوجد باقٍ خارج محضر الجرد المحدد.')
+        beforeOffcuts.push(existing)
+        offcutUpdate.run(item.quantity, countId, item.offcutId)
+      }
       audit(req.user.id, 'count-items', 'stock-count', countId, count.code,
-        { items: beforeItems }, { items: newItems })
+        { items: beforeItems, offcuts: beforeOffcuts }, { items: newItems, offcuts: offcutCounts })
     })()
-    res.json({ ok: true, updated: counts.length })
+    res.json({ ok: true, updated: counts.length, offcutsUpdated: offcutCounts.length })
   } catch (error) { return sendError(res, error.status || 400, error.message) }
 })
 
@@ -6174,6 +6544,11 @@ api.post('/inventory/stock-counts/:id/approve', requireAuth, allowRoles('admin')
         VALUES (?,'adjustment',?,?,?,?,?,'stock_count',?)`)
       const postings = []
       let varianceCents = 0
+      const offcuts = db.prepare(`SELECT i.*,o.name,o.dimensions,o.quantity,o.status,o.material_id,
+          COALESCE(m.unit_cost,0) AS unit_cost,COALESCE(m.code,'') AS material_code
+        FROM stock_count_offcut_items i JOIN secondary_warehouse_offcuts o ON o.id=i.offcut_id
+        LEFT JOIN materials m ON m.id=o.material_id WHERE i.count_id=? ORDER BY o.id`).all(countId)
+      if (offcuts.some((item) => item.counted_quantity === null)) throw apiError(409, 'أدخل الكمية الفعلية لكل باقٍ قبل اعتماد المحضر.')
       for (const item of items) {
         const deltas = [
           ['main', Number((item.counted_stock - item.recorded_stock).toFixed(6))],
@@ -6204,10 +6579,33 @@ api.post('/inventory/stock-counts/:id/approve', requireAuth, allowRoles('admin')
         db.prepare(`UPDATE stock_count_items SET variance=? WHERE count_id=? AND material_id=?`)
           .run(Number(((item.counted_stock + item.counted_sub_stock) - (item.recorded_stock + item.recorded_sub_stock)).toFixed(6)), countId, item.material_id)
       }
+      const updateOffcut = db.prepare(`UPDATE secondary_warehouse_offcuts SET quantity=?,status=?
+        WHERE id=? AND status='available'`)
+      for (const item of offcuts) {
+        const delta = Number((Number(item.counted_quantity) - Number(item.recorded_quantity)).toFixed(6))
+        const nextStatus = Number(item.counted_quantity) === 0 ? 'scrapped' : 'available'
+        if (item.status !== 'available') throw apiError(409, `الباقي ${item.offcut_id} لم يعد متاحًا.`)
+        updateOffcut.run(Number(item.counted_quantity) > 0 ? Number(item.counted_quantity) : Number(item.quantity), nextStatus, item.offcut_id)
+        if (Math.abs(delta) > 0.000001 && Number(item.unit_cost) > 0) {
+          const amountCents = Math.abs(Math.round(delta * Number(item.unit_cost) * 100))
+          if (amountCents > 0) {
+            varianceCents += (delta > 0 ? 1 : -1) * amountCents
+            postings.push(delta > 0
+              ? { mappingKey: 'inventory', debitCents: amountCents, description: `زيادة باقي جرد ${item.name}` }
+              : { mappingKey: 'inventory_variance', debitCents: amountCents, description: `عجز باقي جرد ${item.name}` })
+            postings.push(delta > 0
+              ? { mappingKey: 'inventory_variance', creditCents: amountCents, description: `فائض باقي جرد ${item.name}` }
+              : { mappingKey: 'inventory', creditCents: amountCents, description: `نقص باقي جرد ${item.name}` })
+          }
+        }
+        db.prepare('UPDATE stock_count_offcut_items SET variance=? WHERE count_id=? AND offcut_id=?')
+          .run(delta, countId, item.offcut_id)
+      }
       let journal = null
       if (postings.length) journal = queueJournalEntry(db, { sourceType: 'stock_count', sourceId: countId,
         sourceKey: `stock-count:${countId}`, description: `فروقات جرد ${count.code}`, createdBy: req.user.id, postings })
       db.prepare(`UPDATE stock_count_items SET released_at=CURRENT_TIMESTAMP WHERE count_id=? AND released_at IS NULL`).run(countId)
+      db.prepare(`UPDATE stock_count_offcut_items SET released_at=CURRENT_TIMESTAMP WHERE count_id=? AND released_at IS NULL`).run(countId)
       db.prepare(`UPDATE stock_counts SET status='approved',approved_by=?,closed_at=CURRENT_TIMESTAMP WHERE id=?`).run(req.user.id, countId)
       audit(req.user.id, 'approve', 'stock-count', countId, count.code,
         { status: count.status, items: items.map((item) => ({ material_id: item.material_id,
@@ -6217,7 +6615,9 @@ api.post('/inventory/stock-counts/:id/approve', requireAuth, allowRoles('admin')
           counted_stock: Number(item.counted_stock), counted_sub_stock: Number(item.counted_sub_stock),
           variance: Number(((item.counted_stock + item.counted_sub_stock)
             - (item.recorded_stock + item.recorded_sub_stock)).toFixed(6)) })),
-        varianceCents, journalEntryId: journal?.id || null })
+         varianceCents, offcuts: offcuts.map((item) => ({ offcutId: item.offcut_id, recorded: item.recorded_quantity,
+           counted: item.counted_quantity, variance: Number((item.counted_quantity - item.recorded_quantity).toFixed(6)) })),
+         journalEntryId: journal?.id || null })
       return { id: countId, status: 'approved', varianceCents, journalEntryId: journal?.id || null }
     })()
     res.json(result)
@@ -6230,6 +6630,7 @@ api.post('/inventory/stock-counts/:id/cancel', requireAuth, allowRoles('admin'),
   if (!count) return sendError(res, 409, 'محضر الجرد غير مفتوح للإلغاء.')
   db.transaction(() => {
     db.prepare(`UPDATE stock_count_items SET released_at=CURRENT_TIMESTAMP WHERE count_id=? AND released_at IS NULL`).run(countId)
+    db.prepare(`UPDATE stock_count_offcut_items SET released_at=CURRENT_TIMESTAMP WHERE count_id=? AND released_at IS NULL`).run(countId)
     db.prepare(`UPDATE stock_counts SET status='cancelled',approved_by=?,closed_at=CURRENT_TIMESTAMP WHERE id=?`).run(req.user.id, countId)
     audit(req.user.id, 'cancel', 'stock-count', countId, count.code, { status: count.status }, { status: 'cancelled' })
   })()
@@ -6879,9 +7280,33 @@ api.post('/analysis/export-internal-report', requireAuth, allowRoles('admin'), c
   res.send(buffer)
 }))
 
+function summarizeMaintenanceRecords(records) {
+  const serviced = new Set(records.map((record) => `${record.order.id}:${record.card.id}`))
+  const counts = { totalMachinesServiced: serviced.size, sparePartsReplaced: 0, electricalRepairs: 0, inspections: 0 }
+  const patterns = {
+    sparePartsReplaced: /spare|parts?|component|قطع|غيار|استبدال|تغيير/iu,
+    electricalRepairs: /electric|wiring|كهرب|أسلاك|توصيل/iu,
+    inspections: /inspect|inspection|check|مراجعة|فحص|معاينة|كشف/iu,
+  }
+  for (const record of records) {
+    const reasons = [...new Set((record.reasons || []).map((reason) => String(reason).trim()).filter(Boolean))]
+    for (const [key, pattern] of Object.entries(patterns)) {
+      if (reasons.some((reason) => pattern.test(reason))) counts[key] += 1
+    }
+  }
+  return counts
+}
+
 async function buildBulkMaintenancePptx(records, criteria) {
   const pptx = new PptxGenJS()
   const primary = '01509F'
+  const summary = summarizeMaintenanceRecords(records)
+  const summaryRows = [
+    ['إجمالي الماكينات التي تمت خدمتها', summary.totalMachinesServiced],
+    ['حالات استبدال قطع الغيار المسجلة', summary.sparePartsReplaced],
+    ['حالات الإصلاحات الكهربائية', summary.electricalRepairs],
+    ['حالات الفحص والمعاينة', summary.inspections],
+  ]
   const groupedByArea = new Map()
   for (const record of records) {
     const area = String(record.card.area || '').trim() || 'غير محدد'
@@ -6925,6 +7350,21 @@ async function buildBulkMaintenancePptx(records, criteria) {
   if (logo) index.addImage({ data: logo.dataUri, ...pptxImagePlacement(logo, 0.65, 1.15, 2.1, 0.85) })
   index.addText(`عدد السجلات: ${records.length}\n${criteria.reasonLabel ? `سبب الصيانة: ${criteria.reasonLabel}\n` : ''}${criteria.fromDate || criteria.toDate ? `الفترة: ${criteria.fromDate || '—'} إلى ${criteria.toDate || '—'}` : 'كل الفترات'}`, {
     x: 0.65, y: 2.15, w: 3.4, h: 1.45, fontFace: 'Arial', fontSize: 15, color: '29445F', valign: 'mid',
+  })
+  index.addText('الملخص الإحصائي للصيانة', { x: 0.65, y: 3.78, w: 3.4, h: 0.34,
+    fontFace: 'Arial', fontSize: 14, bold: true, color: primary, align: 'center' })
+  summaryRows.forEach(([label, count], rowIndex) => {
+    const y = 4.18 + rowIndex * 0.48
+    index.addShape(pptx.ShapeType.rect, { x: 0.65, y, w: 3.4, h: 0.42,
+      line: { color: 'D8E0E8', width: 0.6 }, fill: { color: rowIndex % 2 ? 'F4F7FA' : 'FFFFFF' } })
+    index.addText(String(count), { x: 0.76, y: y + 0.04, w: 0.55, h: 0.32, fontFace: 'Arial', fontSize: 13,
+      bold: true, color: primary, align: 'center', valign: 'mid' })
+    index.addText(label, { x: 1.4, y: y + 0.04, w: 2.55, h: 0.32, fontFace: 'Arial', fontSize: 9,
+      color: '29445F', align: 'right', valign: 'mid', fit: 'shrink' })
+  })
+  index.addText('الأعداد حسب أسباب الصيانة المسجلة؛ استبدال القطع يحصي الحالات المصنفة لا عدد الوحدات.', {
+    x: 0.68, y: 6.15, w: 3.35, h: 0.48, fontFace: 'Arial', fontSize: 7, color: '718295',
+    align: 'right', valign: 'mid', fit: 'shrink',
   })
   index.addText('فهرس المناطق  |  Index of Areas', {
     x: 4.1, y: 1.05, w: 8.55, h: 0.45, fontFace: 'Arial', fontSize: 18, bold: true, color: primary, align: 'center',
@@ -7032,10 +7472,39 @@ async function buildBulkMaintenancePptx(records, criteria) {
 }
 
 async function buildBulkMaintenanceDocx(records, criteria) {
+  const summary = summarizeMaintenanceRecords(records)
+  const summaryRows = [
+    ['إجمالي الماكينات التي تمت خدمتها', summary.totalMachinesServiced],
+    ['حالات استبدال قطع الغيار المسجلة', summary.sparePartsReplaced],
+    ['حالات الإصلاحات الكهربائية', summary.electricalRepairs],
+    ['حالات الفحص والمعاينة', summary.inspections],
+  ]
+  const summaryBorders = {
+    top: { style: BorderStyle.SINGLE, size: 4, color: 'C5D4D9' },
+    bottom: { style: BorderStyle.SINGLE, size: 4, color: 'C5D4D9' },
+    left: { style: BorderStyle.SINGLE, size: 4, color: 'C5D4D9' },
+    right: { style: BorderStyle.SINGLE, size: 4, color: 'C5D4D9' },
+    insideHorizontal: { style: BorderStyle.SINGLE, size: 4, color: 'D7E0E8' },
+    insideVertical: { style: BorderStyle.SINGLE, size: 4, color: 'D7E0E8' },
+  }
+  const summaryCell = (text, header = false) => new TableCell({
+    width: { size: 50, type: WidthType.PERCENTAGE },
+    shading: header ? { fill: 'DCE8EA' } : undefined,
+    children: [new Paragraph({ text: String(text), alignment: AlignmentType.RIGHT, bidirectional: true })],
+  })
   const children = [
     new Paragraph({ text: 'تقرير الصيانة المجمع', heading: HeadingLevel.TITLE, alignment: AlignmentType.RIGHT, bidirectional: true }),
     new Paragraph({ text: `عدد السجلات: ${records.length}${criteria.reasonLabel ? ` · سبب الصيانة: ${criteria.reasonLabel}` : ''}`, alignment: AlignmentType.RIGHT, bidirectional: true }),
     new Paragraph({ text: `الفترة: ${criteria.fromDate || '—'} إلى ${criteria.toDate || '—'}`, alignment: AlignmentType.RIGHT, bidirectional: true }),
+    new Paragraph({ text: 'الملخص الإحصائي للصيانة', heading: HeadingLevel.HEADING_1, alignment: AlignmentType.RIGHT, bidirectional: true }),
+    new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, columnWidths: [4680, 4680], borders: summaryBorders,
+      rows: [
+        new TableRow({ tableHeader: true, children: [summaryCell('المؤشر', true), summaryCell('العدد', true)] }),
+        ...summaryRows.map(([label, count]) => new TableRow({ children: [summaryCell(label), summaryCell(count)] })),
+      ],
+    }),
+    new Paragraph({ text: 'الأعداد حسب أسباب الصيانة المسجلة؛ استبدال القطع يحصي الحالات المصنفة لا عدد الوحدات المادية.',
+      alignment: AlignmentType.RIGHT, bidirectional: true }),
     new Paragraph({ text: 'فهرس المناطق', heading: HeadingLevel.HEADING_1, alignment: AlignmentType.RIGHT, bidirectional: true }),
   ]
   const areas = [...new Set(records.map(({ card }) => card.area || 'غير محدد'))]

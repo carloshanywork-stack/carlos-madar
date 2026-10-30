@@ -1,4 +1,4 @@
-const CURRENT_SCHEMA_VERSION = 7
+const CURRENT_SCHEMA_VERSION = 14
 const MADAR_APPLICATION_ID = 0x4d414452
 
 function validateDatabaseSchemaMetadata(applicationId, schemaVersion) {

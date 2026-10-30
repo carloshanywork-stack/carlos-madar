@@ -33,6 +33,7 @@ function roundRatio(numerator, denominator) {
 
 function calculatePayroll({
   baseSalaryCents,
+  absenceDays = 0,
   ordinaryOvertimeMinutes = 0,
   holidayOvertimeMinutes = 0,
   bonusCents = 0,
@@ -40,13 +41,15 @@ function calculatePayroll({
   outstandingAdvanceCents = 0,
   cashPaidCents = 0,
 }) {
-  const nonnegative = [baseSalaryCents, ordinaryOvertimeMinutes, holidayOvertimeMinutes,
+  const nonnegative = [baseSalaryCents, absenceDays, ordinaryOvertimeMinutes, holidayOvertimeMinutes,
     bonusCents, deductionCents, outstandingAdvanceCents, cashPaidCents]
   if (nonnegative.some((value) => !Number.isSafeInteger(value) || value < 0)) throw new Error('مدخلات الرواتب يجب أن تكون أعدادًا صحيحة غير سالبة.')
+  if (absenceDays > 26) throw new Error('أيام الغياب لا يمكن أن تتجاوز 26 يومًا في الشهر.')
 
-  const ordinaryOvertimeCents = roundRatio(BigInt(baseSalaryCents) * BigInt(ordinaryOvertimeMinutes) * 3n, 270n * 60n * 2n)
-  const holidayOvertimeCents = roundRatio(BigInt(baseSalaryCents) * BigInt(holidayOvertimeMinutes) * 2n, 270n * 60n)
-  const grossCents = baseSalaryCents + ordinaryOvertimeCents + holidayOvertimeCents + bonusCents
+  const absenceDeductionCents = roundRatio(BigInt(baseSalaryCents) * BigInt(absenceDays), 26n)
+  const ordinaryOvertimeCents = roundRatio(BigInt(baseSalaryCents) * BigInt(ordinaryOvertimeMinutes) * 3n, 234n * 60n * 2n)
+  const holidayOvertimeCents = roundRatio(BigInt(baseSalaryCents) * BigInt(holidayOvertimeMinutes) * 2n, 234n * 60n)
+  const grossCents = baseSalaryCents - absenceDeductionCents + ordinaryOvertimeCents + holidayOvertimeCents + bonusCents
   if (!Number.isSafeInteger(grossCents) || deductionCents > grossCents) throw new Error('الخصومات تتجاوز إجمالي استحقاق الشهر.')
   const netEntitlementCents = grossCents - deductionCents
   const advancesAppliedCents = Math.min(outstandingAdvanceCents, Math.max(0, netEntitlementCents - cashPaidCents))
@@ -54,6 +57,7 @@ function calculatePayroll({
   const overpaymentCents = Math.max(0, cashPaidCents - netEntitlementCents)
   const advanceBalanceCents = outstandingAdvanceCents - advancesAppliedCents + overpaymentCents
   return {
+    absenceDeductionCents,
     ordinaryOvertimeCents,
     holidayOvertimeCents,
     netEntitlementCents,

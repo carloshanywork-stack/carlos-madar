@@ -34,14 +34,19 @@ test('sales tax uses basis points and rounds upward to the next EGP 0.10 exactly
 test('payroll applies 150% ordinary and 200% holiday overtime, deductions, advances and overpayments in cents', () => {
   const overtime = calculatePayroll({ baseSalaryCents: 2_700_000,
     ordinaryOvertimeMinutes: 60, holidayOvertimeMinutes: 60 })
-  assert.equal(overtime.ordinaryOvertimeCents, 15_000)
-  assert.equal(overtime.holidayOvertimeCents, 20_000)
-  assert.equal(overtime.netEntitlementCents, 2_735_000)
+  assert.equal(overtime.ordinaryOvertimeCents, 17_308)
+  assert.equal(overtime.holidayOvertimeCents, 23_077)
+  assert.equal(overtime.netEntitlementCents, 2_740_385)
+
+  const attendance = calculatePayroll({ baseSalaryCents: 270_000, absenceDays: 2 })
+  assert.equal(attendance.absenceDeductionCents, 20_769)
+  assert.equal(attendance.netEntitlementCents, 249_231)
+  assert.throws(() => calculatePayroll({ baseSalaryCents: 270_000, absenceDays: 27 }))
 
   const settlement = calculatePayroll({ baseSalaryCents: 270_000, deductionCents: 20_000,
     outstandingAdvanceCents: 100_000, cashPaidCents: 200_000 })
   assert.deepEqual(settlement, {
-    ordinaryOvertimeCents: 0, holidayOvertimeCents: 0, netEntitlementCents: 250_000,
+    absenceDeductionCents: 0, ordinaryOvertimeCents: 0, holidayOvertimeCents: 0, netEntitlementCents: 250_000,
     advancesAppliedCents: 50_000, cashPaidCents: 200_000, unpaidSalaryCents: 0,
     overpaymentCents: 0, advanceBalanceCents: 50_000,
   })

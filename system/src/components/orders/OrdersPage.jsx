@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react'
 import { Archive, ClipboardList, Pencil, Plus, Search, Trash2, X } from 'lucide-react'
 
 const filters = [
-  { key: 'all', label: 'الكل' },
   { key: 'in_progress', label: 'قيد التنفيذ' },
   { key: 'review', label: 'للاعتماد' },
   { key: 'archived', label: 'الأرشيف' },
@@ -10,17 +9,18 @@ const filters = [
 const statusLabels = { in_progress: 'قيد التنفيذ', review: 'بانتظار الاعتماد', archived: 'مؤرشف' }
 const editableRoles = ['admin', 'sales', 'operations']
 
-export default function OrdersPage({ data, user, search, setSearch, onCreate, onOpen, onEdit, onDelete, notify, formatMoney }) {
-  const [filter, setFilter] = useState('all')
+export default function OrdersPage({ data, user, search, setSearch, onCreate, onOpen, onEdit, onDelete, notify, formatMoney, orderType = null }) {
+  const [filter, setFilter] = useState('in_progress')
   const [deleteTarget, setDeleteTarget] = useState(null)
   const [deleting, setDeleting] = useState(false)
   const allOrders = Array.isArray(data?.orders) ? data.orders : []
   const canEdit = editableRoles.includes(user?.role)
   const canDelete = user?.role === 'admin'
   const hasActions = canEdit || canDelete
+  const maintenanceTable = orderType === 'maintenance'
   const query = String(search || '').trim().toLocaleLowerCase('ar')
   const orders = allOrders.filter((order) => (
-    (filter === 'all' || order.status === filter) &&
+    (!orderType || order.type === orderType) && order.status === filter &&
     [order.code, order.clientName].filter(Boolean).join(' ').toLocaleLowerCase('ar').includes(query)
   ))
 
@@ -51,8 +51,8 @@ export default function OrdersPage({ data, user, search, setSearch, onCreate, on
     <header className="page-heading">
       <div>
         <span className="section-eyebrow">سير العمل</span>
-        <h2>أوامر التشغيل والصيانة</h2>
-        <p>أنشئ الأوامر، تابع التنفيذ، وراجع حالة كل ماكينة.</p>
+        <h2>{orderType === 'maintenance' ? 'أوامر الصيانة الميدانية' : 'أوامر التشغيل'}</h2>
+        <p>{orderType === 'maintenance' ? 'تابع أعمال المواقع من التنفيذ إلى الاعتماد والأرشفة.' : 'تابع أوامر التشغيل وحالة الماكينات المرتبطة.'}</p>
       </div>
       {editableRoles.includes(user?.role) && <div className="heading-actions">
         <button type="button" className="button button-primary" onClick={onCreate}><Plus size={17}/> أمر جديد</button>
@@ -65,7 +65,7 @@ export default function OrdersPage({ data, user, search, setSearch, onCreate, on
         <input value={search || ''} onChange={(event) => setSearch(event.target.value)} placeholder="ابحث برقم الأمر أو العميل..." aria-label="البحث في الأوامر"/>
         {search && <button type="button" onClick={() => setSearch('')} aria-label="مسح البحث"><X size={14}/></button>}
       </label>
-      <div className="filter-pills" role="group" aria-label="تصفية الأوامر">
+      <div className="filter-pills" role="group" aria-label="مراحل الأوامر">
         {filters.map((item) => <button type="button" key={item.key} className={filter === item.key ? 'filter-active' : ''}
           aria-pressed={filter === item.key} onClick={() => setFilter(item.key)}>
           {item.label}{item.key === 'review' && Number(data?.stats?.pendingReview || 0) > 0 && <small>{data.stats.pendingReview}</small>}
@@ -73,15 +73,23 @@ export default function OrdersPage({ data, user, search, setSearch, onCreate, on
       </div>
     </div>
 
-    <section className="panel orders-table-panel" aria-label="جدول أوامر التشغيل">
+    <section className="panel orders-table-panel" aria-label={maintenanceTable ? 'جدول أوامر الصيانة' : 'جدول أوامر التشغيل'}>
       {orders.length ? <div className="table-wrap"><table>
-        <thead><tr><th>رقم الأمر</th><th>العميل</th><th>النوع</th><th>الماكينات</th><th>التكلفة التقديرية</th><th>الحالة</th><th>التاريخ</th>{hasActions && <th>الإجراءات</th>}</tr></thead>
+        <thead><tr><th>رقم الأمر</th><th>العميل</th>{maintenanceTable
+          ? <><th>المنطقة</th><th>عدد الماكينات</th></>
+          : <><th>النوع</th><th>الماكينات</th><th>التكلفة التقديرية</th></>}
+          <th>الحالة</th><th>التاريخ</th>{hasActions && <th>الإجراءات</th>}</tr></thead>
         <tbody>{orders.map((order) => <tr key={order.id} className="clickable-row" onClick={() => onOpen?.(order)}>
           <td><strong className="code-cell">{order.code || '—'}</strong></td>
           <td>{order.clientName || '—'}</td>
-          <td><span className={'type-pill ' + (order.type === 'maintenance' ? 'maintenance' : 'operation')}>{order.type === 'maintenance' ? 'صيانة' : 'تشغيل'}</span></td>
-          <td>{Number(order.machineCount || 0)}</td>
-          <td>{formatMoney?.(order.totalCost || 0) ?? order.totalCost ?? 0} ج.م</td>
+          {maintenanceTable ? <>
+            <td>{formatAreaNames(order.areaNames)}</td>
+            <td>{Number(order.machineCount || 0)}</td>
+          </> : <>
+            <td><span className={'type-pill ' + (order.type === 'maintenance' ? 'maintenance' : 'operation')}>{order.type === 'maintenance' ? 'صيانة' : 'تشغيل'}</span></td>
+            <td>{Number(order.machineCount || 0)}</td>
+            <td>{formatMoney?.(order.totalCost || 0) ?? order.totalCost ?? 0} ج.م</td>
+          </>}
           <td><span className={'status-badge status-' + order.status}><i/>{statusLabels[order.status] || order.status || '—'}</span></td>
           <td>{formatDate(order.createdAt)}</td>
           {hasActions && <td><div className="order-row-actions" onClick={(event) => event.stopPropagation()}>
@@ -119,4 +127,8 @@ function formatDate(value) {
   if (!value) return '—'
   const parsed = new Date(String(value).includes('T') ? value : String(value).replace(' ', 'T') + 'Z')
   return Number.isNaN(parsed.getTime()) ? String(value) : new Intl.DateTimeFormat('ar-EG', { day: 'numeric', month: 'short', year: 'numeric' }).format(parsed)
+}
+
+function formatAreaNames(value) {
+  return String(value || '').split(',').map((area) => area.trim()).filter(Boolean).join('، ') || '—'
 }

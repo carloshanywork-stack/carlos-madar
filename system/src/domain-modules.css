@@ -1,0 +1,58 @@
+.domain-tabs {
+  display: flex;
+  gap: 5px;
+  width: max-content;
+  max-width: 100%;
+  margin: 0 0 18px;
+  padding: 4px;
+  overflow-x: auto;
+  border: 1px solid #e5ebf0;
+  border-radius: 10px;
+  background: #fff;
+}
+.domain-tab {
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 7px;
+  color: #6f7f8e;
+  background: transparent;
+  font: inherit;
+  font-size: 11px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.domain-tab-active { color: #245783; background: #eaf2f8; font-weight: 750; }
+.domain-tab small { min-width: 20px; height: 20px; display: inline-grid; place-items: center; border-radius: 12px; color: #315c7e; background: #dce9f2; font-size: 9px; }
+.manufacturing-form-panel { margin-bottom: 18px; padding: 18px; }
+.manufacturing-form-panel .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.manufacturing-form-actions { display: flex; align-items: center; gap: 9px; }
+.manufacturing-order-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
+.manufacturing-order-card { padding: 17px; }
+.manufacturing-order-card .panel-heading { align-items: flex-start; gap: 10px; }
+.manufacturing-order-card .panel-heading h3 { margin: 4px 0 0; }
+.manufacturing-order-meta { display: flex; flex-wrap: wrap; gap: 8px 14px; margin: 13px 0; color: #7c8995; font-size: 10px; }
+.manufacturing-order-card > p { color: #586a79; font-size: 11px; line-height: 1.7; white-space: pre-wrap; }
+.manufacturing-invoice-link,.manufacturing-offcuts-note { margin: 10px 0; padding: 9px 11px; border-radius: 7px; color: #44627c; background: #f1f6f9; font-size: 10px; }
+.manufacturing-order-actions { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 9px; margin-top: 14px; }
+.manufacturing-order-actions .field { min-width: 150px; flex: 1; }
+.archive-ledger-stack { display: grid; gap: 16px; }
+.archive-manufacturing-ledger { padding: 17px; }
+.archive-manufacturing-ledger .heading-actions { display: flex; align-items: center; gap: 8px; }
+.archive-manufacturing-ledger .empty-inline { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 28px 12px; color: #8794a0; font-size: 11px; }
+html[data-theme="dark"] .domain-tabs { border-color: #2c3b49; background: #14212c; }
+html[data-theme="dark"] .domain-tab { color: #a9b8c6; }
+html[data-theme="dark"] .domain-tab-active { color: #d2e4f2; background: #263949; }
+html[data-theme="dark"] .domain-tab small { color: #c5d8e7; background: #344a5b; }
+html[data-theme="dark"] .manufacturing-invoice-link,html[data-theme="dark"] .manufacturing-offcuts-note { color: #c0d1df; background: #1b2a37; }
+@media (max-width: 680px) {
+  .domain-tabs { width: 100%; }
+  .domain-tab { flex: 1; padding: 0 10px; font-size: 10px; }
+  .manufacturing-form-panel .form-grid { grid-template-columns: 1fr; }
+  .manufacturing-order-grid { grid-template-columns: 1fr; }
+  .manufacturing-form-actions { flex-wrap: wrap; }
+}

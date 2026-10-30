@@ -1,0 +1,25 @@
+{
+  "name": "madar-v2",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Clean local-first foundation for MADAR V2",
+  "engines": {
+    "node": ">=22"
+  },
+  "type": "module",
+  "scripts": {
+    "start": "node server/index.js",
+    "test": "node --test test/*.test.js",
+    "db:init": "node server/database/init.js",
+    "db:migrate-v1": "node scripts/migrate-from-v1.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "better-sqlite3": "^13.0.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.0",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^2.5.0"
+  }
+}

@@ -12,46 +12,61 @@ import OrdersPage from './components/orders/OrdersPage'
 import OrderFormModal from './components/orders/OrderFormModal'
 import UsersPage from './components/users/UsersPage'
 import EmployeesPage from './components/employees/EmployeesPage'
+import SecondaryWarehousePage from './components/warehouse/SecondaryWarehousePage'
+import WarehouseModulePage from './components/warehouse/WarehouseModulePage'
+import MaintenanceModulePage from './components/maintenance/MaintenanceModulePage'
+import ManufacturingPage from './components/manufacturing/ManufacturingPage'
 import AccountingPage from './components/accounting/AccountingPage'
+import AccountingStaffModulePage from './components/accounting/AccountingStaffModulePage'
 import ArchiveAnalysisPage from './components/archive/ArchiveAnalysisPage'
+import ArchiveModulePage from './components/archive/ArchiveModulePage'
+import ArchiveLedgerPage from './components/archive/ArchiveLedgerPage'
 import SettingsPage from './components/settings/SettingsPage'
+import SettingsModulePage from './components/settings/SettingsModulePage'
 import {
   Activity, Archive, ArrowDownLeft, ArrowLeft, ArrowUpRight, Ban, Boxes, Building2, Check, CheckCircle2,
   Bell, ChevronDown, CircleDollarSign, ClipboardList, CloudUpload, FileImage, FileSpreadsheet, Filter,
   HardDrive, LayoutDashboard, LogOut, Menu, Moon, Package, Plus, Search, Settings, ShieldCheck, Sun,
-  SlidersHorizontal, Sparkles, Users, Wrench, X, ImagePlus, Trash2, Download, MapPin, Clock3,
+  SlidersHorizontal, Sparkles, Users, Wrench, Factory, X, ImagePlus, Trash2, Download, MapPin, Clock3,
    CircleHelp, AlertTriangle, RefreshCw, Presentation, Boxes as BoxesIcon, Folder, Pencil, FileText, BriefcaseBusiness, BookOpenCheck,
 } from 'lucide-react'
 
 const roleNames = { admin: 'المدير العام', sales: 'المبيعات', operations: 'التشغيل والصيانة', purchasing: 'المشتريات والمخازن' }
 const statusNames = { in_progress: 'قيد التنفيذ', review: 'بانتظار الاعتماد', archived: 'مؤرشف' }
 const roleLinks = {
-  admin: ['overview', 'clients', 'orders', 'machines', 'inventory', 'finance', 'accounting', 'reports', 'analysis', 'settings', 'users', 'employees'],
-  sales: ['overview', 'clients', 'orders', 'finance'],
-  operations: ['overview', 'orders', 'machines', 'inventory'],
-  purchasing: ['overview', 'inventory'],
+  admin: ['overview', 'clients', 'maintenance', 'manufacturing', 'warehouse', 'finance', 'accounting', 'archive', 'settings'],
+  sales: ['overview', 'clients', 'manufacturing', 'finance'],
+  operations: ['overview', 'clients', 'maintenance', 'manufacturing', 'warehouse'],
+  purchasing: ['overview', 'warehouse'],
 }
 const navItems = [
   { key: 'overview', label: 'لوحة التحكم', icon: LayoutDashboard },
   { key: 'clients', label: 'العملاء', icon: Building2 },
-  { key: 'orders', label: 'أوامر التشغيل', icon: ClipboardList },
-  { key: 'machines', label: 'قاعدة الماكينات', icon: HardDrive },
-  { key: 'inventory', label: 'المخزون والمشتريات', icon: Boxes },
+  { key: 'maintenance', label: 'أوامر الصيانة', icon: Wrench },
+  { key: 'manufacturing', label: 'أوامر التشغيل', icon: Factory },
+  { key: 'warehouse', label: 'المخزن كامل', icon: Boxes },
   { key: 'finance', label: 'الخزينة والماليات', icon: CircleDollarSign },
   { key: 'accounting', label: 'المحاسبة والرواتب', icon: BookOpenCheck },
-  { key: 'reports', label: 'الأرشيف والتقارير', icon: Archive },
-  { key: 'analysis', label: 'تحليل الأرشيف', icon: Activity },
+  { key: 'archive', label: 'الأرشيف والتحليل', icon: Archive },
   { key: 'settings', label: 'الإعدادات', icon: Settings },
-  { key: 'users', label: 'المستخدمون', icon: Users },
-  { key: 'employees', label: 'الموظفون', icon: BriefcaseBusiness },
 ]
-const viewPaths = { overview: '/', clients: '/clients', orders: '/orders', machines: '/machines', inventory: '/inventory', finance: '/finance', accounting: '/accounting', reports: '/archive', analysis: '/analysis', settings: '/settings', users: '/users', employees: '/employees' }
+const viewPaths = {
+  overview: '/', clients: '/clients', maintenance: '/maintenance', manufacturing: '/manufacturing', warehouse: '/warehouse',
+  finance: '/finance', accounting: '/accounting', archive: '/archive', settings: '/settings',
+  orders: '/maintenance', machines: '/maintenance?tab=machines', inventory: '/warehouse?tab=main',
+  reports: '/archive', analysis: '/archive?tab=analytics', staff: '/accounting?tab=staff', users: '/settings?tab=users',
+}
 
 function viewFromPath(pathname) {
   if (/^\/orders\/\d+\/?$/.test(pathname)) return 'order-detail'
   const segment = pathname.split('/').filter(Boolean)[0]
-  if (segment === 'archive') return 'reports'
-  return Object.entries(viewPaths).find(([, route]) => route === `/${segment}`)?.[0] || 'overview'
+  if (['orders', 'machines'].includes(segment)) return 'maintenance'
+  if (segment === 'inventory') return 'warehouse'
+  if (['analysis', 'reports'].includes(segment)) return 'archive'
+  if (['staff', 'accounting'].includes(segment)) return 'accounting'
+  if (['users', 'settings'].includes(segment)) return 'settings'
+  return ['overview', 'clients', 'maintenance', 'manufacturing', 'warehouse', 'finance', 'archive'].includes(segment)
+    ? segment : 'overview'
 }
 
 async function api(url, options = {}) {
@@ -80,6 +95,7 @@ function normalizeBootstrap(payload) {
     ...payload,
     machines: Array.isArray(payload.machines) ? payload.machines.map(normalizeAreaRecord) : [],
     orders: Array.isArray(payload.orders) ? payload.orders.map(normalizeOrderAreas) : [],
+    manufacturingOrders: Array.isArray(payload.manufacturingOrders) ? payload.manufacturingOrders : [],
   }
 }
 function normalizeOrderAreas(order) {
@@ -308,9 +324,9 @@ export default function App() {
       <nav className="main-nav">
         {navItems.filter((item) => permitted.includes(item.key)).map((item) => {
           const Icon = item.icon
-          const active = view === item.key || (view === 'order-detail' && item.key === 'orders')
+          const active = view === item.key || (view === 'order-detail' && item.key === 'maintenance')
           return <button key={item.key} className={`nav-link ${active ? 'nav-link-active' : ''}`} onClick={() => navigate(item.key)}>
-            <Icon size={18} /><span>{item.label}</span>{item.key === 'orders' && data?.stats.pendingReview > 0 && user.role === 'admin' && <b>{data.stats.pendingReview}</b>}
+            <Icon size={18} /><span>{item.label}</span>{item.key === 'maintenance' && data?.stats.pendingReview > 0 && user.role === 'admin' && <b>{data.stats.pendingReview}</b>}
           </button>
         })}
       </nav>
@@ -339,28 +355,39 @@ export default function App() {
       </header>
       <div className="page-content">
         <Routes>
-          <Route path="/" element={<Overview data={data} user={user} onNavigate={navigate} onOpenOrder={openOrder} />} />
-          <Route path="/clients" element={<ClientsPage data={data} search={search} setSearch={setSearch} onCreate={() => setModal('client')} onRefresh={refresh} notify={notify} />} />
-          <Route path="/orders" element={<OrdersPage data={data} user={user} search={search} setSearch={setSearch} onCreate={() => setModal('order')} onOpen={openOrder} onEdit={(order) => setModal({ type: 'edit-order', order })} onDelete={async (order) => { await api('/orders/' + order.id, { method: 'DELETE' }); await refresh() }} notify={notify} formatMoney={money} />} />
-          <Route path="/orders/:orderId" element={selectedOrder && String(selectedOrder.id) === routeOrderId ? <OrderDetail order={selectedOrder} data={data} user={user} onBack={() => navigate('orders')} onRefresh={async () => { await refresh(); setSelectedOrder(normalizeOrderAreas(await api(`/orders/${selectedOrder.id}`))) }} onEdit={() => setModal({ type: 'edit-order', order: selectedOrder })} onDelete={async () => { await refresh(); navigate('orders') }} notify={notify} onPreview={(photo, side, photos) => setLightbox({ photo, side, photos })} onAddMachine={() => setModal({ type: 'add-machine', order: selectedOrder })} onIssue={() => setModal({ type: 'issue', order: selectedOrder })} /> : <div className="panel loading-inline">جارٍ تحميل الأمر...</div>} />
-         <Route path="/machines" element={<MachinesPage data={data} search={search} setSearch={setSearch} onAdd={() => setModal('machine')} onRefresh={refresh} notify={notify} apiClient={api} />} />
-          <Route path="/inventory" element={<InventoryPage data={data} user={user} onAdd={() => setModal('material')} onPurchase={() => setModal('purchase')} onIssue={() => setModal('issue')} onOtherInvoice={() => setModal('other-invoice')} onRefresh={refresh} notify={notify} />} />
+          <Route path="/" element={<Overview data={data} user={user} onNavigate={navigate} onOpenOrder={openOrder}
+            onCreateMaintenance={() => setModal({ type: 'order', initialType: 'maintenance' })} />} />
+          <Route path="/clients" element={<ClientsPage data={data} user={user} search={search} setSearch={setSearch} onCreate={() => setModal('client')} onRefresh={refresh} notify={notify} />} />
+          <Route path="/maintenance" element={<MaintenanceModulePage data={data} user={user} search={search} setSearch={setSearch} onCreate={() => setModal({ type: 'order', initialType: 'maintenance' })} onOpen={openOrder} onEdit={(order) => setModal({ type: 'edit-order', order })} onDelete={async (order) => { await api('/orders/' + order.id, { method: 'DELETE' }); await refresh() }} notify={notify} formatMoney={money} onMachineAdd={() => setModal('machine')} onRefresh={refresh} apiClient={api} />} />
+          <Route path="/orders" element={<Navigate to="/maintenance" replace />} />
+          <Route path="/orders/:orderId" element={selectedOrder && String(selectedOrder.id) === routeOrderId ? <OrderDetail order={selectedOrder} data={data} user={user} onBack={() => navigate('orders')} onRefresh={async () => { await refresh(); setSelectedOrder(normalizeOrderAreas(await api(`/orders/${selectedOrder.id}`))) }} onEdit={() => setModal({ type: 'edit-order', order: selectedOrder })} onDelete={async () => { await refresh(); navigate('orders') }} notify={notify} onPreview={(photo, side, photos) => setLightbox({ photo, side, photos })} onAddMachine={() => setModal({ type: 'add-machine', order: selectedOrder })} onIssue={selectedOrder.type === 'maintenance' ? undefined : () => setModal({ type: 'issue', order: selectedOrder })} /> : <div className="panel loading-inline">جارٍ تحميل الأمر...</div>} />
+          <Route path="/manufacturing" element={<ManufacturingPage apiClient={api} data={data} user={user} notify={notify} />} />
+          <Route path="/machines" element={<Navigate to="/maintenance?tab=machines" replace />} />
+          <Route path="/inventory" element={<Navigate to="/warehouse?tab=main" replace />} />
+          <Route path="/warehouse" element={<WarehouseModulePage mainWarehouse={<InventoryPage data={data} user={user} onAdd={() => setModal('material')} onPurchase={() => setModal('purchase')} onIssue={() => setModal('issue')} onOtherInvoice={() => setModal('other-invoice')} onRefresh={refresh} notify={notify} />} offcutsWarehouse={<SecondaryWarehousePage canManage={user.role === 'admin'} apiClient={api} notify={notify} />} />} />
           <Route path="/finance" element={<FinancePage user={user} data={data} notify={notify} onCreateSale={() => setModal('sale')} onAddTreasury={() => setModal('treasury')} onAddFunding={() => setModal('funding')} onOtherInvoice={() => setModal('other-invoice')} onRecordReceipt={(invoice) => setModal({ type: 'receipt', invoice })} onCorrectPurchase={(invoice) => setModal({ type: 'purchase-correction', invoice })} onRevisePurchase={(invoice) => setModal({ type: 'purchase-revision', invoice })} onViewPurchaseHistory={(invoice) => setModal({ type: 'purchase-history', invoice })} />} />
-          <Route path="/accounting" element={<AccountingPage apiClient={api} data={data} notify={notify} onRefresh={refresh} />} />
-          <Route path="/archive" element={<ReportsPage data={data} />} />
-          <Route path="/analysis" element={<ArchiveAnalysisPage data={data} apiClient={api} onProcessMissing={(area) => setModal({
-            type: 'order', initialType: 'maintenance', initialMachines: area.missing_machines,
-          })} />} />
-           <Route path="/settings" element={<SettingsPage data={data} apiClient={api} onRefresh={refresh} notify={notify} />} />
-            <Route path="/users" element={<UsersPage user={user} apiClient={api} onCreate={() => setModal('user')} notify={notify} />} />
-            <Route path="/employees" element={<EmployeesPage apiClient={api} onRefresh={refresh} notify={notify} />} />
-            <Route path="/workers" element={<Navigate to="/employees" replace />} />
+           <Route path="/accounting" element={<AccountingStaffModulePage accounting={<AccountingPage apiClient={api} data={data} notify={notify} onRefresh={refresh} />} staff={<EmployeesPage apiClient={api} onRefresh={refresh} notify={notify} />} />} />
+           <Route path="/staff" element={<Navigate to="/accounting?tab=staff" replace />} />
+           <Route path="/archive" element={
+             <ArchiveModulePage
+               ledger={<ArchiveLedgerPage apiClient={api} maintenanceLedger={<ReportsPage data={data} />} />}
+                analytics={<ArchiveAnalysisPage data={data} apiClient={api} onProcessMissing={() => setModal({
+                  type: 'order', initialType: 'maintenance',
+                })} />}
+             />
+           } />
+           <Route path="/analysis" element={<Navigate to="/archive?tab=analytics" replace />} />
+           <Route path="/reports" element={<Navigate to="/archive" replace />} />
+            <Route path="/settings" element={<SettingsModulePage settings={<SettingsPage data={data} apiClient={api} onRefresh={refresh} notify={notify} />} users={<UsersPage user={user} apiClient={api} onCreate={() => setModal('user')} notify={notify} />} />} />
+             <Route path="/users" element={<Navigate to="/settings?tab=users" replace />} />
+              <Route path="/employees" element={<Navigate to="/accounting?tab=staff" replace />} />
+             <Route path="/workers" element={<Navigate to="/staff" replace />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </div>
     </main>
-    {modal && (isOrderModal(modal)
-      ? <OrderFormModal key={(typeof modal === 'string' ? modal : modal.type) + '-' + (typeof modal === 'object' ? modal.order?.id || '' : '')} modal={modal} data={data} apiClient={api} onClose={() => setModal(null)} onRefresh={refresh} onOrderUpdated={async (id) => setSelectedOrder(normalizeOrderAreas(await api(`/orders/${id}`)))} notify={notify} />
+     {modal && (isOrderModal(modal)
+       ? <OrderFormModal key={(typeof modal === 'string' ? modal : modal.type) + '-' + (typeof modal === 'object' ? modal.order?.id || modal.initialType || '' : '')} modal={modal} data={data} apiClient={api} onClose={() => setModal(null)} onRefresh={refresh} onOrderUpdated={async (id) => setSelectedOrder(normalizeOrderAreas(await api(`/orders/${id}`)))} notify={notify} />
       : ['purchase-revision','purchase-history'].includes(typeof modal === 'object' ? modal.type : '')
         ? <PurchaseInvoiceModal key={`${modal.type}:${modal.invoice?.id || ''}`} modal={modal} data={data} onClose={() => setModal(null)} onRefresh={refresh} notify={notify} />
       : <ModalHost key={`${typeof modal === 'string' ? modal : modal.type}:${typeof modal === 'object' ? modal.order?.id || '' : ''}`} modal={modal} setModal={setModal} data={data} onRefresh={refresh} run={run} notify={notify} />)}
@@ -445,7 +472,7 @@ function Lightbox({ lightbox, onClose, onChange }) {
   </div>
 }
 
-function Overview({ data, user, onNavigate, onOpenOrder }) {
+function Overview({ data, user, onNavigate, onOpenOrder, onCreateMaintenance }) {
   const [financeDashboard, setFinanceDashboard] = useState(null)
   const [financeError, setFinanceError] = useState('')
   useEffect(() => {
@@ -455,16 +482,26 @@ function Overview({ data, user, onNavigate, onOpenOrder }) {
       .catch((error) => { if (active) setFinanceError(error.message || 'تعذر تحميل المؤشرات المالية.') })
     return () => { active = false }
   }, [user.role, data])
+  const orderRows = Array.isArray(data?.orders) ? data.orders : []
+  const manufacturingRows = Array.isArray(data?.manufacturingOrders) ? data.manufacturingOrders : []
+  const activeMaintenanceOrders = orderRows.filter((order) => order.type === 'maintenance' && order.status !== 'archived')
+  const activeManufacturingOrders = manufacturingRows.filter((order) => order.status === 'in_production')
+  const readyManufacturingOrders = manufacturingRows.filter((order) => order.status === 'ready')
+  const maintenanceActivity = activeMaintenanceOrders.slice(0, 5)
+  const manufacturingActivity = manufacturingRows.filter((order) => order.status !== 'delivered_archived').slice(0, 5)
   const stats = [
-    { label: 'إجمالي العملاء', value: data.stats.clients, sub: 'ملفات العملاء النشطة', icon: Building2, color: 'blue', link: 'clients' },
-    { label: 'أوامر قيد التنفيذ', value: data.stats.activeOrders, sub: `${data.stats.pendingReview} بانتظار الاعتماد`, icon: ClipboardList, color: 'orange', link: 'orders' },
-    { label: 'الماكينات المسجلة', value: data.stats.machines, sub: 'ضمن قاعدة البيانات', icon: HardDrive, color: 'green', link: 'machines' },
-    { label: 'أصناف تحتاج متابعة', value: data.stats.lowStock, sub: 'وصلت حد إعادة الطلب', icon: Package, color: 'purple', link: 'inventory' },
+    { label: 'العملاء النشطون', value: data.stats.clients, sub: 'ملفات العملاء النشطة', icon: Building2, color: 'blue', link: 'clients' },
+    { label: 'أعمال الصيانة الميدانية', value: data.stats.activeMaintenanceOrders ?? data.stats.activeOrders,
+      sub: `${data.stats.pendingReviewMaintenance ?? data.stats.pendingReview} بانتظار الاعتماد`, icon: Wrench, color: 'orange', link: 'maintenance' },
+    { label: 'أوامر التشغيل بالورشة', value: data.stats.activeManufacturingOrders ?? activeManufacturingOrders.length,
+      sub: `${data.stats.readyManufacturingOrders ?? readyManufacturingOrders.length} جاهز للتسليم`, icon: Factory, color: 'green', link: 'manufacturing' },
+    { label: 'المخزون والمواد', value: data.stats.lowStock, sub: 'خامات قاربت الحد الأدنى', icon: Boxes, color: 'purple', link: 'warehouse' },
   ]
-  const orders = data.orders.filter((order) => order.status !== 'archived').slice(0, 5)
+  const machineNames = { cnc_router: 'CNC Router', laser: 'Laser', both: 'كلاهما', manual: 'تجميع يدوي' }
+  const manufacturingStatuses = { in_production: 'قيد التشغيل', ready: 'جاهز للتسليم' }
   return <div className="page-enter">
-    <section className="welcome-banner"><div className="welcome-copy"><div className="eyebrow"><span className="live-dot" /> مساحة تشغيل موحدة</div><h2>أهلًا، {user.fullName.split(' ')[0]} <span className="wave">✦</span></h2><p>نظرة سريعة على أداء التشغيل والصيانة اليوم.</p><button className="button button-white" onClick={() => onNavigate(user.role === 'purchasing' ? 'inventory' : 'orders')}>استكشف أوامر التشغيل <ArrowLeft size={16} /></button></div><div className="welcome-art"><div className="orb orb-one"/><div className="orb orb-two"/><div className="dashboard-illustration"><div className="illustration-top"><span/><span/><span/></div><div className="illustration-body"><div className="illustration-side"/><div className="illustration-content"><i/><i/><div><b/><b/><b/><b/></div></div></div><div className="illustration-check"><Check size={16}/></div></div><div className="welcome-spark spark-a">✳</div><div className="welcome-spark spark-b">✦</div></div><div className="banner-index">01 <i /> OVERVIEW</div></section>
-     <section className="stats-grid">{stats.map((item) => { const Icon = item.icon; return <button key={item.label} className="stat-card" onClick={() => onNavigate(item.link)}><div className={`stat-icon ${item.color}`}><Icon size={19}/></div><div className="stat-meta"><span>{item.label}</span><small>{item.sub}</small></div><strong className="stat-value">{item.value}</strong><span className="stat-arrow"><ArrowUpRight size={16}/></span></button> })}</section>
+    <section className="welcome-banner"><div className="welcome-copy"><div className="eyebrow"><span className="live-dot" /> مساحة تشغيل موحدة</div><h2>أهلًا، {user.fullName.split(' ')[0]} <span className="wave">✦</span></h2><p>نظرة سريعة على أداء التشغيل والصيانة اليوم.</p><button className="button button-white" onClick={() => onNavigate(user.role === 'purchasing' ? 'warehouse' : 'manufacturing')}>استكشف أوامر التشغيل <ArrowLeft size={16} /></button></div><div className="welcome-art"><div className="orb orb-one"/><div className="orb orb-two"/><div className="dashboard-illustration"><div className="illustration-top"><span/><span/><span/></div><div className="illustration-body"><div className="illustration-side"/><div className="illustration-content"><i/><i/><div><b/><b/><b/><b/></div></div></div><div className="illustration-check"><Check size={16}/></div></div><div className="welcome-spark spark-a">✳</div><div className="welcome-spark spark-b">✦</div></div><div className="banner-index">01 <i /> OVERVIEW</div></section>
+    <section className="stats-grid overview-stats-grid">{stats.map((item) => { const Icon = item.icon; return <button key={item.label} className="stat-card" onClick={() => onNavigate(item.link)}><div className={`stat-icon ${item.color}`}><Icon size={19}/></div><div className="stat-meta"><span>{item.label}</span><small>{item.sub}</small></div><strong className="stat-value">{item.value}</strong><span className="stat-arrow"><ArrowUpRight size={16}/></span></button> })}</section>
     {user.role === 'admin' && <>
       {financeError && <div className="inline-error" role="status">{financeError}</div>}
       {financeDashboard && <>
@@ -481,26 +518,62 @@ function Overview({ data, user, onNavigate, onOpenOrder }) {
             const max = Math.max(1, ...financeDashboard.monthly.flatMap((item) => [item.income, item.expense]))
             return <button type="button" className="cashflow-month" key={month.month} title={`${month.label} · وارد ${money(month.income)} · منصرف ${money(month.expense)}`} onClick={() => onNavigate('finance')}><div className="cashflow-bars"><div className="cashflow-bar income-bar" style={{ height: `${Math.max(month.income ? 5 : 0, month.income / max * 100)}%` }}/><div className="cashflow-bar expense-bar" style={{ height: `${Math.max(month.expense ? 5 : 0, month.expense / max * 100)}%` }}/></div><span>{month.label}</span></button>
           })}</div>
-          <div className="chart-legend"><span><i className="legend-income"/>وارد غير تمويلي</span><span><i className="legend-expense"/>منصرف</span><span>الربح مرتبط بأوامر التشغيل المؤرشفة/المفوترة</span></div>
+          <div className="chart-legend"><span><i className="legend-income"/>وارد غير تمويلي</span><span><i className="legend-expense"/>منصرف</span><span>الربح من المؤشرات المالية الفعلية</span></div>
         </section>
       </>}
     </>}
-     <section className="content-grid overview-grid"><div className="panel recent-panel"><div className="panel-heading"><div><span className="section-eyebrow">متابعة العمل</span><h3>أحدث أوامر التشغيل</h3></div><button className="text-button" onClick={() => onNavigate('orders')}>عرض الكل <ArrowLeft size={15}/></button></div>{orders.length ? <div className="table-wrap"><table><thead><tr><th>رقم الأمر</th><th>العميل</th><th>النوع</th><th>الحالة</th><th>التاريخ</th><th /></tr></thead><tbody>{orders.map((order) => <tr key={order.id} onClick={() => onOpenOrder(order)} className="clickable-row"><td><strong className="code-cell">{order.code}</strong></td><td>{order.clientName}</td><td>{order.type === 'maintenance' ? 'صيانة' : 'تشغيل'}</td><td><StatusBadge status={order.status}/></td><td>{date(order.createdAt)}</td><td><ArrowLeft size={14} className="muted"/></td></tr>)}</tbody></table></div> : <EmptyState icon={ClipboardList} title="لا توجد أوامر بعد" description="أنشئ أول أمر تشغيل لبدء متابعة العمل." action={<button className="button button-primary button-small" onClick={() => onNavigate('orders')}>الذهاب للأوامر</button>} />}</div>
-      <div className="panel quick-panel"><div className="panel-heading"><div><span className="section-eyebrow">وصول سريع</span><h3>اختصارات العمل</h3></div><div className="panel-icon"><Sparkles size={18}/></div></div><div className="quick-list"><QuickAction icon={Building2} label="إضافة عميل جديد" detail="إنشاء ملف ومجلد عميل" onClick={() => onNavigate('clients')}/><QuickAction icon={ClipboardList} label="إنشاء أمر تشغيل" detail="ابدأ أمرًا جديدًا" onClick={() => onNavigate('orders')}/><QuickAction icon={HardDrive} label="تحديث الماكينات" detail="استيراد ملف بيانات" onClick={() => onNavigate('machines')}/><QuickAction icon={Boxes} label="متابعة المخزون" detail={`${data.stats.lowStock} أصناف منخفضة`} onClick={() => onNavigate('inventory')}/></div><div className="local-note"><ShieldCheck size={16}/><span>تتم معالجة ملفاتك محليًا، وتبقى الصور داخل مجلد التخزين الآمن.</span></div></div></section>
-    <div className="bottom-meta"><span><Activity size={14}/> مَدَار — منصة إدارة التشغيل والصيانة</span><span>قاعدة البيانات محلية وكلمات المرور محفوظة بتجزئة آمنة</span>{user.role==='admin'&&<span>هامش الربح المتوقع: {money(data.stats.totalProfit)} ج.م</span>}</div>
+    <section className="content-grid overview-activity-grid">
+      <div className="panel recent-panel overview-activity-panel">
+        <div className="panel-heading"><div><span className="section-eyebrow">الصيانة الميدانية</span><h3>أحدث أعمال الصيانة الميدانية</h3></div><button className="text-button" onClick={() => onNavigate('maintenance')}>جميع أعمال الصيانة <ArrowLeft size={15}/></button></div>
+        {maintenanceActivity.length ? <div className="table-wrap"><table><thead><tr><th>رقم الأمر</th><th>العميل</th><th>المنطقة</th><th>الماكينات</th><th>الحالة</th><th>التاريخ</th></tr></thead><tbody>{maintenanceActivity.map((order) => <tr key={order.id} onClick={() => onOpenOrder(order)} className="clickable-row"><td><strong className="code-cell">{order.code}</strong></td><td>{order.clientName || '—'}</td><td>{order.areaNames || '—'}</td><td>{quantity(order.machineCount)}</td><td><StatusBadge status={order.status}/></td><td>{date(order.createdAt)}</td></tr>)}</tbody></table></div>
+          : <EmptyState icon={Wrench} title="لا توجد أعمال صيانة نشطة" description="ستظهر هنا أوامر الصيانة الميدانية قيد المتابعة." action={<button className="button button-primary button-small" onClick={onCreateMaintenance}><Plus size={14}/> أمر صيانة جديد</button>} />}
+      </div>
+      <div className="panel recent-panel overview-activity-panel">
+        <div className="panel-heading"><div><span className="section-eyebrow">التشغيل داخل الورشة</span><h3>أحدث أوامر التشغيل بالورشة</h3></div><button className="text-button" onClick={() => onNavigate('manufacturing')}>جميع أوامر التشغيل <ArrowLeft size={15}/></button></div>
+        {manufacturingActivity.length ? <div className="table-wrap"><table><thead><tr><th>رقم الأمر</th><th>العميل</th><th>المنتج</th><th>الماكينة</th><th>الحالة</th><th>تاريخ التسليم المستهدف</th></tr></thead><tbody>{manufacturingActivity.map((order) => <tr key={order.id} onClick={() => onNavigate('manufacturing')} className="clickable-row"><td><strong className="code-cell">{order.order_code}</strong></td><td>{order.client_name || '—'}</td><td>{order.product_name || '—'}</td><td>{machineNames[order.machine_type] || order.machine_type || '—'}</td><td><span className={`status-badge ${order.status === 'ready' ? 'status-archived' : 'status-in_progress'}`}><i/>{manufacturingStatuses[order.status] || order.status}</span></td><td>{date(order.target_delivery_date)}</td></tr>)}</tbody></table></div>
+          : <EmptyState icon={Factory} title="لا توجد أوامر ورشة نشطة" description="أنشئ أمر تشغيل لمتابعة المنتج والمواد والتسليم." action={<button className="button button-primary button-small" onClick={() => onNavigate('manufacturing')}><Factory size={14}/> أوامر التشغيل</button>} />}
+      </div>
+    </section>
+    <section className="panel quick-panel overview-quick-panel"><div className="panel-heading"><div><span className="section-eyebrow">وصول سريع</span><h3>اختصارات العمل</h3></div><div className="panel-icon"><Sparkles size={18}/></div></div><div className="quick-list"><QuickAction icon={Building2} label="إضافة عميل جديد" detail="إنشاء ملف ومجلد عميل" onClick={() => onNavigate('clients')}/>{['admin', 'operations'].includes(user.role) && <QuickAction icon={Wrench} label="متابعة الصيانة الميدانية" detail="استعراض الأعمال والماكينات" onClick={() => onNavigate('maintenance')}/>}{['admin', 'operations'].includes(user.role) && <QuickAction icon={Plus} label="أمر صيانة جديد" detail="إنشاء أمر ميداني" onClick={onCreateMaintenance}/>}{['admin', 'operations'].includes(user.role) && <QuickAction icon={Factory} label="أمر تشغيل ورشة جديد" detail="افتح أوامر التشغيل بالورشة" onClick={() => onNavigate('manufacturing')}/>}<QuickAction icon={Boxes} label="متابعة المخزون" detail={`${data.stats.lowStock} خامات قاربت الحد الأدنى`} onClick={() => onNavigate('warehouse')}/></div><div className="local-note"><ShieldCheck size={16}/><span>تتم معالجة ملفاتك محليًا، وتبقى الصور داخل مجلد التخزين الآمن.</span></div></section>
+    <div className="bottom-meta"><span><Activity size={14}/> مَدَار — منصة إدارة التشغيل والصيانة</span><span>قاعدة البيانات محلية وكلمات المرور محفوظة بتجزئة آمنة</span>{user.role==='admin'&&financeDashboard&&<span>صافي حركة الخزينة: {money(Number(financeDashboard.summary.income||0)-Number(financeDashboard.summary.expense||0))} ج.م</span>}</div>
   </div>
 }
 
-function ClientsPage({ data, search, setSearch, onCreate, onRefresh, notify }) {
+function ClientsPage({ data, user, search, setSearch, onCreate, onRefresh, notify }) {
   const [logoBusy, setLogoBusy] = useState(null)
+  const [statements, setStatements] = useState({})
   const clients = data.clients.filter((client) => `${client.name} ${client.code} ${client.phone}`.toLowerCase().includes(search.toLowerCase()))
+  useEffect(() => {
+    let active = true
+    if (!['admin', 'sales'].includes(user?.role)) { setStatements({}); return () => { active = false } }
+    Promise.all(data.clients.map(async (client) => {
+      try { return [client.id, await api(`/clients/${client.id}/statement`)] }
+      catch { return [client.id, null] }
+    })).then((entries) => { if (active) setStatements(Object.fromEntries(entries)) })
+    return () => { active = false }
+  }, [data.clients, user?.role])
   const uploadLogo = async (clientId, file) => {
     if (!file) return
     setLogoBusy(clientId)
     try { const form = new FormData(); form.append('logo', file); await api(`/clients/${clientId}/logo`, { method: 'POST', body: form }); await onRefresh(); notify('تم تحديث شعار العميل.') }
     catch (error) { notify(error.message) } finally { setLogoBusy(null) }
   }
-  return <div className="page-enter"><PageHeading eyebrow="إدارة العلاقات" title="العملاء" description="ملفات العملاء وهوياتهم البصرية في مكان واحد." action={<button className="button button-primary" onClick={onCreate}><Plus size={17}/> إضافة عميل</button>} /><div className="toolbar"><SearchBox value={search} onChange={setSearch} placeholder="ابحث باسم العميل أو الكود..."/><span className="result-count">{clients.length} عميل</span></div>{clients.length ? <div className="client-grid">{clients.map((client) => <article className="client-card" key={client.id}><div className="client-card-top"><div className="client-logo" style={{ backgroundColor: `${client.primaryColor}12`, color: client.primaryColor }}>{client.logoPath ? <img src={fileUrl(client.logoPath)} alt=""/> : client.name.slice(0, 1)}</div><span className="client-code">{client.code}</span><label className="logo-upload" title="رفع شعار"><ImagePlus size={15}/><input type="file" accept="image/*" onChange={(event) => uploadLogo(client.id, event.target.files?.[0])}/></label></div><h3>{client.name}</h3><p>{client.contactName || 'لا يوجد مسؤول اتصال'}</p><div className="client-meta"><span><ArrowDownLeft size={14}/>{client.phone || '—'}</span><span className="color-dots"><i style={{ background: client.primaryColor }}/><i style={{ background: client.secondaryColor }}/></span></div><div className="client-card-footer"><span><HardDrive size={14}/> مجلد العميل جاهز</span><span>{data.orders.filter((order) => order.clientId === client.id).length} أوامر</span></div>{logoBusy === client.id && <div className="card-uploading">جارٍ رفع الشعار...</div>}</article>)}</div> : <EmptyState icon={Building2} title="لا يوجد عملاء مطابقون" description="أضف عميلًا جديدًا أو غيّر كلمات البحث." action={<button className="button button-primary button-small" onClick={onCreate}><Plus size={15}/> إضافة عميل</button>}/>}</div>
+  return <div className="page-enter">
+    <PageHeading eyebrow="إدارة العلاقات" title="العملاء" description="ملفات العملاء وهوياتهم البصرية في مكان واحد."
+      action={<div className="heading-actions">{['admin', 'sales'].includes(user?.role) && Object.values(statements).some((statement) => statement?.overdue_60_days)
+        && <span className="client-overdue-pill"><AlertTriangle size={14}/> توجد مديونيات تجاوزت 60 يومًا</span>}
+        <button className="button button-primary" onClick={onCreate}><Plus size={17}/> إضافة عميل</button></div>} />
+    <div className="toolbar"><SearchBox value={search} onChange={setSearch} placeholder="ابحث باسم العميل أو الكود..."/><span className="result-count">{clients.length} عميل</span></div>
+    {clients.length ? <div className="client-grid">{clients.map((client) => <article className="client-card" key={client.id}>
+      <div className="client-card-top"><div className="client-logo" style={{ backgroundColor: `${client.primaryColor}12`, color: client.primaryColor }}>{client.logoPath ? <img src={fileUrl(client.logoPath)} alt=""/> : client.name.slice(0, 1)}</div>
+        <span className="client-code">{client.code}</span><label className="logo-upload" title="رفع شعار"><ImagePlus size={15}/><input type="file" accept="image/*" onChange={(event) => uploadLogo(client.id, event.target.files?.[0])}/></label></div>
+      <h3>{client.name}</h3><p>{client.contactName || 'لا يوجد مسؤول اتصال'}</p>
+      <div className="client-meta"><span><ArrowDownLeft size={14}/>{client.phone || '—'}</span><span className="color-dots"><i style={{ background: client.primaryColor }}/><i style={{ background: client.secondaryColor }}/></span></div>
+      {statements[client.id]?.overdue_60_days && <div className="client-overdue-pill client-overdue-card"><AlertTriangle size={14}/> متأخر أكثر من 60 يومًا · {Number(statements[client.id].outstanding_balance || 0).toFixed(2)} ج.م</div>}
+      <div className="client-card-footer"><span><HardDrive size={14}/> {data.orders.filter((order) => Number(order.clientId) === Number(client.id) && order.type === 'maintenance').length} صيانة · {(data.manufacturingOrders || []).filter((order) => Number(order.client_id) === Number(client.id)).length} تشغيل</span></div>
+      {logoBusy === client.id && <div className="card-uploading">جارٍ رفع الشعار...</div>}
+    </article>)}</div> : <EmptyState icon={Building2} title="لا يوجد عملاء مطابقون" description="أضف عميلًا جديدًا أو غيّر كلمات البحث." action={<button className="button button-primary button-small" onClick={onCreate}><Plus size={15}/> إضافة عميل</button>}/>}
+    </div>
 }
 
 function OrderDetail({ order, data, user, onBack, onRefresh, onEdit, onDelete, notify, onPreview, onAddMachine, onIssue }) {
@@ -777,8 +850,15 @@ function OrderDetail({ order, data, user, onBack, onRefresh, onEdit, onDelete, n
   }
   const archive = async () => {
     if (!requireStorageClient()) return
-    if (!window.confirm('سيتم حفظ صور هذا الأمر في أرشيفه داخل مجلد العميل. هل تريد المتابعة؟')) return
-    try { await api(`/orders/${order.id}/archive`, {method:'POST'}); notify('تم اعتماد الأمر ونقله إلى الأرشيف.'); onBack() }
+    const confirmation = order.type === 'maintenance'
+      ? 'سيتم حفظ صور الأمر وأرشفة أمر الصيانة مباشرة. هل تريد المتابعة؟'
+      : 'سيتم حفظ صور الأمر واعتماده ونقله إلى الأرشيف. هل تريد المتابعة؟'
+    if (!window.confirm(confirmation)) return
+    try {
+      await api(`/orders/${order.id}/archive`, { method: 'POST', body: json({}) })
+      notify(order.type === 'maintenance' ? 'تمت أرشفة أمر الصيانة بنجاح.' : 'تم اعتماد الأمر ونقله إلى الأرشيف.')
+      onBack()
+    }
     catch(error){notify(error.message)}
   }
   const deleteOrder = async () => {
@@ -878,9 +958,30 @@ function OrderDetail({ order, data, user, onBack, onRefresh, onEdit, onDelete, n
   )).slice(0, 8)
   const visibleUnrecognizedFolders = order.unrecognizedFolders.filter((folder) => !boundFolderIds.includes(folder.id) && !eradicatedFolderIds.includes(folder.id))
   const visibleCards = order.cards.filter((card) => !excludedCardIds.includes(card.id))
-  return <div className="page-enter"><button className="back-link" onClick={onBack}><ArrowLeft size={16}/> العودة إلى الأوامر</button><div className="order-detail-heading"><div><div className="eyebrow">{order.code} <span className="eyebrow-dot"/> {order.client.name}</div><h2>تفاصيل الأمر</h2><p>{order.type==='maintenance'?'أمر صيانة':'أمر تشغيل'} · أنشئ في {date(order.createdAt)} · <StatusBadge status={order.status}/></p></div><div className="detail-actions">{canEditOrder&&<button className="button button-secondary" onClick={onEdit}><Pencil size={16}/> تعديل الأمر</button>}{user.role==='admin'&&<button className="button button-danger" onClick={()=>setConfirmDelete(true)}><Trash2 size={16}/> حذف الأمر</button>}{order.status!=='archived'&&canOperate&&<><button className="button button-secondary" onClick={onAddMachine}><Plus size={16}/> إضافة ماكينة</button>{order.status==='in_progress'&&<button className="button button-secondary" onClick={setReview}><CheckCircle2 size={16}/> إرسال للمراجعة</button>}{visibleCards.length>0&&<button className="button button-primary" onClick={archive}><Archive size={16}/> اعتماد وأرشفة</button>}</>}{order.status!=='archived'&&canIssue&&<button className="button button-secondary" onClick={onIssue}><ArrowUpRight size={16}/> صرف خامة لهذا الأمر</button>}</div></div>
-    <div className="order-info-strip"><div><span>العميل</span><strong>{order.client.name} <small>{order.client.code}</small></strong></div><div><span>عدد الماكينات</span><strong>{visibleCards.length}</strong></div><div><span>التكلفة التقديرية</span><strong>{money(order.totalCost)} ج.م</strong></div><div><span>المنطقة</span><strong>{[...new Set(visibleCards.map((card)=>card.area).filter(Boolean))].join('، ')||'—'}</strong></div>{user.role==='admin'&&<><div><span>تكلفة الخامات التقديرية</span><strong>{money(order.materialCost)} ج.م</strong></div><div><span>تكلفة مواد FIFO الفعلية</span><strong>{money(order.actualMaterialCogs)} ج.م</strong></div><div><span>تكلفة التشغيل</span><strong>{money(order.operatingCost)} ج.م</strong></div><div><span>قيمة البيع</span><strong>{money(order.sellingPrice)} ج.م</strong></div><div><span>الربح المتوقع</span><strong className={order.profit>=0?'profit-positive':'profit-negative'}>{money(order.profit)} ج.م</strong></div></>}</div>
-    {user.role==='admin'&&<section className="panel inventory-panel"><div className="panel-heading"><div><span className="section-eyebrow">تكلفة فعلية بقيمة FIFO</span><h3>صرف مواد الأمر</h3></div><span className="result-count">{money(order.actualMaterialCogs)} ج.م</span></div>{order.inventoryIssues?.length?<div className="table-wrap"><table><thead><tr><th>التاريخ</th><th>الخامة</th><th>المرجع</th><th>الكمية</th><th>قيمة الصرف</th><th>تكلفة الأمر</th><th>القيد</th></tr></thead><tbody>{order.inventoryIssues.map((issue)=><tr key={issue.id}><td>{date(issue.created_at)}</td><td>{issue.material_label||'—'}</td><td>{issue.reference||'—'}</td><td>{quantity(issue.requested_quantity)}</td><td>{money(issue.gross_cost_cents/100)} ج.م</td><td>{money(issue.cogs_cents/100)} ج.م</td><td>{issue.journal_status==='posted'?'مرحّل':issue.journal_status==='pending_configuration'?'بانتظار اعتماد الحساب':issue.journal_status||'دون تكلفة'}</td></tr>)}</tbody></table></div>:<div className="empty-inline">لم يُسجل صرف مواد لهذا الأمر بعد.</div>}</section>}
+  const isMaintenanceOrder = order.type === 'maintenance'
+  const orderAreaNames = [...new Set(visibleCards.map((card) => card.area).filter(Boolean))].join('، ') || '—'
+  return <div className="page-enter"><button className="back-link" onClick={onBack}><ArrowLeft size={16}/> العودة إلى الأوامر</button><div className="order-detail-heading"><div><div className="eyebrow">{order.code} <span className="eyebrow-dot"/> {order.client.name}</div><h2>تفاصيل الأمر</h2><p>{order.type==='maintenance'?'أمر صيانة':'أمر تشغيل'} · أنشئ في {date(order.createdAt)} · <StatusBadge status={order.status}/></p></div><div className="detail-actions">{canEditOrder&&<button className="button button-secondary" onClick={onEdit}><Pencil size={16}/> تعديل الأمر</button>}{user.role==='admin'&&<button className="button button-danger" onClick={()=>setConfirmDelete(true)}><Trash2 size={16}/> حذف الأمر</button>}{order.status!=='archived'&&canOperate&&<><button className="button button-secondary" onClick={onAddMachine}><Plus size={16}/> إضافة ماكينة</button>{order.status==='in_progress'&&<button className="button button-secondary" onClick={setReview}><CheckCircle2 size={16}/> إرسال للمراجعة</button>}{visibleCards.length>0&&<button className="button button-primary" onClick={archive}><Archive size={16}/> اعتماد وأرشفة</button>}</>}{!isMaintenanceOrder&&order.status!=='archived'&&canIssue&&<button className="button button-secondary" onClick={onIssue}><ArrowUpRight size={16}/> صرف خامة لهذا الأمر</button>}</div></div>
+    <div className={`order-info-strip ${isMaintenanceOrder ? 'maintenance-order-info-strip' : ''}`}>
+      {isMaintenanceOrder ? <>
+        <div><span>العميل</span><strong>{order.client.name} <small>{order.client.code}</small></strong></div>
+        <div><span>المنطقة</span><strong>{orderAreaNames}</strong></div>
+        <div><span>عدد الماكينات</span><strong>{visibleCards.length}</strong></div>
+        <div><span>الحالة</span><StatusBadge status={order.status}/></div>
+      </> : <>
+        <div><span>العميل</span><strong>{order.client.name} <small>{order.client.code}</small></strong></div>
+        <div><span>عدد الماكينات</span><strong>{visibleCards.length}</strong></div>
+        <div><span>التكلفة التقديرية</span><strong>{money(order.totalCost)} ج.م</strong></div>
+        <div><span>المنطقة</span><strong>{orderAreaNames}</strong></div>
+        {user.role === 'admin' && <>
+          <div><span>تكلفة الخامات التقديرية</span><strong>{money(order.materialCost)} ج.م</strong></div>
+          <div><span>تكلفة مواد FIFO الفعلية</span><strong>{money(order.actualMaterialCogs)} ج.م</strong></div>
+          <div><span>تكلفة التشغيل</span><strong>{money(order.operatingCost)} ج.م</strong></div>
+          <div><span>قيمة البيع</span><strong>{money(order.sellingPrice)} ج.م</strong></div>
+          <div><span>الربح المتوقع</span><strong className={order.profit >= 0 ? 'profit-positive' : 'profit-negative'}>{money(order.profit)} ج.م</strong></div>
+        </>}
+      </>}
+    </div>
+    {user.role==='admin'&&!isMaintenanceOrder&&<section className="panel inventory-panel"><div className="panel-heading"><div><span className="section-eyebrow">تكلفة فعلية بقيمة FIFO</span><h3>صرف مواد الأمر</h3></div><span className="result-count">{money(order.actualMaterialCogs)} ج.م</span></div>{order.inventoryIssues?.length?<div className="table-wrap"><table><thead><tr><th>التاريخ</th><th>الخامة</th><th>المرجع</th><th>الكمية</th><th>قيمة الصرف</th><th>تكلفة الأمر</th><th>القيد</th></tr></thead><tbody>{order.inventoryIssues.map((issue)=><tr key={issue.id}><td>{date(issue.created_at)}</td><td>{issue.material_label||'—'}</td><td>{issue.reference||'—'}</td><td>{quantity(issue.requested_quantity)}</td><td>{money(issue.gross_cost_cents/100)} ج.م</td><td>{money(issue.cogs_cents/100)} ج.م</td><td>{issue.journal_status==='posted'?'مرحّل':issue.journal_status==='pending_configuration'?'بانتظار اعتماد الحساب':issue.journal_status||'دون تكلفة'}</td></tr>)}</tbody></table></div>:<div className="empty-inline">لم يُسجل صرف مواد لهذا الأمر بعد.</div>}</section>}
      {canOperate&&order.status!=='archived'&&<section className={`upload-area panel ${draggingFolder?'upload-area-dragging':''} ${uploading?'upload-area-busy':''}`} onDragOver={(event)=>{event.preventDefault();if(!uploading)setDraggingFolder(true)}} onDragLeave={(event)=>{if(!event.currentTarget.contains(event.relatedTarget))setDraggingFolder(false)}} onDrop={dropFolder}><div className="upload-icon"><CloudUpload size={22}/></div><div className="upload-copy"><h3>{processingFolder?`جارٍ معالجة ${processingFolder}`:draggingFolder?'أفلت المجلد لبدء الرفع':'إضافة صور المنطقة'}</h3><p>اختر المنطقة أولًا، ثم اختر مجلدًا محفوظًا على الخادم أو أفلت مجلدًا من جهازك.</p><span><FileImage size={14}/> صور JPG وPNG وWEBP · حتى 25MB للصورة</span>{uploading&&!processingFolder&&<div className="upload-progress" role="progressbar" aria-valuenow={uploadProgress} aria-valuemin="0" aria-valuemax="100"><div><i style={{width:`${uploadProgress}%`}}/></div><strong>{uploadProgress}%</strong></div>}{processingFolder&&<span className="server-folder-processing"><RefreshCw size={14} className="spin"/> تتم قراءة الصور من مجلد الخادم...</span>}</div><div className="area-picker-control"><MachineAreaSelector areas={machineAreas} selectedAreas={selectedAreas} onChange={setSelectedAreas} loading={areasLoading} error={areasLoadError} disabled={uploading||addingAreaMachines}/><button type="button" className="button button-primary" disabled={uploading||addingAreaMachines||selectedAreas.length===0} onClick={openServerFolderPicker}>{uploading?<RefreshCw size={16} className="spin"/>:<Folder size={16}/>} {uploading?'جارٍ المعالجة...':'اختيار مجلد الصور'}</button>{canOperate&&<button type="button" className="button button-secondary insert-area-machines-button" disabled={uploading||addingAreaMachines||order.status==='archived'||selectedAreas.length===0} onClick={insertAllAreaMachines}>{addingAreaMachines?<RefreshCw size={15} className="spin"/>:<Plus size={15}/>} {addingAreaMachines?'جارٍ إدراج الماكينات...':'إدراج جميع ماكينات المنطقة'}</button>}</div></section>}
     {processingFolder&&<div className="server-folder-progress" role="status"><div className="server-folder-progress-label"><RefreshCw size={14} className="spin"/><span>تتم قراءة الصور من المجلد بنسبة {processingProgress}%</span></div><div className="upload-progress" role="progressbar" aria-valuenow={processingProgress} aria-valuemin="0" aria-valuemax="100"><div><i style={{width:`${processingProgress}%`}}/></div><strong>{processingProgress}%</strong></div></div>}
     {visibleUnrecognizedFolders.length > 0 && <section className="unrecognized-section">
@@ -1029,6 +1130,7 @@ function InventoryPage({ data, user, onAdd, onPurchase, onIssue, onOtherInvoice,
   const [stockCounts,setStockCounts]=useState([])
   const [activeCount,setActiveCount]=useState(null)
   const [countItems,setCountItems]=useState([])
+  const [countOffcuts,setCountOffcuts]=useState([])
   const [countReason,setCountReason]=useState('')
   const [otherInvoices,setOtherInvoices]=useState([])
   const [selectedCountMaterialIds,setSelectedCountMaterialIds]=useState([])
@@ -1041,10 +1143,10 @@ function InventoryPage({ data, user, onAdd, onPurchase, onIssue, onOtherInvoice,
   useEffect(()=>{if(!canManage)return;api('/other-invoices').then(setOtherInvoices).catch((error)=>notify(error.message))},[canManage,data])
   useEffect(()=>{setSelectedCountMaterialIds((current)=>current.filter((id)=>data.materials.some((material)=>material.id===id)))},[data.materials])
   useEffect(()=>{if(!location.hash)return;requestAnimationFrame(()=>document.getElementById(decodeURIComponent(location.hash.slice(1)))?.scrollIntoView({behavior:'smooth',block:'center'}))},[location.hash,movements,stockCounts])
-  const openStockCount=async(count)=>{try{const detail=await api(`/inventory/stock-counts/${count.id}`);setActiveCount(detail);setCountItems(detail.items.map((item)=>({...item,counted_stock:item.counted_stock??'',counted_sub_stock:item.counted_sub_stock??''})))}catch(error){notify(error.message)}}
+  const openStockCount=async(count)=>{try{const detail=await api(`/inventory/stock-counts/${count.id}`);setActiveCount(detail);setCountItems(detail.items.map((item)=>({...item,counted_stock:item.counted_stock??'',counted_sub_stock:item.counted_sub_stock??''})));setCountOffcuts((detail.offcuts||[]).map((item)=>({...item,counted_quantity:item.counted_quantity??''})))}catch(error){notify(error.message)}}
   const createStockCount=async()=>{if(!countReason.trim()){notify('اذكر سبب الجرد قبل فتح المحضر.');return}if(!selectedCountMaterialIds.length){notify('حدد صنفًا واحدًا على الأقل للجرد.');return}setCountBusy(true);try{const result=await api('/inventory/stock-counts',{method:'POST',body:json({reason:countReason,materialIds:selectedCountMaterialIds})});setCountReason('');setSelectedCountMaterialIds([]);await loadStockCounts();await openStockCount(result);notify(`تم فتح ${result.code} وقفل ${result.itemCount} صنفًا للحركة.`)}catch(error){notify(error.message)}finally{setCountBusy(false)}}
   const toggleCountMaterial=(materialId)=>setSelectedCountMaterialIds((current)=>current.includes(materialId)?current.filter((id)=>id!==materialId):[...current,materialId])
-  const saveCountItems=async()=>{if(countItems.some((item)=>item.counted_stock===''||item.counted_stock==null||item.counted_sub_stock===''||item.counted_sub_stock==null)){notify('أدخل الرصيد الفعلي الأساسي والبواقي لكل صنف قبل الحفظ.');return}setCountBusy(true);try{await api(`/inventory/stock-counts/${activeCount.id}/items`,{method:'PUT',body:json({items:countItems.map((item)=>({materialId:item.material_id,stock:Number(item.counted_stock),subStock:Number(item.counted_sub_stock)}))})});await openStockCount(activeCount);notify('تم حفظ كميات الجرد الفعلية.') }catch(error){notify(error.message)}finally{setCountBusy(false)}}
+  const saveCountItems=async()=>{if(countItems.some((item)=>item.counted_stock===''||item.counted_stock==null||item.counted_sub_stock===''||item.counted_sub_stock==null)||countOffcuts.some((item)=>item.counted_quantity===''||item.counted_quantity==null)){notify('أدخل الكميات الفعلية لكل صنف وباقٍ قبل الحفظ.');return}setCountBusy(true);try{await api(`/inventory/stock-counts/${activeCount.id}/items`,{method:'PUT',body:json({items:countItems.map((item)=>({materialId:item.material_id,stock:Number(item.counted_stock),subStock:Number(item.counted_sub_stock)})),offcuts:countOffcuts.map((item)=>({offcutId:item.offcut_id,quantity:Number(item.counted_quantity)}))})});await openStockCount(activeCount);notify('تم حفظ كميات الأصناف والبواقي الفعلية.') }catch(error){notify(error.message)}finally{setCountBusy(false)}}
   const approveCount=async()=>{if(!window.confirm('اعتماد الجرد سيُنشئ تسويات محاسبية ويفك قفل الأصناف. هل راجعت الكميات؟'))return;setCountBusy(true);try{await api(`/inventory/stock-counts/${activeCount.id}/approve`,{method:'POST',body:'{}'});setActiveCount(null);await loadStockCounts();await onRefresh();notify('تم اعتماد محضر الجرد وتسجيل الفروقات.') }catch(error){notify(error.message)}finally{setCountBusy(false)}}
   const cancelCount=async()=>{if(!window.confirm('إلغاء المحضر سيفك قفل الأصناف دون تسويات. متابعة؟'))return;setCountBusy(true);try{await api(`/inventory/stock-counts/${activeCount.id}/cancel`,{method:'POST',body:'{}'});setActiveCount(null);await loadStockCounts();notify('تم إلغاء الجرد وفك قفل الأصناف.')}catch(error){notify(error.message)}finally{setCountBusy(false)}}
   const importInventory=async(file)=>{
@@ -1081,6 +1183,7 @@ function InventoryPage({ data, user, onAdd, onPurchase, onIssue, onOtherInvoice,
        {stockCounts.length?<div className="table-wrap"><table><thead><tr><th>المحضر</th><th>السبب</th><th>الحالة</th><th>الأصناف</th><th>غير معدود</th><th>التاريخ</th><th/></tr></thead><tbody>{stockCounts.map((count)=><tr key={count.id} id={`stock-count-${count.id}`}><td>{count.code}</td><td>{count.reason||'—'}</td><td>{count.status==='open'?'مفتوح ومقفل':count.status==='approved'?'معتمد':'ملغى'}</td><td>{count.item_count}</td><td>{count.uncounted}</td><td>{date(count.created_at)}</td><td><button className="button button-ghost button-small" onClick={()=>openStockCount(count)}>{count.status==='open'?'إدخال / مراجعة':'عرض'}</button></td></tr>)}</tbody></table></div>:<div className="empty-inline">لا توجد محاضر جرد.</div>}
       {activeCount&&<div className="stock-count-detail"><div className="panel-heading"><div><span className="section-eyebrow">{activeCount.code} · {activeCount.reason}</span><h3>الكميات الفعلية مقابل الدفترية والفروقات</h3></div><button className="icon-button" onClick={()=>setActiveCount(null)} aria-label="إغلاق"><X size={18}/></button></div><div className="table-wrap"><table><thead><tr><th>الصنف</th><th>أساسي دفتري</th><th>أساسي فعلي</th><th>فرق الأساسي</th><th>بواقي دفتري</th><th>بواقي فعلي</th><th>فرق البواقي</th><th>فرق الإجمالي</th></tr></thead><tbody>{countItems.map((item,index)=>{const mainVariance=item.counted_stock===''||item.counted_stock==null?null:Number((Number(item.counted_stock)-Number(item.recorded_stock)).toFixed(6));const subVariance=item.counted_sub_stock===''||item.counted_sub_stock==null?null:Number((Number(item.counted_sub_stock)-Number(item.recorded_sub_stock)).toFixed(6));const totalVariance=mainVariance==null||subVariance==null?null:Number((mainVariance+subVariance).toFixed(6));const varianceCell=(value)=><td className={value==null?'':value<0?'movement-negative':'movement-positive'}>{value==null?'—':`${value>0?'+':''}${quantity(value)}`}</td>;return <tr key={item.id}><td>{item.code} — {item.name} {item.specification&&`· ${item.specification}`}</td><td>{quantity(item.recorded_stock)}</td><td><input aria-label={`الأساسي الفعلي ${item.name}`} type="number" min="0" step="1" placeholder={String(item.recorded_stock)} disabled={activeCount.status!=='open'} value={item.counted_stock} onChange={(event)=>setCountItems((current)=>current.map((row,i)=>i===index?{...row,counted_stock:event.target.value}:row))}/></td>{varianceCell(mainVariance)}<td>{quantity(item.recorded_sub_stock)}</td><td><input aria-label={`البواقي الفعلية ${item.name}`} type="number" min="0" step="0.000001" placeholder={String(item.recorded_sub_stock)} disabled={activeCount.status!=='open'} value={item.counted_sub_stock} onChange={(event)=>setCountItems((current)=>current.map((row,i)=>i===index?{...row,counted_sub_stock:event.target.value}:row))}/></td>{varianceCell(subVariance)}{varianceCell(totalVariance)}</tr>})}</tbody></table></div>{activeCount.status==='open'&&<div className="modal-actions"><button className="button button-ghost" disabled={countBusy} onClick={saveCountItems}><Save size={15}/> حفظ الكميات</button><button className="button button-primary" disabled={countBusy} onClick={approveCount}><Check size={15}/> اعتماد وتسوية</button><button className="button button-danger" disabled={countBusy} onClick={cancelCount}>إلغاء وفك القفل</button></div>}</div>}
     </section>}
+     {isAdmin&&activeCount&&<section className="panel inventory-panel"><div className="panel-heading"><div><span className="section-eyebrow">المخزن الجانبي</span><h3>جرد البواقي المسجلة</h3></div><span className="result-count">{countOffcuts.length} باقي</span></div>{countOffcuts.length?<div className="table-wrap"><table><thead><tr><th>الخامة</th><th>الأبعاد</th><th>الوحدة</th><th>الكمية الدفترية</th><th>الكمية الفعلية</th><th>الفرق</th></tr></thead><tbody>{countOffcuts.map((item,index)=>{const variance=item.counted_quantity===''||item.counted_quantity==null?null:Number((Number(item.counted_quantity)-Number(item.recorded_quantity)).toFixed(6));return <tr key={item.id}><td>{item.name}{item.material_code&&` · ${item.material_code}`}</td><td>{item.dimensions||'—'}</td><td>{item.unit}</td><td>{quantity(item.recorded_quantity)}</td><td><input aria-label={`الكمية الفعلية ${item.name}`} type="number" min="0" step="0.000001" disabled={activeCount.status!=='open'} value={item.counted_quantity} onChange={(event)=>setCountOffcuts((current)=>current.map((row,i)=>i===index?{...row,counted_quantity:event.target.value}:row))}/></td><td className={variance==null?'':variance<0?'movement-negative':'movement-positive'}>{variance==null?'—':`${variance>0?'+':''}${quantity(variance)}`}</td></tr>})}</tbody></table></div>:<div className="empty-inline">لم تكن هناك بواقي متاحة عند فتح محضر الجرد.</div>}</section>}
      <div className="panel inventory-panel movement-panel"><div className="panel-heading"><div><span className="section-eyebrow">سجل الحركة</span><h3>آخر حركات المخزون</h3></div><span className="result-count">آخر {movements.length} حركة</span></div>{movements.length?<div className="table-wrap"><table><thead><tr><th>التاريخ</th><th>الخامة</th><th>الحركة</th><th>المخزن</th><th>الكمية</th><th>التصنيف / الأمر</th><th>المرجع</th><th>ملاحظات</th></tr></thead><tbody>{movements.slice(0,40).map((movement)=><tr key={movement.id} id={`inventory-movement-${movement.id}`}><td>{date(movement.created_at)}</td><td>{movement.material_name}</td><td>{movementName[movement.kind]||movement.kind}</td><td>{movement.warehouse==='sub'?'البواقي':'الأساسي'}</td><td className={movement.quantity<0?'movement-negative':'movement-positive'}>{quantity(movement.quantity)}</td><td>{movement.order_code|| (movement.issue_classification==='general'?'استهلاك عام':movement.issue_classification==='order'?'أمر تشغيل':'—')}</td><td>{movement.reference||'—'}</td><td className="movement-notes">{movement.notes||'—'}</td></tr>)}</tbody></table></div>:<div className="empty-inline">لا توجد حركات مسجلة حتى الآن.</div>}</div>
   </div>
 }
@@ -1406,7 +1509,9 @@ function ModalHost({ modal, setModal, data, onRefresh, run, notify }) {
       const result=await api(`/inventory/purchases/${modal.invoice.id}/correction`,{method:'POST',body:json({reason:values.reason,supplierRefundReceived:values.supplierRefundReceived==='yes'})});notify(`تم تصحيح ${result.code} بعد إثبات عدم صرف الرصيد ورد المبلغ.`)
     }
     if(modalType==='issue'){
-      await api('/inventory/issue',{method:'POST',body:json({materialId:Number(values.materialId),quantity:Number(values.quantity),warehouse:values.warehouse||'auto',classification:values.classification,orderId:values.classification==='order'?Number(values.orderId):null,reference:values.reference,notes:values.notes})});notify('تم صرف الخامة وربط تكلفتها الفعلية.')
+      const selectedOrder = String(values.orderId || '').match(/^(legacy|manufacturing):(\d+)$/)
+      if(values.classification==='order'&&!selectedOrder)throw new Error('اختر أمرًا صحيحًا لربط صرف الخامة به.')
+      await api('/inventory/issue',{method:'POST',body:json({materialId:Number(values.materialId),quantity:Number(values.quantity),warehouse:values.warehouse||'auto',classification:values.classification,orderId:values.classification==='order'?Number(selectedOrder[2]):null,orderType:values.classification==='order'?selectedOrder[1]:undefined,reference:values.reference,notes:values.notes})});notify('تم صرف الخامة وربط تكلفتها الفعلية.')
     }
     if(modalType==='user'){
       await api('/users',{method:'POST',body:json(values)});notify('تم إنشاء حساب المستخدم.')
@@ -1433,7 +1538,7 @@ function ModalHost({ modal, setModal, data, onRefresh, run, notify }) {
      {modalType==='other-invoice'&&<><Field label="المورد"><input name="supplier" placeholder="المورد أو الجهة"/></Field><Field label="الموظف"><select name="employeeId" defaultValue=""><option value="">بدون ربط بموظف</option>{(data.employees||[]).map((employee)=><option value={employee.id} key={employee.id}>{employee.name} — {employee.department}</option>)}</select></Field>{otherLines.map((line,index)=><section className="purchase-line panel" key={index}><div className="panel-heading"><strong>مصروف {index+1}</strong>{otherLines.length>1&&<button type="button" className="button button-ghost button-small" onClick={()=>setOtherLines((current)=>current.filter((_,i)=>i!==index))}>حذف</button>}</div><div className="form-row"><Field label="الوصف" required><input required value={line.description} onChange={(event)=>setOtherLines((current)=>current.map((item,i)=>i===index?{...item,description:event.target.value}:item))}/></Field><Field label="التصنيف" required><input required value={line.category} placeholder="إيجار، صيانة..." onChange={(event)=>setOtherLines((current)=>current.map((item,i)=>i===index?{...item,category:event.target.value}:item))}/></Field><Field label="المبلغ (ج.م)" required><input required type="number" min="0.01" step="0.01" value={line.amount} onChange={(event)=>setOtherLines((current)=>current.map((item,i)=>i===index?{...item,amount:event.target.value}:item))}/></Field></div></section>)}<button type="button" className="button button-ghost" onClick={()=>setOtherLines((current)=>[...current,{description:'',category:'',amount:''}])}><Plus size={15}/> إضافة مصروف</button><Field label="ملاحظات"><input name="notes"/></Field><div className="modal-hint">مصروف غير مخزني؛ يُسدد كاملًا من صندوق المصنع. اعتماد التصنيف المحاسبي مطلوب لترحيل القيد.</div></>}
       {modalType==='other-invoice'&&<Field label="مرفق إثبات اختياري"><input name="otherEvidence" type="file" accept="image/jpeg,image/png,image/webp,image/gif,image/bmp,application/pdf" className="file-input-native"/><small className="field-help">يمكن إرفاق صورة أو PDF. سيبقى ملف الفاتورة محليًا، ويمكن إرفاق الإثبات بعد الحفظ إذا تعذر الرفع.</small></Field>}
       {modalType==='purchase-correction'&&<><div className="modal-hint">الفاتورة {modal.invoice?.code} · {money(modal.invoice?.total)} ج.م. يُقبل التصحيح فقط إذا أثبت النظام أن كامل رصيدها ما زال غير مصروف واستُرد المبلغ من المورد.</div><Field label="سبب التصحيح" required><textarea name="reason" required rows="3" maxLength="1000"/></Field><Field label="تأكيد استلام رد المورد" required><select name="supplierRefundReceived" required defaultValue=""><option value="" disabled>اختر</option><option value="yes">استلمت رد المبلغ كاملًا</option><option value="no">لم أستلم المبلغ</option></select></Field></>}
-     {modalType==='issue'&&<><Field label="تصنيف الصرف" required><select name="classification" required value={issueClassification} onChange={(event)=>setIssueClassification(event.target.value)}><option value="general">استهلاك عام (ليس لأمر محدد)</option><option value="order">مرتبط بأمر تشغيل</option></select></Field>{issueClassification==='order'&&<Field label="أمر التشغيل" required><select name="orderId" required defaultValue={modal?.order?.id||''}><option value="" disabled>اختر أمر التشغيل</option>{data.orders.filter((order)=>order.status!=='archived').map((order)=><option value={order.id} key={order.id}>{order.code} · {order.clientName}</option>)}</select></Field>}<Field label="الخامة" required><select name="materialId" required defaultValue=""><option value="" disabled>اختر خامة</option>{data.materials.map((material)=><option value={material.id} key={material.id}>{material.name} — الأساسي {quantity(material.stock)} · البواقي {quantity(material.subStock)}</option>)}</select></Field><Field label="مصدر الصرف" required><select name="warehouse" defaultValue="auto"><option value="auto">تلقائي: البواقي أولًا ثم الأساسي</option><option value="sub">مخزن البواقي فقط</option><option value="main">وحدات كاملة من الأساسي (يُسجّل المتبقي كبواقي)</option></select><small className="field-help">تكلفة الصرف تُحسب من أرصدة FIFO؛ قيمة الباقي القابل للاستخدام تُستبعد من تكلفة الأمر.</small></Field><div className="form-row"><Field label="الكمية" required><input name="quantity" required type="number" step="0.01" min="0.01"/></Field><Field label="المرجع"><input name="reference" placeholder="مرجع صرف اختياري"/></Field></div><Field label="ملاحظات"><input name="notes"/></Field></>}
+      {modalType==='issue'&&<><Field label="تصنيف الصرف" required><select name="classification" required value={issueClassification} onChange={(event)=>setIssueClassification(event.target.value)}><option value="general">استهلاك عام (ليس لأمر محدد)</option><option value="order">مرتبط بأمر</option></select></Field>{issueClassification==='order'&&<Field label="أمر التشغيل أو الصيانة" required><select name="orderId" required defaultValue={modal?.order?.id?`legacy:${modal.order.id}`:''}><option value="" disabled>اختر الأمر</option>{data.orders.filter((order)=>order.status!=='archived').map((order)=><option value={`legacy:${order.id}`} key={`legacy-${order.id}`}>{order.type==='maintenance'?'[صيانة]':'[أمر سابق]'} {order.code} — {order.clientName}</option>)}{(data.manufacturingOrders||[]).filter((order)=>order.status==='in_production').map((order)=><option value={`manufacturing:${order.id}`} key={`manufacturing-${order.id}`}>[أمر تشغيل] {order.order_code} — {order.product_name} — {order.client_name}</option>)}</select></Field>}<Field label="الخامة" required><select name="materialId" required defaultValue=""><option value="" disabled>اختر خامة</option>{data.materials.map((material)=><option value={material.id} key={material.id}>{material.name} — الأساسي {quantity(material.stock)} · البواقي {quantity(material.subStock)}</option>)}</select></Field><Field label="مصدر الصرف" required><select name="warehouse" defaultValue="auto"><option value="auto">تلقائي: البواقي أولًا ثم الأساسي</option><option value="sub">مخزن البواقي فقط</option><option value="main">وحدات كاملة من الأساسي (يُسجّل المتبقي كبواقي)</option></select><small className="field-help">تكلفة الصرف تُحسب من أرصدة FIFO؛ قيمة الباقي القابل للاستخدام تُستبعد من تكلفة الأمر.</small></Field><div className="form-row"><Field label="الكمية" required><input name="quantity" required type="number" step="0.01" min="0.01"/></Field><Field label="المرجع"><input name="reference" placeholder="مرجع صرف اختياري"/></Field></div><Field label="ملاحظات"><input name="notes"/></Field></>}
     {modalType==='user'&&<><Field label="الاسم الكامل" required><input name="fullName" required placeholder="اسم الموظف"/></Field><div className="form-row"><Field label="اسم المستخدم" required><input name="username" required minLength="3" autoComplete="off"/></Field><Field label="الدور الوظيفي" required><select name="role" defaultValue="sales"><option value="admin">مدير عام</option><option value="sales">مبيعات</option><option value="operations">تشغيل وصيانة</option><option value="purchasing">مشتريات ومخازن</option></select></Field></div><Field label="كلمة المرور (10 أحرف على الأقل)" required><input name="password" required minLength="10" type="password" autoComplete="new-password"/></Field></>}
       {modalType==='purchase'&&<section className="purchase-calculation-summary" aria-live="polite">{purchaseLines.map((line,index)=>{const material=data.materials.find((item)=>String(item.id)===String(line.materialId));return <div key={index}><span>بند {index+1}{material?` · ${material.code} — ${material.name} · ${material.specification||'بدون مواصفة'} · ${material.unit} · سعر الكود ${money(material.unitCost)} ج.م`:''} · سعر الشراء ${line.unitCost||'—'} ج.م · الكمية ${line.quantity||'—'}</span><strong>{purchaseLineTotalCents[index]===null?'—':`${formatCurrencyCents(purchaseLineTotalCents[index])} ج.م`}</strong></div>})}<strong>إجمالي الفاتورة: {purchaseInvoiceTotalCents===null?'—':`${formatCurrencyCents(purchaseInvoiceTotalCents)} ج.م`}</strong></section>}
       {modalType==='sale'&&<div className="custom-tax-option"><label><input type="checkbox" checked={useCustomTaxRate} onChange={(event)=>setUseCustomTaxRate(event.target.checked)}/> إدخال نسبة ضريبية مخصصة لهذه الفاتورة</label>{useCustomTaxRate&&<Field label="النسبة المخصصة (%)" required><input name="customTaxPercent" type="number" min="0" max="1000" step="0.01" required/></Field>}</div>}

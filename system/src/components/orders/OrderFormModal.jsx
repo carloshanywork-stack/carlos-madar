@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ArrowLeft, Users, X } from 'lucide-react'
+import { ArrowLeft, X } from 'lucide-react'
 
 const numberFormat = new Intl.NumberFormat('ar-EG', { maximumFractionDigits: 0 })
 const missingClientMessage = 'يجب اختيار العميل لتكوين مسار الحفظ الصحيح'
@@ -7,12 +7,11 @@ const missingClientMessage = 'يجب اختيار العميل لتكوين مس
 export default function OrderFormModal({ modal, data, apiClient, onClose, onRefresh, onOrderUpdated, notify }) {
   const modalType = typeof modal === 'string' ? modal : modal?.type
   const editingOrder = modalType === 'edit-order' && typeof modal === 'object' ? modal.order : null
-  const initialMachines = !editingOrder && Array.isArray(modal?.initialMachines) ? modal.initialMachines : []
   const clients = Array.isArray(data?.clients) ? data.clients : []
-  const [type, setType] = useState(editingOrder?.type === 'maintenance' || modal?.initialType === 'maintenance' ? 'maintenance' : 'operation')
+  const initialType = editingOrder?.type || (modal?.initialType === 'maintenance' ? 'maintenance' : 'operation')
+  const [type, setType] = useState(initialType)
   const [clientId, setClientId] = useState(String(editingOrder?.clientId ?? editingOrder?.client?.id ?? ''))
   const [employeeIds, setEmployeeIds] = useState((editingOrder?.employeeIds || (editingOrder?.assignedEmployeeId ? [editingOrder.assignedEmployeeId] : [])).map(String))
-  const [selectedMachineIds, setSelectedMachineIds] = useState((initialMachines || []).map((machine) => String(machine.id)))
   const [employees, setEmployees] = useState([])
   const [loadingEmployees, setLoadingEmployees] = useState(false)
   const [notes, setNotes] = useState(String(editingOrder?.notes ?? ''))
@@ -44,8 +43,10 @@ export default function OrderFormModal({ modal, data, apiClient, onClose, onRefr
     const parsedClientId = Number(clientId)
     if (!Number.isSafeInteger(parsedClientId) || parsedClientId < 1 || !clients.some((client) => Number(client.id) === parsedClientId)) return missingClientMessage
     if (!['operation','maintenance'].includes(type)) return 'اختر نوع أمر صالحًا.'
-    const financialValues = [costs.materials, costs.operations, costs.sale].map((value) => Number(value || 0))
-    if (financialValues.some((value) => !Number.isFinite(value) || value < 0)) return 'يجب أن تكون القيم المالية أرقامًا موجبة أو صفرًا.'
+    if (type === 'operation') {
+      const financialValues = [costs.materials, costs.operations, costs.sale].map((value) => Number(value || 0))
+      if (financialValues.some((value) => !Number.isFinite(value) || value < 0)) return 'يجب أن تكون القيم المالية أرقامًا موجبة أو صفرًا.'
+    }
     return ''
   }
 
@@ -62,11 +63,8 @@ export default function OrderFormModal({ modal, data, apiClient, onClose, onRefr
         type,
         notes: String(notes || '').trim(),
         employeeIds: employeeIds.map(Number),
-        machineIds: selectedMachineIds.map(Number),
       }
-      if (type === 'maintenance') {
-        if (initialMachines.length) payload.machineIds = [...new Set([...payload.machineIds, ...initialMachines.map((machine) => Number(machine.id))])]
-      } else {
+      if (type === 'operation') {
         payload.materialCost = materialCost
         payload.operatingCost = operatingCost
         payload.sellingPrice = sellingPrice
@@ -89,7 +87,14 @@ export default function OrderFormModal({ modal, data, apiClient, onClose, onRefr
   }
 
   const close = () => { if (!submitting) onClose?.() }
-  const heading = editingOrder ? 'تعديل بيانات الأمر' : 'إنشاء أمر تشغيل'
+  const heading = editingOrder
+    ? `تعديل أمر ${type === 'maintenance' ? 'صيانة' : 'تشغيل'}`
+    : `إنشاء أمر ${type === 'maintenance' ? 'صيانة' : 'تشغيل'}`
+  const toggleEmployee = (employeeId, checked) => setEmployeeIds((current) => (
+    checked
+      ? [...new Set([...current, employeeId])]
+      : current.filter((id) => id !== employeeId)
+  ))
 
   return <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && close()}>
     <section className="modal-card" role="dialog" aria-modal="true" aria-labelledby="order-form-heading" dir="rtl">
@@ -114,29 +119,25 @@ export default function OrderFormModal({ modal, data, apiClient, onClose, onRefr
         <label className="field"><span>نوع الأمر<b> *</b></span>
           <select value={type} onChange={(event) => setType(event.target.value)} required>
             <option value="operation">أمر تشغيل</option>
-            <option value="maintenance">صيانة</option>
+            <option value="maintenance">أمر صيانة</option>
           </select>
         </label>
 
-        <label className="field"><span>فريق العمل (متساوون)</span>
-          <select multiple value={employeeIds} onChange={(event) => setEmployeeIds(Array.from(event.target.selectedOptions, (option) => option.value))} size={Math.min(5, Math.max(3, employees.length))}>
-            {employees.map((employee) => <option key={employee.id} value={employee.id}>{employee.name} — {employee.department}</option>)}
-          </select>
+        <div className="field employee-checkbox-field" role="group" aria-label="فريق العمل">
+          <span>فريق العمل (متساوون)</span>
+          {loadingEmployees ? <small className="field-help">جارٍ تحميل الموظفين...</small> : employees.length ? <div className="employee-checkbox-list">
+            {employees.map((employee) => {
+              const employeeId = String(employee.id)
+              return <label className="employee-checkbox-option" key={employee.id}>
+                <input type="checkbox" checked={employeeIds.includes(employeeId)} onChange={(event) => toggleEmployee(employeeId, event.target.checked)}/>
+                <span><strong>{employee.name} — {employee.jobTitle || employee.department || 'موظف'}</strong></span>
+              </label>
+            })}
+          </div> : <small className="field-help">لا يوجد موظفون نشطون للاختيار.</small>}
           <small className="field-help">يمكن اختيار أكثر من موظف؛ لا يوجد قائد أو توزيع حصص.</small>
-        </label>
-        <label className="field"><span>أنواع الماكينات من الدليل</span>
-          <select multiple value={selectedMachineIds} onChange={(event) => setSelectedMachineIds(Array.from(event.target.selectedOptions, (option) => option.value))} size={Math.min(6, Math.max(3, data.machines.length))}>
-            {data.machines.map((machine) => <option key={machine.id} value={machine.id}>{machine.code} — {machine.nameAr}</option>)}
-          </select>
-        </label>
+        </div>
 
-        {type === 'maintenance' ? <div className="maintenance-assignee-field">
-          {initialMachines.length > 0 && <section className="preselected-machines" aria-label="الماكينات المطلوب استكمالها">
-            <div><strong>الماكينات المحددة مسبقًا</strong><span>{initialMachines.length} ماكينة من تحليل المنطقة</span></div>
-            <ul>{initialMachines.map((machine) => <li key={machine.id}><b>{machine.code}</b><span>{machine.name_ar || machine.nameAr}</span></li>)}</ul>
-          </section>}
-          <span className="maintenance-note"><Users size={15}/> أوامر الصيانة لا تتضمن بيانات مالية.</span>
-        </div> : <>
+        {type === 'operation' && <>
           <div className="form-row">
             <label className="field"><span>تكلفة الخامات (ج.م)</span><input type="number" min="0" step="0.01" value={costs.materials} onChange={(event) => setCost('materials', event.target.value)}/></label>
             <label className="field"><span>تكلفة التشغيل (ج.م)</span><input type="number" min="0" step="0.01" value={costs.operations} onChange={(event) => setCost('operations', event.target.value)}/></label>

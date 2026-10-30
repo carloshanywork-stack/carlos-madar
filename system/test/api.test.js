@@ -318,6 +318,57 @@ test('purchase, fractional issue, sales and treasury stay in sync in SQLite', as
   assert.equal((await request('/employees', {
     method: 'POST', authCookie: salesCookie, body: { name: 'Unauthorized employee', department: 'Maintenance' },
   })).response.status, 403)
+  const staffRoster = await request('/staff')
+  assert.equal(staffRoster.response.status, 200)
+  assert.ok(staffRoster.data.some((employee) => employee.id === maintenanceEmployee.data.id))
+  const employeeLogin = await request('/auth/login', { method: 'POST', body: {
+    username: 'employee-purchasing', password: 'employee-password-123',
+  } })
+  assert.equal(employeeLogin.response.status, 200)
+  const employeeCookie = employeeLogin.response.headers.get('set-cookie').split(';')[0]
+  const disabledEmployeeLogin = await request(`/staff/${loginEmployee.data.id}`, { method: 'PATCH', body: {
+    name: 'Test Purchasing', department: 'Purchasing', phone: '', monthlyBaseSalary: 0,
+    canLogin: false, active: true,
+  } })
+  assert.equal(disabledEmployeeLogin.response.status, 200, disabledEmployeeLogin.data.error)
+  assert.equal((await request('/bootstrap', { authCookie: employeeCookie })).response.status, 401)
+  const disabledUserState = new Database(path.join(tempRoot, 'test.sqlite'), { readonly: true })
+  try {
+    assert.equal(disabledUserState.prepare('SELECT active FROM users WHERE username=?').get('employee-purchasing').active, 0)
+    assert.equal(disabledUserState.prepare(`SELECT COUNT(*) AS count FROM sessions
+      WHERE user_id=(SELECT id FROM users WHERE username=?)`).get('employee-purchasing').count, 0)
+  } finally { disabledUserState.close() }
+  const attendanceOne = await request('/staff/attendance/mark-all-present', {
+    method: 'POST', body: { date: '2026-09-01' },
+  })
+  assert.equal(attendanceOne.response.status, 200)
+  const attendanceTwo = await request('/staff/attendance/mark-all-present', {
+    method: 'POST', body: { date: '2026-09-02' },
+  })
+  assert.equal(attendanceTwo.response.status, 200)
+  for (const date of ['2026-09-01', '2026-09-02']) {
+    const dayAttendance = await request(`/staff/attendance/${date}`, { method: 'PUT', body: { entries: [{
+      employeeId: maintenanceEmployee.data.id, status: 'absent', overtimeMinutes: 30,
+      holidayOvertimeMinutes: 30, notes: 'isolated attendance test',
+    }] } })
+    assert.equal(dayAttendance.response.status, 200, dayAttendance.data.error)
+  }
+  const invalidAttendanceDate = await request('/staff/attendance?date=2026-02-30')
+  assert.equal(invalidAttendanceDate.response.status, 400)
+
+  const custodyEmployee = await request('/staff', {
+    method: 'POST', body: { name: 'Custody Clearance Test', jobTitle: 'Field technician', department: 'Maintenance' },
+  })
+  assert.equal(custodyEmployee.data.jobTitle, 'Field technician')
+  const issuedTool = await request(`/staff/${custodyEmployee.data.id}/tools`, {
+    method: 'POST', body: { toolName: 'Impact driver', serialNumber: 'CUSTODY-API-1' },
+  })
+  assert.equal(issuedTool.response.status, 201, issuedTool.data.error)
+  assert.equal((await request(`/staff/${custodyEmployee.data.id}`, { method: 'DELETE' })).response.status, 409)
+  const returnedTool = await request(`/staff/tools/${issuedTool.data.id}/return`, { method: 'POST', body: {} })
+  assert.equal(returnedTool.response.status, 200, returnedTool.data.error)
+  assert.equal(returnedTool.data.return_status, 'returned')
+  assert.equal((await request(`/staff/${custodyEmployee.data.id}`, { method: 'DELETE' })).response.status, 200)
 
   const temporaryClient = await request('/clients', { method: 'POST', body: { name: 'Soft delete client' } })
   assert.equal((await request(`/clients/${temporaryClient.data.id}`, { method: 'DELETE' })).response.status, 200)
@@ -344,6 +395,30 @@ test('purchase, fractional issue, sales and treasury stay in sync in SQLite', as
   const operationsMaterialList = await request('/materials', { authCookie: operationsCookie })
   assert.equal(operationsMaterialList.data.find((item) => item.id === material.data.id).unitCost, 0)
 
+  assert.equal((await request('/warehouse/offcuts', { authCookie: null })).response.status, 401)
+  assert.equal((await request('/warehouse/offcuts', { authCookie: salesCookie })).response.status, 403)
+  assert.equal((await request('/warehouse/scrap-sales', { authCookie: null, method: 'POST', body: {} })).response.status, 401)
+  const offcut = await request('/warehouse/offcuts', { method: 'POST', body: {
+    materialId: material.data.id, name: 'Acrylic remnant', dimensions: '50x50 cm', quantity: 0.5, unit: 'sheet',
+  } })
+  assert.equal(offcut.response.status, 201, offcut.data.error)
+  assert.equal((await request('/warehouse/scrap-sales', { authCookie: salesCookie, method: 'POST', body: {
+    amount: 15, items: [{ offcutId: offcut.data.id, quantity: 0.25 }],
+  } })).response.status, 403)
+  const scrapSale = await request('/warehouse/scrap-sales', { method: 'POST', body: {
+    amount: 15, notes: 'Isolated scrap-sale test', items: [{ offcutId: offcut.data.id, quantity: 0.25 }],
+  } })
+  assert.equal(scrapSale.response.status, 201, scrapSale.data.error)
+  assert.equal(scrapSale.data.treasury_kind, 'income')
+  assert.equal(scrapSale.data.treasury_category, 'إيرادات بيع خردة ومخلفات تشغيل')
+  assert.equal(scrapSale.data.amount_cents, 1500)
+  assert.equal((await request('/warehouse/offcuts')).data.find((item) => item.id === offcut.data.id).quantity, 0.25)
+  const scrapSaleRemainder = await request('/warehouse/scrap-sales', { method: 'POST', body: {
+    amount: 5, items: [{ offcutId: offcut.data.id, quantity: 0.25 }],
+  } })
+  assert.equal(scrapSaleRemainder.response.status, 201, scrapSaleRemainder.data.error)
+  assert.equal((await request('/warehouse/offcuts')).data.some((item) => item.id === offcut.data.id), false)
+
   const parallelMaterialRequests = await Promise.all([
     request('/materials', { method: 'POST', body: { name: 'Parallel material' } }),
     request('/materials', { method: 'POST', body: { name: 'Parallel material' } }),
@@ -363,13 +438,8 @@ test('purchase, fractional issue, sales and treasury stay in sync in SQLite', as
     auditDb.close()
   }
 
-  const worker = await request('/workers', { method: 'POST', body: { name: 'Test worker', jobTitle: 'Technician', phone: '555-0199' } })
-  assert.equal(worker.response.status, 201)
-  const workersList = await request('/workers')
-  assert.ok(workersList.data.some((item) => item.id === worker.data.id && item.name === 'Test worker'))
-  assert.ok((await request('/bootstrap')).data.workers.some((item) => item.id === worker.data.id && item.name === 'Test worker'))
-  const workerUpdate = await request(`/workers/${worker.data.id}`, { method: 'PATCH', body: { jobTitle: 'Senior technician' } })
-  assert.equal(workerUpdate.data.jobTitle, 'Senior technician')
+  assert.equal((await request('/workers')).response.status, 404)
+  assert.equal(Object.hasOwn((await request('/bootstrap')).data, 'workers'), false)
 
   const invalidPrecisionPurchase = await request('/inventory/purchases', {
     method: 'POST', body: { supplier: 'Precision check', employeeId: maintenanceEmployee.data.id, items: [{ materialId: material.data.id, quantity: 1, unitCost: 50.001 }] },
@@ -464,10 +534,10 @@ test('purchase, fractional issue, sales and treasury stay in sync in SQLite', as
 
   const dashboard = await request('/finance/dashboard')
   assert.equal(dashboard.response.status, 200)
-  assert.equal(dashboard.data.summary.income, 0)
+  assert.equal(dashboard.data.summary.income, 20)
   assert.equal(dashboard.data.summary.ownerFunding, 1000)
   assert.equal(dashboard.data.summary.expense, 181)
-  assert.equal(dashboard.data.summary.cashBalance, 819)
+  assert.equal(dashboard.data.summary.cashBalance, 839)
   assert.equal(dashboard.data.summary.inventoryValue, 562.8125)
   assert.equal(dashboard.data.invoices.find((invoice) => invoice.id === sale.data.id).kind, 'sales')
   assert.equal(dashboard.data.invoices.find((invoice) => invoice.id === sale.data.id).payment_status, 'unpaid')
@@ -478,6 +548,13 @@ test('purchase, fractional issue, sales and treasury stay in sync in SQLite', as
   assert.equal(partialReceipt.response.status, 201)
   assert.deepEqual({ paid: partialReceipt.data.paidTotal, remaining: partialReceipt.data.remaining, status: partialReceipt.data.paymentStatus },
     { paid: 200, remaining: 300, status: 'partial' })
+  const clientStatement = await request(`/clients/${client.data.id}/statement`)
+  assert.equal(clientStatement.response.status, 200)
+  assert.equal(clientStatement.data.total_billed, 500)
+  assert.equal(clientStatement.data.total_paid, 200)
+  assert.equal(clientStatement.data.outstanding_balance, 300)
+  assert.equal(clientStatement.data.overdue_60_days, false)
+  assert.equal((await request(`/clients/${client.data.id}/statement`, { authCookie: operationsCookie })).response.status, 403)
   assert.equal((await request(`/treasury/invoices/${sale.data.id}/payments`, {
     method: 'POST', body: { amount: 1.001 },
   })).response.status, 400)
@@ -500,7 +577,10 @@ test('purchase, fractional issue, sales and treasury stay in sync in SQLite', as
   await new Promise((resolve) => setTimeout(resolve, 1050))
   const orderCreate = await request('/orders', {
     method: 'POST', headers: { 'Idempotency-Key': orderKey },
-    body: { clientId: client.data.id },
+    body: {
+      clientId: client.data.id, type: 'operation', notes: 'Operation form submission', employeeIds: [],
+      materialCost: 0, operatingCost: 0, sellingPrice: 0, totalCost: 0,
+    },
   })
   assert.equal(orderCreate.response.status, 201)
   assert.equal(orderCreate.data.folderPath, `Clients/${client.data.name}/Operation/${orderCreate.data.code}`)
@@ -558,7 +638,10 @@ test('purchase, fractional issue, sales and treasury stay in sync in SQLite', as
   createdOrderDb.close()
   const orderReplay = await request('/orders', {
     method: 'POST', headers: { 'Idempotency-Key': orderKey },
-    body: { clientId: client.data.id },
+    body: {
+      clientId: client.data.id, type: 'operation', notes: 'Operation form submission', employeeIds: [],
+      materialCost: 0, operatingCost: 0, sellingPrice: 0, totalCost: 0,
+    },
   })
   assert.equal(orderReplay.data.id, orderCreate.data.id)
   assert.equal(orderReplay.response.headers.get('idempotency-replayed'), 'true')
@@ -577,15 +660,14 @@ test('purchase, fractional issue, sales and treasury stay in sync in SQLite', as
     body: {
       clientId: client.data.id,
       type: 'maintenance',
-       assignedEmployeeId: maintenanceEmployee.data.id,
-      materialCost: 900,
-      operatingCost: 500,
-      sellingPrice: 2000,
+      notes: 'Maintenance form submission',
+      employeeIds: [maintenanceEmployee.data.id],
     },
   })
   assert.equal(maintenanceOrder.response.status, 201)
   assert.equal(maintenanceOrder.data.folderPath, `Clients/${client.data.name}/Maintenance/${maintenanceOrder.data.code}`)
   assert.equal(maintenanceOrder.data.assignedEmployeeId, maintenanceEmployee.data.id)
+  assert.deepEqual(maintenanceOrder.data.employeeIds, [maintenanceEmployee.data.id])
   const maintenanceDb = new Database(path.join(tempRoot, 'test.sqlite'), { readonly: true })
   assert.deepEqual(maintenanceDb.prepare('SELECT total_cost,material_cost,operating_cost,selling_price FROM orders WHERE id=?').get(maintenanceOrder.data.id), {
     total_cost: null, material_cost: null, operating_cost: null, selling_price: null,
@@ -1263,15 +1345,15 @@ test('purchase, fractional issue, sales and treasury stay in sync in SQLite', as
   assert.ok(exported.data.byteLength > 1000)
 
   const settledDashboard = await request('/finance/dashboard')
-  assert.equal(settledDashboard.data.summary.income, 505)
+  assert.equal(settledDashboard.data.summary.income, 525)
   assert.equal(settledDashboard.data.summary.expense, 181)
-  assert.equal(settledDashboard.data.summary.cashBalance, 1324)
+  assert.equal(settledDashboard.data.summary.cashBalance, 1344)
   const paidSale = settledDashboard.data.invoices.find((invoice) => invoice.id === sale.data.id)
   assert.deepEqual([paidSale.paid_total, paidSale.remaining, paidSale.payment_status], [500, 0, 'paid'])
   const softDeletedInvoice = await request(`/invoices/${sale.data.id}`, { method: 'DELETE' })
   assert.equal(softDeletedInvoice.response.status, 409)
   const financeAfterInvoiceDelete = await request('/finance/dashboard')
-  assert.equal(financeAfterInvoiceDelete.data.summary.income, 505)
+  assert.equal(financeAfterInvoiceDelete.data.summary.income, 525)
   assert.ok(financeAfterInvoiceDelete.data.invoices.some((invoice) => invoice.id === sale.data.id))
 
   assert.equal((await request('/accounting/setup', { authCookie: salesCookie })).response.status, 403)
@@ -1525,6 +1607,10 @@ test('purchase, fractional issue, sales and treasury stay in sync in SQLite', as
   const correctedInvoice = (await request('/finance/dashboard')).data.invoices.find((invoice) => invoice.id === correctionPurchase.data.id)
   assert.equal(correctedInvoice.status, 'corrected')
 
+  const countOffcut = await request('/warehouse/offcuts', { method: 'POST', body: {
+    materialId: material.data.id, name: 'Counted acrylic remnant', dimensions: '20x30 cm', quantity: 0.4, unit: 'sheet',
+  } })
+  assert.equal(countOffcut.response.status, 201, countOffcut.data.error)
   const stockCount = await request('/inventory/stock-counts', {
     method: 'POST', body: { reason: 'Isolated stock-count API test', materialIds: [material.data.id] },
   })
@@ -1540,9 +1626,15 @@ test('purchase, fractional issue, sales and treasury stay in sync in SQLite', as
   assert.equal((await request(`/inventory/stock-counts/${stockCount.data.id}/approve`, { method: 'POST', body: {} })).response.status, 409)
   const stockCountDetails = await request(`/inventory/stock-counts/${stockCount.data.id}`)
   assert.equal(stockCountDetails.data.items.length, 1)
+  assert.equal(stockCountDetails.data.offcuts.length, 1)
+  assert.equal(stockCountDetails.data.offcuts[0].offcut_id, countOffcut.data.id)
+  assert.equal((await request('/warehouse/scrap-sales', { method: 'POST', body: {
+    amount: 1, items: [{ offcutId: countOffcut.data.id, quantity: 0.1 }],
+  } })).response.status, 409)
   const counted = stockCountDetails.data.items[0]
   const actualCount = await request(`/inventory/stock-counts/${stockCount.data.id}/items`, {
-    method: 'PUT', body: { items: [{ materialId: material.data.id, stock: counted.recorded_stock - 1, subStock: counted.recorded_sub_stock }] },
+    method: 'PUT', body: { items: [{ materialId: material.data.id, stock: counted.recorded_stock - 1, subStock: counted.recorded_sub_stock }],
+      offcuts: [{ offcutId: countOffcut.data.id, quantity: 0.4 }] },
   })
   assert.equal(actualCount.response.status, 200)
   const countEditAudit = (await request(`/audit?entity=stock-count&action=count-items`)).data
@@ -1555,6 +1647,7 @@ test('purchase, fractional issue, sales and treasury stay in sync in SQLite', as
   const countLedgerDb = new Database(path.join(tempRoot, 'test.sqlite'), { readonly: true })
   try {
     assert.equal(countLedgerDb.prepare('SELECT variance FROM stock_count_items WHERE count_id=?').get(stockCount.data.id).variance, -1)
+    assert.equal(countLedgerDb.prepare('SELECT variance FROM stock_count_offcut_items WHERE count_id=?').get(stockCount.data.id).variance, 0)
     assert.equal(countLedgerDb.prepare("SELECT status FROM journal_entries WHERE source_key=?").get(`stock-count:${stockCount.data.id}`).status, 'posted')
   } finally { countLedgerDb.close() }
   const countApprovalAudit = (await request('/audit?entity=stock-count&action=approve')).data
@@ -1609,21 +1702,23 @@ test('purchase, fractional issue, sales and treasury stay in sync in SQLite', as
     method: 'POST', body: { employeeId: maintenanceEmployee.data.id, period: '2026-09' },
   })
   assert.equal(payrollDraft.response.status, 201, payrollDraft.data.error)
+  assert.deepEqual([payrollDraft.data.absence_days, payrollDraft.data.absence_deduction_cents,
+    payrollDraft.data.ordinary_overtime_minutes, payrollDraft.data.holiday_overtime_minutes], [2, 769, 60, 60])
   const finalizedPayroll = await request(`/payroll/${payrollDraft.data.id}/finalize`, {
     method: 'POST', body: { cashPaid: 50 },
   })
   assert.equal(finalizedPayroll.response.status, 200, finalizedPayroll.data.error)
   assert.deepEqual([finalizedPayroll.data.advances_applied_cents, finalizedPayroll.data.cash_paid_cents,
-    finalizedPayroll.data.unpaid_salary_cents], [2000, 5000, 3000])
+    finalizedPayroll.data.unpaid_salary_cents], [2000, 5000, 2380])
   assert.equal((await request(`/payroll/${payrollDraft.data.id}/finalize`, { method: 'POST', body: {} })).response.status, 409)
-  const salaryPayment = await request(`/payroll/${payrollDraft.data.id}/payments`, { method: 'POST', body: { amount: 30 } })
+  const salaryPayment = await request(`/payroll/${payrollDraft.data.id}/payments`, { method: 'POST', body: { amount: 23.80 } })
   assert.equal(salaryPayment.response.status, 201)
   assert.equal(salaryPayment.data.unpaidSalaryCents, 0)
   const employeeHistory = await request(`/employees/${maintenanceEmployee.data.id}/history`)
   assert.equal(employeeHistory.response.status, 200, employeeHistory.data.error)
   assert.equal(employeeHistory.data.employee.id, maintenanceEmployee.data.id)
   assert.equal(employeeHistory.data.summary.payrollPeriodCount, 1)
-  assert.equal(employeeHistory.data.summary.payrollEntitlementCents, 10000)
+  assert.equal(employeeHistory.data.summary.payrollEntitlementCents, 9380)
   assert.equal(employeeHistory.data.summary.advancesIssuedCents, 2000)
   assert.equal(employeeHistory.data.summary.advancesAppliedCents, 2000)
   assert.equal(employeeHistory.data.summary.currentAdvanceBalanceCents, 0)
@@ -1741,6 +1836,32 @@ test('purchase, fractional issue, sales and treasury stay in sync in SQLite', as
   const archiveSourcePath = path.join(tempRoot, 'storage', 'Areas', 'manual-import', 'archive-source.png')
   await fs.promises.writeFile(archiveSourcePath, sourceBytes)
   const reportOrder = await request('/orders', { method: 'POST', body: { clientId: client.data.id } })
+  await new Promise((resolve) => setTimeout(resolve, 1050))
+  const custodyOrder = await request('/orders', { method: 'POST', body: {
+    clientId: client.data.id, type: 'maintenance', machineIds: [arabicMachine.data.id],
+  } })
+  assert.equal(custodyOrder.response.status, 201, custodyOrder.data.error)
+  const custodyOrderSummary = (await request('/bootstrap')).data.orders.find((order) => order.id === custodyOrder.data.id)
+  assert.equal(custodyOrderSummary.areaNames, 'شرم الشيخ')
+  const maintenanceBootstrap = await request('/bootstrap')
+  const maintenanceCountDb = new Database(path.join(tempRoot, 'test.sqlite'), { readonly: true })
+  try {
+    assert.equal(maintenanceBootstrap.data.stats.activeMaintenanceOrders, maintenanceCountDb.prepare(
+      "SELECT COUNT(*) AS count FROM orders WHERE type='maintenance' AND status!='archived' AND deleted_at IS NULL",
+    ).get().count)
+    assert.equal(maintenanceBootstrap.data.stats.pendingReviewMaintenance, maintenanceCountDb.prepare(
+      "SELECT COUNT(*) AS count FROM orders WHERE type='maintenance' AND status='review' AND deleted_at IS NULL",
+    ).get().count)
+  } finally { maintenanceCountDb.close() }
+  const maintenanceCashCustody = await request(`/orders/${custodyOrder.data.id}/petty-cash`, {
+    method: 'POST', body: { amount: 50, notes: 'Maintenance custody test' },
+  })
+  assert.equal(maintenanceCashCustody.response.status, 201, maintenanceCashCustody.data.error)
+  const maintenanceMaterialIssue = await request('/inventory/issue', {
+    method: 'POST', body: { materialId: material.data.id, quantity: 2, warehouse: 'main',
+      classification: 'order', orderId: custodyOrder.data.id },
+  })
+  assert.equal(maintenanceMaterialIssue.response.status, 200, maintenanceMaterialIssue.data.error)
   const archivedOrderIssue = await request('/inventory/issue', {
     method: 'POST', body: { materialId: purchase.data.items[0].materialId, quantity: 0.25,
       warehouse: 'sub', classification: 'order', orderId: reportOrder.data.id },
@@ -1763,7 +1884,43 @@ test('purchase, fractional issue, sales and treasury stay in sync in SQLite', as
   })
   assert.equal((await request(`/orders/${reportOrder.data.id}/cards/${archivedExcludedCard.data.id}/exclude`, { method: 'POST' })).response.status, 200)
   const archivedReport = await request(`/orders/${reportOrder.data.id}/archive`, { method: 'POST', body: {} })
-  assert.equal(archivedReport.response.status, 200)
+  assert.equal(archivedReport.response.status, 200, archivedReport.data.error)
+  await new Promise((resolve) => setTimeout(resolve, 1050))
+  const archivedCustody = await request(`/orders/${custodyOrder.data.id}/archive`, { method: 'POST', body: {
+    actualExpenses: 30, warrantyPeriodMonths: 6,
+    materialsReconciled: [{ materialId: material.data.id, consumedQuantity: 1 }],
+  } })
+  assert.equal(archivedCustody.response.status, 200, archivedCustody.data.error)
+  assert.equal(archivedCustody.data.pettyCashRefund, 20)
+  assert.equal(archivedCustody.data.warrantyPeriodMonths, 6)
+  assert.match(archivedCustody.data.warrantyExpiresAt, /^\d{4}-\d{2}-\d{2}$/)
+  assert.equal(archivedCustody.data.materialReturns[0].returnedQuantity, 1)
+  const settlementDb = new Database(path.join(tempRoot, 'test.sqlite'), { readonly: true })
+  try {
+    const settledOrder = settlementDb.prepare(`SELECT petty_cash_amount_cents,actual_expenses_cents,petty_cash_settled,
+        warranty_period_months,warranty_expires_at,materials_reconciled FROM orders WHERE id=?`).get(custodyOrder.data.id)
+    assert.equal(settledOrder.petty_cash_amount_cents, 5000)
+    assert.equal(settledOrder.actual_expenses_cents, 3000)
+    assert.equal(settledOrder.petty_cash_settled, 1)
+    assert.equal(settledOrder.warranty_period_months, 6)
+    assert.equal(JSON.parse(settledOrder.materials_reconciled)[0].returnedQuantity, 1)
+    assert.equal(settlementDb.prepare(`SELECT amount FROM treasury_transactions
+      WHERE order_id=? AND kind='income' AND category='رد متبقي العهدة النقدية'`).get(custodyOrder.data.id).amount, 20)
+    assert.equal(settlementDb.prepare('SELECT stock FROM materials WHERE id=?').get(material.data.id).stock, 3)
+    assert.equal(settlementDb.prepare('SELECT COUNT(*) AS count FROM maintenance_order_settlements WHERE order_id=?')
+      .get(custodyOrder.data.id).count, 1)
+  } finally { settlementDb.close() }
+  const directArchiveOrder = await request('/orders', { method: 'POST', body: {
+    clientId: client.data.id, type: 'maintenance', machineIds: [arabicMachine.data.id],
+  } })
+  assert.equal(directArchiveOrder.response.status, 201, directArchiveOrder.data.error)
+  await new Promise((resolve) => setTimeout(resolve, 1050))
+  const directMaintenanceArchive = await request(`/orders/${directArchiveOrder.data.id}/archive`, { method: 'POST', body: {} })
+  assert.equal(directMaintenanceArchive.response.status, 200, directMaintenanceArchive.data.error)
+  assert.equal(directMaintenanceArchive.data.warrantyPeriodMonths, 3)
+  assert.equal(directMaintenanceArchive.data.pettyCashRefund, 0)
+  const directArchiveSummary = (await request('/bootstrap')).data.orders.find((order) => order.id === directArchiveOrder.data.id)
+  assert.equal(directArchiveSummary.status, 'archived')
   const reportOrderIssueRow = (await request(`/orders/${reportOrder.data.id}`)).data.inventoryIssues[0]
   const recognizedCogsJournal = (await request('/accounting/journal?sourceType=work_order_cogs_recognition')).data
     .find((entry) => entry.source_key === `work-order-cogs:${reportOrder.data.id}:issue:${reportOrderIssueRow.id}`)
@@ -1772,7 +1929,15 @@ test('purchase, fractional issue, sales and treasury stay in sync in SQLite', as
     && line.debit_cents === reportOrderIssueRow.cogs_cents))
   assert.ok(recognizedCogsJournal.lines.some((line) => line.account_id === manufacturingAccountIds.work_order_wip
     && line.credit_cents === reportOrderIssueRow.cogs_cents))
+  const nonAdminArchivedEdit = await request(`/orders/${reportOrder.data.id}`, {
+    authCookie: salesCookie, method: 'PUT', body: {
+      clientId: client.data.id, type: 'operation', notes: 'Rejected non-admin archive edit',
+      materialCost: 25, operatingCost: 15, sellingPrice: 120,
+    },
+  })
+  assert.equal(nonAdminArchivedEdit.response.status, 403)
   const editArchivedOrder = await request(`/orders/${reportOrder.data.id}`, {
+    authCookie: adminCookie,
     method: 'PUT', body: {
       clientId: client.data.id,
       type: 'operation',
@@ -1789,6 +1954,14 @@ test('purchase, fractional issue, sales and treasury stay in sync in SQLite', as
   assert.equal(archivedReportDetail.data.notes, 'Edited after archive')
   assert.equal(archivedReportDetail.data.totalCost, 40)
   assert.equal(archivedReportDetail.data.status, 'archived')
+  const archivedOrderHistory = await request(`/orders/${reportOrder.data.id}/history`, { authCookie: adminCookie })
+  const archivedEditSnapshot = archivedOrderHistory.data.find((entry) => entry.action === 'admin-edit-archived-order')
+  assert.ok(archivedEditSnapshot)
+  assert.equal(archivedEditSnapshot.new_values.actor_id, 1)
+  assert.equal(archivedEditSnapshot.new_values.version_number, 1)
+  assert.ok(archivedEditSnapshot.new_values.timestamp)
+  assert.equal(archivedEditSnapshot.old_values.before_snapshot.order.status, 'archived')
+  assert.equal(archivedEditSnapshot.new_values.after_snapshot.order.notes, 'Edited after archive')
   const archivedImageRelative = archivedReportDetail.data.cards[0].beforePhotos[0]
   const archivedImagePath = path.join(tempRoot, 'storage', ...archivedImageRelative.split('/'))
   assert.equal(crypto.createHash('sha256').update(await fs.promises.readFile(archivedImagePath)).digest('hex'), sourceHash)
@@ -1896,6 +2069,7 @@ test('purchase, fractional issue, sales and treasury stay in sync in SQLite', as
     .map((file) => file.async('string')))).join('\n')
   assert.equal(bulkPptxText.includes('INTERNAL-NOTES-CANARY-DONE'), false)
   assert.equal(bulkPptxText.includes('INTERNAL-NOTES-CANARY-MERGED'), false)
+  assert.ok(bulkPptxText.includes('الملخص الإحصائي للصيانة'))
 
   await new Promise((resolve) => setTimeout(resolve, 1050))
   const moveInternalReportMachineForm = new FormData()
@@ -2010,6 +2184,10 @@ test('purchase, fractional issue, sales and treasury stay in sync in SQLite', as
   assert.equal(bulkDocx.response.status, 200, JSON.stringify(bulkDocx.data))
   assert.match(bulkDocx.response.headers.get('content-type'), /wordprocessingml/)
   assert.ok(bulkDocx.data.byteLength > 1000)
+  const bulkDocxZip = await JSZip.loadAsync(Buffer.from(bulkDocx.data))
+  const bulkDocxText = await bulkDocxZip.file('word/document.xml').async('string')
+  assert.ok(bulkDocxText.includes('الملخص الإحصائي للصيانة'))
+  assert.ok(bulkDocxText.includes('حالات الإصلاحات الكهربائية'))
 
   const disposableClient = await request('/clients', { method: 'POST', body: { name: 'Soft deleted client' } })
   const removedClient = await request(`/clients/${disposableClient.data.id}`, { method: 'DELETE' })
@@ -2192,8 +2370,7 @@ test('purchase, fractional issue, sales and treasury stay in sync in SQLite', as
   assert.ok(deletedUserDb.prepare('SELECT deleted_at FROM users WHERE id=?').get(batchUserId).deleted_at)
   assert.equal(require('bcryptjs').compareSync('batch-password-reset-123', deletedUserDb.prepare('SELECT password_hash FROM users WHERE id=?').get(batchUserId).password_hash), true)
   deletedUserDb.close()
-  assert.equal((await request(`/workers/${worker.data.id}`, { method: 'DELETE' })).response.status, 200)
-  assert.equal((await request('/workers')).data.some((item) => item.id === worker.data.id), false)
+  assert.equal((await request('/workers')).response.status, 404)
 
   const restoreProofPath = path.join(tempRoot, 'storage', 'Areas', 'restore-check', 'proof.txt')
   await fs.promises.mkdir(path.dirname(restoreProofPath), { recursive: true })
@@ -2290,4 +2467,129 @@ test('purchase, fractional issue, sales and treasury stay in sync in SQLite', as
   assert.equal((await request('/bootstrap', { authCookie: revocableCookie })).response.status, 200)
   assert.equal((await request('/auth/logout', { method: 'POST', authCookie: revocableCookie })).response.status, 200)
   assert.equal((await request('/bootstrap', { authCookie: revocableCookie })).response.status, 401)
+
+  assert.equal((await request('/manufacturing/orders', { authCookie: null })).response.status, 401)
+  assert.equal((await request('/manufacturing/orders', { authCookie: salesCookie, method: 'POST', body: {
+    clientId: client.data.id, productName: 'Laser cut acrylic sign', machineType: 'laser',
+  } })).response.status, 403)
+  const manufacturingOrder = await request('/manufacturing/orders', { authCookie: adminCookie, method: 'POST', body: {
+    clientId: client.data.id, productName: 'Laser cut acrylic sign', description: 'Isolated manufacturing workflow test',
+    machineType: 'laser', targetDeliveryDate: '2026-10-25', technicianIds: [maintenanceEmployee.data.id],
+  } })
+  assert.equal(manufacturingOrder.response.status, 201, manufacturingOrder.data.error)
+  assert.match(manufacturingOrder.data.order_code, /^MFG-/)
+  assert.equal(manufacturingOrder.data.status, 'in_production')
+  const manufacturingBootstrap = await request('/bootstrap')
+  assert.ok(manufacturingBootstrap.data.manufacturingOrders.some((row) => row.id === manufacturingOrder.data.id
+    && row.client_name === client.data.name))
+  assert.equal(manufacturingBootstrap.data.stats.activeManufacturingOrders, 1)
+  assert.equal(manufacturingBootstrap.data.stats.readyManufacturingOrders, 0)
+  const availableManufacturingOffcut = (await request('/warehouse/offcuts?status=available', { authCookie: adminCookie })).data
+    .find((item) => item.id === countOffcut.data.id)
+  assert.ok(availableManufacturingOffcut)
+  const manufacturingIssue = await request(`/manufacturing/orders/${manufacturingOrder.data.id}/materials`, {
+    authCookie: adminCookie, method: 'POST', body: { items: [
+      { sourceWarehouse: 'main', materialId: material.data.id, quantity: 1 },
+      { sourceWarehouse: 'offcut', offcutId: availableManufacturingOffcut.id, quantity: 0.1 },
+    ] },
+  })
+  assert.equal(manufacturingIssue.response.status, 201, manufacturingIssue.data.error)
+  assert.equal(manufacturingIssue.data.materialsUsed.length, 2)
+  assert.equal((await request('/materials', { authCookie: adminCookie })).data.find((item) => item.id === material.data.id).stock, 2)
+  const manufacturingMovement = (await request('/inventory/movements')).data.find((movement) =>
+    movement.source_type === 'manufacturing_order' && movement.source_id === String(manufacturingOrder.data.id))
+  assert.equal(manufacturingMovement.order_code, manufacturingOrder.data.order_code)
+  assert.equal(manufacturingMovement.issue_classification, 'order')
+  const invalidDesignUpload = new FormData()
+  invalidDesignUpload.append('file', new Blob(['not a design'], { type: 'text/plain' }), 'malware.exe')
+  assert.equal((await request(`/manufacturing/orders/${manufacturingOrder.data.id}/designs`, {
+    authCookie: adminCookie, method: 'POST', form: invalidDesignUpload,
+  })).response.status, 400)
+  const designUpload = new FormData()
+  const designBytes = Buffer.from('%PDF-1.7 test vector design')
+  designUpload.append('file', new Blob([designBytes], { type: 'application/pdf' }), 'laser-layout.pdf')
+  const attachedDesign = await request(`/manufacturing/orders/${manufacturingOrder.data.id}/designs`, {
+    authCookie: adminCookie, method: 'POST', form: designUpload,
+  })
+  assert.equal(attachedDesign.response.status, 201, attachedDesign.data.error)
+  assert.match(attachedDesign.data.downloadUrl, /^\/api\/manufacturing\/designs\/\d+\/download$/)
+  const designDownload = await request(attachedDesign.data.downloadUrl.replace('/api', ''), { authCookie: adminCookie })
+  assert.equal(designDownload.response.status, 200)
+  assert.deepEqual(Buffer.from(designDownload.data), designBytes)
+  const manufacturingReady = await request(`/manufacturing/orders/${manufacturingOrder.data.id}/ready`, { authCookie: adminCookie, method: 'POST', body: {
+    offcuts: [{ materialId: material.data.id, name: 'Acrylic production remnant', dimensions: '25x40 cm', quantity: 0.2, unit: 'لوح' }],
+  } })
+  assert.equal(manufacturingReady.response.status, 200, manufacturingReady.data.error)
+  assert.equal(manufacturingReady.data.status, 'ready')
+  assert.equal((await request('/warehouse/offcuts', { authCookie: adminCookie })).data.some((row) => row.name === 'Acrylic production remnant'), true)
+  assert.ok(manufacturingReady.data.offcuts[0].costCents > 0)
+  const manufacturingDelivered = await request(`/manufacturing/orders/${manufacturingOrder.data.id}/deliver`, {
+    method: 'POST', body: { invoiceId: sale.data.id }, authCookie: adminCookie,
+  })
+  assert.equal(manufacturingDelivered.response.status, 200, manufacturingDelivered.data.error)
+  assert.equal(manufacturingDelivered.data.status, 'delivered_archived')
+  assert.equal((await request('/manufacturing/orders?status=delivered_archived', { authCookie: adminCookie })).data.some((row) => row.id === manufacturingOrder.data.id), true)
+
+  const statementBeforeAutoInvoice = await request(`/clients/${client.data.id}/statement`, { authCookie: adminCookie })
+  assert.equal(statementBeforeAutoInvoice.response.status, 200)
+  const autoInvoiceOrder = await request('/manufacturing/orders', { authCookie: adminCookie, method: 'POST', body: {
+    clientId: client.data.id, productName: 'Auto-invoiced workshop product', machineType: 'manual', saleAmount: 250,
+  } })
+  assert.equal(autoInvoiceOrder.response.status, 201, autoInvoiceOrder.data.error)
+  assert.equal(autoInvoiceOrder.data.sale_amount_cents, 25000)
+  const workshopMainIssue = await request('/inventory/issue', { authCookie: adminCookie, method: 'POST', body: {
+    materialId: material.data.id, quantity: 1.5, warehouse: 'main', classification: 'order',
+    orderId: autoInvoiceOrder.data.id, orderType: 'manufacturing',
+  } })
+  assert.equal(workshopMainIssue.response.status, 200, workshopMainIssue.data.error)
+  assert.equal(workshopMainIssue.data.manufacturingOrderId, autoInvoiceOrder.data.id)
+  assert.equal(workshopMainIssue.data.orderType, 'manufacturing')
+  const workshopSubIssue = await request('/inventory/issue', { authCookie: adminCookie, method: 'POST', body: {
+    materialId: material.data.id, quantity: 0.25, warehouse: 'sub', classification: 'order',
+    orderId: autoInvoiceOrder.data.id, orderType: 'manufacturing',
+  } })
+  assert.equal(workshopSubIssue.response.status, 200, workshopSubIssue.data.error)
+  const workshopOrderAfterIssue = await request(`/manufacturing/orders/${autoInvoiceOrder.data.id}`, { authCookie: adminCookie })
+  assert.equal(workshopOrderAfterIssue.data.materials_used.length, 2)
+  assert.ok(workshopOrderAfterIssue.data.materials_used.every((row) => row.costCents > 0 && row.journalEntryId))
+  const workshopIssueMovements = (await request('/inventory/movements', { authCookie: adminCookie })).data.filter((movement) =>
+    movement.source_type === 'manufacturing_order' && movement.source_id === String(autoInvoiceOrder.data.id))
+  assert.ok(workshopIssueMovements.some((movement) => movement.kind === 'issue' && movement.reference === autoInvoiceOrder.data.order_code
+    && movement.order_code === autoInvoiceOrder.data.order_code
+    && movement.issue_classification === 'order'))
+  assert.ok(workshopIssueMovements.some((movement) => movement.kind === 'adjustment' && movement.order_code === autoInvoiceOrder.data.order_code))
+  assert.equal((await request(`/manufacturing/orders/${autoInvoiceOrder.data.id}/ready`, {
+    authCookie: adminCookie, method: 'POST', body: { offcuts: [] },
+  })).response.status, 200)
+  const autoInvoicedDelivery = await request(`/manufacturing/orders/${autoInvoiceOrder.data.id}/deliver`, {
+    authCookie: adminCookie, method: 'POST', body: { createInvoice: true },
+  })
+  assert.equal(autoInvoicedDelivery.response.status, 200, autoInvoicedDelivery.data.error)
+  assert.equal(autoInvoicedDelivery.data.invoiceAutoCreated, true)
+  assert.equal(autoInvoicedDelivery.data.invoiceTotal, 250)
+  assert.ok(autoInvoicedDelivery.data.cogsCents > 0)
+  const workshopSalesInvoiceView = await request('/sales/invoices', { authCookie: salesCookie })
+  assert.equal(workshopSalesInvoiceView.data.find((row) => row.id === autoInvoicedDelivery.data.salesInvoiceId).order_code,
+    autoInvoiceOrder.data.order_code)
+  const financeInvoiceView = await request('/finance/dashboard', { authCookie: adminCookie })
+  assert.equal(financeInvoiceView.data.invoices.find((row) => row.id === autoInvoicedDelivery.data.salesInvoiceId).order_code,
+    autoInvoiceOrder.data.order_code)
+  const autoInvoiceDb = new Database(path.join(tempRoot, 'test.sqlite'), { readonly: true })
+  try {
+    const invoice = autoInvoiceDb.prepare('SELECT kind,client_id,total,paid_total,remaining,payment_status,manufacturing_order_id FROM invoices WHERE id=?')
+      .get(autoInvoicedDelivery.data.salesInvoiceId)
+    assert.deepEqual(invoice, { kind: 'sales', client_id: client.data.id, total: 250, paid_total: 0,
+      remaining: 250, payment_status: 'unpaid', manufacturing_order_id: autoInvoiceOrder.data.id })
+  } finally { autoInvoiceDb.close() }
+  const statementBeforeAging = await request(`/clients/${client.data.id}/statement`, { authCookie: adminCookie })
+  assert.equal(statementBeforeAging.data.total_billed, statementBeforeAutoInvoice.data.total_billed + 250)
+  assert.equal(statementBeforeAging.data.total_paid, statementBeforeAutoInvoice.data.total_paid)
+  assert.equal(statementBeforeAging.data.outstanding_balance, statementBeforeAutoInvoice.data.outstanding_balance + 250)
+  const ageInvoiceDb = new Database(path.join(tempRoot, 'test.sqlite'))
+  ageInvoiceDb.prepare("UPDATE invoices SET created_at=datetime('now','-61 days') WHERE id=?")
+    .run(autoInvoicedDelivery.data.salesInvoiceId)
+  ageInvoiceDb.close()
+  const overdueStatement = await request(`/clients/${client.data.id}/statement`, { authCookie: adminCookie })
+  assert.equal(overdueStatement.data.overdue_60_days, true)
+  assert.ok(overdueStatement.data.overdue_invoices.some((invoice) => invoice.id === autoInvoicedDelivery.data.salesInvoiceId))
 })

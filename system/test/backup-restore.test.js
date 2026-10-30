@@ -30,7 +30,11 @@ test('validates restore schema markers and rejects foreign-key violations', asyn
   const createSnapshot = (name, { applicationId = MADAR_APPLICATION_ID, schemaVersion = CURRENT_SCHEMA_VERSION,
     orphan = false, financeMigrations = true, manufacturingMappingsMigration = true,
     otherInvoiceAttachmentsMigration = true, otherInvoiceAttachmentsTable = true,
-    purchaseInvoiceRevisionsMigration = true, purchaseInvoiceRevisionsTable = true } = {}) => {
+    purchaseInvoiceRevisionsMigration = true, purchaseInvoiceRevisionsTable = true,
+    payrollAttendanceMigration = true, payrollAttendanceColumns = true,
+    operationalDomainsMigration = true, operationalDomainsTables = true,
+    custodyManufacturingMigration = true, custodyManufacturingTables = true, custodyManufacturingColumns = true,
+    workshopIssueMigration = true, workshopIssueSupport = true } = {}) => {
     const databasePath = path.join(tempRoot, name)
     const database = new Database(databasePath)
     database.exec(`
@@ -42,6 +46,54 @@ test('validates restore schema markers and rejects foreign-key violations', asyn
       CREATE TABLE audit_log(id INTEGER PRIMARY KEY);
     `)
     try {
+      if (applicationId === MADAR_APPLICATION_ID && schemaVersion >= 8) {
+        database.exec(payrollAttendanceColumns
+          ? `CREATE TABLE payroll_records(id INTEGER PRIMARY KEY, absence_days INTEGER NOT NULL DEFAULT 0,
+            absence_deduction_cents INTEGER NOT NULL DEFAULT 0)`
+          : 'CREATE TABLE payroll_records(id INTEGER PRIMARY KEY)')
+      }
+      if (applicationId === MADAR_APPLICATION_ID && schemaVersion >= 9) {
+        database.exec(`CREATE TABLE employees(id INTEGER PRIMARY KEY, base_salary INTEGER,
+          standard_daily_hours INTEGER, standard_monthly_days INTEGER, can_login INTEGER,
+          login_username TEXT, login_password_hash TEXT, role TEXT, is_active INTEGER)`)
+        if (operationalDomainsTables) database.exec(`CREATE TABLE maintenance_orders(id INTEGER PRIMARY KEY);
+          CREATE TABLE manufacturing_orders(id INTEGER PRIMARY KEY);
+          CREATE TABLE secondary_warehouse_offcuts(id INTEGER PRIMARY KEY);
+          CREATE TABLE secondary_warehouse_scrap_sales(id INTEGER PRIMARY KEY);
+          CREATE TABLE secondary_warehouse_scrap_sale_items(id INTEGER PRIMARY KEY);`)
+      }
+      if (applicationId === MADAR_APPLICATION_ID && schemaVersion >= 10) {
+        database.exec('CREATE TABLE employee_daily_attendance(id INTEGER PRIMARY KEY); CREATE TABLE employee_tool_custody(id INTEGER PRIMARY KEY);')
+      }
+      if (applicationId === MADAR_APPLICATION_ID && schemaVersion >= 11) {
+        database.exec('CREATE TABLE stock_count_offcut_items(id INTEGER PRIMARY KEY);')
+        database.prepare('INSERT INTO schema_migrations(name) VALUES (?)').run('secondary-warehouse-stock-count-schema-v11')
+      }
+      if (applicationId === MADAR_APPLICATION_ID && schemaVersion >= 12) {
+        database.exec('CREATE TABLE legacy_worker_history(id INTEGER PRIMARY KEY);')
+        database.prepare('INSERT INTO schema_migrations(name) VALUES (?)').run('retire-legacy-workers-table-v12')
+      }
+      if (applicationId === MADAR_APPLICATION_ID && schemaVersion >= 13) {
+        if (custodyManufacturingColumns) {
+          database.exec(`ALTER TABLE orders ADD COLUMN petty_cash_amount_cents INTEGER NOT NULL DEFAULT 0;
+            ALTER TABLE orders ADD COLUMN actual_expenses_cents INTEGER NOT NULL DEFAULT 0;
+            ALTER TABLE orders ADD COLUMN warranty_period_months INTEGER;
+            ALTER TABLE orders ADD COLUMN warranty_expires_at TEXT;
+            CREATE TABLE invoices(id INTEGER PRIMARY KEY, manufacturing_order_id INTEGER);
+            CREATE TABLE treasury_transactions(id INTEGER PRIMARY KEY, order_id INTEGER);`)
+          const manufacturingTable = database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='manufacturing_orders'").get()
+          if (manufacturingTable) database.exec('ALTER TABLE manufacturing_orders ADD COLUMN sale_amount_cents INTEGER NOT NULL DEFAULT 0;')
+        }
+        if (custodyManufacturingTables) database.exec(`CREATE TABLE maintenance_order_settlements(id INTEGER PRIMARY KEY);
+          CREATE TABLE manufacturing_design_files(id INTEGER PRIMARY KEY);
+          CREATE TABLE manufacturing_material_consumptions(id INTEGER PRIMARY KEY${schemaVersion >= 14 && workshopIssueSupport
+            ? ", source_warehouse TEXT CHECK(source_warehouse IN ('main','sub','offcut'))" : ''});`)
+        if (custodyManufacturingMigration) database.prepare('INSERT INTO schema_migrations(name) VALUES (?)')
+          .run('custody-manufacturing-remediation-v13')
+      }
+      if (applicationId === MADAR_APPLICATION_ID && schemaVersion >= 14 && workshopIssueMigration) {
+        database.prepare('INSERT INTO schema_migrations(name) VALUES (?)').run('workshop-inventory-issue-source-v14')
+      }
       if (applicationId === MADAR_APPLICATION_ID && schemaVersion >= 6 && otherInvoiceAttachmentsTable) {
         database.exec(`CREATE TABLE other_invoices(id INTEGER PRIMARY KEY);
           CREATE TABLE other_invoice_attachments(id INTEGER PRIMARY KEY, other_invoice_id INTEGER REFERENCES other_invoices(id));`)
@@ -70,6 +122,15 @@ test('validates restore schema markers and rejects foreign-key violations', asyn
       }
       if (applicationId === MADAR_APPLICATION_ID && schemaVersion >= 7 && purchaseInvoiceRevisionsMigration) {
         database.prepare('INSERT INTO schema_migrations(name) VALUES (?)').run('purchase-invoice-revisions-schema-v7')
+      }
+      if (applicationId === MADAR_APPLICATION_ID && schemaVersion >= 8 && payrollAttendanceMigration) {
+        database.prepare('INSERT INTO schema_migrations(name) VALUES (?)').run('payroll-attendance-schema-v8')
+      }
+      if (applicationId === MADAR_APPLICATION_ID && schemaVersion >= 9 && operationalDomainsMigration) {
+        database.prepare('INSERT INTO schema_migrations(name) VALUES (?)').run('operational-domains-secondary-warehouse-schema-v9')
+      }
+      if (applicationId === MADAR_APPLICATION_ID && schemaVersion >= 10) {
+        database.prepare('INSERT INTO schema_migrations(name) VALUES (?)').run('staff-attendance-tool-custody-schema-v10')
       }
       if (orphan) {
         database.pragma('foreign_keys = OFF')
@@ -114,6 +175,47 @@ test('validates restore schema markers and rejects foreign-key violations', asyn
       purchaseInvoiceRevisionsTable: false,
     })
     await assert.rejects(validateDatabaseSnapshot(missingPurchaseRevisionTable), /جدول مراجعات فواتير الشراء المطلوب لمخطط v7/)
+    const missingPayrollAttendanceMigration = createSnapshot('missing-payroll-attendance-migration.sqlite', {
+      payrollAttendanceMigration: false,
+    })
+    await assert.rejects(validateDatabaseSnapshot(missingPayrollAttendanceMigration), /ترحيل أيام الغياب لمخطط v8/)
+    const missingPayrollAttendanceColumns = createSnapshot('missing-payroll-attendance-columns.sqlite', {
+      payrollAttendanceColumns: false,
+    })
+    await assert.rejects(validateDatabaseSnapshot(missingPayrollAttendanceColumns), /أعمدة الغياب المطلوبة لمخطط v8/)
+    const missingOperationalDomainsMigration = createSnapshot('missing-operational-domains-migration.sqlite', {
+      operationalDomainsMigration: false,
+    })
+    await assert.rejects(validateDatabaseSnapshot(missingOperationalDomainsMigration), /ترحيل أوامر الصيانة والتصنيع/)
+    const missingOperationalDomainsTables = createSnapshot('missing-operational-domains-tables.sqlite', {
+      operationalDomainsTables: false,
+    })
+    await assert.rejects(validateDatabaseSnapshot(missingOperationalDomainsTables), /جدول maintenance_orders/)
+    const missingCustodyManufacturingMigration = createSnapshot('missing-custody-manufacturing-migration.sqlite', {
+      custodyManufacturingMigration: false,
+    })
+    await assert.rejects(validateDatabaseSnapshot(missingCustodyManufacturingMigration), /ترحيل العهدة ومرفقات التصنيع/)
+    const missingCustodyManufacturingTables = createSnapshot('missing-custody-manufacturing-tables.sqlite', {
+      custodyManufacturingTables: false,
+    })
+    await assert.rejects(validateDatabaseSnapshot(missingCustodyManufacturingTables), /جدول maintenance_order_settlements/)
+    const missingCustodyManufacturingColumns = createSnapshot('missing-custody-manufacturing-columns.sqlite', {
+      custodyManufacturingColumns: false,
+    })
+    await assert.rejects(validateDatabaseSnapshot(missingCustodyManufacturingColumns), /أعمدة تسوية الصيانة أو فواتير التصنيع/)
+    const missingWorkshopIssueMigration = createSnapshot('missing-workshop-issue-migration.sqlite', {
+      workshopIssueMigration: false,
+    })
+    await assert.rejects(validateDatabaseSnapshot(missingWorkshopIssueMigration), /ربط صرف المخزون بأوامر الورشة لمخطط v14/)
+    const missingWorkshopIssueSupport = createSnapshot('missing-workshop-issue-support.sqlite', {
+      workshopIssueSupport: false,
+    })
+    await assert.rejects(validateDatabaseSnapshot(missingWorkshopIssueSupport), /لا يدعم مخزن البواقي العام/)
+    const missingStaffSchema = createSnapshot('missing-staff-schema.sqlite', { operationalDomainsTables: true })
+    const staffDb = new Database(missingStaffSchema)
+    staffDb.prepare("DELETE FROM schema_migrations WHERE name='staff-attendance-tool-custody-schema-v10'").run()
+    staffDb.close()
+    await assert.rejects(validateDatabaseSnapshot(missingStaffSchema), /ترحيل الحضور وعهد الأدوات لمخطط v10/)
     const orphanPath = createSnapshot('orphan.sqlite', { orphan: true })
     await assert.rejects(validateDatabaseSnapshot(orphanPath), /مخالفة مفاتيح خارجية/)
     const futurePath = createSnapshot('future.sqlite', { schemaVersion: CURRENT_SCHEMA_VERSION + 1 })

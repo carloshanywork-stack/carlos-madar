@@ -904,6 +904,213 @@ if (!db.prepare('SELECT 1 FROM schema_migrations WHERE name=?').get(purchaseInvo
     db.prepare('INSERT INTO schema_migrations(name) VALUES (?)').run(purchaseInvoiceRevisionsMigration)
   })()
 }
+const payrollAttendanceMigration = 'payroll-attendance-schema-v8'
+if (!db.prepare('SELECT 1 FROM schema_migrations WHERE name=?').get(payrollAttendanceMigration)) {
+  db.transaction(() => {
+    ensureColumn('payroll_records', 'absence_days', 'INTEGER NOT NULL DEFAULT 0 CHECK(absence_days >= 0 AND absence_days <= 26)')
+    ensureColumn('payroll_records', 'absence_deduction_cents', 'INTEGER NOT NULL DEFAULT 0 CHECK(absence_deduction_cents >= 0)')
+    db.prepare('INSERT INTO schema_migrations(name) VALUES (?)').run(payrollAttendanceMigration)
+  })()
+}
+const operationalDomainSchemaMigration = 'operational-domains-secondary-warehouse-schema-v9'
+if (!db.prepare('SELECT 1 FROM schema_migrations WHERE name=?').get(operationalDomainSchemaMigration)) {
+  db.transaction(() => {
+    for (const [name, declaration] of [
+      ['base_salary', 'INTEGER NOT NULL DEFAULT 0'],
+      ['standard_daily_hours', 'INTEGER NOT NULL DEFAULT 9'],
+      ['standard_monthly_days', 'INTEGER NOT NULL DEFAULT 26'],
+      ['can_login', 'INTEGER NOT NULL DEFAULT 0'],
+      ['login_username', 'TEXT'],
+      // Authentication remains owned by users.password_hash; this compatibility field stays NULL.
+      ['login_password_hash', 'TEXT'],
+      ['role', 'TEXT'],
+      ['is_active', 'INTEGER NOT NULL DEFAULT 1'],
+    ]) ensureColumn('employees', name, declaration)
+
+    db.prepare(`UPDATE employees SET base_salary=monthly_salary_cents
+      WHERE base_salary=0 AND monthly_salary_cents>0`).run()
+    db.prepare('UPDATE employees SET is_active=active').run()
+    db.prepare(`UPDATE employees SET can_login=1,
+      login_username=(SELECT username FROM users WHERE users.employee_id=employees.id AND users.deleted_at IS NULL),
+      role=(SELECT role FROM users WHERE users.employee_id=employees.id AND users.deleted_at IS NULL)
+      WHERE EXISTS (SELECT 1 FROM users WHERE users.employee_id=employees.id AND users.deleted_at IS NULL)`).run()
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS maintenance_orders (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        client_id INTEGER NOT NULL REFERENCES clients(id),
+        site_location TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'in_progress' CHECK(status IN ('in_progress','for_approval','archived')),
+        created_by INTEGER REFERENCES users(id),
+        assigned_technicians TEXT NOT NULL DEFAULT '[]',
+        petty_cash_amount INTEGER NOT NULL DEFAULT 0 CHECK(petty_cash_amount >= 0),
+        petty_cash_settled INTEGER NOT NULL DEFAULT 0 CHECK(petty_cash_settled IN (0,1)),
+        petty_cash_balance INTEGER NOT NULL DEFAULT 0 CHECK(petty_cash_balance >= 0),
+        materials_issued TEXT NOT NULL DEFAULT '[]',
+        materials_reconciled TEXT NOT NULL DEFAULT '[]',
+        admin_edit_history TEXT NOT NULL DEFAULT '[]',
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        archived_at TEXT,
+        deleted_at TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_maintenance_orders_client_status
+        ON maintenance_orders(client_id,status,deleted_at);
+      CREATE INDEX IF NOT EXISTS idx_maintenance_orders_status_date
+        ON maintenance_orders(status,created_at);
+
+      CREATE TABLE IF NOT EXISTS manufacturing_orders (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        order_code TEXT NOT NULL UNIQUE,
+        client_id INTEGER NOT NULL REFERENCES clients(id),
+        product_name TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        target_delivery_date TEXT,
+        machine_type TEXT NOT NULL CHECK(machine_type IN ('cnc_router','laser','both','manual')),
+        assigned_technicians TEXT NOT NULL DEFAULT '[]',
+        status TEXT NOT NULL DEFAULT 'in_production' CHECK(status IN ('in_production','ready','delivered_archived')),
+        materials_used TEXT NOT NULL DEFAULT '[]',
+        offcuts_returned TEXT NOT NULL DEFAULT '[]',
+        sales_invoice_id INTEGER REFERENCES invoices(id),
+        created_by INTEGER REFERENCES users(id),
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        delivered_at TEXT,
+        deleted_at TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_manufacturing_orders_client_status
+        ON manufacturing_orders(client_id,status,deleted_at);
+      CREATE INDEX IF NOT EXISTS idx_manufacturing_orders_delivery
+        ON manufacturing_orders(target_delivery_date,status);
+
+      CREATE TABLE IF NOT EXISTS secondary_warehouse_offcuts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        material_id INTEGER REFERENCES materials(id),
+        name TEXT NOT NULL,
+        dimensions TEXT NOT NULL DEFAULT '',
+        quantity REAL NOT NULL CHECK(quantity > 0),
+        unit TEXT NOT NULL DEFAULT '',
+        notes TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        status TEXT NOT NULL DEFAULT 'available' CHECK(status IN ('available','consumed','scrapped'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_secondary_offcuts_status_material
+        ON secondary_warehouse_offcuts(status,material_id,created_at);
+
+      CREATE TABLE IF NOT EXISTS secondary_warehouse_scrap_sales (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        amount_cents INTEGER NOT NULL CHECK(amount_cents > 0),
+        treasury_transaction_id INTEGER NOT NULL UNIQUE REFERENCES treasury_transactions(id),
+        created_by INTEGER REFERENCES users(id),
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        notes TEXT NOT NULL DEFAULT ''
+      );
+      CREATE TABLE IF NOT EXISTS secondary_warehouse_scrap_sale_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        sale_id INTEGER NOT NULL REFERENCES secondary_warehouse_scrap_sales(id),
+        offcut_id INTEGER NOT NULL REFERENCES secondary_warehouse_offcuts(id),
+        quantity REAL NOT NULL CHECK(quantity > 0),
+        UNIQUE(sale_id,offcut_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_scrap_sale_items_offcut ON secondary_warehouse_scrap_sale_items(offcut_id);
+
+      CREATE TRIGGER IF NOT EXISTS trg_scrap_sale_treasury_income_guard
+      BEFORE INSERT ON secondary_warehouse_scrap_sales
+      WHEN (SELECT kind FROM treasury_transactions WHERE id=NEW.treasury_transaction_id) IS NOT 'income'
+      BEGIN
+        SELECT RAISE(ABORT, 'scrap sale must link an income treasury transaction');
+      END;
+      CREATE TRIGGER IF NOT EXISTS trg_scrap_sale_treasury_category
+      AFTER INSERT ON secondary_warehouse_scrap_sales
+      BEGIN
+        UPDATE treasury_transactions
+          SET category='إيرادات بيع خردة ومخلفات تشغيل'
+          WHERE id=NEW.treasury_transaction_id;
+      END;
+    `)
+    db.prepare('INSERT INTO schema_migrations(name) VALUES (?)').run(operationalDomainSchemaMigration)
+  })()
+}
+const staffAttendanceCustodyMigration = 'staff-attendance-tool-custody-schema-v10'
+if (!db.prepare('SELECT 1 FROM schema_migrations WHERE name=?').get(staffAttendanceCustodyMigration)) {
+  db.transaction(() => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS employee_daily_attendance (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        employee_id INTEGER NOT NULL REFERENCES employees(id),
+        attendance_date TEXT NOT NULL,
+        status TEXT NOT NULL CHECK(status IN ('present','absent','leave','holiday')),
+        overtime_minutes INTEGER NOT NULL DEFAULT 0 CHECK(overtime_minutes >= 0 AND overtime_minutes <= 1440),
+        holiday_overtime_minutes INTEGER NOT NULL DEFAULT 0 CHECK(holiday_overtime_minutes >= 0 AND holiday_overtime_minutes <= 1440),
+        notes TEXT NOT NULL DEFAULT '',
+        marked_by INTEGER REFERENCES users(id),
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(employee_id,attendance_date)
+      );
+      CREATE INDEX IF NOT EXISTS idx_employee_attendance_date_employee
+        ON employee_daily_attendance(attendance_date,employee_id);
+
+      CREATE TABLE IF NOT EXISTS employee_tool_custody (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        employee_id INTEGER NOT NULL REFERENCES employees(id),
+        tool_name TEXT NOT NULL,
+        serial_number TEXT NOT NULL DEFAULT '',
+        issued_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        issued_by INTEGER REFERENCES users(id),
+        return_status TEXT NOT NULL DEFAULT 'issued' CHECK(return_status IN ('issued','returned')),
+        returned_at TEXT,
+        returned_by INTEGER REFERENCES users(id),
+        notes TEXT NOT NULL DEFAULT ''
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_tool_custody_active_serial
+        ON employee_tool_custody(serial_number) WHERE serial_number<>'' AND return_status='issued';
+      CREATE INDEX IF NOT EXISTS idx_tool_custody_employee_status
+        ON employee_tool_custody(employee_id,return_status,issued_at);
+
+      CREATE TRIGGER IF NOT EXISTS trg_employee_deactivate_requires_tool_clearance
+      BEFORE UPDATE OF active ON employees
+      WHEN OLD.active=1 AND NEW.active=0 AND EXISTS (
+        SELECT 1 FROM employee_tool_custody c WHERE c.employee_id=OLD.id AND c.return_status='issued'
+      )
+      BEGIN
+        SELECT RAISE(ABORT, 'employee has outstanding tool custody');
+      END;
+    `)
+    db.prepare('INSERT INTO schema_migrations(name) VALUES (?)').run(staffAttendanceCustodyMigration)
+  })()
+}
+const secondaryWarehouseStockCountMigration = 'secondary-warehouse-stock-count-schema-v11'
+if (!db.prepare('SELECT 1 FROM schema_migrations WHERE name=?').get(secondaryWarehouseStockCountMigration)) {
+  db.transaction(() => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS stock_count_offcut_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        count_id INTEGER NOT NULL REFERENCES stock_counts(id),
+        offcut_id INTEGER NOT NULL REFERENCES secondary_warehouse_offcuts(id),
+        recorded_quantity REAL NOT NULL CHECK(recorded_quantity >= 0),
+        counted_quantity REAL CHECK(counted_quantity IS NULL OR counted_quantity >= 0),
+        variance REAL,
+        released_at TEXT,
+        UNIQUE(count_id,offcut_id)
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_stock_count_locked_offcut
+        ON stock_count_offcut_items(offcut_id) WHERE released_at IS NULL;
+      CREATE INDEX IF NOT EXISTS idx_stock_count_offcut_count
+        ON stock_count_offcut_items(count_id,offcut_id);
+    `)
+    db.prepare('INSERT INTO schema_migrations(name) VALUES (?)').run(secondaryWarehouseStockCountMigration)
+  })()
+}
+const retireLegacyWorkersMigration = 'retire-legacy-workers-table-v12'
+if (!db.prepare('SELECT 1 FROM schema_migrations WHERE name=?').get(retireLegacyWorkersMigration)) {
+  db.transaction(() => {
+    const workersTable = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='workers'").get()
+    const archivedTable = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='legacy_worker_history'").get()
+    if (workersTable && !archivedTable) db.exec('ALTER TABLE workers RENAME TO legacy_worker_history')
+    db.prepare('INSERT INTO schema_migrations(name) VALUES (?)').run(retireLegacyWorkersMigration)
+  })()
+}
 const workOrderCogsMigration = 'work-order-cogs-v1'
 if (!db.prepare('SELECT 1 FROM schema_migrations WHERE name=?').get(workOrderCogsMigration)) {
   db.transaction(() => {
@@ -993,6 +1200,102 @@ if (!db.prepare('SELECT 1 FROM schema_migrations WHERE name=?').get(manufacturin
     const { retryPendingJournalEntries } = require('./accounting')
     retryPendingJournalEntries(db)
     db.prepare('INSERT INTO schema_migrations(name) VALUES (?)').run(manufacturingAccountMappingsMigration)
+  })()
+}
+const custodyManufacturingRemediationMigration = 'custody-manufacturing-remediation-v13'
+if (!db.prepare('SELECT 1 FROM schema_migrations WHERE name=?').get(custodyManufacturingRemediationMigration)) {
+  db.transaction(() => {
+    for (const [column, declaration] of [
+      ['petty_cash_amount_cents', 'INTEGER NOT NULL DEFAULT 0 CHECK(petty_cash_amount_cents >= 0)'],
+      ['actual_expenses_cents', 'INTEGER NOT NULL DEFAULT 0 CHECK(actual_expenses_cents >= 0)'],
+      ['petty_cash_settled', 'INTEGER NOT NULL DEFAULT 0 CHECK(petty_cash_settled IN (0,1))'],
+      ['materials_issued', "TEXT NOT NULL DEFAULT '[]'"],
+      ['materials_reconciled', "TEXT NOT NULL DEFAULT '[]'"],
+      ['warranty_period_months', 'INTEGER CHECK(warranty_period_months IS NULL OR warranty_period_months IN (3,6))'],
+      ['warranty_expires_at', 'TEXT'],
+    ]) ensureColumn('orders', column, declaration)
+    ensureColumn('treasury_transactions', 'order_id', 'INTEGER REFERENCES orders(id)')
+    ensureColumn('invoices', 'manufacturing_order_id', 'INTEGER REFERENCES manufacturing_orders(id)')
+    ensureColumn('manufacturing_orders', 'sale_amount_cents', 'INTEGER NOT NULL DEFAULT 0 CHECK(sale_amount_cents >= 0)')
+    ensureColumn('secondary_warehouse_offcuts', 'unit_cost_cents', 'INTEGER NOT NULL DEFAULT 0 CHECK(unit_cost_cents >= 0)')
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS maintenance_order_settlements (
+        order_id INTEGER PRIMARY KEY REFERENCES orders(id),
+        petty_cash_amount_cents INTEGER NOT NULL DEFAULT 0 CHECK(petty_cash_amount_cents >= 0),
+        actual_expenses_cents INTEGER NOT NULL DEFAULT 0 CHECK(actual_expenses_cents >= 0),
+        cash_refund_transaction_id INTEGER REFERENCES treasury_transactions(id),
+        material_returns TEXT NOT NULL DEFAULT '[]',
+        warranty_period_months INTEGER NOT NULL CHECK(warranty_period_months IN (3,6)),
+        warranty_expires_at TEXT NOT NULL,
+        actor_id INTEGER REFERENCES users(id),
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_treasury_order_petty_cash
+        ON treasury_transactions(order_id) WHERE order_id IS NOT NULL AND category='عهدة صيانة';
+      CREATE INDEX IF NOT EXISTS idx_treasury_order ON treasury_transactions(order_id,id);
+      CREATE INDEX IF NOT EXISTS idx_invoices_manufacturing_order ON invoices(manufacturing_order_id,id);
+
+      CREATE TABLE IF NOT EXISTS manufacturing_design_files (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        order_id INTEGER NOT NULL REFERENCES manufacturing_orders(id),
+        storage_path TEXT NOT NULL UNIQUE,
+        original_name TEXT NOT NULL,
+        extension TEXT NOT NULL CHECK(extension IN ('.dxf','.cdr','.ai','.pdf')),
+        byte_size INTEGER NOT NULL CHECK(byte_size > 0),
+        uploaded_by INTEGER REFERENCES users(id),
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_manufacturing_design_files_order
+        ON manufacturing_design_files(order_id,id);
+
+      CREATE TABLE IF NOT EXISTS manufacturing_material_consumptions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        order_id INTEGER NOT NULL REFERENCES manufacturing_orders(id),
+        source_warehouse TEXT NOT NULL CHECK(source_warehouse IN ('main','offcut')),
+        material_id INTEGER REFERENCES materials(id),
+        offcut_id INTEGER REFERENCES secondary_warehouse_offcuts(id),
+        quantity REAL NOT NULL CHECK(quantity > 0),
+        unit_cost_cents INTEGER NOT NULL DEFAULT 0 CHECK(unit_cost_cents >= 0),
+        movement_id INTEGER REFERENCES inventory_movements(id),
+        created_by INTEGER REFERENCES users(id),
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CHECK((source_warehouse='main' AND material_id IS NOT NULL AND offcut_id IS NULL)
+          OR (source_warehouse='offcut' AND offcut_id IS NOT NULL))
+      );
+      CREATE INDEX IF NOT EXISTS idx_manufacturing_material_consumptions_order
+        ON manufacturing_material_consumptions(order_id,id);
+    `)
+    db.prepare('INSERT INTO schema_migrations(name) VALUES (?)').run(custodyManufacturingRemediationMigration)
+  })()
+}
+const workshopInventoryIssueMigration = 'workshop-inventory-issue-source-v14'
+if (!db.prepare('SELECT 1 FROM schema_migrations WHERE name=?').get(workshopInventoryIssueMigration)) {
+  db.transaction(() => {
+    db.exec(`
+      CREATE TABLE manufacturing_material_consumptions_v14 (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        order_id INTEGER NOT NULL REFERENCES manufacturing_orders(id),
+        source_warehouse TEXT NOT NULL CHECK(source_warehouse IN ('main','sub','offcut')),
+        material_id INTEGER REFERENCES materials(id),
+        offcut_id INTEGER REFERENCES secondary_warehouse_offcuts(id),
+        quantity REAL NOT NULL CHECK(quantity > 0),
+        unit_cost_cents INTEGER NOT NULL DEFAULT 0 CHECK(unit_cost_cents >= 0),
+        movement_id INTEGER REFERENCES inventory_movements(id),
+        created_by INTEGER REFERENCES users(id),
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CHECK((source_warehouse IN ('main','sub') AND material_id IS NOT NULL AND offcut_id IS NULL)
+          OR (source_warehouse='offcut' AND offcut_id IS NOT NULL))
+      );
+      INSERT INTO manufacturing_material_consumptions_v14(
+        id,order_id,source_warehouse,material_id,offcut_id,quantity,unit_cost_cents,movement_id,created_by,created_at
+      ) SELECT id,order_id,source_warehouse,material_id,offcut_id,quantity,unit_cost_cents,movement_id,created_by,created_at
+        FROM manufacturing_material_consumptions;
+      DROP TABLE manufacturing_material_consumptions;
+      ALTER TABLE manufacturing_material_consumptions_v14 RENAME TO manufacturing_material_consumptions;
+      CREATE INDEX idx_manufacturing_material_consumptions_order
+        ON manufacturing_material_consumptions(order_id,id);
+    `)
+    db.prepare('INSERT INTO schema_migrations(name) VALUES (?)').run(workshopInventoryIssueMigration)
   })()
 }
 db.pragma(`application_id = ${MADAR_APPLICATION_ID}`)

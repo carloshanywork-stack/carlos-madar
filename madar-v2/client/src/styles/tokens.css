@@ -1,0 +1,55 @@
+#madar-app {
+  font-family: "Segoe UI", Tahoma, Arial, sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  --madar-ink: #15243a;
+  --madar-ink-soft: #213550;
+  --madar-accent: #187b68;
+  --madar-accent-strong: #116754;
+  --madar-accent-pale: #e7f4ef;
+  --madar-gold: #dcaa52;
+  --madar-text: #17263c;
+  --madar-muted: #748197;
+  --madar-border: #e4e9ef;
+  --madar-surface: #ffffff;
+  --madar-surface-alt: #f5f7fa;
+  --madar-canvas: #f2f5f8;
+  --madar-selected: #e8f2ff;
+  --madar-danger: #bd4e51;
+  --madar-warning: #ae741d;
+  --madar-success: #27866d;
+  --madar-shadow: 0 16px 42px rgba(24, 43, 69, 0.08);
+  min-height: 100vh;
+  color: var(--madar-text);
+  background: var(--madar-canvas);
+}
+
+#madar-app[data-theme="dark"] {
+  --madar-ink: #101a27;
+  --madar-ink-soft: #1b2b3e;
+  --madar-accent: #4bb89b;
+  --madar-accent-strong: #3aa386;
+  --madar-accent-pale: #18372f;
+  --madar-gold: #e1b660;
+  --madar-text: #e8eef5;
+  --madar-muted: #9baabd;
+  --madar-border: #29384a;
+  --madar-surface: #172333;
+  --madar-surface-alt: #1b293a;
+  --madar-canvas: #101925;
+  --madar-selected: #1b334c;
+  --madar-danger: #da7778;
+  --madar-warning: #e0ae58;
+  --madar-success: #4bb89b;
+  --madar-shadow: 0 16px 42px rgba(0, 0, 0, .24);
+}
+
+#madar-app, #madar-app *, #madar-app *::before, #madar-app *::after { box-sizing: border-box; }
+#madar-app { font-size: 14px; line-height: 1.55; }
+#madar-app button, #madar-app input, #madar-app select, #madar-app textarea { font: inherit; }
+#madar-app button { color: inherit; }
+#madar-app button:focus-visible, #madar-app a:focus-visible, #madar-app input:focus-visible,
+#madar-app select:focus-visible, #madar-app textarea:focus-visible {
+  outline: 3px solid rgba(24, 123, 104, 0.24);
+  outline-offset: 2px;
+}

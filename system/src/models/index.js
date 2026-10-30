@@ -22,22 +22,6 @@ function defineModels(sequelize) {
     freezeTableName: true,
   })
 
-  const Worker = sequelize.define('Worker', {
-    id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
-    name: { type: DataTypes.STRING, allowNull: false },
-    jobTitle: { type: DataTypes.STRING, field: 'job_title', allowNull: false, defaultValue: '' },
-    phone: { type: DataTypes.STRING, allowNull: false, defaultValue: '' },
-    active: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
-  }, {
-    tableName: 'workers',
-    timestamps: true,
-    createdAt: 'created_at',
-    updatedAt: false,
-    paranoid: true,
-    deletedAt: 'deleted_at',
-    freezeTableName: true,
-  })
-
   const Employee = sequelize.define('Employee', {
     id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
     name: { type: DataTypes.STRING, allowNull: false },
@@ -49,7 +33,16 @@ function defineModels(sequelize) {
     phone: { type: DataTypes.STRING, allowNull: false, defaultValue: '' },
     jobTitle: { type: DataTypes.STRING, field: 'job_title', allowNull: false, defaultValue: '' },
     monthlySalaryCents: { type: DataTypes.INTEGER, field: 'monthly_salary_cents', allowNull: false, defaultValue: 0 },
+    baseSalaryCents: { type: DataTypes.INTEGER, field: 'base_salary', allowNull: false, defaultValue: 0 },
+    standardDailyHours: { type: DataTypes.INTEGER, field: 'standard_daily_hours', allowNull: false, defaultValue: 9 },
+    standardMonthlyDays: { type: DataTypes.INTEGER, field: 'standard_monthly_days', allowNull: false, defaultValue: 26 },
+    canLogin: { type: DataTypes.BOOLEAN, field: 'can_login', allowNull: false, defaultValue: false },
+    loginUsername: { type: DataTypes.STRING, field: 'login_username' },
+    // Kept nullable for schema compatibility only. users.password_hash remains the sole credential source.
+    loginPasswordHash: { type: DataTypes.STRING, field: 'login_password_hash' },
+    loginRole: { type: DataTypes.STRING, field: 'role' },
     active: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
+    isActive: { type: DataTypes.BOOLEAN, field: 'is_active', allowNull: false, defaultValue: true },
   }, {
     tableName: 'employees',
     timestamps: true,
@@ -300,6 +293,105 @@ function defineModels(sequelize) {
     freezeTableName: true,
   })
 
+  const MaintenanceOrder = sequelize.define('MaintenanceOrder', {
+    id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+    clientId: { type: DataTypes.INTEGER, field: 'client_id', allowNull: false },
+    siteLocation: { type: DataTypes.TEXT, field: 'site_location', allowNull: false, defaultValue: '' },
+    status: { type: DataTypes.STRING, allowNull: false, defaultValue: 'in_progress' },
+    createdBy: { type: DataTypes.INTEGER, field: 'created_by' },
+    assignedTechnicians: { type: DataTypes.TEXT, field: 'assigned_technicians', allowNull: false, defaultValue: '[]' },
+    pettyCashAmountCents: { type: DataTypes.INTEGER, field: 'petty_cash_amount', allowNull: false, defaultValue: 0 },
+    pettyCashSettled: { type: DataTypes.BOOLEAN, field: 'petty_cash_settled', allowNull: false, defaultValue: false },
+    pettyCashBalanceCents: { type: DataTypes.INTEGER, field: 'petty_cash_balance', allowNull: false, defaultValue: 0 },
+    materialsIssued: { type: DataTypes.TEXT, field: 'materials_issued', allowNull: false, defaultValue: '[]' },
+    materialsReconciled: { type: DataTypes.TEXT, field: 'materials_reconciled', allowNull: false, defaultValue: '[]' },
+    adminEditHistory: { type: DataTypes.TEXT, field: 'admin_edit_history', allowNull: false, defaultValue: '[]' },
+    archivedAt: { type: DataTypes.DATE, field: 'archived_at' },
+  }, {
+    tableName: 'maintenance_orders',
+    timestamps: true,
+    createdAt: 'created_at',
+    updatedAt: 'updated_at',
+    paranoid: true,
+    deletedAt: 'deleted_at',
+    freezeTableName: true,
+  })
+
+  const ManufacturingOrder = sequelize.define('ManufacturingOrder', {
+    id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+    orderCode: { type: DataTypes.STRING, field: 'order_code', allowNull: false, unique: true },
+    clientId: { type: DataTypes.INTEGER, field: 'client_id', allowNull: false },
+    productName: { type: DataTypes.STRING, field: 'product_name', allowNull: false },
+    description: { type: DataTypes.TEXT, allowNull: false, defaultValue: '' },
+    targetDeliveryDate: { type: DataTypes.DATEONLY, field: 'target_delivery_date' },
+    machineType: { type: DataTypes.STRING, field: 'machine_type', allowNull: false },
+    assignedTechnicians: { type: DataTypes.TEXT, field: 'assigned_technicians', allowNull: false, defaultValue: '[]' },
+    status: { type: DataTypes.STRING, allowNull: false, defaultValue: 'in_production' },
+    materialsUsed: { type: DataTypes.TEXT, field: 'materials_used', allowNull: false, defaultValue: '[]' },
+    offcutsReturned: { type: DataTypes.TEXT, field: 'offcuts_returned', allowNull: false, defaultValue: '[]' },
+    salesInvoiceId: { type: DataTypes.INTEGER, field: 'sales_invoice_id' },
+    createdBy: { type: DataTypes.INTEGER, field: 'created_by' },
+    deliveredAt: { type: DataTypes.DATE, field: 'delivered_at' },
+  }, {
+    tableName: 'manufacturing_orders',
+    timestamps: true,
+    createdAt: 'created_at',
+    updatedAt: 'updated_at',
+    paranoid: true,
+    deletedAt: 'deleted_at',
+    freezeTableName: true,
+  })
+
+  const SecondaryWarehouseOffcut = sequelize.define('SecondaryWarehouseOffcut', {
+    id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+    materialId: { type: DataTypes.INTEGER, field: 'material_id' },
+    name: { type: DataTypes.STRING, allowNull: false },
+    dimensions: { type: DataTypes.STRING, allowNull: false, defaultValue: '' },
+    quantity: { type: DataTypes.FLOAT, allowNull: false },
+    unit: { type: DataTypes.STRING, allowNull: false, defaultValue: '' },
+    notes: { type: DataTypes.TEXT, allowNull: false, defaultValue: '' },
+    status: { type: DataTypes.STRING, allowNull: false, defaultValue: 'available' },
+  }, { tableName: 'secondary_warehouse_offcuts', timestamps: true, createdAt: 'created_at', updatedAt: false, freezeTableName: true })
+
+  const SecondaryWarehouseScrapSale = sequelize.define('SecondaryWarehouseScrapSale', {
+    id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+    amountCents: { type: DataTypes.INTEGER, field: 'amount_cents', allowNull: false },
+    treasuryTransactionId: { type: DataTypes.INTEGER, field: 'treasury_transaction_id', allowNull: false, unique: true },
+    createdBy: { type: DataTypes.INTEGER, field: 'created_by' },
+    notes: { type: DataTypes.TEXT, allowNull: false, defaultValue: '' },
+  }, { tableName: 'secondary_warehouse_scrap_sales', timestamps: true, createdAt: 'created_at', updatedAt: false, freezeTableName: true })
+
+  const SecondaryWarehouseScrapSaleItem = sequelize.define('SecondaryWarehouseScrapSaleItem', {
+    id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+    saleId: { type: DataTypes.INTEGER, field: 'sale_id', allowNull: false },
+    offcutId: { type: DataTypes.INTEGER, field: 'offcut_id', allowNull: false },
+    quantity: { type: DataTypes.FLOAT, allowNull: false },
+  }, { tableName: 'secondary_warehouse_scrap_sale_items', timestamps: false, freezeTableName: true })
+
+  const EmployeeDailyAttendance = sequelize.define('EmployeeDailyAttendance', {
+    id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+    employeeId: { type: DataTypes.INTEGER, field: 'employee_id', allowNull: false },
+    attendanceDate: { type: DataTypes.DATEONLY, field: 'attendance_date', allowNull: false },
+    status: { type: DataTypes.STRING, allowNull: false },
+    overtimeMinutes: { type: DataTypes.INTEGER, field: 'overtime_minutes', allowNull: false, defaultValue: 0 },
+    holidayOvertimeMinutes: { type: DataTypes.INTEGER, field: 'holiday_overtime_minutes', allowNull: false, defaultValue: 0 },
+    notes: { type: DataTypes.TEXT, allowNull: false, defaultValue: '' },
+    markedBy: { type: DataTypes.INTEGER, field: 'marked_by' },
+  }, { tableName: 'employee_daily_attendance', timestamps: true, createdAt: 'created_at', updatedAt: 'updated_at', freezeTableName: true })
+
+  const EmployeeToolCustody = sequelize.define('EmployeeToolCustody', {
+    id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+    employeeId: { type: DataTypes.INTEGER, field: 'employee_id', allowNull: false },
+    toolName: { type: DataTypes.STRING, field: 'tool_name', allowNull: false },
+    serialNumber: { type: DataTypes.STRING, field: 'serial_number', allowNull: false, defaultValue: '' },
+    issuedAt: { type: DataTypes.DATE, field: 'issued_at', allowNull: false },
+    issuedBy: { type: DataTypes.INTEGER, field: 'issued_by' },
+    returnStatus: { type: DataTypes.STRING, field: 'return_status', allowNull: false, defaultValue: 'issued' },
+    returnedAt: { type: DataTypes.DATE, field: 'returned_at' },
+    returnedBy: { type: DataTypes.INTEGER, field: 'returned_by' },
+    notes: { type: DataTypes.TEXT, allowNull: false, defaultValue: '' },
+  }, { tableName: 'employee_tool_custody', timestamps: false, freezeTableName: true })
+
   Client.hasMany(Order, { as: 'orders', foreignKey: 'clientId' })
   Order.belongsTo(Client, { as: 'client', foreignKey: 'clientId' })
 
@@ -323,10 +415,6 @@ function defineModels(sequelize) {
   InvoiceItem.belongsTo(Material, { as: 'material', foreignKey: 'materialId' })
   Material.hasMany(InventoryMovement, { as: 'movements', foreignKey: 'materialId' })
   InventoryMovement.belongsTo(Material, { as: 'material', foreignKey: 'materialId' })
-  Worker.hasMany(Invoice, { as: 'invoices', foreignKey: 'workerId' })
-  Invoice.belongsTo(Worker, { as: 'worker', foreignKey: 'workerId' })
-  Worker.hasMany(TreasuryTransaction, { as: 'treasuryTransactions', foreignKey: 'workerId' })
-  TreasuryTransaction.belongsTo(Worker, { as: 'worker', foreignKey: 'workerId' })
   Employee.hasOne(User, { as: 'user', foreignKey: 'employeeId' })
   User.belongsTo(Employee, { as: 'employee', foreignKey: 'employeeId' })
   Employee.hasMany(Invoice, { as: 'invoices', foreignKey: 'employeeId' })
@@ -336,9 +424,42 @@ function defineModels(sequelize) {
   Employee.hasMany(Order, { as: 'orders', foreignKey: 'assignedEmployeeId' })
   Order.belongsTo(Employee, { as: 'assignedEmployee', foreignKey: 'assignedEmployeeId' })
 
+  Client.hasMany(MaintenanceOrder, { as: 'maintenanceOrders', foreignKey: 'clientId' })
+  MaintenanceOrder.belongsTo(Client, { as: 'client', foreignKey: 'clientId' })
+  MaintenanceOrder.belongsTo(User, { as: 'creator', foreignKey: 'createdBy' })
+  User.hasMany(MaintenanceOrder, { as: 'createdMaintenanceOrders', foreignKey: 'createdBy' })
+  Client.hasMany(ManufacturingOrder, { as: 'manufacturingOrders', foreignKey: 'clientId' })
+  ManufacturingOrder.belongsTo(Client, { as: 'client', foreignKey: 'clientId' })
+  ManufacturingOrder.belongsTo(Invoice, { as: 'salesInvoice', foreignKey: 'salesInvoiceId' })
+  Invoice.hasMany(ManufacturingOrder, { as: 'manufacturingOrders', foreignKey: 'salesInvoiceId' })
+  ManufacturingOrder.belongsTo(User, { as: 'creator', foreignKey: 'createdBy' })
+  User.hasMany(ManufacturingOrder, { as: 'createdManufacturingOrders', foreignKey: 'createdBy' })
+  Material.hasMany(SecondaryWarehouseOffcut, { as: 'offcuts', foreignKey: 'materialId' })
+  SecondaryWarehouseOffcut.belongsTo(Material, { as: 'material', foreignKey: 'materialId' })
+  TreasuryTransaction.hasOne(SecondaryWarehouseScrapSale, { as: 'scrapSale', foreignKey: 'treasuryTransactionId' })
+  SecondaryWarehouseScrapSale.belongsTo(TreasuryTransaction, { as: 'treasuryTransaction', foreignKey: 'treasuryTransactionId' })
+  SecondaryWarehouseScrapSale.belongsTo(User, { as: 'creator', foreignKey: 'createdBy' })
+  User.hasMany(SecondaryWarehouseScrapSale, { as: 'scrapSales', foreignKey: 'createdBy' })
+  SecondaryWarehouseScrapSale.hasMany(SecondaryWarehouseScrapSaleItem, { as: 'items', foreignKey: 'saleId' })
+  SecondaryWarehouseScrapSaleItem.belongsTo(SecondaryWarehouseScrapSale, { as: 'sale', foreignKey: 'saleId' })
+  SecondaryWarehouseOffcut.hasMany(SecondaryWarehouseScrapSaleItem, { as: 'scrapSaleItems', foreignKey: 'offcutId' })
+  SecondaryWarehouseScrapSaleItem.belongsTo(SecondaryWarehouseOffcut, { as: 'offcut', foreignKey: 'offcutId' })
+  Employee.hasMany(EmployeeDailyAttendance, { as: 'attendance', foreignKey: 'employeeId' })
+  EmployeeDailyAttendance.belongsTo(Employee, { as: 'employee', foreignKey: 'employeeId' })
+  User.hasMany(EmployeeDailyAttendance, { as: 'markedAttendance', foreignKey: 'markedBy' })
+  EmployeeDailyAttendance.belongsTo(User, { as: 'marker', foreignKey: 'markedBy' })
+  Employee.hasMany(EmployeeToolCustody, { as: 'toolCustody', foreignKey: 'employeeId' })
+  EmployeeToolCustody.belongsTo(Employee, { as: 'employee', foreignKey: 'employeeId' })
+  User.hasMany(EmployeeToolCustody, { as: 'issuedTools', foreignKey: 'issuedBy' })
+  EmployeeToolCustody.belongsTo(User, { as: 'issuer', foreignKey: 'issuedBy' })
+  User.hasMany(EmployeeToolCustody, { as: 'returnedTools', foreignKey: 'returnedBy' })
+  EmployeeToolCustody.belongsTo(User, { as: 'returner', foreignKey: 'returnedBy' })
+
   return {
-    User, Worker, Employee, Client, Machine, Material, Order, OrderMachine, OrderEmployeeAssignment, AreaFolder, IdempotencyKey,
+    User, Employee, Client, Machine, Material, Order, OrderMachine, OrderEmployeeAssignment, AreaFolder, IdempotencyKey,
     Invoice, TreasuryTransaction, InvoiceItem, InventoryMovement, Counter, AuditLog,
+    MaintenanceOrder, ManufacturingOrder, SecondaryWarehouseOffcut, SecondaryWarehouseScrapSale, SecondaryWarehouseScrapSaleItem,
+    EmployeeDailyAttendance, EmployeeToolCustody,
   }
 }
 

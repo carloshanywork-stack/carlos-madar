@@ -303,6 +303,80 @@ async function validateDatabaseSnapshot(databasePath, { manifest = null } = {}) 
           throw new Error('قاعدة البيانات تفتقد جدول مراجعات فواتير الشراء المطلوب لمخطط v7.')
         }
       }
+      if (schemaVersion >= 8) {
+        if (!migrations.has('payroll-attendance-schema-v8')) {
+          throw new Error('قاعدة البيانات تفتقد ترحيل أيام الغياب لمخطط v8.')
+        }
+        if (!tables.has('payroll_records')) {
+          throw new Error('قاعدة البيانات تفتقد جدول الرواتب المطلوب لمخطط v8.')
+        }
+        const payrollColumns = new Set(database.prepare('PRAGMA table_info(payroll_records)').all().map((column) => column.name))
+        if (!payrollColumns.has('absence_days') || !payrollColumns.has('absence_deduction_cents')) {
+          throw new Error('جدول الرواتب يفتقد أعمدة الغياب المطلوبة لمخطط v8.')
+        }
+      }
+      if (schemaVersion >= 9) {
+        if (!migrations.has('operational-domains-secondary-warehouse-schema-v9')) {
+          throw new Error('قاعدة البيانات تفتقد ترحيل أوامر الصيانة والتصنيع والمخزن الجانبي لمخطط v9.')
+        }
+        for (const required of ['maintenance_orders', 'manufacturing_orders', 'secondary_warehouse_offcuts',
+          'secondary_warehouse_scrap_sales', 'secondary_warehouse_scrap_sale_items', 'employees']) {
+          if (!tables.has(required)) throw new Error(`قاعدة البيانات تفتقد جدول ${required} المطلوب لمخطط v9.`)
+        }
+        const employeeColumns = new Set(database.prepare('PRAGMA table_info(employees)').all().map((column) => column.name))
+        for (const column of ['base_salary', 'standard_daily_hours', 'standard_monthly_days', 'can_login',
+          'login_username', 'login_password_hash', 'role', 'is_active']) {
+          if (!employeeColumns.has(column)) throw new Error(`جدول الموظفين يفتقد العمود ${column} المطلوب لمخطط v9.`)
+        }
+      }
+      if (schemaVersion >= 10) {
+        if (!migrations.has('staff-attendance-tool-custody-schema-v10')) {
+          throw new Error('قاعدة البيانات تفتقد ترحيل الحضور وعهد الأدوات لمخطط v10.')
+        }
+        for (const required of ['employee_daily_attendance', 'employee_tool_custody']) {
+          if (!tables.has(required)) throw new Error(`قاعدة البيانات تفتقد جدول ${required} المطلوب لمخطط v10.`)
+        }
+      }
+      if (schemaVersion >= 11) {
+        if (!migrations.has('secondary-warehouse-stock-count-schema-v11')) {
+          throw new Error('قاعدة البيانات تفتقد ترحيل جرد المخزن الجانبي لمخطط v11.')
+        }
+        if (!tables.has('stock_count_offcut_items')) throw new Error('قاعدة البيانات تفتقد جدول جرد المخزن الجانبي المطلوب لمخطط v11.')
+      }
+      if (schemaVersion >= 12) {
+        if (!migrations.has('retire-legacy-workers-table-v12')) {
+          throw new Error('قاعدة البيانات تفتقد ترحيل أرشفة سجل العمال التاريخي لمخطط v12.')
+        }
+        if (tables.has('workers') || !tables.has('legacy_worker_history')) {
+          throw new Error('جدول العمال النشط لم تتم أرشفته بطريقة تحفظ الروابط التاريخية في مخطط v12.')
+        }
+      }
+      if (schemaVersion >= 13) {
+        if (!migrations.has('custody-manufacturing-remediation-v13')) {
+          throw new Error('قاعدة البيانات تفتقد ترحيل العهدة ومرفقات التصنيع لمخطط v13.')
+        }
+        for (const required of ['maintenance_order_settlements', 'manufacturing_design_files', 'manufacturing_material_consumptions']) {
+          if (!tables.has(required)) throw new Error(`قاعدة البيانات تفتقد جدول ${required} المطلوب لمخطط v13.`)
+        }
+        const orderColumns = new Set(database.prepare('PRAGMA table_info(orders)').all().map((column) => column.name))
+        const invoiceColumns = new Set(database.prepare('PRAGMA table_info(invoices)').all().map((column) => column.name))
+        const manufacturingColumns = new Set(database.prepare('PRAGMA table_info(manufacturing_orders)').all().map((column) => column.name))
+        const treasuryColumns = new Set(database.prepare('PRAGMA table_info(treasury_transactions)').all().map((column) => column.name))
+        if (!['petty_cash_amount_cents', 'actual_expenses_cents', 'warranty_period_months', 'warranty_expires_at']
+          .every((column) => orderColumns.has(column)) || !invoiceColumns.has('manufacturing_order_id')
+          || !manufacturingColumns.has('sale_amount_cents') || !treasuryColumns.has('order_id')) {
+          throw new Error('قاعدة البيانات تفتقد أعمدة تسوية الصيانة أو فواتير التصنيع المطلوبة لمخطط v13.')
+        }
+      }
+      if (schemaVersion >= 14) {
+        if (!migrations.has('workshop-inventory-issue-source-v14')) {
+          throw new Error('قاعدة البيانات تفتقد ترحيل ربط صرف المخزون بأوامر الورشة لمخطط v14.')
+        }
+        const consumptionSchema = database.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='manufacturing_material_consumptions'").get()?.sql || ''
+        if (!consumptionSchema.includes("'sub'")) {
+          throw new Error('سجل استهلاك خامات الورشة لا يدعم مخزن البواقي العام المطلوب لمخطط v14.')
+        }
+      }
     }
     if (manifest?.schemaVersion !== undefined && manifest.schemaVersion !== schemaVersion) {
       throw new Error('إصدار مخطط قاعدة البيانات لا يطابق بيان النسخة الاحتياطية.')
