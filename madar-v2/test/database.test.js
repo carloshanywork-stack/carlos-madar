@@ -73,11 +73,33 @@ test('fresh initialization leaves administrator setup to the first-run screen by
     assert.equal(result.adminCreated, false);
     assert.equal(cleanDatabase.prepare('SELECT COUNT(*) AS count FROM users').get().count, 0);
   assert.equal(cleanDatabase.prepare('SELECT COUNT(*) AS count FROM sessions').get().count, 0);
-  assert.equal(
-    cleanDatabase.prepare('SELECT COUNT(*) AS count FROM schema_migrations WHERE version = ?')
-      .get('20261030-authentication-sessions').count,
-    1,
-  );
+    assert.equal(
+      cleanDatabase.prepare('SELECT COUNT(*) AS count FROM schema_migrations WHERE version = ?')
+        .get('20261030-authentication-sessions').count,
+      1,
+    );
+    assert.equal(
+      cleanDatabase.prepare('SELECT COUNT(*) AS count FROM schema_migrations WHERE version = ?')
+        .get('20261031-maintenance-order-soft-delete-recovery').count,
+      1,
+    );
+    assert.equal(cleanDatabase.prepare(`
+      SELECT COUNT(*) AS count FROM sqlite_master
+      WHERE type = 'table' AND name = 'maintenance_order_deletion_operations'
+    `).get().count, 1);
+    assert.equal(cleanDatabase.prepare(`
+      SELECT COUNT(*) AS count FROM sqlite_master
+      WHERE type = 'table' AND name = 'maintenance_card_deletion_operations'
+    `).get().count, 1);
+    assert.equal(cleanDatabase.prepare(`
+      SELECT COUNT(*) AS count FROM sqlite_master
+      WHERE type = 'table' AND name = 'maintenance_machine_decommission_operations'
+    `).get().count, 1);
+    assert.ok(cleanDatabase.pragma('table_info(maintenance_cards)').some((column) => column.name === 'deleted_at'));
+    assert.equal(cleanDatabase.prepare('SELECT COUNT(*) AS count FROM schema_migrations WHERE version = ?')
+      .get('20261031-maintenance-card-soft-delete-recovery').count, 1);
+    assert.equal(cleanDatabase.prepare('SELECT COUNT(*) AS count FROM schema_migrations WHERE version = ?')
+      .get('20261031-maintenance-machine-decommission-recovery').count, 1);
     assert.equal(cleanDatabase.prepare('SELECT COUNT(*) AS count FROM settings').get().count, 5);
   } finally {
     cleanDatabase.close();

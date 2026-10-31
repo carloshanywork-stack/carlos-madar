@@ -19,13 +19,15 @@ const SettingsPage = lazy(() => import('./modules/settings/SettingsPage.jsx'));
 
 function savedTheme() {
   try {
-    return window.localStorage.getItem('madar-v2-theme') === 'dark' ? 'dark' : 'light';
+    const preference = window.localStorage.getItem('madar-v2-theme');
+    if (preference === 'dark' || preference === 'light') return preference;
   } catch {
-    return 'light';
+    // Fall back to the operating-system preference when browser storage is unavailable.
   }
+  return window.matchMedia?.('(prefers-color-scheme: dark)')?.matches ? 'dark' : 'light';
 }
 
-function BusinessRoutes() {
+function BusinessRoutes({ user }) {
   return (
     <Suspense fallback={<LoadingState label="جارٍ تحميل الصفحة" />}>
       <Routes>
@@ -38,7 +40,7 @@ function BusinessRoutes() {
         <Route path="/warehouse" element={<WarehousePage />} />
         <Route path="/finance" element={<FinancePage />} />
         <Route path="/accounting" element={<AccountingPage />} />
-        <Route path="/archive" element={<ArchivePage />} />
+        <Route path="/archive" element={<ArchivePage isAdmin={user?.role === 'admin'} />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
@@ -130,7 +132,7 @@ function AuthenticatedApplication() {
           theme={theme}
           onThemeToggle={toggleTheme}
         >
-          <BusinessRoutes />
+          <BusinessRoutes user={user} />
         </AppShell>
       )}
     </div>

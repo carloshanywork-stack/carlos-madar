@@ -115,7 +115,9 @@ test('Phase 2 client, maintenance, and workshop flows remain isolated and transa
   const machine = machineCreated.body;
   assert.deepEqual((await request('/api/maintenance/areas')).body, ['Riyadh']);
   const filteredMachines = await request('/api/maintenance/machines?area=Riyadh&search=acrylic');
-  assert.deepEqual(filteredMachines.body.map((entry) => entry.id), [machine.id]);
+  assert.deepEqual(filteredMachines.body.machines.map((entry) => entry.id), [machine.id]);
+  assert.equal(filteredMachines.body.total, 1);
+  assert.deepEqual(filteredMachines.body.areas, ['Riyadh']);
 
   const rejectedFinancialFields = await request('/api/maintenance/orders', jsonOptions('POST', {
     clientId: client.id,
@@ -127,6 +129,7 @@ test('Phase 2 client, maintenance, and workshop flows remain isolated and transa
 
   const maintenanceCreated = await request('/api/maintenance/orders', jsonOptions('POST', {
     clientId: client.id,
+    area: 'Riyadh',
     employeeIds: [maintenanceTechnicianId],
     notes: 'Inspect acrylic equipment at site.',
     pettyCashDisbursedCents: 12500,

@@ -197,6 +197,7 @@ test('Phase 3 warehouse lifecycle preserves Phase 1/2 domains and reconciles phy
 
   const maintenance = await request('/api/maintenance/orders', jsonOptions('POST', {
     clientId,
+    area: 'Cairo',
     employeeIds: [],
     notes: 'This must not receive warehouse materials.',
   }));

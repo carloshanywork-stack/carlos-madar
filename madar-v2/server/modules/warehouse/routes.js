@@ -10,8 +10,19 @@ import {
   sellScrap,
 } from './service.js';
 import { reconcileStockCount, startStockCount } from './stock-count.service.js';
+import { buildWarehouseWorkbook } from './export.js';
 
 const router = Router();
+
+router.get('/export.xlsx', (req, res) => {
+  const buffer = buildWarehouseWorkbook();
+  res.set({
+    'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'Content-Disposition': `attachment; filename="madar-v2-warehouse-${new Date().toISOString().slice(0, 10)}.xlsx"`,
+    'Cache-Control': 'private, no-store',
+  });
+  res.send(buffer);
+});
 
 router.get('/materials', (req, res) => {
   res.json(listMaterials());

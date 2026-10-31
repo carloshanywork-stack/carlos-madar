@@ -1,22 +1,46 @@
 import { Router } from 'express';
 import { readFile } from 'node:fs/promises';
 import { extname } from 'node:path';
-import { asyncHandler } from '../http.js';
+import { asyncHandler, HttpError } from '../http.js';
 import { memoryUpload } from '../upload.js';
 import { requestActorId } from '../actor.js';
+import { listStorageDirectories } from '../storage.js';
+import { exportMaintenancePptx, exportMaintenanceReport } from './export.js';
+import { buildMaintenanceAnalysisWorkbook, getMaintenanceAreaAnalysis } from './analysis.js';
+import { buildAreaMaintenanceNotesWorkbook, getAreaMaintenanceNotes } from './area-notes.js';
 import {
   addMaintenanceCard,
   archiveMaintenanceOrder,
+  beginMaintenanceTripProgress,
+  bindUnmatchedMaintenanceFolder,
+  clearMachineMaintenanceNotes,
   createMachine,
+  createMaintenanceReason,
   createMaintenanceOrder,
+  deactivateMachine,
+  deactivateMaintenanceReason,
+  deleteMaintenanceCard,
+  deleteMaintenanceOrder,
+  decommissionMaintenanceMachineWithoutCard,
   disburseMaintenanceCustody,
+  failMaintenanceTripProgress,
   getMaintenanceOrder,
+  getMaintenanceTripProgress,
   getMaintenancePhoto,
+  getUnmatchedMaintenancePhoto,
+  importMachines,
+  importMaintenanceServerFolder,
   listAreas,
   listMachines,
+  listMaintenanceReasons,
   listMaintenanceOrders,
+  populateMaintenanceOrderArea,
+  processMaintenanceTripFolder,
+  previewMachineImport,
   transitionMaintenanceToReview,
   updateMaintenanceCard,
+  updateMaintenanceReason,
+  updateMachine,
   uploadMaintenancePhoto,
 } from './service.js';
 
@@ -25,18 +49,161 @@ const photoUpload = memoryUpload({
   maxBytes: 25 * 1024 * 1024,
   extensions: ['.jpg', '.jpeg', '.png', '.webp', '.heic', '.heif'],
 }).single('photo');
+const machineImportUpload = memoryUpload({ maxBytes: 50 * 1024 * 1024, extensions: ['.xlsx', '.xls', '.csv'] }).single('file');
+const tripFolderUpload = memoryUpload({ maxBytes: 1024 * 1024 * 1024, extensions: ['.zip'] }).single('file');
+
+function receiveTripFolderUpload(req, res, next) {
+  try {
+    beginMaintenanceTripProgress(req.params.id);
+    tripFolderUpload(req, res, (error) => {
+      if (error) failMaintenanceTripProgress(req.params.id, 'تعذر استلام ملف الرحلة.');
+      next(error);
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+function requireRole(role) {
+  return (req, res, next) => {
+    if (req.user?.role !== role) {
+      res.status(403).json({ error: 'Administrator access is required.' });
+      return;
+    }
+    next();
+  };
+}
+
+function explorerPath(value) {
+  if (value === undefined || value === '') return '';
+  if (typeof value !== 'string' || value.length > 1024 || value.includes('\\') || value.includes('\0')) {
+    throw new HttpError(400, 'Invalid Areas folder path.');
+  }
+  const segments = value.split('/');
+  if (segments.some((segment) => !segment || segment === '.' || segment === '..' || segment.startsWith('.') || segment.includes(':'))) {
+    throw new HttpError(400, 'Invalid Areas folder path.');
+  }
+  return segments.join('/');
+}
 
 router.get('/areas', (req, res) => {
   res.json(listAreas());
 });
 
-router.get('/machines', (req, res) => {
-  res.json(listMachines({ area: req.query.area, search: req.query.search ?? req.query.q }));
+router.get('/area-notes/export.xlsx', (req, res, next) => {
+  try {
+    const workbook = buildAreaMaintenanceNotesWorkbook({ area: req.query.area });
+    res.set({
+      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': 'attachment; filename="Madar-Area-Maintenance.xlsx"',
+      'Cache-Control': 'private, no-store',
+    }).send(workbook);
+  } catch (error) {
+    next(error);
+  }
 });
 
-router.post('/machines', (req, res, next) => {
+router.get('/area-notes', (req, res, next) => {
+  try { res.json(getAreaMaintenanceNotes()); }
+  catch (error) { next(error); }
+});
+
+router.get('/storage-explorer', asyncHandler(async (req, res) => {
+  const currentPath = explorerPath(req.query.path);
+  const storagePath = currentPath ? `Areas/${currentPath}` : 'Areas';
+  let directories;
   try {
-    res.status(201).json(createMachine(req.body, requestActorId(req)));
+    directories = await listStorageDirectories(storagePath, { photoExtensions: ['.jpg', '.jpeg', '.png'] });
+  } catch (error) {
+    if (currentPath || error.status !== 404) throw error;
+    directories = [];
+  }
+
+  const breadcrumbs = [{ name: 'Areas', path: '' }];
+  let breadcrumbPath = '';
+  for (const segment of currentPath ? currentPath.split('/') : []) {
+    breadcrumbPath = breadcrumbPath ? `${breadcrumbPath}/${segment}` : segment;
+    breadcrumbs.push({ name: segment, path: breadcrumbPath });
+  }
+  const folders = directories.map((directory) => {
+    const folderPath = currentPath ? `${currentPath}/${directory.name}` : directory.name;
+    return {
+      ...directory,
+      path: folderPath,
+      fullStoragePath: `Areas/${folderPath}`,
+    };
+  });
+
+  res.json({ currentPath, breadcrumbs, folders });
+}));
+
+router.get('/machines', (req, res) => {
+  res.json(listMachines({ area: req.query.area, search: req.query.search ?? req.query.q, page: req.query.page, limit: req.query.limit }));
+});
+
+router.post('/machines/import/preview', machineImportUpload, (req, res, next) => {
+  try { res.json(previewMachineImport(req.file)); }
+  catch (error) { next(error); }
+});
+
+router.post('/machines/import', machineImportUpload, asyncHandler(async (req, res) => {
+  res.json(await importMachines(req.file, requestActorId(req)));
+}));
+
+router.post('/machines', asyncHandler(async (req, res) => {
+  res.status(201).json(await createMachine(req.body, requestActorId(req)));
+}));
+
+router.patch('/machines/:id', asyncHandler(async (req, res) => {
+  res.json(await updateMachine(req.params.id, req.body, requestActorId(req)));
+}));
+
+router.delete('/machines/:id', (req, res, next) => {
+  try { res.json(deactivateMachine(req.params.id, requestActorId(req))); }
+  catch (error) { next(error); }
+});
+
+router.delete('/machines/:id/maintenance-note', (req, res, next) => {
+  try { res.json(clearMachineMaintenanceNotes(req.params.id, requestActorId(req))); }
+  catch (error) { next(error); }
+});
+
+router.get('/reasons', (req, res, next) => {
+  try {
+    const includeInactive = req.query.includeInactive;
+    if (includeInactive !== undefined && !['true', 'false', '1', '0'].includes(includeInactive)) {
+      throw new HttpError(400, 'includeInactive must be true or false.');
+    }
+    res.json(listMaintenanceReasons({ includeInactive: includeInactive === 'true' || includeInactive === '1' }));
+  } catch (error) {
+    next(error);
+  }
+});
+router.post('/reasons', (req, res, next) => {
+  try { res.status(201).json(createMaintenanceReason(req.body, requestActorId(req))); }
+  catch (error) { next(error); }
+});
+router.patch('/reasons/:id', (req, res, next) => {
+  try { res.json(updateMaintenanceReason(req.params.id, req.body, requestActorId(req))); }
+  catch (error) { next(error); }
+});
+router.delete('/reasons/:id', (req, res, next) => {
+  try { res.json(deactivateMaintenanceReason(req.params.id, requestActorId(req))); }
+  catch (error) { next(error); }
+});
+
+router.get('/analysis/areas', (req, res, next) => {
+  try { res.json(getMaintenanceAreaAnalysis(req.query)); }
+  catch (error) { next(error); }
+});
+router.get('/analysis/export.xlsx', (req, res, next) => {
+  try {
+    const workbook = buildMaintenanceAnalysisWorkbook(req.query);
+    res.set({
+      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': 'attachment; filename="Madar-Maintenance-Analysis.xlsx"',
+      'Cache-Control': 'private, no-store',
+    }).send(workbook);
   } catch (error) {
     next(error);
   }
@@ -58,6 +225,10 @@ router.post('/orders', (req, res, next) => {
   }
 });
 
+router.delete('/orders/:id', requireRole('admin'), asyncHandler(async (req, res) => {
+  res.json(await deleteMaintenanceOrder(req.params.id, requestActorId(req)));
+}));
+
 router.post('/orders/:id/cards', (req, res, next) => {
   try {
     res.status(201).json(addMaintenanceCard(req.params.id, req.body, requestActorId(req)));
@@ -65,6 +236,87 @@ router.post('/orders/:id/cards', (req, res, next) => {
     next(error);
   }
 });
+
+router.delete('/orders/:id/cards/:cardId', asyncHandler(async (req, res) => {
+  res.json(await deleteMaintenanceCard(req.params.id, req.params.cardId, requestActorId(req)));
+}));
+
+router.delete('/orders/:id/machines/:machineId', asyncHandler(async (req, res) => {
+  res.json(await decommissionMaintenanceMachineWithoutCard(
+    req.params.id,
+    req.params.machineId,
+    requestActorId(req),
+  ));
+}));
+
+router.post('/orders/:id/populate-area', (req, res, next) => {
+  try { res.json(populateMaintenanceOrderArea(req.params.id, req.body, requestActorId(req))); }
+  catch (error) { next(error); }
+});
+
+router.post('/orders/:id/import-server-folder', asyncHandler(async (req, res) => {
+  res.json(await importMaintenanceServerFolder(req.params.id, req.body, requestActorId(req)));
+}));
+
+router.get('/orders/:id/trip-progress', (req, res, next) => {
+  try { res.json(getMaintenanceTripProgress(req.params.id)); }
+  catch (error) { next(error); }
+});
+
+router.post('/orders/:id/process-folder', receiveTripFolderUpload, asyncHandler(async (req, res) => {
+  try {
+    res.json(await processMaintenanceTripFolder(req.params.id, {
+      folderPath: req.body?.folderPath,
+      file: req.file,
+    }, requestActorId(req)));
+  } catch (error) {
+    failMaintenanceTripProgress(req.params.id);
+    throw error;
+  }
+}));
+
+router.post('/orders/:id/unmatched/:folderId/bind', asyncHandler(async (req, res) => {
+  res.json(await bindUnmatchedMaintenanceFolder(
+    req.params.id,
+    req.params.folderId,
+    req.body,
+    requestActorId(req),
+  ));
+}));
+
+router.get('/orders/:id/unmatched/:folderId/photos/:filename', asyncHandler(async (req, res) => {
+  const absolutePath = await getUnmatchedMaintenancePhoto(
+    req.params.id,
+    req.params.folderId,
+    req.query.phase,
+    req.params.filename,
+  );
+  const type = {
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.png': 'image/png',
+    '.webp': 'image/webp',
+    '.heic': 'image/heic',
+    '.heif': 'image/heif',
+  }[extname(req.params.filename).toLowerCase()];
+  res.set({ 'Content-Type': type, 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' });
+  res.send(await readFile(absolutePath));
+}));
+
+router.get('/export/pptx', asyncHandler(async (req, res) => {
+  await exportMaintenancePptx(req, res);
+}));
+
+router.post('/export/pptx', asyncHandler(async (req, res) => {
+  await exportMaintenancePptx(req, res);
+}));
+
+router.get('/orders/:id/export.pptx', asyncHandler(async (req, res) => {
+  await exportMaintenanceReport(req, res, 'pptx');
+}));
+router.get('/orders/:id/export.docx', asyncHandler(async (req, res) => {
+  await exportMaintenanceReport(req, res, 'docx');
+}));
 
 router.post('/orders/:id/custody-advance', (req, res, next) => {
   try {

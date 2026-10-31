@@ -8,18 +8,25 @@
   },
   "type": "module",
   "scripts": {
-    "start": "node server/index.js",
+    "start": "node --max-old-space-size=4096 server/index.js",
     "test": "node --test test/*.test.js",
     "db:init": "node server/database/init.js",
     "db:migrate-v1": "node scripts/migrate-from-v1.js"
   },
   "dependencies": {
+    "archiver": "^8.0.0",
     "bcryptjs": "^2.4.3",
     "better-sqlite3": "^13.0.0",
     "cors": "^2.8.5",
+    "docx": "^9.15.0",
     "dotenv": "^16.4.5",
     "express": "^4.21.0",
     "jsonwebtoken": "^9.0.2",
-    "multer": "^2.5.0"
+    "multer": "^2.5.0",
+    "pptxgenjs": "^4.0.1",
+    "sharp": "^0.35.5",
+    "xlsx": "^0.18.5",
+    "xlsx-js-style": "^1.2.0",
+    "yauzl": "^3.4.0"
   }
 }

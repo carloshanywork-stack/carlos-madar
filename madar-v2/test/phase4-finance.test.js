@@ -198,6 +198,7 @@ test('Phase 4 finance lifecycle keeps integer-cents, stock, custody, billing, an
 
   const maintenanceCreated = await request('/api/maintenance/orders', jsonOptions('POST', {
     clientId: client.id,
+    area: 'Cairo',
     employeeIds: [],
     notes: 'Maintenance with petty-cash custody.',
     pettyCashDisbursedCents: 200_000,

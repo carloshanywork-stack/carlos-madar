@@ -162,7 +162,7 @@ export default function WarehousePage() {
 
   return (
     <>
-      <PageHeader kicker="المواد · المخازن" title="المخزون والمواد" description="متابعة رصيد الألواح في المخزن الرئيسي والقصاصات القابلة لإعادة الاستخدام في المخزن الثانوي." actions={<><Button variant="secondary" icon="check" onClick={startCount}>جلسة جرد</Button>{tab === 'materials' ? <Button icon="plus" onClick={() => { setFormError(''); setModal('material'); }}>مادة جديدة</Button> : <Button icon="plus" onClick={() => { setFormError(''); setModal('offcut'); }}>تسجيل باقي</Button>}</>} />
+      <PageHeader kicker="المواد · المخازن" title="المخزون والمواد" description="متابعة رصيد الألواح في المخزن الرئيسي والقصاصات القابلة لإعادة الاستخدام في المخزن الثانوي." actions={<><Button variant="secondary" icon="download" onClick={() => { window.location.href = '/api/warehouse/export.xlsx'; }}>تصدير Excel</Button><Button variant="secondary" icon="check" onClick={startCount}>جلسة جرد</Button>{tab === 'materials' ? <Button icon="plus" onClick={() => { setFormError(''); setModal('material'); }}>مادة جديدة</Button> : <Button icon="plus" onClick={() => { setFormError(''); setModal('offcut'); }}>تسجيل باقي</Button>}</>} />
       <div className="madar-warehouse-toolbar madar-section">
         <Tabs items={inventoryTabs} value={tab} onChange={(value) => { setTab(value); setSearch(''); }} ariaLabel="أقسام المخزون" />
         <label className="madar-field madar-search"><Icon name="search" size={15} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="بحث في سجل المخزون" aria-label="بحث المخزون" /></label>

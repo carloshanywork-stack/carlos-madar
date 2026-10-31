@@ -16,6 +16,9 @@ import Modal from '../../components/ui/Modal.jsx';
 import PageHeader from '../../components/ui/PageHeader.jsx';
 import Tabs from '../../components/ui/Tabs.jsx';
 import Toast from '../../components/ui/Toast.jsx';
+import AreaMaintenanceDirectory from './AreaMaintenanceDirectory.jsx';
+import MachinesDirectory from './MachinesDirectory.jsx';
+import MaintenanceReasonsDirectory from './MaintenanceReasonsDirectory.jsx';
 
 const statusItems = [
   { value: 'in_progress', label: 'قيد التنفيذ' },
@@ -24,31 +27,46 @@ const statusItems = [
 ];
 
 export default function MaintenancePage() {
+  const [view, setView] = useState('orders');
   const [status, setStatus] = useState('in_progress');
   const { data: orders, loading, error, reload } = useApi(`/api/maintenance/orders?status=${status}`);
   const { data: clients } = useApi('/api/clients');
+  const { data: areas } = useApi('/api/maintenance/areas');
   const [createOpen, setCreateOpen] = useState(false);
   const [employeeIds, setEmployeeIds] = useState([]);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState('');
   const [search, setSearch] = useState('');
+  const [selectedAreas, setSelectedAreas] = useState([]);
+  const [autoPopulate, setAutoPopulate] = useState(true);
+  const selectedAreasQuery = selectedAreas.join('، ');
+  const { data: areaMachines } = useApi(selectedAreas.length
+    ? `/api/maintenance/machines?area=${encodeURIComponent(selectedAreasQuery)}&limit=1`
+    : '', { enabled: selectedAreas.length > 0 });
   const { notice, showToast, clearToast } = useToast();
   const filteredOrders = useMemo(() => (orders ?? []).filter((order) =>
     `${order.order_code} ${order.client_name} ${order.client_code}`.toLowerCase().includes(search.toLowerCase())), [orders, search]);
 
   async function createOrder(event) {
     event.preventDefault();
+    if (!selectedAreas.length) {
+      setFormError('اختر منطقة واحدة على الأقل لإنشاء أمر الصيانة.');
+      return;
+    }
     setSaving(true);
     setFormError('');
     const form = new FormData(event.currentTarget);
     try {
       await api.post('/api/maintenance/orders', {
         clientId: Number(form.get('clientId')),
+        areas: selectedAreas,
+        autoPopulateAreaMachines: Boolean(selectedAreas.length && autoPopulate),
         employeeIds,
         notes: form.get('notes') || undefined,
       });
       setCreateOpen(false);
       setEmployeeIds([]);
+      setSelectedAreas([]);
       if (status !== 'in_progress') setStatus('in_progress');
       else await reload();
       showToast('تم إنشاء أمر الصيانة بنجاح.');
@@ -63,10 +81,17 @@ export default function MaintenancePage() {
     <>
       <PageHeader
         kicker="الخدمة الميدانية · الصيانة"
-        title="أوامر الصيانة"
-        description="من إنشاء أمر الخدمة حتى فحص الآلات، التوثيق بالصور، والمراجعة والأرشفة."
-        actions={<Button icon="plus" onClick={() => { setFormError(''); setEmployeeIds([]); setCreateOpen(true); }}>إنشاء أمر صيانة</Button>}
+        title={view === 'reasons' ? 'أسباب الأعطال' : view === 'machines' ? 'قاعدة الماكينات' : view === 'area_notes' ? 'صيانات المناطق' : 'أوامر الصيانة'}
+        description={view === 'reasons' ? 'إدارة أسباب الأعطال التي تظهر في بطاقات فحص الصيانة.' : view === 'machines' ? 'دليل الماكينات النشطة ومناطق الخدمة والاستيراد.' : view === 'area_notes' ? 'عرض أحدث الملاحظات الفنية المسجلة لكل ماكينة حسب المنطقة.' : 'من إنشاء أمر الخدمة حتى فحص الآلات، التوثيق بالصور، والمراجعة والأرشفة.'}
+        actions={view === 'orders' && <Button icon="plus" onClick={() => { setFormError(''); setEmployeeIds([]); setSelectedAreas([]); setAutoPopulate(true); setCreateOpen(true); }}>إنشاء أمر صيانة</Button>}
       />
+      <div className="madar-section"><Tabs items={[
+        { value: 'orders', label: 'أوامر الصيانة (Orders)' },
+        { value: 'machines', label: 'قاعدة الماكينات (Machines Directory)' },
+        { value: 'reasons', label: 'أسباب الأعطال (Maintenance Reasons)' },
+        { value: 'area_notes', label: 'صيانات المناطق (Area Maintenance)' },
+      ]} value={view} onChange={setView} ariaLabel="مساحات الصيانة" /></div>
+      {view === 'area_notes' ? <AreaMaintenanceDirectory /> : view === 'machines' ? <MachinesDirectory /> : view === 'reasons' ? <MaintenanceReasonsDirectory /> : <>
       <div className="madar-list-toolbar madar-section">
         <Tabs items={statusItems.map((item) => ({ ...item, count: status === item.value ? orders?.length : undefined }))} value={status} onChange={setStatus} ariaLabel="حالة أوامر الصيانة" />
         <label className="madar-field madar-search"><Icon name="search" size={15} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="بحث برقم الأمر أو العميل" aria-label="بحث أوامر الصيانة" /></label>
@@ -96,6 +121,29 @@ export default function MaintenancePage() {
               <option value="" disabled>اختر العميل</option>
               {(clients ?? []).map((client) => <option key={client.id} value={client.id}>{client.name} · {client.code}</option>)}
             </Select>
+            <div className="madar-field">
+              <span>المنطقة / خط السير * (اختر منطقة أو أكثر)</span>
+              {(areas ?? []).length ? <div className="madar-employee-picker madar-area-picker" role="group" aria-label="مناطق أمر الصيانة" aria-required="true">
+                {(areas ?? []).map((areaName) => {
+                  const checked = selectedAreas.includes(areaName);
+                  return <label key={areaName} className={`employee-checkbox-card ${checked ? 'selected' : ''}`}>
+                    <input
+                      className="madar-checkbox"
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => setSelectedAreas((current) => checked
+                        ? current.filter((area) => area !== areaName)
+                        : [...current, areaName])}
+                    />
+                    <span className="madar-checkbox-title">{areaName}</span>
+                  </label>;
+                })}
+              </div> : <small className="madar-field-hint">لا توجد مناطق نشطة في دليل الماكينات.</small>}
+              <small className="madar-field-hint">
+                {selectedAreas.length ? `المناطق المحددة: ${selectedAreas.join('، ')}` : 'يجب اختيار منطقة واحدة على الأقل.'}
+              </small>
+            </div>
+            {selectedAreas.length > 0 && <label className="madar-check-row"><input type="checkbox" checked={autoPopulate} onChange={(event) => setAutoPopulate(event.target.checked)} /><span>إدراج جميع ماكينات المناطق المحددة تلقائياً في أمر الصيانة (عدد: {areaMachines?.total ?? 0})</span></label>}
             <EmployeeCheckboxList department="Maintenance" selectedIds={employeeIds} onChange={setEmployeeIds} title="الفنيون المكلّفون (اختياري)" />
             <Textarea label="ملاحظات الخدمة" name="notes" maxLength={10000} placeholder="وصف موجز للزيارة أو نطاق العمل…" />
           </div>
@@ -104,6 +152,7 @@ export default function MaintenancePage() {
           <div className="madar-form-actions"><Button variant="secondary" onClick={() => setCreateOpen(false)}>إلغاء</Button><Button type="submit" disabled={saving || !clients?.length}>{saving ? 'جارٍ الإنشاء…' : 'إنشاء الأمر'}</Button></div>
         </form>
       </Modal>
+      </>}
       <Toast notice={notice} onClose={clearToast} />
     </>
   );

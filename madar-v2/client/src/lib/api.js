@@ -25,6 +25,28 @@ async function request(path, options = {}) {
   return payload;
 }
 
+function uploadWithProgress(path, formData, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', path);
+    xhr.withCredentials = true;
+    xhr.upload.addEventListener('progress', (event) => {
+      if (event.lengthComputable) onProgress?.(Math.round((event.loaded / event.total) * 100));
+    });
+    xhr.addEventListener('error', () => reject(new ApiError('تعذر الاتصال بالخادم أثناء رفع الملف.', 0)));
+    xhr.addEventListener('load', () => {
+      const contentType = xhr.getResponseHeader('content-type') ?? '';
+      let payload;
+      try { payload = contentType.includes('application/json') ? JSON.parse(xhr.responseText) : xhr.responseText; }
+      catch { payload = {}; }
+      if (xhr.status < 200 || xhr.status >= 300) {
+        reject(new ApiError(payload?.error || `تعذر تنفيذ الطلب (${xhr.status})`, xhr.status, payload));
+      } else resolve(payload);
+    });
+    xhr.send(formData);
+  });
+}
+
 export const api = {
   get: (path, options = {}) => request(path, { ...options, method: 'GET' }),
   post: (path, body, options = {}) => request(path, {
@@ -39,11 +61,13 @@ export const api = {
     headers: { 'content-type': 'application/json', ...options.headers },
     body: JSON.stringify(body ?? {}),
   }),
+  delete: (path, options = {}) => request(path, { ...options, method: 'DELETE' }),
   upload: (path, formData, options = {}) => request(path, {
     ...options,
     method: 'POST',
     body: formData,
   }),
+  uploadWithProgress,
 };
 
 export function queryString(parameters) {

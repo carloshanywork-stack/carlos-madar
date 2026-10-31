@@ -104,7 +104,8 @@ CREATE TABLE IF NOT EXISTS maintenance_cards (
   status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'completed', 'excluded')),
   notes TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS workshop_orders (

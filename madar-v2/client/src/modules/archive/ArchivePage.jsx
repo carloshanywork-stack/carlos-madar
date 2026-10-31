@@ -12,8 +12,10 @@ import LoadingState from '../../components/ui/LoadingState.jsx';
 import Modal from '../../components/ui/Modal.jsx';
 import PageHeader from '../../components/ui/PageHeader.jsx';
 import Tabs from '../../components/ui/Tabs.jsx';
+import MaintenanceAreaAnalysis from './MaintenanceAreaAnalysis.jsx';
+import MaintenancePptxExportModal from '../maintenance/MaintenancePptxExportModal.jsx';
 
-export default function ArchivePage() {
+export default function ArchivePage({ isAdmin = false }) {
   const [tab, setTab] = useState('maintenance');
   const { data: maintenance, loading: maintenanceLoading, error: maintenanceError } = useApi('/api/maintenance/orders?status=archived');
   const { data: workshop, loading: workshopLoading, error: workshopError } = useApi('/api/workshop/orders?status=delivered_archived');
@@ -21,7 +23,11 @@ export default function ArchivePage() {
   const [report, setReport] = useState(null);
   const [reportLoading, setReportLoading] = useState(false);
   const [reportError, setReportError] = useState('');
-  const orders = tab === 'maintenance' ? maintenance : workshop;
+  const [pptxExportOpen, setPptxExportOpen] = useState(false);
+  const [pptxExportOrder, setPptxExportOrder] = useState(null);
+  const [orderToDelete, setOrderToDelete] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+  const orders = tab === 'maintenance' ? maintenance : tab === 'workshop' ? workshop : [];
   const loading = tab === 'maintenance' ? maintenanceLoading : workshopLoading;
   const error = tab === 'maintenance' ? maintenanceError : workshopError;
 
@@ -35,15 +41,26 @@ export default function ArchivePage() {
     finally { setReportLoading(false); }
   }
 
+  function openPptxExport(order = null) {
+    setPptxExportOrder(order);
+    setPptxExportOpen(true);
+  }
+
   return (
     <>
-      <PageHeader kicker="الأعمال المكتملة · السجل التاريخي" title="الأرشيف والتقارير" description="تصفح أوامر الصيانة المؤرشفة وأوامر الورشة المسلّمة دون تعديل السجلات التاريخية." />
-      <div className="madar-integration-notice"><Alert tone="info">تتوفر الآن معاينة قابلة للطباعة لصور الصيانة المؤرشفة. إنشاء ملفات PPTX أو Word غير متاح لأن خادم V2 لا يوفّر واجهة تصدير تقارير بعد.</Alert></div>
-      <div className="madar-section"><Tabs items={[{ value: 'maintenance', label: 'أرشيف الصيانة', count: maintenance?.length }, { value: 'workshop', label: 'أوامر الورشة المسلّمة', count: workshop?.length }]} value={tab} onChange={setTab} ariaLabel="أقسام الأرشيف" /></div>
-      {error && <div className="madar-section"><Alert tone="error">{error}</Alert></div>}
-      <section className="madar-panel madar-section">
-        {loading ? <LoadingState label="جارٍ تحميل الأرشيف" /> : orders?.length ? <div className="madar-table-wrap"><table className="madar-table"><thead><tr><th>رقم الأمر</th><th>العميل</th><th>{tab === 'maintenance' ? 'الآلات' : 'المنتج'}</th><th>تاريخ الإغلاق</th><th>الحالة</th><th>عرض</th></tr></thead><tbody>{orders.map((order) => <tr key={order.id}><td className="madar-code">{order.order_code}</td><td>{order.client_name}</td><td>{tab === 'maintenance' ? order.card_count : order.product_name}</td><td>{formatDate(order.archived_at ?? order.delivered_at)}</td><td><Badge status={order.status} /></td><td>{tab === 'maintenance' ? <Button size="small" variant="secondary" icon="image" onClick={() => openPhotoReport(order)}>معاينة الصور</Button> : <Link className="madar-button madar-button-secondary madar-button-small" to={`/workshop/${order.id}`}>تفاصيل الأمر <Icon name="chevron" size={12} /></Link>}</td></tr>)}</tbody></table></div> : <EmptyState icon="archive" title="لا توجد سجلات مؤرشفة" description="ستظهر هنا الطلبات المكتملة مع الاحتفاظ بسجلها التاريخي." />}
-      </section>
+      <PageHeader kicker="الأعمال المكتملة · السجل التاريخي" title="الأرشيف والتقارير" description="تصفح أوامر الصيانة المؤرشفة وأوامر الورشة المسلّمة. يمكن للمدير إزالة تقرير الصيانة من الأرشيف مع الاحتفاظ بسجله التاريخي." actions={tab === 'maintenance' && <Button icon="presentation" onClick={() => openPptxExport()}>تصدير تقرير PowerPoint</Button>} />
+      <div className="madar-integration-notice"><Alert tone="info">يمكن تنزيل تقارير الصيانة المؤرشفة بصيغ PowerPoint وWord، أو طباعة المعاينة وحفظها PDF.</Alert></div>
+      <div className="madar-section"><Tabs items={[
+        { value: 'maintenance', label: 'أرشيف الصيانة', count: maintenance?.length },
+        { value: 'workshop', label: 'أوامر الورشة المسلّمة', count: workshop?.length },
+        { value: 'analysis', label: 'تحليل الأرشيف والمناطق (Archive & Area Analysis)' },
+      ]} value={tab} onChange={setTab} ariaLabel="أقسام الأرشيف" /></div>
+      {tab === 'analysis' ? <MaintenanceAreaAnalysis /> : <>
+        {error && <div className="madar-section"><Alert tone="error">{error}</Alert></div>}
+        <section className="madar-panel madar-section">
+          {loading ? <LoadingState label="جارٍ تحميل الأرشيف" /> : orders?.length ? <div className="madar-table-wrap"><table className="madar-table"><thead><tr><th>رقم الأمر</th><th>العميل</th><th>{tab === 'maintenance' ? 'الآلات' : 'المنتج'}</th><th>تاريخ الإغلاق</th><th>الحالة</th><th>عرض / تصدير</th></tr></thead><tbody>{orders.map((order) => <tr key={order.id}><td className="madar-code">{order.order_code}</td><td>{order.client_name}</td><td>{tab === 'maintenance' ? order.card_count : order.product_name}</td><td>{formatDate(order.archived_at ?? order.delivered_at)}</td><td><Badge status={order.status} /></td><td>{tab === 'maintenance' ? <div className="madar-inline-wrap"><Button size="small" variant="secondary" icon="image" onClick={() => openPhotoReport(order)}>معاينة</Button><Button size="small" variant="primary" icon="presentation" onClick={() => openPptxExport(order)}>تصدير PowerPoint</Button><Button size="small" variant="secondary" icon="file" onClick={() => { window.location.href = `/api/maintenance/orders/${order.id}/export.docx`; }}>Word</Button>{isAdmin && <Button size="small" variant="danger" icon="trash" onClick={() => setOrderToDelete(order)}>حذف</Button>}</div> : <Link className="madar-button madar-button-secondary madar-button-small" to={`/workshop/${order.id}`}>تفاصيل الأمر <Icon name="chevron" size={12} /></Link>}</td></tr>)}</tbody></table></div> : <EmptyState icon="archive" title="لا توجد سجلات مؤرشفة" description="ستظهر هنا الطلبات المكتملة مع الاحتفاظ بسجلها التاريخي." />}
+        </section>
+      </>}
       <Modal open={reportOrder !== null} onClose={() => setReportOrder(null)} title="معاينة تقرير الصيانة" description={reportOrder ? `${reportOrder.order_code} · ${reportOrder.client_name}` : ''} wide>
         <div className="madar-report-actions"><Alert tone="info">يمكنك طباعة هذه المعاينة أو اختيار “حفظ كـ PDF” من نافذة الطباعة.</Alert><Button icon="printer" variant="secondary" onClick={() => window.print()} disabled={!report}>طباعة / حفظ PDF</Button></div>
         {reportLoading ? <LoadingState label="جارٍ تجهيز معاينة الصور" /> : reportError ? <Alert tone="error">{reportError}</Alert> : report && <div className="madar-print-report">
@@ -51,6 +68,50 @@ export default function ArchivePage() {
           {report.cards.map((card) => <section className="madar-report-machine" key={card.id}><h3>{card.machine_name_ar} · {card.machine_code}</h3><p>{card.machine_area}</p><div className="madar-report-photo-columns"><ReportPhotoColumn title="قبل الصيانة" urls={card.before_photo_urls} /><ReportPhotoColumn title="بعد الصيانة" urls={card.after_photo_urls} /></div></section>)}
           {!report.cards.length && <EmptyState icon="image" title="لا توجد صور مرتبطة" />}
         </div>}
+      </Modal>
+      <MaintenancePptxExportModal
+        open={pptxExportOpen}
+        onClose={() => setPptxExportOpen(false)}
+        currentOrder={pptxExportOrder}
+        defaultScope={pptxExportOrder ? 'current' : 'archive'}
+      />
+      <Modal
+        open={Boolean(orderToDelete)}
+        onClose={() => !deleting && setOrderToDelete(null)}
+        title="تأكيد إزالة التقرير من الأرشيف"
+        description={orderToDelete ? `${orderToDelete.order_code} · ${orderToDelete.client_name}` : ''}
+      >
+        <div className="madar-delete-confirm">
+          <Alert tone="error">
+            سيُخفى أمر الصيانة من الأرشيف وتُحذف ملفات صوره المؤرشفة من التخزين المحلي. ستظل بيانات الأمر وبطاقاته وسجل التدقيق محفوظة.
+          </Alert>
+          <div className="madar-modal-actions" style={{ marginTop: '1.5rem', display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
+            <Button variant="secondary" onClick={() => setOrderToDelete(null)} disabled={deleting}>
+              إلغاء
+            </Button>
+            <Button
+              variant="danger"
+              icon="trash"
+              disabled={deleting}
+              aria-busy={deleting}
+              onClick={async () => {
+                if (!orderToDelete || deleting) return;
+                setDeleting(true);
+                try {
+                  await api.delete(`/api/maintenance/orders/${orderToDelete.id}`);
+                  setOrderToDelete(null);
+                  window.location.reload();
+                } catch (err) {
+                  window.alert(err.message || 'تعذر إزالة التقرير من الأرشيف.');
+                } finally {
+                  setDeleting(false);
+                }
+              }}
+            >
+              {deleting ? 'جارٍ الإزالة…' : 'تأكيد الإزالة من الأرشيف'}
+            </Button>
+          </div>
+        </div>
       </Modal>
     </>
   );

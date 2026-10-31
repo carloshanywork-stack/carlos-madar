@@ -84,6 +84,7 @@ test('employee selectors filter active staff and maintenance custody advances st
 
   const created = await request('/api/maintenance/orders', jsonOptions('POST', {
     clientId: client.body.id,
+    area: 'Cairo',
     employeeIds: [maintenanceEmployeeId],
     notes: 'A separate custody advance is expected after order creation.',
   }));

@@ -7,6 +7,8 @@ import { clientDistPath } from './config/paths.js';
 import { errorHandler, notFoundHandler } from './middleware/error-handler.js';
 import { requireAuthentication } from './modules/auth/service.js';
 import authRouter from './modules/auth/routes.js';
+import usersRouter from './modules/auth/users.js';
+import systemRouter from './modules/system/backup.js';
 import { requestLogger } from './middleware/request-logger.js';
 import clientsRouter from './modules/clients/routes.js';
 import maintenanceRouter from './modules/maintenance/routes.js';
@@ -28,6 +30,8 @@ app.get('/api/health', (req, res) => {
 
 app.use('/api/auth', authRouter);
 app.use('/api', requireAuthentication);
+app.use('/api/auth/users', usersRouter);
+app.use('/api/system', systemRouter);
 app.use('/api/clients', clientsRouter);
 app.use('/api/maintenance', maintenanceRouter);
 app.use('/api/workshop', workshopRouter);

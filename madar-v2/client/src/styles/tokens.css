@@ -2,6 +2,7 @@
   font-family: "Segoe UI", Tahoma, Arial, sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
+  color-scheme: light;
   --madar-ink: #15243a;
   --madar-ink-soft: #213550;
   --madar-accent: #187b68;
@@ -25,17 +26,18 @@
 }
 
 #madar-app[data-theme="dark"] {
+  color-scheme: dark;
   --madar-ink: #101a27;
   --madar-ink-soft: #1b2b3e;
   --madar-accent: #4bb89b;
   --madar-accent-strong: #3aa386;
   --madar-accent-pale: #18372f;
   --madar-gold: #e1b660;
-  --madar-text: #e8eef5;
-  --madar-muted: #9baabd;
-  --madar-border: #29384a;
-  --madar-surface: #172333;
-  --madar-surface-alt: #1b293a;
+  --madar-text: #f8fafc;
+  --madar-muted: #94a3b8;
+  --madar-border: #2d3b4e;
+  --madar-surface: #16202e;
+  --madar-surface-alt: #1c2838;
   --madar-canvas: #101925;
   --madar-selected: #1b334c;
   --madar-danger: #da7778;
