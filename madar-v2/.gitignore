@@ -16,3 +16,5 @@ key.properties
 data/
 .env
 npm-debug.log*
+
+logs/

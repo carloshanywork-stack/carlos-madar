@@ -1,0 +1,9 @@
+{
+  "appId": "com.madar.rep",
+  "appName": "مدار - متابعة المناديب",
+  "webDir": "public/rep",
+  "server": {
+    "url": "https://carlos-pc.tail852ef0.ts.net/rep/",
+    "cleartext": false
+  }
+}
