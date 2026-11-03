@@ -10,7 +10,10 @@ let running = false;
 function check() {
   if (running) return;
   running = true;
-  execFile(script, { timeout: 600_000 }, (error, stdout, stderr) => {
+  // Invoke through bash rather than executing the file directly: this repo is
+  // checked out with core.fileMode=false, so a fresh clone may lack the exec
+  // bit and a direct exec would fail with EACCES.
+  execFile('/bin/bash', [script], { timeout: 600_000 }, (error, stdout, stderr) => {
     running = false;
     const out = String(stdout).trim();
     const err = String(stderr).trim();
