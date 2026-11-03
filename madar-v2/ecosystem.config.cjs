@@ -27,7 +27,6 @@ module.exports = {
       ],
       env: {
         NODE_ENV: 'production',
-        HOST: '127.0.0.1',
         PORT: 3000,
       },
       error_file: `${__dirname}/logs/pm2-error.log`,
