@@ -4,6 +4,7 @@ import { db } from '../../database/connection.js';
 import { asyncHandler, allowOnlyKeys, HttpError, requireObject, requireText } from '../http.js';
 import { diskUploadMany } from '../upload.js';
 import { ensureStorageDirectory, removeStorageFile } from '../storage.js';
+import { publishOperationsEvent } from '../operations-events.js';
 import { clockInForRep, clockOutForRep, getTodayAttendanceForRep } from '../employees/attendance.js';
 import {
   authenticateRepUser,
@@ -66,11 +67,21 @@ router.get('/attendance/today', (req, res) => {
 
 router.post('/attendance/clock-in', (req, res) => {
   const attendance = clockInForRep(req.user.id, req.body);
+  publishOperationsEvent('attendance.changed', {
+    userId: req.user.id,
+    employeeId: attendance.employee_id,
+    workDate: attendance.work_date,
+  });
   res.status(201).json({ success: true, attendance });
 });
 
 router.post('/attendance/clock-out', (req, res) => {
   const attendance = clockOutForRep(req.user.id, req.body);
+  publishOperationsEvent('attendance.changed', {
+    userId: req.user.id,
+    employeeId: attendance.employee_id,
+    workDate: attendance.work_date,
+  });
   res.json({ success: true, attendance });
 });
 
@@ -92,7 +103,13 @@ router.get('/fault-reasons', (_req, res) => {
 router.post(['/tracking', '/track-location'], (req, res, next) => {
   try {
     res.set({ 'Cache-Control': 'private, no-store', Pragma: 'no-cache' });
-    res.json({ success: true, ...syncRepTracking(req.user, req.body) });
+    const result = syncRepTracking(req.user, req.body);
+    publishOperationsEvent('rep.tracking.updated', {
+      userId: req.user.id,
+      acceptedPoints: result.acceptedPoints,
+      onDuty: result.onDuty,
+    });
+    res.json({ success: true, ...result });
   } catch (error) {
     next(error);
   }
@@ -101,7 +118,13 @@ router.post(['/tracking', '/track-location'], (req, res, next) => {
 router.post('/location-ping', (req, res, next) => {
   try {
     res.set({ 'Cache-Control': 'private, no-store', Pragma: 'no-cache' });
-    res.json({ success: true, ...syncRepLocationPing(req.user, req.body) });
+    const result = syncRepLocationPing(req.user, req.body);
+    publishOperationsEvent('rep.tracking.updated', {
+      userId: req.user.id,
+      acceptedPoints: result.acceptedPoints,
+      onDuty: result.onDuty,
+    });
+    res.json({ success: true, ...result });
   } catch (error) {
     next(error);
   }
@@ -123,6 +146,13 @@ router.post('/sync-visit', syncVisitUpload.any(), asyncHandler(async (req, res) 
       beforePhotos: files.filter((file) => file.fieldname === 'beforePhoto'),
       afterPhotos: files.filter((file) => file.fieldname === 'afterPhoto'),
     });
+    if (result.status !== 'processing') {
+      publishOperationsEvent('rep.visit.submitted', {
+        userId: req.user.id,
+        visitUuid: result.visitUuid,
+        status: result.status,
+      });
+    }
     res.set({ 'Cache-Control': 'private, no-store', Pragma: 'no-cache' });
     res.status(result.status === 'processing' ? 202 : 200).json(result);
   } finally {

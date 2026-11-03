@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { readFile } from 'node:fs/promises';
 import { asyncHandler, HttpError } from '../http.js';
 import { requestActorId } from '../actor.js';
+import { subscribeOperationsEvents } from '../operations-events.js';
 import {
   buildApprovedVisitsWorkbook,
   getPendingVisitReviews,
@@ -19,6 +20,30 @@ router.use((req, res, next) => {
     return;
   }
   next();
+});
+
+router.get('/events', (req, res) => {
+  res.status(200).set({
+    'Cache-Control': 'private, no-cache, no-transform',
+    Connection: 'keep-alive',
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'X-Accel-Buffering': 'no',
+  });
+  res.flushHeaders?.();
+  res.write('retry: 3000\n\n');
+
+  const unsubscribe = subscribeOperationsEvents((event) => {
+    res.write(`id: ${event.id}\nevent: operations\ndata: ${JSON.stringify(event)}\n\n`);
+    if (event.type === 'system.shutdown') res.end();
+  });
+  const heartbeat = setInterval(() => res.write(': keepalive\n\n'), 25_000);
+  heartbeat.unref?.();
+  const close = () => {
+    clearInterval(heartbeat);
+    unsubscribe();
+  };
+  res.once('close', close);
+  res.once('error', close);
 });
 
 router.get('/radar', (_req, res) => {

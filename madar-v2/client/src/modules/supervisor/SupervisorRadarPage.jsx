@@ -152,8 +152,26 @@ export default function SupervisorRadarPage() {
 
   useEffect(() => {
     void refresh();
-    const timer = window.setInterval(refresh, 15000);
-    return () => window.clearInterval(timer);
+    // SSE delivers committed field changes immediately; this slower refresh is
+    // a reconciliation fallback for reconnect gaps and reverse-proxy outages.
+    const timer = window.setInterval(refresh, 60_000);
+    const events = new EventSource('/api/supervisor/events', { withCredentials: true });
+    const onOperationsEvent = (message) => {
+      try {
+        const event = JSON.parse(message.data);
+        if (['rep.tracking.updated', 'rep.visit.submitted', 'attendance.changed'].includes(event.type)) {
+          void refresh();
+        }
+      } catch {
+        // Ignore malformed event frames; the periodic reconciliation remains active.
+      }
+    };
+    events.addEventListener('operations', onOperationsEvent);
+    return () => {
+      window.clearInterval(timer);
+      events.removeEventListener('operations', onOperationsEvent);
+      events.close();
+    };
   }, [refresh]);
 
   const representatives = radar?.representatives ?? [];
@@ -233,7 +251,7 @@ export default function SupervisorRadarPage() {
         <section className="supervisor-panel radar-panel">
           <div className="supervisor-panel-head">
             <div><span className="supervisor-eyebrow">GPS · LAST SIGNAL</span><h2>الخريطة ومسارات اليوم</h2></div>
-            <span className="live-pill"><i /> يتحدث كل 15 ثانية</span>
+            <span className="live-pill"><i /> تحديث فوري · تحقق احتياطي كل دقيقة</span>
           </div>
           <div className="radar-route-controls">
             <label>المندوب<select value={selectedRep ?? ''} onChange={(event) => setSelectedRep(event.target.value ? Number(event.target.value) : null)}>

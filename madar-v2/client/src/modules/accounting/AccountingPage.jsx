@@ -68,6 +68,26 @@ export default function AccountingPage({ isAdmin = false }) {
     if (attendanceToday?.date && !manuallySelectedDate.current) setDate(attendanceToday.date);
   }, [attendanceToday]);
 
+  useEffect(() => {
+    if (!isAdmin || !['attendance', 'payroll'].includes(tab)) return undefined;
+    const events = new EventSource('/api/supervisor/events', { withCredentials: true });
+    const onOperationsEvent = (message) => {
+      try {
+        const event = JSON.parse(message.data);
+        if (!['attendance.changed', 'overtime.reviewed'].includes(event.type)) return;
+        void Promise.all([reloadAttendance(), reloadPendingOvertime(), reloadPayroll()]);
+        window.dispatchEvent(new CustomEvent('madar:attendance-updated', { detail: event }));
+      } catch {
+        // Ignore malformed event frames; users can still refresh through the UI.
+      }
+    };
+    events.addEventListener('operations', onOperationsEvent);
+    return () => {
+      events.removeEventListener('operations', onOperationsEvent);
+      events.close();
+    };
+  }, [isAdmin, tab, reloadAttendance, reloadPendingOvertime, reloadPayroll]);
+
   async function saveEmployee(event) {
     event.preventDefault();
     setSaving(true);

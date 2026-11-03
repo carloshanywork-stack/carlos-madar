@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { requestActorId } from '../actor.js';
+import { publishOperationsEvent } from '../operations-events.js';
 import { buildMonthlyAttendanceWorkbook } from './attendance-export.js';
 import {
   createEmployee,
@@ -44,10 +45,14 @@ router.get('/attendance/monthly', (req, res) => {
   res.json(getMonthlyAttendance(req.query.month));
 });
 router.post('/attendance/monthly', (req, res) => {
-  res.json(saveMonthlyAttendance(req.body, requestActorId(req)));
+  const result = saveMonthlyAttendance(req.body, requestActorId(req));
+  publishOperationsEvent('attendance.changed', { month: result.month, actorId: requestActorId(req) });
+  res.json(result);
 });
 router.post('/attendance/mark-all-present', (req, res) => {
-  res.json(markAllPresent(req.body?.date, requestActorId(req)));
+  const result = markAllPresent(req.body?.date, requestActorId(req));
+  publishOperationsEvent('attendance.changed', { workDate: result.date, actorId: requestActorId(req) });
+  res.json(result);
 });
 router.get('/attendance/export-monthly', (req, res) => {
   const month = req.query.month;
@@ -59,7 +64,9 @@ router.get('/attendance/export-monthly', (req, res) => {
   }).send(workbook);
 });
 router.post('/attendance', (req, res) => {
-  res.json(saveAttendance(req.body, requestActorId(req)));
+  const result = saveAttendance(req.body, requestActorId(req));
+  publishOperationsEvent('attendance.changed', { workDate: req.body?.date, actorId: requestActorId(req) });
+  res.json(result);
 });
 
 router.get('/payroll', (req, res) => {

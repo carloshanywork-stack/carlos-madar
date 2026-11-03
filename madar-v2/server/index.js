@@ -10,6 +10,7 @@ import {
   recoverUnmatchedMaintenanceFolderDeletions,
 } from './modules/maintenance/service.js';
 import { recoverRepVisitUploads } from './modules/rep/service.js';
+import { publishOperationsEvent } from './modules/operations-events.js';
 
 const initialization = initializeDatabase();
 try {
@@ -59,6 +60,7 @@ function shutdown(signal) {
   shuttingDown = true;
   const scheduledBackup = stopSystemBackupScheduler();
   console.log(`${signal} received; shutting down MADAR V2.`);
+  publishOperationsEvent('system.shutdown');
   server.close((error) => {
     if (error) {
       console.error('HTTP server shutdown failed:', error);

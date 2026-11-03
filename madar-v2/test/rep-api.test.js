@@ -314,6 +314,8 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   assert.equal(repCannotReadAdminUsers.response.status, 403);
   const repCannotReadSupervisorRadar = await request('/api/supervisor/radar', {}, login.cookie);
   assert.equal(repCannotReadSupervisorRadar.response.status, 403);
+  const repCannotReadSupervisorEvents = await request('/api/supervisor/events', {}, login.cookie);
+  assert.equal(repCannotReadSupervisorEvents.response.status, 403);
 
   const faultReasons = await request('/api/rep/fault-reasons', {}, login.cookie);
   assert.equal(faultReasons.response.status, 200);
@@ -492,11 +494,50 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
     { latitude: 24.8000, longitude: 46.7000, accuracy: 10, updatedAt: new Date(now - 20000).toISOString() },
     { latitude: 24.8010, longitude: 46.7010, accuracy: 10, updatedAt: new Date(now - 10000).toISOString() },
   ];
+  const eventController = new AbortController();
+  const eventResponse = await fetch(`${baseUrl}/api/supervisor/events`, {
+    headers: { cookie: adminCookie },
+    signal: eventController.signal,
+  });
+  assert.equal(eventResponse.status, 200);
+  assert.match(eventResponse.headers.get('content-type'), /text\/event-stream/);
+  const eventReader = eventResponse.body.getReader();
+  const trackingEventPromise = (async () => {
+    const decoder = new TextDecoder();
+    let buffer = '';
+    while (true) {
+      const { value, done } = await eventReader.read();
+      if (done) throw new Error('Operations event stream closed before tracking event arrived.');
+      buffer += decoder.decode(value, { stream: true });
+      while (buffer.includes('\n\n')) {
+        const separator = buffer.indexOf('\n\n');
+        const frame = buffer.slice(0, separator);
+        buffer = buffer.slice(separator + 2);
+        const dataLine = frame.split('\n').find((line) => line.startsWith('data: '));
+        if (!dataLine) continue;
+        const event = JSON.parse(dataLine.slice(6));
+        if (event.type === 'rep.tracking.updated') return event;
+      }
+    }
+  })();
   const tracking = await request('/api/rep/track-location', jsonOptions('POST', {
     onDuty: true, location: { ...trackPoints[1], updatedAt: new Date(now).toISOString() }, trail: trackPoints,
   }), login.cookie);
   assert.equal(tracking.response.status, 200);
   assert.equal(tracking.body.onDuty, true);
+  let timeoutId;
+  let trackingEvent;
+  try {
+    trackingEvent = await Promise.race([
+      trackingEventPromise,
+      new Promise((_, reject) => { timeoutId = setTimeout(() => reject(new Error('Timed out waiting for live tracking event.')), 2000); }),
+    ]);
+  } finally {
+    clearTimeout(timeoutId);
+    eventController.abort();
+  }
+  assert.equal(trackingEvent.userId, repId);
+  assert.equal(trackingEvent.acceptedPoints, 3);
   const duplicateTracking = await request('/api/rep/tracking', jsonOptions('POST', {
     onDuty: true, location: { ...trackPoints[1], updatedAt: new Date(now).toISOString() }, trail: trackPoints,
   }), login.cookie);

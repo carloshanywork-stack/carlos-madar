@@ -98,6 +98,16 @@ export default function MonthlyAttendanceMatrix() {
 
   useEffect(() => { void loadMonth(month); }, [month, loadMonth]);
 
+  useEffect(() => {
+    const refreshAttendance = (event) => {
+      const update = event.detail ?? {};
+      const affectsMonth = update.month === month || update.workDate?.startsWith(`${month}-`);
+      if (affectsMonth && dirty.size === 0) void loadMonth(month);
+    };
+    window.addEventListener('madar:attendance-updated', refreshAttendance);
+    return () => window.removeEventListener('madar:attendance-updated', refreshAttendance);
+  }, [dirty.size, loadMonth, month]);
+
   function editCell(employeeId, date, patch) {
     const key = cellKey(employeeId, date);
     setRecords((current) => ({
