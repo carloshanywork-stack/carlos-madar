@@ -54,6 +54,7 @@ test('clean schema contains every V2 domain table', () => {
     'maintenance_orders',
     'maintenance_order_technicians',
     'maintenance_cards',
+    'rep_visits',
     'workshop_orders',
     'workshop_order_technicians',
     'workshop_design_files',

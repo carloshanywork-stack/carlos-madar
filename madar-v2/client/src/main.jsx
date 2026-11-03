@@ -10,3 +10,18 @@ createRoot(document.getElementById('root')).render(
     <App />
   </React.StrictMode>,
 );
+
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    let refreshing = false;
+    const hadController = Boolean(navigator.serviceWorker.controller);
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!hadController || refreshing) return;
+      refreshing = true;
+      window.location.reload();
+    });
+    navigator.serviceWorker.register(`/sw.js?v=${encodeURIComponent(__MADAR_BUILD_VERSION__)}`, { scope: '/' }).catch((error) => {
+      console.warn('MADAR offline shell could not be installed:', error);
+    });
+  }, { once: true });
+}

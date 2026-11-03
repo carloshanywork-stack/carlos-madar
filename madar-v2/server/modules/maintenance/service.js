@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { extname, join } from 'node:path';
-import { lstat, readFile, readdir, rename, rm, stat } from 'node:fs/promises';
+import { lstat, mkdtemp, readFile, readdir, rename, rm, stat } from 'node:fs/promises';
 import * as XLSX from 'xlsx';
 import { db } from '../../database/connection.js';
 import { recordAudit } from '../audit.js';
@@ -8,6 +8,7 @@ import { assertCashAvailable, insertTreasuryEntry } from '../finance/treasury.se
 import {
   classifyMachinePhotos,
   matchMachineFolder,
+  matchMachineFolderGroups,
   readTripZip,
   TRIP_PHOTO_EXTENSIONS,
 } from './trip-folder.js';
@@ -22,6 +23,7 @@ import {
   requireText,
 } from '../http.js';
 import {
+  copyStorageFile,
   removeStorageFile,
   ensureStorageDirectory,
   listStorageFiles,
@@ -36,6 +38,10 @@ const MAINTENANCE_STATUSES = ['in_progress', 'review', 'archived'];
 const PHOTO_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.heic', '.heif']);
 const MAX_MAINTENANCE_ORDER_AREAS = 50;
 const AREA_DELIMITER = /[،,]/;
+const MAX_TRIP_FOLDER_BYTES = 20 * 1024 * 1024 * 1024;
+const MAX_TRIP_PHOTO_BYTES = 200 * 1024 * 1024;
+const MAX_TRIP_FOLDER_FILES = 50000;
+const MAX_CARD_PHOTOS = 10000;
 const maintenanceTripProgress = new Map();
 const TRIP_PROGRESS_RETENTION_MS = 30 * 60 * 1000;
 
@@ -180,8 +186,8 @@ function parsePhotoJson(value) {
 }
 
 function validateStoredPhotoList(value, label) {
-  if (!Array.isArray(value) || value.length > 100) {
-    throw new HttpError(400, `${label} must be an array containing at most 100 stored file paths.`);
+  if (!Array.isArray(value) || value.length > MAX_CARD_PHOTOS) {
+    throw new HttpError(400, `${label} must be an array containing at most ${MAX_CARD_PHOTOS} stored file paths.`);
   }
   return value.map((photo, index) => requireText(photo, `${label}[${index}]`, { maxLength: 1024 }));
 }
@@ -550,25 +556,43 @@ export function listMaintenanceOrders(status, database = db) {
   if (!MAINTENANCE_STATUSES.includes(status)) {
     throw new HttpError(400, `status is required and must be one of: ${MAINTENANCE_STATUSES.join(', ')}.`);
   }
-  return database.prepare(`
+  const orders = database.prepare(`
     SELECT order_record.id, order_record.order_code, order_record.client_id,
       client.code AS client_code, client.name AS client_name,
       order_record.status, order_record.notes, order_record.area, order_record.warranty_period_months,
       order_record.petty_cash_disbursed_cents, order_record.actual_expenses_cents,
       order_record.petty_cash_refund_cents, order_record.archived_at,
       order_record.created_at, order_record.updated_at,
-       (SELECT COUNT(*) FROM maintenance_cards card WHERE card.order_id = order_record.id AND card.deleted_at IS NULL) AS card_count,
+      (
+        SELECT GROUP_CONCAT(DISTINCT m.area)
+        FROM maintenance_cards card
+        JOIN machines m ON m.id = card.machine_id
+        WHERE card.order_id = order_record.id
+          AND card.deleted_at IS NULL
+          AND m.area IS NOT NULL
+          AND m.area != ''
+      ) AS card_areas,
+      (SELECT COUNT(*) FROM maintenance_cards card WHERE card.order_id = order_record.id AND card.deleted_at IS NULL) AS card_count,
       (SELECT COUNT(*) FROM maintenance_order_technicians assigned WHERE assigned.order_id = order_record.id) AS technician_count
     FROM maintenance_orders AS order_record
     JOIN clients AS client ON client.id = order_record.client_id
     WHERE order_record.status = ? AND order_record.deleted_at IS NULL
     ORDER BY order_record.created_at DESC, order_record.id DESC
   `).all(status);
+
+  return orders.map((row) => {
+    const { card_areas: cardAreas, ...order } = row;
+    const areas = [...new Set([order.area, ...(cardAreas ?? '').split(',')]
+      .map((area) => String(area ?? '').trim())
+      .filter(Boolean))];
+    return { ...order, areas, area_summary: areas.join(' • ') };
+  });
 }
 
 const MAINTENANCE_ORDER_DELETION_STAGE_ROOT = ['.madar-recovery', 'maintenance-order-deletions'];
 const MAINTENANCE_CARD_DELETION_STAGE_ROOT = ['.madar-recovery', 'maintenance-card-deletions'];
 const MAINTENANCE_MACHINE_DECOMMISSION_STAGE_ROOT = ['.madar-recovery', 'maintenance-machine-decommissions'];
+const MAINTENANCE_UNMATCHED_FOLDER_DELETION_STAGE_ROOT = ['.madar-recovery', 'maintenance-unmatched-folder-deletions'];
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function hasPendingMaintenanceFileRecovery(database) {
@@ -578,6 +602,8 @@ function hasPendingMaintenanceFileRecovery(database) {
     SELECT 1 FROM maintenance_card_deletion_operations WHERE state = 'prepared'
     UNION ALL
     SELECT 1 FROM maintenance_machine_decommission_operations WHERE state = 'prepared'
+    UNION ALL
+    SELECT 1 FROM maintenance_unmatched_folder_deletion_operations
     LIMIT 1
   `).get());
 }
@@ -600,6 +626,262 @@ async function resolveStorageFileIfPresent(relativePath) {
   }
 }
 
+function isSimpleStorageSegment(value) {
+  return typeof value === 'string'
+    && value.length > 0
+    && value !== '.'
+    && value !== '..'
+    && !/[\\/:\u0000]/.test(value);
+}
+
+function unmatchedFolderArchiveDirectory({ client_code: clientCode, order_code: orderCode, folder_name: folderName }) {
+  if (!isSimpleStorageSegment(clientCode) || !isSimpleStorageSegment(orderCode)
+    || typeof folderName !== 'string' || !folderName.trim()) {
+    throw new HttpError(409, 'Unmatched folder storage metadata is invalid and cannot be safely removed.');
+  }
+  return storageDirectory(
+    'Clients', clientCode, 'Archived_Orders', orderCode, 'Unmatched', safeTripFolderSegment(folderName),
+  );
+}
+
+function unmatchedFolderSourceDirectory(sourceName, folderName) {
+  if (typeof sourceName !== 'string' || extname(sourceName).toLowerCase() === '.zip') return null;
+  const sourceSegments = sourceName.split('/');
+  if (sourceSegments.length < 2 || sourceSegments[0] !== 'Areas'
+    || sourceSegments.some((segment) => !isSimpleStorageSegment(segment))
+    || !isSimpleStorageSegment(folderName)) {
+    return null;
+  }
+  return storageDirectory(...sourceSegments, folderName);
+}
+
+function normalizedStoragePathIdentity(relativePath) {
+  return relativePath.split('/').map((segment) => (
+    segment.normalize('NFKC').trim().toLocaleLowerCase('en')
+  )).join('/');
+}
+
+async function findExistingUnmatchedFolderSourceDirectory(sourceName, folderName) {
+  const expected = unmatchedFolderSourceDirectory(sourceName, folderName);
+  if (!expected) return null;
+  if (await resolveStorageDirectoryIfPresent(expected)) return expected;
+
+  const sourceSegments = sourceName.split('/');
+  const sourceDirectory = await resolveStorageDirectoryIfPresent(storageDirectory(...sourceSegments));
+  if (!sourceDirectory) return null;
+  const matchingEntries = (await readdir(sourceDirectory, { withFileTypes: true })).filter((entry) => (
+    entry.isDirectory()
+      && isSimpleStorageSegment(entry.name)
+      && entry.name.trim() === folderName.trim()
+  ));
+  if (matchingEntries.length !== 1) return null;
+  const actualPath = storageDirectory(...sourceSegments, matchingEntries[0].name);
+  return await resolveStorageDirectoryIfPresent(actualPath) ? actualPath : null;
+}
+
+function parseUnmatchedFolderPhotoPaths(value, label) {
+  let paths;
+  try { paths = JSON.parse(value); } catch {
+    throw new HttpError(409, 'Unmatched folder photo metadata is invalid and cannot be safely removed.');
+  }
+  if (!Array.isArray(paths) || paths.length > MAX_CARD_PHOTOS
+    || paths.some((path) => typeof path !== 'string' || !path.trim() || path.length > 1024)) {
+    throw new HttpError(409, `${label} contains invalid photo paths.`);
+  }
+  return [...new Set(paths)];
+}
+
+async function collectUnmatchedFolderDeletionTargets(order, folder, database) {
+  const archiveDirectory = unmatchedFolderArchiveDirectory({
+    client_code: order.client_code,
+    order_code: order.order_code,
+    folder_name: folder.folder_name,
+  });
+  const beforePhotos = parseUnmatchedFolderPhotoPaths(folder.before_photos_json, 'before_photos_json');
+  const afterPhotos = parseUnmatchedFolderPhotoPaths(folder.after_photos_json, 'after_photos_json');
+  const photos = [...new Set([...beforePhotos, ...afterPhotos])];
+  const photoTargets = [];
+  for (const storedPath of photos) {
+    if (!storedPath.startsWith(`${archiveDirectory}/`)) {
+      throw new HttpError(409, 'An unmatched photo is outside its archive folder and cannot be safely removed.');
+    }
+    if (await resolveStorageFileIfPresent(storedPath)) photoTargets.push({ path: storedPath, kind: 'file' });
+  }
+
+  const archiveSegment = safeTripFolderSegment(folder.folder_name);
+  const otherArchiveOwner = database.prepare(`
+    SELECT folder_name FROM maintenance_unmatched_folders
+    WHERE order_id = ? AND id != ?
+  `).all(order.id, folder.id).some((candidate) => safeTripFolderSegment(candidate.folder_name) === archiveSegment);
+  const targets = [];
+  if (!otherArchiveOwner && await resolveStorageDirectoryIfPresent(archiveDirectory)) {
+    targets.push({ path: archiveDirectory, kind: 'directory' });
+  } else {
+    targets.push(...photoTargets);
+  }
+
+  const sourceDirectory = await findExistingUnmatchedFolderSourceDirectory(folder.source_name, folder.folder_name);
+  const sourceIdentity = sourceDirectory ? normalizedStoragePathIdentity(sourceDirectory) : null;
+  const otherSourceOwner = sourceIdentity && database.prepare(`
+    SELECT source_name, folder_name FROM maintenance_unmatched_folders WHERE id != ?
+  `).all(folder.id).some((candidate) => {
+    const candidatePath = unmatchedFolderSourceDirectory(candidate.source_name, candidate.folder_name);
+    return candidatePath && normalizedStoragePathIdentity(candidatePath) === sourceIdentity;
+  });
+  if (sourceDirectory && !otherSourceOwner
+    && await resolveStorageDirectoryIfPresent(sourceDirectory)) {
+    targets.push({ path: sourceDirectory, kind: 'directory' });
+  }
+
+  const uniqueTargets = new Map(targets.map((target) => [`${target.kind}:${target.path}`, target]));
+  const distinctTargets = [...uniqueTargets.values()];
+  return distinctTargets.filter((target) => !distinctTargets.some((candidate) => (
+    candidate.kind === 'directory'
+      && candidate.path !== target.path
+      && target.path.startsWith(`${candidate.path}/`)
+  )));
+}
+
+function unmatchedFolderDeletionStageDirectory(operationId) {
+  return storageDirectory(...MAINTENANCE_UNMATCHED_FOLDER_DELETION_STAGE_ROOT, operationId);
+}
+
+function unmatchedFolderDeletionStagedPath(operationId, index) {
+  return storageDirectory(...MAINTENANCE_UNMATCHED_FOLDER_DELETION_STAGE_ROOT, operationId, `item-${index}`);
+}
+
+function parseUnmatchedFolderDeletionTargets(targetsJson, operation) {
+  let targets;
+  try { targets = JSON.parse(targetsJson); } catch { targets = null; }
+  if (!Array.isArray(targets) || targets.length < 1 || targets.length > 202) {
+    throw new HttpError(500, 'Unmatched-folder recovery contains invalid staged paths.');
+  }
+  const archiveDirectory = unmatchedFolderArchiveDirectory(operation);
+  const sourceDirectory = unmatchedFolderSourceDirectory(operation.source_name, operation.folder_name);
+  const sourceSegments = typeof operation.source_name === 'string' ? operation.source_name.split('/') : [];
+  const unique = new Set();
+  for (const target of targets) {
+    if (!target || typeof target.path !== 'string' || !['file', 'directory'].includes(target.kind)
+      || unique.has(`${target.kind}:${target.path}`)) {
+      throw new HttpError(500, 'Unmatched-folder recovery contains invalid staged paths.');
+    }
+    const allowedDirectory = target.kind === 'directory'
+      && (target.path === archiveDirectory || (sourceDirectory && (
+        target.path === sourceDirectory
+        || (target.path.split('/').length === sourceSegments.length + 1
+          && target.path.split('/').slice(0, -1).every((segment, index) => segment === sourceSegments[index])
+          && target.path.split('/').at(-1).trim() === operation.folder_name.trim())
+      )));
+    const allowedFile = target.kind === 'file' && target.path.startsWith(`${archiveDirectory}/`);
+    if (!allowedDirectory && !allowedFile) {
+      throw new HttpError(500, 'Unmatched-folder recovery contains an unsafe path.');
+    }
+    unique.add(`${target.kind}:${target.path}`);
+  }
+  return targets;
+}
+
+async function restoreUnmatchedFolderDeletion(operationId, targets) {
+  const operationDirectoryPath = unmatchedFolderDeletionStageDirectory(operationId);
+  const operationDirectory = await resolveStorageDirectoryIfPresent(operationDirectoryPath);
+  const stagedNames = operationDirectory ? await readdir(operationDirectory) : [];
+  const expectedNames = new Set(targets.map((_, index) => `item-${index}`));
+  if (stagedNames.some((name) => !expectedNames.has(name))) {
+    throw new HttpError(500, 'Unmatched-folder recovery staging contains unexpected files.');
+  }
+
+  for (const [index, target] of targets.entries()) {
+    const resolveTarget = target.kind === 'directory' ? resolveStorageDirectoryIfPresent : resolveStorageFileIfPresent;
+    const original = await resolveTarget(target.path);
+    const staged = await resolveTarget(unmatchedFolderDeletionStagedPath(operationId, index));
+    if (original && staged) {
+      throw new HttpError(500, 'Both original and staged unmatched-folder files exist; recovery stopped for safety.');
+    }
+    if (!original && !staged) {
+      throw new HttpError(500, 'Neither original nor staged unmatched-folder files exist; recovery stopped for safety.');
+    }
+    if (staged) {
+      const originalSegments = target.path.split('/');
+      const originalParent = await ensureStorageDirectory(...originalSegments.slice(0, -1));
+      await rename(staged, join(originalParent, originalSegments.at(-1)));
+    }
+  }
+  if (operationDirectory) await rm(operationDirectory, { recursive: true, force: true });
+}
+
+function removeUnmatchedFolderDeletionOperation(operationId, database) {
+  database.transaction(() => {
+    database.prepare(`
+      DELETE FROM maintenance_unmatched_folder_deletion_operations WHERE operation_id = ?
+    `).run(operationId);
+  }).immediate();
+}
+
+async function recoverUnmatchedFolderDeletionOperations(database) {
+  const stageRoot = await ensureStorageDirectory(...MAINTENANCE_UNMATCHED_FOLDER_DELETION_STAGE_ROOT);
+  const stageEntries = await readdir(stageRoot, { withFileTypes: true });
+  const operations = database.prepare(`
+    SELECT * FROM maintenance_unmatched_folder_deletion_operations
+    ORDER BY created_at, operation_id
+  `).all();
+  const operationsById = new Map(operations.map((operation) => [operation.operation_id, operation]));
+  if (stageEntries.some((entry) => !entry.isDirectory() || !UUID_PATTERN.test(entry.name) || !operationsById.has(entry.name))) {
+    throw new HttpError(500, 'Unmatched-folder recovery contains an unexpected staging entry; startup was stopped for safety.');
+  }
+
+  let recoveredCount = 0;
+  for (const operation of operations) {
+    if (!UUID_PATTERN.test(operation.operation_id)) {
+      throw new HttpError(500, 'Unmatched-folder recovery contains an invalid operation ID.');
+    }
+    const targets = parseUnmatchedFolderDeletionTargets(operation.targets_json, operation);
+    const folder = database.prepare(`
+      SELECT id, order_id, folder_name, source_name, status
+      FROM maintenance_unmatched_folders WHERE id = ? AND order_id = ?
+    `).get(operation.folder_id, operation.order_id);
+    const operationDirectory = await resolveStorageDirectoryIfPresent(
+      unmatchedFolderDeletionStageDirectory(operation.operation_id),
+    );
+    const stagedNames = operationDirectory ? await readdir(operationDirectory) : [];
+    const expectedNames = new Set(targets.map((_, index) => `item-${index}`));
+    if (stagedNames.some((name) => !expectedNames.has(name))) {
+      throw new HttpError(500, 'Unmatched-folder recovery staging contains unexpected files; startup was stopped for safety.');
+    }
+
+    if (operation.state === 'prepared') {
+      if (!folder || folder.status !== 'pending' || folder.folder_name !== operation.folder_name
+        || folder.source_name !== operation.source_name) {
+        throw new HttpError(500, 'A prepared unmatched-folder purge conflicts with its database row; startup was stopped for safety.');
+      }
+      await restoreUnmatchedFolderDeletion(operation.operation_id, targets);
+    } else if (operation.state === 'committed') {
+      if (folder) {
+        throw new HttpError(500, 'A committed unmatched-folder purge still has a database row; startup was stopped for safety.');
+      }
+      const audit = database.prepare(`
+        SELECT 1 FROM audit_log
+        WHERE action = 'delete_unmatched_folder' AND entity_type = 'maintenance_unmatched_folder' AND entity_id = ?
+        LIMIT 1
+      `).get(operation.folder_id);
+      if (!audit) {
+        throw new HttpError(500, 'A committed unmatched-folder purge has no audit record; startup was stopped for safety.');
+      }
+      for (const target of targets) {
+        const resolveTarget = target.kind === 'directory' ? resolveStorageDirectoryIfPresent : resolveStorageFileIfPresent;
+        if (await resolveTarget(target.path)) {
+          throw new HttpError(500, 'A committed unmatched-folder purge conflicts with an original path; startup was stopped for safety.');
+        }
+      }
+      if (operationDirectory) await rm(operationDirectory, { recursive: true, force: true });
+    } else {
+      throw new HttpError(500, 'Unmatched-folder recovery has an unknown state; startup was stopped for safety.');
+    }
+    removeUnmatchedFolderDeletionOperation(operation.operation_id, database);
+    recoveredCount += 1;
+  }
+  return recoveredCount;
+}
+
 function maintenanceCardPhotoPaths(card) {
   const paths = [];
   for (const value of [card.before_photos_json, card.after_photos_json]) {
@@ -607,7 +889,7 @@ function maintenanceCardPhotoPaths(card) {
     try { parsed = JSON.parse(value); } catch {
       throw new HttpError(409, 'The inspection card photo list is invalid and cannot be safely removed.');
     }
-    if (!Array.isArray(parsed) || parsed.length > 100 || parsed.some((path) => typeof path !== 'string' || !path.trim())) {
+    if (!Array.isArray(parsed) || parsed.length > MAX_CARD_PHOTOS || parsed.some((path) => typeof path !== 'string' || !path.trim())) {
       throw new HttpError(409, 'The inspection card photo list is invalid and cannot be safely removed.');
     }
     paths.push(...parsed);
@@ -1534,6 +1816,12 @@ export async function recoverMaintenanceMachineDecommissions(database = db) {
   }));
 }
 
+export async function recoverUnmatchedMaintenanceFolderDeletions(database = db) {
+  return withMaintenanceOrderStorageLock(async () => ({
+    recoveredCount: await recoverUnmatchedFolderDeletionOperations(database),
+  }));
+}
+
 function assertActiveClient(clientId, database) {
   if (!database.prepare('SELECT 1 FROM clients WHERE id = ? AND deleted_at IS NULL').get(clientId)) {
     throw new HttpError(404, 'Active client was not found.');
@@ -1715,8 +2003,11 @@ export function getMaintenanceOrder(orderId, database = db) {
     WHERE assigned.order_id = ?
     ORDER BY employee.name COLLATE NOCASE, employee.id
   `).all(order.id);
+  const allReasons = database.prepare('SELECT id, name FROM maintenance_reasons').all();
+  const reasonMap = new Map(allReasons.map((r) => [r.id, r.name]));
+
   const cards = database.prepare(`
-    SELECT card.*, reason.name AS reason_name, machine.code AS machine_code, machine.name_ar AS machine_name_ar,
+    SELECT card.*, reason.name AS single_reason_name, machine.code AS machine_code, machine.name_ar AS machine_name_ar,
       machine.name_en AS machine_name_en, machine.area AS machine_area
     FROM maintenance_cards card
     JOIN machines machine ON machine.id = card.machine_id
@@ -1726,14 +2017,36 @@ export function getMaintenanceOrder(orderId, database = db) {
   `).all(order.id).map((card) => {
     const beforePhotos = parsePhotoJson(card.before_photos_json);
     const afterPhotos = parsePhotoJson(card.after_photos_json);
+    let reasonIds = [];
+    try {
+      reasonIds = JSON.parse(card.reason_ids_json || '[]');
+      if (!Array.isArray(reasonIds)) reasonIds = [];
+    } catch {
+      reasonIds = [];
+    }
+    if (!reasonIds.length && card.reason_id) {
+      reasonIds = [card.reason_id];
+    }
+    const reasonNames = reasonIds.map((rid) => reasonMap.get(rid)).filter(Boolean);
+    const primaryReasonName = card.single_reason_name ?? reasonNames[0] ?? null;
+    const compositeReasonName = reasonNames.length ? reasonNames.join('، ') : primaryReasonName;
+
     return {
       ...card,
+      reason_id: card.reason_id ?? (reasonIds[0] ?? null),
+      reason_ids: reasonIds,
+      reason_names: reasonNames,
+      reason_name: compositeReasonName,
       before_photos: beforePhotos,
       after_photos: afterPhotos,
       before_photo_urls: beforePhotos.map((storedPath) =>
         `/api/maintenance/orders/${order.id}/cards/${card.id}/photos/before/${encodeURIComponent(storedPath.split('/').at(-1))}`),
       after_photo_urls: afterPhotos.map((storedPath) =>
         `/api/maintenance/orders/${order.id}/cards/${card.id}/photos/after/${encodeURIComponent(storedPath.split('/').at(-1))}`),
+      before_thumbnail_urls: beforePhotos.map((storedPath) =>
+        `/api/maintenance/orders/${order.id}/cards/${card.id}/photos/before/${encodeURIComponent(storedPath.split('/').at(-1))}/thumbnail`),
+      after_thumbnail_urls: afterPhotos.map((storedPath) =>
+        `/api/maintenance/orders/${order.id}/cards/${card.id}/photos/after/${encodeURIComponent(storedPath.split('/').at(-1))}/thumbnail`),
     };
   });
   const client = database.prepare(`
@@ -1741,7 +2054,8 @@ export function getMaintenanceOrder(orderId, database = db) {
     FROM clients WHERE id = ?
   `).get(order.client_id);
   const unmatchedFolders = database.prepare(`
-    SELECT id, folder_name, source_name, before_photos_json, after_photos_json, created_at
+    SELECT id, folder_name, source_name, before_photos_json, after_photos_json,
+      is_duplicate, duplicate_of_folder, duplicate_machine_id, created_at
     FROM maintenance_unmatched_folders
     WHERE order_id = ? AND status = 'pending'
     ORDER BY id
@@ -1754,6 +2068,9 @@ export function getMaintenanceOrder(orderId, database = db) {
       id: folder.id,
       folder_name: folder.folder_name,
       source_name: folder.source_name,
+      is_duplicate: Boolean(folder.is_duplicate),
+      duplicate_of_folder: folder.duplicate_of_folder,
+      duplicate_machine_id: folder.duplicate_machine_id,
       created_at: folder.created_at,
       before_photos: beforePhotos,
       after_photos: afterPhotos,
@@ -1884,7 +2201,7 @@ async function readServerTripFolder(folderPath, { onScanProgress, onFileProgress
     || segments.some((segment) => segment.toLocaleLowerCase('en') === '.incoming')) {
     throw new HttpError(400, 'Choose a trip folder under storage/Areas or storage/Uploads.');
   }
-  const sourceFiles = await listStorageFiles(folderPath, { maxFiles: 10000, onProgress: onScanProgress });
+  const sourceFiles = await listStorageFiles(folderPath, { maxFiles: MAX_TRIP_FOLDER_FILES, onProgress: onScanProgress });
   const files = [];
   let totalBytes = 0;
   let processedSourceFiles = 0;
@@ -1904,15 +2221,17 @@ async function readServerTripFolder(folderPath, { onScanProgress, onFileProgress
     }
     const absolutePath = await resolveStorageFile(sourcePath);
     const metadata = await stat(absolutePath);
-    if (metadata.size > 100 * 1024 * 1024) throw new HttpError(413, 'A trip photo exceeds the 100 MB processing limit.');
+    if (metadata.size > MAX_TRIP_PHOTO_BYTES) throw new HttpError(413, 'A trip photo exceeds the 200 MB processing limit.');
     totalBytes += metadata.size;
-    if (totalBytes > 2048 * 1024 * 1024) throw new HttpError(413, 'The trip folder exceeds the 2 GB processing limit.');
+    if (totalBytes > MAX_TRIP_FOLDER_BYTES) {
+      throw new HttpError(413, 'The trip folder exceeds the 20 GB processing limit.');
+    }
     files.push({
       relativePath,
       name: parts.at(-1),
       machineRelativePath: parts.slice(1).join('/'),
       sourcePath,
-      buffer: await readFile(absolutePath),
+      sourceAbsolutePath: absolutePath,
       modifiedAt: metadata.mtimeMs,
     });
     processedSourceFiles += 1;
@@ -1955,15 +2274,16 @@ export async function processMaintenanceTripFolder(orderId, { folderPath, file }
   if (Boolean(file) === Boolean(folderPath)) throw new HttpError(400, 'Provide either one ZIP file or a server-side folder path.');
 
   beginMaintenanceTripProgress(id, database);
+  let tripExtractionDirectory = null;
   try {
     updateMaintenanceTripProgress(id, { percent: 2, stage: 'جارٍ تجهيز قائمة الماكينات ومصدر الرحلة...' });
     const machines = database.prepare(`
-      SELECT id, code, name_ar, name_en, area FROM machines
-      WHERE area COLLATE NOCASE IN (${orderAreas.map(() => '?').join(',')})
-        AND active = 1 AND deleted_at IS NULL
-      ORDER BY area COLLATE NOCASE, code COLLATE NOCASE, id
+      SELECT DISTINCT machine.id, machine.code, machine.name_ar, machine.name_en, machine.area
+      FROM machines machine
+      WHERE machine.area COLLATE NOCASE IN (${orderAreas.map(() => '?').join(',')})
+        AND machine.active = 1 AND machine.deleted_at IS NULL
+      ORDER BY machine.code COLLATE NOCASE, machine.id
     `).all(...orderAreas);
-    if (!machines.length) throw new HttpError(400, 'No active machines were found in the order areas.');
 
     let sourceName;
     let files;
@@ -1971,7 +2291,10 @@ export async function processMaintenanceTripFolder(orderId, { folderPath, file }
     if (file) {
       if (extname(file.originalname ?? '').toLowerCase() !== '.zip') throw new HttpError(400, 'Trip uploads must be ZIP files.');
       updateMaintenanceTripProgress(id, { percent: 3, stage: 'جارٍ فحص وفك ملفات ZIP...' });
-      files = await readTripZip(file.buffer, {
+      const incomingDirectory = await ensureStorageDirectory('.incoming');
+      tripExtractionDirectory = await mkdtemp(join(incomingDirectory, 'trip-extract-'));
+      files = await readTripZip(file.path, {
+        tempDirectory: tripExtractionDirectory,
         onProgress: ({ totalFiles, processedFiles, stage }) => {
           const fraction = totalFiles ? processedFiles / totalFiles : 0;
           updateMaintenanceTripProgress(id, {
@@ -2024,8 +2347,12 @@ export async function processMaintenanceTripFolder(orderId, { folderPath, file }
     let classifiedFiles = 0;
     const matchedByMachine = new Map();
     const unmatchedPlans = [];
+    const folderMatchResults = new Map(matchMachineFolderGroups([...folderGroups.keys()], machines)
+      .map((result) => [result.folderName, result]));
+    const duplicateWarnings = [];
     for (const [folderName, photos] of folderGroups) {
-      const machine = matchMachineFolder(folderName, machines);
+      const matchResult = folderMatchResults.get(folderName);
+      const machine = matchResult?.machine ?? null;
       const classified = await classifyMachinePhotos(photos, () => {
         classifiedFiles += 1;
         updateMaintenanceTripProgress(id, {
@@ -2037,11 +2364,26 @@ export async function processMaintenanceTripFolder(orderId, { folderPath, file }
       });
       const plan = { folderName, before: classified.before, after: classified.after };
       if (machine) {
-        const current = matchedByMachine.get(machine.id) ?? { machine, before: [], after: [], folders: [] };
-        current.before.push(...plan.before);
-        current.after.push(...plan.after);
-        current.folders.push(folderName);
-        matchedByMachine.set(machine.id, current);
+        matchedByMachine.set(machine.id, {
+          machine,
+          before: [...plan.before],
+          after: [...plan.after],
+          folders: [folderName],
+        });
+      } else if (matchResult?.duplicate) {
+        const duplicateMachine = matchResult.duplicateMachine;
+        unmatchedPlans.push({
+          ...plan,
+          isDuplicate: true,
+          duplicateOfFolder: matchResult.duplicateOfFolder,
+          duplicateMachineId: duplicateMachine.id,
+        });
+        duplicateWarnings.push({
+          machineId: duplicateMachine.id,
+          machineName: duplicateMachine.name_ar || duplicateMachine.code,
+          originalFolder: matchResult.duplicateOfFolder,
+          duplicateFolder: folderName,
+        });
       } else {
         unmatchedPlans.push(plan);
       }
@@ -2056,10 +2398,14 @@ export async function processMaintenanceTripFolder(orderId, { folderPath, file }
       const existing = existingCards.get(machineId);
       const beforeCount = parsePhotoJson(existing?.before_photos_json ?? '[]').length + plan.before.length;
       const afterCount = parsePhotoJson(existing?.after_photos_json ?? '[]').length + plan.after.length;
-      if (beforeCount > 100 || afterCount > 100) throw new HttpError(400, 'A maintenance card may contain at most 100 photos in each phase.');
+      if (beforeCount > MAX_CARD_PHOTOS || afterCount > MAX_CARD_PHOTOS) {
+        throw new HttpError(400, `A maintenance card may contain at most ${MAX_CARD_PHOTOS} photos in each phase.`);
+      }
     }
     for (const plan of unmatchedPlans) {
-      if (plan.before.length > 100 || plan.after.length > 100) throw new HttpError(400, 'An unmatched folder may contain at most 100 photos in each phase.');
+      if (plan.before.length > MAX_CARD_PHOTOS || plan.after.length > MAX_CARD_PHOTOS) {
+        throw new HttpError(400, `An unmatched folder may contain at most ${MAX_CARD_PHOTOS} photos in each phase.`);
+      }
     }
 
     updateMaintenanceTripProgress(id, { percent: 74, stage: 'جارٍ تجهيز مسارات حفظ الصور...' });
@@ -2096,7 +2442,7 @@ export async function processMaintenanceTripFolder(orderId, { folderPath, file }
     try {
       let savedFileCount = 0;
       for (const item of filePlans) {
-        const saved = await writeStorageFile(item.storedPath, item.photo.buffer);
+        const saved = await copyStorageFile(item.photo.sourceAbsolutePath, item.storedPath);
         writtenPaths.set(item.photo, saved.storedPath);
         savedFiles.push(saved.absolutePath);
         savedFileCount += 1;
@@ -2145,8 +2491,10 @@ export async function processMaintenanceTripFolder(orderId, { folderPath, file }
         }
 
         const insertUnmatched = database.prepare(`
-          INSERT INTO maintenance_unmatched_folders (order_id, folder_name, source_name, before_photos_json, after_photos_json)
-          VALUES (?, ?, ?, ?, ?)
+          INSERT INTO maintenance_unmatched_folders (
+            order_id, folder_name, source_name, before_photos_json, after_photos_json,
+            is_duplicate, duplicate_of_folder, duplicate_machine_id
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         `);
         for (const plan of unmatchedPlans) {
           insertUnmatched.run(
@@ -2155,6 +2503,9 @@ export async function processMaintenanceTripFolder(orderId, { folderPath, file }
             sourceName,
             JSON.stringify(plan.before.map((photo) => writtenPaths.get(photo))),
             JSON.stringify(plan.after.map((photo) => writtenPaths.get(photo))),
+            plan.isDuplicate ? 1 : 0,
+            plan.duplicateOfFolder ?? null,
+            plan.duplicateMachineId ?? null,
           );
         }
 
@@ -2168,6 +2519,8 @@ export async function processMaintenanceTripFolder(orderId, { folderPath, file }
             source_name: sourceName,
             matched_machine_count: matchedByMachine.size,
             unmatched_folder_count: unmatchedPlans.length,
+            duplicate_folder_count: duplicateWarnings.length,
+            duplicate_warnings: duplicateWarnings,
             attached_before: attachedBefore,
             attached_after: attachedAfter,
             cards_created: cardsCreated,
@@ -2176,6 +2529,7 @@ export async function processMaintenanceTripFolder(orderId, { folderPath, file }
         return {
           matchedMachineCount: matchedByMachine.size,
           unmatchedFolderCount: unmatchedPlans.length,
+          duplicateWarnings,
           attachedBefore,
           attachedAfter,
           cardsCreated,
@@ -2197,6 +2551,8 @@ export async function processMaintenanceTripFolder(orderId, { folderPath, file }
   } catch (error) {
     updateMaintenanceTripProgress(id, { stage: 'تعذر إكمال فحص مجلد الرحلة.', active: false });
     throw error;
+  } finally {
+    if (tripExtractionDirectory) await rm(tripExtractionDirectory, { recursive: true, force: true });
   }
 }
 
@@ -2260,7 +2616,9 @@ export async function bindUnmatchedMaintenanceFolder(orderId, folderId, input, a
       `).get(id, machineId, unmatchedId);
       if (existingBound) throw new HttpError(409, 'This machine is already linked to another reviewed folder.');
       for (const item of destinationFiles) (item.phase === 'Before' ? before : after).push(item.storedPath);
-      if (before.length > 100 || after.length > 100) throw new HttpError(400, 'A maintenance card may contain at most 100 photos in each phase.');
+      if (before.length > MAX_CARD_PHOTOS || after.length > MAX_CARD_PHOTOS) {
+        throw new HttpError(400, `A maintenance card may contain at most ${MAX_CARD_PHOTOS} photos in each phase.`);
+      }
       const status = existing?.status === 'excluded' ? 'excluded' : before.length && after.length ? 'completed' : (existing?.status ?? 'pending');
       let cardId = existing?.id;
       if (existing) {
@@ -2307,6 +2665,196 @@ export async function bindUnmatchedMaintenanceFolder(orderId, folderId, input, a
     await Promise.all(savedFiles.map((absolutePath) => removeStorageFile(absolutePath)));
     throw error;
   }
+}
+
+export async function deleteUnmatchedMaintenanceFolder(orderId, folderId, actorId = null, database = db) {
+  const id = positiveId(orderId, 'orderId');
+  const unmatchedId = positiveId(folderId, 'folderId');
+  return withMaintenanceOrderStorageLock(async () => {
+    if (hasPendingMaintenanceFileRecovery(database)) {
+      throw new HttpError(409, 'A maintenance file recovery is pending. Restart the server before trying again.');
+    }
+
+    const order = findMaintenanceOrder(id, database);
+    if (order.status === 'archived') throw new HttpError(409, 'Archived maintenance orders are read-only.');
+    const folder = database.prepare(`
+      SELECT * FROM maintenance_unmatched_folders
+      WHERE id = ? AND order_id = ? AND status = 'pending'
+    `).get(unmatchedId, id);
+    if (!folder) throw new HttpError(404, 'Unmatched folder was not found.');
+
+    const targets = await collectUnmatchedFolderDeletionTargets(order, folder, database);
+    const archiveDirectory = unmatchedFolderArchiveDirectory({
+      client_code: order.client_code,
+      order_code: order.order_code,
+      folder_name: folder.folder_name,
+    });
+    const sourceDirectory = unmatchedFolderSourceDirectory(folder.source_name, folder.folder_name);
+    const operationId = targets.length ? randomUUID() : null;
+
+    const assertNoSharedFolderTargets = () => {
+      if (targets.some((target) => target.kind === 'directory' && target.path === archiveDirectory)) {
+        const otherArchiveOwner = database.prepare(`
+          SELECT folder_name FROM maintenance_unmatched_folders
+          WHERE order_id = ? AND id != ?
+        `).all(id, unmatchedId).some((candidate) => (
+          safeTripFolderSegment(candidate.folder_name) === safeTripFolderSegment(folder.folder_name)
+        ));
+        if (otherArchiveOwner) {
+          throw new HttpError(409, 'Another unmatched folder shares this archive directory; refresh and try again.');
+        }
+      }
+      if (sourceDirectory && targets.some((target) => target.kind === 'directory' && target.path === sourceDirectory)) {
+        const sourceIdentity = normalizedStoragePathIdentity(sourceDirectory);
+        const otherSourceOwner = database.prepare(`
+          SELECT source_name, folder_name FROM maintenance_unmatched_folders WHERE id != ?
+        `).all(unmatchedId).some((candidate) => {
+          const candidatePath = unmatchedFolderSourceDirectory(candidate.source_name, candidate.folder_name);
+          return candidatePath && normalizedStoragePathIdentity(candidatePath) === sourceIdentity;
+        });
+        if (otherSourceOwner) {
+          throw new HttpError(409, 'Another unmatched folder references this source directory; refresh and try again.');
+        }
+      }
+    };
+
+    if (operationId) {
+      database.transaction(() => {
+        const currentOrder = findMaintenanceOrder(id, database);
+        if (currentOrder.status === 'archived'
+          || currentOrder.order_code !== order.order_code
+          || currentOrder.client_code !== order.client_code) {
+          throw new HttpError(409, 'The maintenance order changed while the folder was being prepared.');
+        }
+        const currentFolder = database.prepare(`
+          SELECT * FROM maintenance_unmatched_folders
+          WHERE id = ? AND order_id = ? AND status = 'pending'
+        `).get(unmatchedId, id);
+        if (!currentFolder
+          || currentFolder.folder_name !== folder.folder_name
+          || currentFolder.source_name !== folder.source_name
+          || currentFolder.before_photos_json !== folder.before_photos_json
+          || currentFolder.after_photos_json !== folder.after_photos_json) {
+          throw new HttpError(409, 'The unmatched folder changed while its files were being prepared.');
+        }
+        assertNoSharedFolderTargets();
+        database.prepare(`
+          INSERT INTO maintenance_unmatched_folder_deletion_operations
+            (operation_id, folder_id, order_id, client_code, order_code, folder_name, source_name, targets_json, state)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'prepared')
+        `).run(
+          operationId,
+          unmatchedId,
+          id,
+          order.client_code,
+          order.order_code,
+          folder.folder_name,
+          folder.source_name,
+          JSON.stringify(targets),
+        );
+      }).immediate();
+    }
+
+    let stageDirectory = null;
+    let committed = false;
+    try {
+      if (operationId) {
+        stageDirectory = await ensureStorageDirectory(...MAINTENANCE_UNMATCHED_FOLDER_DELETION_STAGE_ROOT, operationId);
+        for (const [index, target] of targets.entries()) {
+          const source = target.kind === 'directory'
+            ? await resolveStorageDirectoryIfPresent(target.path)
+            : await resolveStorageFileIfPresent(target.path);
+          if (!source) throw new HttpError(409, 'An unmatched-folder source path changed while its files were being staged.');
+          const stagedSegments = unmatchedFolderDeletionStagedPath(operationId, index).split('/');
+          const stagedParent = await ensureStorageDirectory(...stagedSegments.slice(0, -1));
+          await rename(source, join(stagedParent, stagedSegments.at(-1)));
+        }
+      }
+
+      database.transaction(() => {
+        const currentOrder = findMaintenanceOrder(id, database);
+        if (currentOrder.status === 'archived') {
+          throw new HttpError(409, 'Archived maintenance orders are read-only.');
+        }
+        if (currentOrder.order_code !== order.order_code || currentOrder.client_code !== order.client_code) {
+          throw new HttpError(409, 'The maintenance order changed while its files were being staged.');
+        }
+        const currentFolder = database.prepare(`
+          SELECT * FROM maintenance_unmatched_folders
+          WHERE id = ? AND order_id = ? AND status = 'pending'
+        `).get(unmatchedId, id);
+        if (!currentFolder
+          || currentFolder.folder_name !== folder.folder_name
+          || currentFolder.source_name !== folder.source_name
+          || currentFolder.before_photos_json !== folder.before_photos_json
+          || currentFolder.after_photos_json !== folder.after_photos_json) {
+          throw new HttpError(409, 'The unmatched folder changed while its files were being staged.');
+        }
+        assertNoSharedFolderTargets();
+
+        const deletion = database.prepare(`
+          DELETE FROM maintenance_unmatched_folders
+          WHERE id = ? AND order_id = ? AND status = 'pending'
+        `).run(unmatchedId, id);
+        if (deletion.changes !== 1) throw new HttpError(409, 'The unmatched folder was already removed.');
+
+        if (operationId) {
+          const journalUpdate = database.prepare(`
+            UPDATE maintenance_unmatched_folder_deletion_operations
+            SET state = 'committed'
+            WHERE operation_id = ? AND folder_id = ? AND state = 'prepared'
+          `).run(operationId, unmatchedId);
+          if (journalUpdate.changes !== 1) throw new HttpError(500, 'Unmatched-folder recovery journal was not found.');
+        }
+
+        recordAudit({
+          database,
+          actorId,
+          action: 'delete_unmatched_folder',
+          entityType: 'maintenance_unmatched_folder',
+          entityId: unmatchedId,
+          oldValues: {
+            folder_name: folder.folder_name,
+            source_name: folder.source_name,
+            before_count: parseUnmatchedFolderPhotoPaths(folder.before_photos_json, 'before_photos_json').length,
+            after_count: parseUnmatchedFolderPhotoPaths(folder.after_photos_json, 'after_photos_json').length,
+          },
+          newValues: null,
+        });
+      }).immediate();
+      committed = true;
+
+      let cleanupPending = false;
+      if (operationId) {
+        try {
+          await rm(stageDirectory, { recursive: true, force: true });
+          removeUnmatchedFolderDeletionOperation(operationId, database);
+        } catch (cleanupError) {
+          cleanupPending = true;
+          console.error(`Unmatched-folder purge for ${folder.folder_name} remains staged for recovery: ${cleanupError.message}`);
+        }
+      }
+
+      return {
+        id: unmatchedId,
+        folderName: folder.folder_name,
+        deleted: true,
+        ...(cleanupPending ? { cleanupPending: true } : {}),
+      };
+    } catch (error) {
+      if (committed) throw error;
+      if (operationId) {
+        try {
+          await restoreUnmatchedFolderDeletion(operationId, targets);
+          removeUnmatchedFolderDeletionOperation(operationId, database);
+        } catch (restoreError) {
+          console.error(`Unmatched-folder restoration for ${folder.folder_name} is pending: ${restoreError.message}`);
+          throw new HttpError(500, 'The unmatched folder was not deleted, but file recovery is pending. Restart the server before continuing.');
+        }
+      }
+      throw error;
+    }
+  });
 }
 
 export async function getUnmatchedMaintenancePhoto(orderId, folderId, phase, filename, database = db) {
@@ -2414,7 +2962,7 @@ export async function importMaintenanceServerFolder(orderId, input, actorId = nu
   if (order.status !== 'in_progress') throw new HttpError(409, 'Photos can only be imported while the order is in progress.');
   const orderAreas = parseMaintenanceOrderAreas(order.area);
   if (!orderAreas.length) throw new HttpError(400, 'Set at least one order area before importing a server folder.');
-  const sourceFiles = await listStorageFiles(folderPath, { maxFiles: 10000 });
+  const sourceFiles = await listStorageFiles(folderPath, { maxFiles: MAX_TRIP_FOLDER_FILES });
   const machines = database.prepare(`
     SELECT id, code FROM machines
     WHERE active = 1 AND deleted_at IS NULL
@@ -2449,7 +2997,9 @@ export async function importMaintenanceServerFolder(orderId, input, actorId = nu
     const photos = parsePhotoJson(item.phase === 'before' ? card.before_photos_json : card.after_photos_json);
     const key = `${item.machine.id}:${item.phase}`;
     const used = availableSlots.get(key) ?? photos.length;
-    if (used >= 4) { item.skip = true; skipped += 1; continue; }
+    if (used >= MAX_CARD_PHOTOS) {
+      throw new HttpError(400, `A maintenance card may contain at most ${MAX_CARD_PHOTOS} photos in each phase.`);
+    }
     availableSlots.set(key, used + 1);
   }
   const savedFiles = [];
@@ -2457,7 +3007,7 @@ export async function importMaintenanceServerFolder(orderId, input, actorId = nu
     for (const item of planned) {
       if (item.skip) continue;
       const sourceAbsolute = await resolveStorageFile(item.sourcePath);
-      const saved = await writeStorageFile(item.storedPath, await readFile(sourceAbsolute));
+      const saved = await copyStorageFile(sourceAbsolute, item.storedPath);
       savedFiles.push(saved.absolutePath);
     }
     const result = database.transaction(() => {
@@ -2498,7 +3048,7 @@ export async function updateMaintenanceCard(orderId, cardId, input, actorId = nu
   const id = positiveId(orderId, 'orderId');
   const targetCardId = positiveId(cardId, 'cardId');
   const body = requireObject(input);
-  allowOnlyKeys(body, ['beforePhotos', 'afterPhotos', 'notes', 'reasonId']);
+  allowOnlyKeys(body, ['beforePhotos', 'afterPhotos', 'notes', 'reasonId', 'reasonIds', 'machineCode']);
   if (!Object.keys(body).length) throw new HttpError(400, 'At least one card field must be provided.');
 
   const order = findMaintenanceOrder(id, database);
@@ -2510,37 +3060,120 @@ export async function updateMaintenanceCard(orderId, cardId, input, actorId = nu
   `).get(targetCardId, id);
   if (!card) throw new HttpError(404, 'Inspection card was not found on this order.');
 
+  const requestedMachineCode = body.machineCode === undefined ? null : safeMachineCode(body.machineCode);
+  const machineCodeChanged = requestedMachineCode !== null && requestedMachineCode !== card.machine_code;
+  let replacementMachine = null;
+  if (machineCodeChanged) {
+    replacementMachine = database.prepare(`
+      SELECT id, code, name_ar, name_en, area
+      FROM machines
+      WHERE code = ? COLLATE NOCASE AND active = 1 AND deleted_at IS NULL
+    `).get(requestedMachineCode) ?? null;
+    if (!replacementMachine) {
+      const conflictingMachine = database.prepare(`
+        SELECT id, active, deleted_at FROM machines
+        WHERE code = ? COLLATE NOCASE AND id != ?
+      `).get(requestedMachineCode, card.machine_id);
+      if (conflictingMachine) {
+        throw new HttpError(409, 'A machine with this code already exists but is not active.');
+      }
+    }
+  }
+
   const beforePhotos = body.beforePhotos === undefined
     ? parsePhotoJson(card.before_photos_json)
     : validateStoredPhotoList(body.beforePhotos, 'beforePhotos');
   const afterPhotos = body.afterPhotos === undefined
     ? parsePhotoJson(card.after_photos_json)
     : validateStoredPhotoList(body.afterPhotos, 'afterPhotos');
-  for (const [phase, paths] of [['before', beforePhotos], ['after', afterPhotos]]) {
-    const expectedPrefix = `${storageDirectory('clients', order.client_code, 'maintenance', order.order_code, card.machine_code, phase)}/`;
-    const tripFolderPrefix = `${storageDirectory('Clients', order.client_code, 'Archived_Orders', order.order_code, card.machine_code, phase === 'before' ? 'Before' : 'After')}/`;
+  const isValidCardPhoto = (photoPath) => {
+    const segments = String(photoPath).replace(/\\/g, '/').split('/').map((part) => part.toLocaleLowerCase('en'));
+    const expectedPrefixes = [
+      ['clients', order.client_code, 'maintenance', order.order_code, card.machine_code],
+      ['clients', order.client_code, 'archived_orders', order.order_code, card.machine_code],
+    ].map((prefix) => prefix.map((part) => String(part).toLocaleLowerCase('en')));
+    return expectedPrefixes.some((prefix) => prefix.every((part, index) => segments[index] === part));
+  };
+  const submittedPhotoLists = [];
+  if (body.beforePhotos !== undefined) submittedPhotoLists.push(['before', beforePhotos]);
+  if (body.afterPhotos !== undefined) submittedPhotoLists.push(['after', afterPhotos]);
+  for (const [phase, paths] of submittedPhotoLists) {
     for (const photoPath of paths) {
-      if (!photoPath.startsWith(expectedPrefix) && !photoPath.startsWith(tripFolderPrefix)) {
+      if (!isValidCardPhoto(photoPath)) {
         throw new HttpError(400, `${phase} photo paths must belong to this client, order, and machine.`);
       }
       await resolveStorageFile(photoPath);
     }
   }
   const notes = body.notes === undefined ? card.notes : optionalText(body.notes, 'notes', { maxLength: 10000 });
+
   let reasonId = card.reason_id;
-  if (body.reasonId !== undefined) {
+  let reasonIdsJson = card.reason_ids_json ?? '[]';
+  let currentCardReasonIds = [];
+  try {
+    currentCardReasonIds = JSON.parse(card.reason_ids_json || '[]');
+    if (!Array.isArray(currentCardReasonIds)) currentCardReasonIds = [];
+  } catch {
+    currentCardReasonIds = [];
+  }
+  if (!currentCardReasonIds.length && card.reason_id) {
+    currentCardReasonIds = [card.reason_id];
+  }
+
+  if (body.reasonIds !== undefined) {
+    if (!Array.isArray(body.reasonIds)) throw new HttpError(400, 'reasonIds must be an array of reason IDs.');
+    const parsedIds = body.reasonIds.map((val) => positiveId(val, 'reasonId'));
+    const uniqueIds = [...new Set(parsedIds)];
+    if (uniqueIds.length > 0) {
+      const placeholders = uniqueIds.map(() => '?').join(',');
+      const rows = database.prepare(`SELECT id, active FROM maintenance_reasons WHERE id IN (${placeholders})`).all(...uniqueIds);
+      const existingMap = new Map(rows.map((r) => [r.id, r.active]));
+      const allowedInactive = new Set([...currentCardReasonIds, card.reason_id].filter(Boolean));
+      for (const rid of uniqueIds) {
+        if (!existingMap.has(rid)) {
+          throw new HttpError(404, `Maintenance reason ${rid} was not found.`);
+        }
+        if (!existingMap.get(rid) && !allowedInactive.has(rid)) {
+          throw new HttpError(404, `Active maintenance reason ${rid} was not found.`);
+        }
+      }
+    }
+    reasonId = uniqueIds[0] ?? null;
+    reasonIdsJson = JSON.stringify(uniqueIds);
+  } else if (body.reasonId !== undefined) {
     reasonId = body.reasonId === null || body.reasonId === '' ? null : positiveId(body.reasonId, 'reasonId');
-    if (reasonId !== null && !database.prepare('SELECT 1 FROM maintenance_reasons WHERE id = ? AND active = 1').get(reasonId)) {
+    if (reasonId !== null && !database.prepare('SELECT 1 FROM maintenance_reasons WHERE id = ? AND (active = 1 OR id = ?)').get(reasonId, card.reason_id ?? 0)) {
       throw new HttpError(404, 'Active maintenance reason was not found.');
     }
+    reasonIdsJson = JSON.stringify(reasonId === null ? [] : [reasonId]);
   }
 
   const update = database.transaction(() => {
+    if (machineCodeChanged) {
+      if (replacementMachine && replacementMachine.id !== card.machine_id) {
+        database.prepare(`
+          UPDATE maintenance_cards
+          SET machine_id = ?, updated_at = CURRENT_TIMESTAMP
+          WHERE id = ? AND order_id = ? AND deleted_at IS NULL
+        `).run(replacementMachine.id, targetCardId, id);
+      } else if (!replacementMachine || replacementMachine.id === card.machine_id) {
+        database.prepare('UPDATE machines SET code = ? WHERE id = ?').run(requestedMachineCode, card.machine_id);
+      }
+      recordAudit({
+        database,
+        actorId,
+        action: 'update_card_machine_code',
+        entityType: 'maintenance_card',
+        entityId: targetCardId,
+        oldValues: { machine_code: card.machine_code },
+        newValues: { machine_code: requestedMachineCode },
+      });
+    }
     database.prepare(`
       UPDATE maintenance_cards
-      SET before_photos_json = ?, after_photos_json = ?, notes = ?, reason_id = ?, updated_at = CURRENT_TIMESTAMP
+      SET before_photos_json = ?, after_photos_json = ?, notes = ?, reason_id = ?, reason_ids_json = ?, updated_at = CURRENT_TIMESTAMP
       WHERE id = ? AND order_id = ? AND deleted_at IS NULL
-    `).run(JSON.stringify(beforePhotos), JSON.stringify(afterPhotos), notes, reasonId, targetCardId, id);
+    `).run(JSON.stringify(beforePhotos), JSON.stringify(afterPhotos), notes, reasonId, reasonIdsJson, targetCardId, id);
     recordAudit({
       database,
       actorId,
@@ -2552,8 +3185,15 @@ export async function updateMaintenanceCard(orderId, cardId, input, actorId = nu
         after_photos: parsePhotoJson(card.after_photos_json),
         notes: card.notes,
         reason_id: card.reason_id,
+        reason_ids: currentCardReasonIds,
       },
-      newValues: { before_photos: beforePhotos, after_photos: afterPhotos, notes, reason_id: reasonId },
+      newValues: {
+        before_photos: beforePhotos,
+        after_photos: afterPhotos,
+        notes,
+        reason_id: reasonId,
+        reason_ids: JSON.parse(reasonIdsJson),
+      },
     });
   });
   update();
@@ -2614,6 +3254,167 @@ export async function uploadMaintenancePhoto(orderId, cardId, phase, file, actor
     await removeStorageFile(savedFile.absolutePath);
     throw error;
   }
+}
+
+export async function deleteCardPhoto(orderId, cardId, phase, filename, actorId = null, database = db) {
+  const id = positiveId(orderId, 'orderId');
+  const targetCardId = positiveId(cardId, 'cardId');
+  if (!['before', 'after'].includes(phase)) throw new HttpError(400, 'Photo phase must be before or after.');
+  const name = requireText(filename, 'filename', { maxLength: 200 });
+  if (name.includes('/') || name.includes('\\')) throw new HttpError(400, 'Invalid photo filename.');
+
+  return withMaintenanceOrderStorageLock(async () => {
+    const removedPhoto = database.transaction(() => {
+      const card = database.prepare(`
+        SELECT card.id, card.order_id, card.before_photos_json, card.after_photos_json, card.status,
+          order_record.status AS order_status
+        FROM maintenance_cards card
+        JOIN maintenance_orders order_record ON order_record.id = card.order_id
+        WHERE order_record.id = ? AND card.id = ? AND order_record.deleted_at IS NULL AND card.deleted_at IS NULL
+      `).get(id, targetCardId);
+
+      if (!card) throw new HttpError(404, 'Active inspection card was not found.');
+
+      const beforePaths = parsePhotoJson(card.before_photos_json);
+      const afterPaths = parsePhotoJson(card.after_photos_json);
+      const targetList = phase === 'before' ? beforePaths : afterPaths;
+      const targetIndex = targetList.findIndex((photoPath) => photoPath.split('/').at(-1) === name);
+      if (targetIndex === -1) throw new HttpError(404, 'Photo was not found in this card phase.');
+
+      const [removedStoredPath] = targetList.splice(targetIndex, 1);
+      const nextStatus = card.status === 'excluded'
+        ? 'excluded'
+        : beforePaths.length > 0 && afterPaths.length > 0 ? 'completed' : 'pending';
+      const update = database.prepare(`
+        UPDATE maintenance_cards
+        SET before_photos_json = ?, after_photos_json = ?, status = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ? AND order_id = ? AND deleted_at IS NULL
+      `).run(JSON.stringify(beforePaths), JSON.stringify(afterPaths), nextStatus, targetCardId, id);
+      if (update.changes !== 1) throw new HttpError(404, 'Active inspection card was not found.');
+
+      recordAudit({
+        database,
+        actorId,
+        action: 'photo_delete',
+        entityType: 'maintenance_card',
+        entityId: targetCardId,
+        oldValues: { phase, photo: removedStoredPath, previous_status: card.status },
+        newValues: { status: nextStatus, remaining_before: beforePaths.length, remaining_after: afterPaths.length },
+      });
+      return { removedStoredPath, status: nextStatus, beforeCount: beforePaths.length, afterCount: afterPaths.length };
+    }).immediate();
+
+    let fileCleanupPending = false;
+    try {
+      const absolutePath = await resolveStorageFile(removedPhoto.removedStoredPath);
+      await removeStorageFile(absolutePath);
+    } catch (error) {
+      if (error.status !== 404 && error.code !== 'ENOENT') {
+        fileCleanupPending = true;
+        console.error(`Maintenance photo cleanup for card ${targetCardId} is pending: ${error.message}`);
+      }
+    }
+
+    return {
+      ok: true,
+      cardId: targetCardId,
+      status: removedPhoto.status,
+      ...(fileCleanupPending ? { fileCleanupPending: true } : {}),
+    };
+  });
+}
+
+export async function moveCardPhoto(orderId, cardId, input, actorId = null, database = db) {
+  const id = positiveId(orderId, 'orderId');
+  const targetCardId = positiveId(cardId, 'cardId');
+  const body = requireObject(input);
+  allowOnlyKeys(body, ['fromPhase', 'toPhase', 'filename']);
+  const { fromPhase, toPhase } = body;
+  if (!['before', 'after'].includes(fromPhase) || !['before', 'after'].includes(toPhase)) {
+    throw new HttpError(400, 'fromPhase and toPhase must be before or after.');
+  }
+  const name = requireText(body.filename, 'filename', { maxLength: 200 });
+  if (name.includes('/') || name.includes('\\')) throw new HttpError(400, 'Invalid photo filename.');
+
+  return withMaintenanceOrderStorageLock(async () => {
+    const card = database.prepare(`
+      SELECT card.id, card.order_id, card.before_photos_json, card.after_photos_json, card.status,
+        order_record.status AS order_status, order_record.order_code,
+        client.code AS client_code, machine.code AS machine_code
+      FROM maintenance_cards card
+      JOIN maintenance_orders order_record ON order_record.id = card.order_id
+      JOIN clients client ON client.id = order_record.client_id
+      JOIN machines machine ON machine.id = card.machine_id
+      WHERE order_record.id = ? AND card.id = ? AND order_record.deleted_at IS NULL AND card.deleted_at IS NULL
+    `).get(id, targetCardId);
+
+    if (!card) throw new HttpError(404, 'Active inspection card was not found.');
+
+    const beforePaths = parsePhotoJson(card.before_photos_json);
+    const afterPaths = parsePhotoJson(card.after_photos_json);
+    const sourceList = fromPhase === 'before' ? beforePaths : afterPaths;
+    const destinationList = toPhase === 'before' ? beforePaths : afterPaths;
+    const sourceIndex = sourceList.findIndex((photoPath) => photoPath.split('/').at(-1) === name);
+    if (sourceIndex === -1) throw new HttpError(404, 'Photo was not found in source phase.');
+    if (fromPhase === toPhase) return { ok: true, cardId: targetCardId, status: card.status };
+    if (destinationList.length >= 4) {
+      throw new HttpError(400, `لا يمكن نقل الصورة، مرحلة ${toPhase === 'before' ? 'قبل الصيانة' : 'بعد الصيانة'} تحتوي على الحد الأقصى (4 صور).`);
+    }
+
+    const [sourceStoredPath] = sourceList.splice(sourceIndex, 1);
+    const pathSegments = sourceStoredPath.replace(/\\/g, '/').split('/');
+    const phaseDirectoryIndex = pathSegments.length - 2;
+    if (pathSegments[phaseDirectoryIndex]?.toLocaleLowerCase('en') !== fromPhase) {
+      throw new HttpError(400, 'Photo storage path does not match its source phase.');
+    }
+    const phaseDirectory = pathSegments[phaseDirectoryIndex];
+    pathSegments[phaseDirectoryIndex] = phaseDirectory === phaseDirectory.toUpperCase()
+      ? toPhase.toUpperCase()
+      : phaseDirectory[0] === phaseDirectory[0].toUpperCase() && phaseDirectory.slice(1) === phaseDirectory.slice(1).toLowerCase()
+        ? `${toPhase[0].toUpperCase()}${toPhase.slice(1)}`
+        : toPhase;
+    const movedStoredPath = pathSegments.join('/');
+    destinationList.push(movedStoredPath);
+    const nextStatus = card.status === 'excluded'
+      ? 'excluded'
+      : beforePaths.length > 0 && afterPaths.length > 0 ? 'completed' : 'pending';
+    const sourceAbsolutePath = await resolveStorageFile(sourceStoredPath);
+    const destinationAbsoluteDirectory = await ensureStorageDirectory(...pathSegments.slice(0, -1));
+    const destinationAbsolutePath = join(destinationAbsoluteDirectory, pathSegments.at(-1));
+    try {
+      await lstat(destinationAbsolutePath);
+      throw new HttpError(409, 'A photo with the same filename already exists in the destination phase.');
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+
+    await rename(sourceAbsolutePath, destinationAbsolutePath);
+    try {
+      const update = database.transaction(() => {
+        const result = database.prepare(`
+          UPDATE maintenance_cards
+          SET before_photos_json = ?, after_photos_json = ?, status = ?, updated_at = CURRENT_TIMESTAMP
+          WHERE id = ? AND order_id = ? AND deleted_at IS NULL
+        `).run(JSON.stringify(beforePaths), JSON.stringify(afterPaths), nextStatus, targetCardId, id);
+        if (result.changes !== 1) throw new HttpError(404, 'Active inspection card was not found.');
+
+        recordAudit({
+          database,
+          actorId,
+          action: 'photo_move',
+          entityType: 'maintenance_card',
+          entityId: targetCardId,
+          oldValues: { fromPhase, toPhase, photo: sourceStoredPath, status: card.status },
+          newValues: { photo: movedStoredPath, status: nextStatus, before_count: beforePaths.length, after_count: afterPaths.length },
+        });
+      });
+      update.immediate();
+    } catch (error) {
+      await rename(destinationAbsolutePath, sourceAbsolutePath);
+      throw error;
+    }
+    return { ok: true, cardId: targetCardId, status: nextStatus, path: movedStoredPath };
+  });
 }
 
 export async function getMaintenancePhoto(orderId, cardId, phase, filename, database = db) {

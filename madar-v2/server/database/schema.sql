@@ -3,10 +3,13 @@ CREATE TABLE IF NOT EXISTS users (
   username TEXT NOT NULL UNIQUE COLLATE NOCASE,
   password_hash TEXT NOT NULL,
   full_name TEXT NOT NULL,
-  role TEXT NOT NULL CHECK (role IN ('admin', 'sales', 'operations', 'purchasing')),
+  role TEXT NOT NULL CHECK (role IN ('admin', 'sales', 'operations', 'purchasing', 'rep')),
   active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  deleted_at TEXT
+  deleted_at TEXT,
+  assigned_regions_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(assigned_regions_json)),
+  is_online INTEGER NOT NULL DEFAULT 0 CHECK (is_online IN (0, 1)),
+  last_location_json TEXT CHECK (last_location_json IS NULL OR json_valid(last_location_json))
 );
 
 CREATE TABLE IF NOT EXISTS sessions (
@@ -103,10 +106,87 @@ CREATE TABLE IF NOT EXISTS maintenance_cards (
   after_photos_json TEXT NOT NULL DEFAULT '[]',
   status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'completed', 'excluded')),
   notes TEXT,
+  reason_ids_json TEXT NOT NULL DEFAULT '[]',
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   deleted_at TEXT
 );
+
+CREATE TABLE IF NOT EXISTS rep_visits (
+  id INTEGER PRIMARY KEY,
+  visit_uuid TEXT NOT NULL UNIQUE,
+  rep_user_id INTEGER NOT NULL REFERENCES users(id),
+  order_id INTEGER REFERENCES maintenance_orders(id) ON DELETE SET NULL,
+  card_id INTEGER REFERENCES maintenance_cards(id) ON DELETE SET NULL,
+  machine_id INTEGER REFERENCES machines(id) ON DELETE SET NULL,
+  order_code TEXT NOT NULL,
+  machine_code TEXT NOT NULL,
+  region_name TEXT NOT NULL,
+  payload_sha256 TEXT NOT NULL CHECK (length(payload_sha256) = 64),
+  status TEXT NOT NULL CHECK (status IN ('receiving', 'completed', 'failed')),
+  reason_ids_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(reason_ids_json)),
+  notes TEXT,
+  captured_at TEXT NOT NULL,
+  before_captured_at TEXT,
+  after_captured_at TEXT,
+  location_json TEXT CHECK (location_json IS NULL OR json_valid(location_json)),
+  staging_path TEXT NOT NULL,
+  final_path TEXT NOT NULL,
+  before_path TEXT,
+  after_path TEXT,
+  failure_message TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  completed_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_rep_visits_rep_status_created
+  ON rep_visits(rep_user_id, status, created_at, id);
+CREATE INDEX IF NOT EXISTS idx_rep_visits_card_created
+  ON rep_visits(card_id, created_at, id);
+
+CREATE TABLE IF NOT EXISTS rep_visit_reviews (
+  visit_id INTEGER PRIMARY KEY REFERENCES rep_visits(id) ON DELETE CASCADE,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'reshoot')),
+  review_note TEXT,
+  reviewed_by INTEGER REFERENCES users(id),
+  reviewed_at TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_rep_visit_reviews_status_created
+  ON rep_visit_reviews(status, created_at, visit_id);
+
+CREATE TABLE IF NOT EXISTS rep_duty_sessions (
+  id INTEGER PRIMARY KEY,
+  rep_user_id INTEGER NOT NULL REFERENCES users(id),
+  started_at TEXT NOT NULL,
+  ended_at TEXT,
+  start_location_json TEXT CHECK (start_location_json IS NULL OR json_valid(start_location_json)),
+  end_location_json TEXT CHECK (end_location_json IS NULL OR json_valid(end_location_json)),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_rep_duty_sessions_one_active
+  ON rep_duty_sessions(rep_user_id) WHERE ended_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_rep_duty_sessions_rep_started
+  ON rep_duty_sessions(rep_user_id, started_at, ended_at);
+
+CREATE TABLE IF NOT EXISTS rep_location_points (
+  id INTEGER PRIMARY KEY,
+  rep_user_id INTEGER NOT NULL REFERENCES users(id),
+  duty_session_id INTEGER REFERENCES rep_duty_sessions(id),
+  latitude REAL NOT NULL CHECK (latitude BETWEEN -90 AND 90),
+  longitude REAL NOT NULL CHECK (longitude BETWEEN -180 AND 180),
+  accuracy REAL NOT NULL CHECK (accuracy >= 0 AND accuracy <= 100000),
+  captured_at TEXT NOT NULL,
+  received_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (rep_user_id, captured_at)
+);
+
+CREATE INDEX IF NOT EXISTS idx_rep_location_points_rep_captured
+  ON rep_location_points(rep_user_id, captured_at, id);
 
 CREATE TABLE IF NOT EXISTS workshop_orders (
   id INTEGER PRIMARY KEY,
@@ -306,3 +386,4 @@ CREATE INDEX IF NOT EXISTS idx_invoice_items_invoice ON invoice_items(invoice_id
 CREATE INDEX IF NOT EXISTS idx_treasury_entries_created ON treasury_entries(created_at);
 CREATE INDEX IF NOT EXISTS idx_treasury_entries_invoice ON treasury_entries(invoice_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_audit_log_entity ON audit_log(entity_type, entity_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_users_role_presence ON users(role, is_online, active, deleted_at);

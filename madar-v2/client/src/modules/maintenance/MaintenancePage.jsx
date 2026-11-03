@@ -45,7 +45,9 @@ export default function MaintenancePage() {
     : '', { enabled: selectedAreas.length > 0 });
   const { notice, showToast, clearToast } = useToast();
   const filteredOrders = useMemo(() => (orders ?? []).filter((order) =>
-    `${order.order_code} ${order.client_name} ${order.client_code}`.toLowerCase().includes(search.toLowerCase())), [orders, search]);
+    `${order.order_code} ${order.client_name} ${order.client_code} ${order.area_summary || ''} ${order.area || ''}`
+      .toLowerCase()
+      .includes(search.toLowerCase())), [orders, search]);
 
   async function createOrder(event) {
     event.preventDefault();
@@ -94,17 +96,32 @@ export default function MaintenancePage() {
       {view === 'area_notes' ? <AreaMaintenanceDirectory /> : view === 'machines' ? <MachinesDirectory /> : view === 'reasons' ? <MaintenanceReasonsDirectory /> : <>
       <div className="madar-list-toolbar madar-section">
         <Tabs items={statusItems.map((item) => ({ ...item, count: status === item.value ? orders?.length : undefined }))} value={status} onChange={setStatus} ariaLabel="حالة أوامر الصيانة" />
-        <label className="madar-field madar-search"><Icon name="search" size={15} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="بحث برقم الأمر أو العميل" aria-label="بحث أوامر الصيانة" /></label>
+        <label className="madar-field madar-search"><Icon name="search" size={15} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="بحث برقم الأمر، العميل، أو المنطقة..." aria-label="بحث أوامر الصيانة" /></label>
       </div>
       {error && <div className="madar-section"><Alert tone="error">{error}</Alert></div>}
       <section className="madar-panel madar-section">
         {loading ? <LoadingState label="جارٍ تحميل أوامر الصيانة" /> : filteredOrders.length ? (
           <div className="madar-table-wrap"><table className="madar-table">
-            <thead><tr><th>أمر الخدمة</th><th>العميل</th><th>عدد الآلات</th><th>الفنيون</th><th>تاريخ الإنشاء</th><th>الحالة</th><th /></tr></thead>
+            <thead><tr><th>أمر الخدمة</th><th>العميل</th><th>المناطق</th><th>عدد الآلات</th><th>الفنيون</th><th>تاريخ الإنشاء</th><th>الحالة</th><th /></tr></thead>
             <tbody>{filteredOrders.map((order) => (
               <tr key={order.id}>
                 <td><Link className="madar-table-link madar-code" to={`/maintenance/${order.id}`}>{order.order_code}</Link></td>
                 <td><div className="madar-table-primary">{order.client_name}</div><small className="madar-code">{order.client_code}</small></td>
+                <td>
+                  {Array.isArray(order.areas) && order.areas.length ? (
+                    <div className="madar-inline-wrap" style={{ gap: '4px', maxWidth: '240px', flexWrap: 'wrap' }}>
+                      {order.areas.map((areaName, idx) => <span key={`${areaName}-${idx}`} className="madar-badge madar-badge-info" style={{
+                        fontSize: '11px', padding: '2px 8px', borderRadius: '6px', background: 'rgba(56, 189, 248, 0.12)',
+                        color: '#38bdf8', border: '1px solid rgba(56, 189, 248, 0.25)', fontWeight: 600, whiteSpace: 'nowrap',
+                      }}>{areaName}</span>)}
+                    </div>
+                  ) : order.area ? (
+                    <span className="madar-badge madar-badge-info" style={{
+                      fontSize: '11px', padding: '2px 8px', borderRadius: '6px', background: 'rgba(56, 189, 248, 0.12)',
+                      color: '#38bdf8', border: '1px solid rgba(56, 189, 248, 0.25)', fontWeight: 600, whiteSpace: 'nowrap',
+                    }}>{order.area}</span>
+                  ) : <span style={{ color: 'var(--madar-muted)' }}>—</span>}
+                </td>
                 <td>{order.card_count}</td><td>{order.technician_count}</td><td>{formatDate(order.created_at)}</td>
                 <td><Badge status={order.status} /></td>
                 <td><Link className="madar-button madar-button-ghost madar-button-small" to={`/maintenance/${order.id}`} aria-label="فتح أمر الصيانة"><Icon name="chevron" size={13} /></Link></td>

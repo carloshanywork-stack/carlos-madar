@@ -562,6 +562,63 @@ body.madar-document { min-width: 320px; min-height: 100vh; margin: 0; background
 #madar-app .madar-health-row strong { color: #304259; font-size: 11px; }
 #madar-app .madar-health-row small { color: var(--madar-muted); font-size: 9px; }
 #madar-app .madar-health-pulse { width: 10px; height: 10px; border-radius: 50%; background: #38a47e; box-shadow: 0 0 0 5px #e6f5ee; }
+
+/* Refined dark theme surfaces, controls, and interaction states. */
+#madar-app[data-theme="dark"] ::-webkit-scrollbar { width: 8px; height: 8px; }
+#madar-app[data-theme="dark"] ::-webkit-scrollbar-track { background: var(--madar-canvas); }
+#madar-app[data-theme="dark"] ::-webkit-scrollbar-thumb { border: 2px solid var(--madar-canvas); border-radius: 999px; background: #28374d; }
+#madar-app[data-theme="dark"] ::-webkit-scrollbar-thumb:hover { background: #3a4d6b; }
+#madar-app[data-theme="dark"] { scrollbar-color: #28374d var(--madar-canvas); scrollbar-width: thin; }
+
+#madar-app[data-theme="dark"] .madar-panel,
+#madar-app[data-theme="dark"] .madar-inspection-card {
+  border: 1px solid var(--madar-border);
+  background: var(--madar-surface);
+  box-shadow: var(--madar-shadow);
+}
+#madar-app[data-theme="dark"] .madar-panel,
+#madar-app[data-theme="dark"] .madar-card,
+#madar-app[data-theme="dark"] .madar-inspection-card { color: var(--madar-text); }
+#madar-app[data-theme="dark"] .madar-card,
+#madar-app[data-theme="dark"] .madar-kpi,
+#madar-app[data-theme="dark"] .madar-client-card {
+  transition: border-color .18s ease, box-shadow .18s ease, transform .18s ease;
+}
+#madar-app[data-theme="dark"] .madar-kpi-link:hover .madar-kpi,
+#madar-app[data-theme="dark"] .madar-client-card:hover {
+  border-color: rgba(45, 212, 191, .3);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, .38), 0 0 18px rgba(45, 212, 191, .07);
+}
+
+#madar-app[data-theme="dark"] input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+#madar-app[data-theme="dark"] select,
+#madar-app[data-theme="dark"] textarea {
+  border-color: var(--madar-border);
+  background-color: var(--madar-surface-alt);
+  color: var(--madar-text);
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+#madar-app[data-theme="dark"] input:focus,
+#madar-app[data-theme="dark"] select:focus,
+#madar-app[data-theme="dark"] textarea:focus {
+  border-color: var(--madar-accent);
+  box-shadow: 0 0 0 3px rgba(45, 212, 191, .18);
+  outline: none;
+}
+#madar-app[data-theme="dark"] select option { background-color: var(--madar-surface); color: var(--madar-text); }
+
+#madar-app[data-theme="dark"] .madar-table th {
+  border-bottom: 1px solid var(--madar-border);
+  background: var(--madar-surface-alt);
+  color: var(--madar-muted);
+}
+#madar-app[data-theme="dark"] .madar-table td { border-bottom: 1px solid rgba(255, 255, 255, .05); color: var(--madar-text); }
+#madar-app[data-theme="dark"] .madar-table tbody tr:hover td { background: rgba(255, 255, 255, .025); }
+#madar-app[data-theme="dark"] .madar-badge { font-weight: 600; letter-spacing: .3px; }
+#madar-app[data-theme="dark"] .madar-modal-title,
+#madar-app[data-theme="dark"] .madar-page-heading,
+#madar-app[data-theme="dark"] .madar-panel-header h2,
+#madar-app[data-theme="dark"] .madar-panel-header h3 { color: var(--madar-text-bright); }
 #madar-app .madar-unavailable-icon { display: grid; width: 42px; height: 42px; place-items: center; margin-bottom: 12px; border-radius: 12px; color: #65778c; background: #eef2f5; }
 #madar-app .madar-unavailable-title { margin: 12px 0 5px; font-size: 12px; }
 #madar-app .madar-unavailable-description { margin: 0; color: var(--madar-muted); font-size: 10px; }
@@ -698,8 +755,17 @@ body.madar-document { min-width: 320px; min-height: 100vh; margin: 0; background
 #madar-app .madar-export-order-option strong { overflow: hidden; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 #madar-app .madar-export-order-option small { grid-column: 2 / -1; overflow: hidden; color: var(--madar-muted); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
 #madar-app .madar-export-filter-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-#madar-app .madar-export-progress { display: grid; gap: 7px; color: var(--madar-muted); font-size: 10px; }
-#madar-app .madar-export-progress progress { width: 100%; height: 10px; accent-color: var(--madar-accent); }
+#madar-app .madar-export-progress-card { display: grid; gap: 10px; margin-top: 1rem; padding: 16px; border: 1px solid var(--madar-border); border-radius: 12px; color: #e2e8f0; background: rgba(15, 23, 42, .94); box-shadow: 0 10px 28px rgba(15, 23, 42, .14); }
+#madar-app .madar-export-progress-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+#madar-app .madar-export-progress-machine { display: grid; min-width: 0; gap: 4px; }
+#madar-app .madar-export-progress-machine strong { color: #f8fafc; font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+#madar-app .madar-export-progress-machine small { color: #94a3b8; font-size: 11px; overflow-wrap: anywhere; }
+#madar-app .madar-export-progress-percent { flex: 0 0 auto; color: #38bdf8; font-size: 16px; font-weight: 800; }
+#madar-app .madar-export-progress-card progress { width: 100%; height: 11px; overflow: hidden; border: 0; border-radius: 999px; accent-color: #38bdf8; }
+#madar-app .madar-export-progress-card progress::-webkit-progress-bar { border-radius: 999px; background: #263449; }
+#madar-app .madar-export-progress-card progress::-webkit-progress-value { border-radius: 999px; background: linear-gradient(90deg, #0ea5e9, #38bdf8); transition: width .35s ease; }
+#madar-app .madar-export-progress-card progress::-moz-progress-bar { border-radius: 999px; background: linear-gradient(90deg, #0ea5e9, #38bdf8); }
+#madar-app .madar-export-progress-details { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 14px; color: #94a3b8; font-size: 11px; }
 @media (max-width: 760px) {
   #madar-app .madar-export-scope-options,
   #madar-app .madar-export-group-options { grid-template-columns: 1fr; }
@@ -707,4 +773,103 @@ body.madar-document { min-width: 320px; min-height: 100vh; margin: 0; background
 }
 @media (max-width: 480px) {
   #madar-app .madar-export-order-picker { grid-template-columns: 1fr; }
+}
+
+/* High-contrast dark controls and data tables. */
+#madar-app[data-theme="dark"] .madar-tabs,
+#madar-app[data-theme="dark"] .madar-modal .madar-tabs {
+  border-color: #1f2e45;
+  background: #111a28;
+}
+#madar-app[data-theme="dark"] .madar-tab,
+#madar-app[data-theme="dark"] .madar-modal .madar-tab {
+  color: #94a3b8;
+  background: transparent;
+}
+#madar-app[data-theme="dark"] .madar-tab:hover:not(.active),
+#madar-app[data-theme="dark"] .madar-modal .madar-tab:hover:not(.active) {
+  color: #f1f5f9;
+  background: #162438;
+}
+#madar-app[data-theme="dark"] .madar-tab.active,
+#madar-app[data-theme="dark"] .madar-modal .madar-tab.active {
+  border: 1px solid rgba(56, 189, 248, .4);
+  color: #38bdf8;
+  background: #1b2d47;
+  box-shadow: none;
+}
+#madar-app[data-theme="dark"] .madar-tab-count {
+  color: #cbd5e1;
+  background: #1e293b;
+}
+
+#madar-app[data-theme="dark"] .madar-table th {
+  border-bottom: 2px solid #23354d;
+  background: #162234;
+  color: #e2e8f0;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .5px;
+}
+#madar-app[data-theme="dark"] .madar-table td {
+  border-bottom: 1px solid #1b283a;
+  color: #cbd5e1;
+  font-weight: 600;
+}
+#madar-app[data-theme="dark"] .madar-table td strong,
+#madar-app[data-theme="dark"] .madar-table .madar-table-primary,
+#madar-app[data-theme="dark"] .madar-table .madar-table-link,
+#madar-app[data-theme="dark"] .madar-table .madar-code {
+  color: #f8fafc;
+  font-weight: 700;
+}
+#madar-app[data-theme="dark"] .madar-table tbody tr:hover td { background: rgba(255, 255, 255, .03); }
+
+#madar-app[data-theme="dark"] .madar-table td .madar-inline-wrap > .madar-button-ghost {
+  min-height: 0;
+  padding: 4px 10px;
+  border: 1px solid rgba(56, 189, 248, .25);
+  border-radius: 6px;
+  color: #38bdf8;
+  background: rgba(56, 189, 248, .12);
+  font-weight: 700;
+}
+#madar-app[data-theme="dark"] .madar-table td .madar-inline-wrap > .madar-button-ghost:hover:not(:disabled) {
+  border-color: rgba(56, 189, 248, .45);
+  background: rgba(56, 189, 248, .2);
+}
+#madar-app[data-theme="dark"] .madar-table td .madar-inline-wrap > .madar-button-ghost:last-child:not(:first-child) {
+  border-color: rgba(248, 113, 113, .25);
+  color: #f87171;
+  background: rgba(248, 113, 113, .12);
+}
+#madar-app[data-theme="dark"] .madar-table td .madar-inline-wrap > .madar-button-ghost:last-child:not(:first-child):hover:not(:disabled) {
+  border-color: rgba(248, 113, 113, .45);
+  background: rgba(248, 113, 113, .2);
+}
+
+#madar-app[data-theme="dark"] .madar-badge {
+  border: 1px solid rgba(148, 163, 184, .25);
+  color: #cbd5e1;
+  background: rgba(148, 163, 184, .12);
+}
+#madar-app[data-theme="dark"] .madar-badge-success {
+  border-color: rgba(16, 185, 129, .3);
+  color: #34d399;
+  background: rgba(16, 185, 129, .16);
+}
+#madar-app[data-theme="dark"] .madar-badge-warning {
+  border-color: rgba(245, 158, 11, .3);
+  color: #fbbf24;
+  background: rgba(245, 158, 11, .16);
+}
+#madar-app[data-theme="dark"] .madar-badge-danger {
+  border-color: rgba(239, 68, 68, .3);
+  color: #f87171;
+  background: rgba(239, 68, 68, .16);
+}
+#madar-app[data-theme="dark"] .madar-badge-info {
+  border-color: rgba(56, 189, 248, .3);
+  color: #7dd3fc;
+  background: rgba(56, 189, 248, .14);
 }

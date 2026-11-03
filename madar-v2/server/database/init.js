@@ -23,6 +23,237 @@ const maintenanceTripFolderMigration = '20261031-maintenance-trip-folder-engine'
 const maintenanceOrderDeletionMigration = '20261031-maintenance-order-soft-delete-recovery';
 const maintenanceCardDeletionMigration = '20261031-maintenance-card-soft-delete-recovery';
 const maintenanceMachineDecommissionMigration = '20261031-maintenance-machine-decommission-recovery';
+const maintenanceUnmatchedFolderDeletionMigration = '20261031-maintenance-unmatched-folder-purge-recovery';
+const maintenanceCardMultiReasonMigration = '20261031-maintenance-card-multi-reasons';
+const maintenanceUnmatchedFolderDuplicateMigration = '20261101-maintenance-unmatched-folder-duplicate-flags';
+const repUserProfileMigration = '20261102-rep-user-profile';
+const repVisitIngestionMigration = '20261102-rep-offline-visit-ingestion';
+const repSupervisorRadarMigration = '20261102-rep-supervisor-radar-qa';
+
+const repUsersTableSql = `
+  CREATE TABLE users_rep_migration_v1 (
+    id INTEGER PRIMARY KEY,
+    username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    password_hash TEXT NOT NULL,
+    full_name TEXT NOT NULL,
+    role TEXT NOT NULL CHECK (role IN ('admin', 'sales', 'operations', 'purchasing', 'rep')),
+    active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted_at TEXT,
+    assigned_regions_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(assigned_regions_json)),
+    is_online INTEGER NOT NULL DEFAULT 0 CHECK (is_online IN (0, 1)),
+    last_location_json TEXT CHECK (last_location_json IS NULL OR json_valid(last_location_json))
+  );
+`;
+
+function tableExists(database, tableName) {
+  return Boolean(database.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(tableName));
+}
+
+function hasRepUserProfileSchema(database) {
+  const table = database.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'users'").get();
+  if (!table) return false;
+  const columns = new Set(database.pragma('table_info(users)').map((column) => column.name));
+  return table.sql?.includes("'rep'")
+    && columns.has('assigned_regions_json')
+    && columns.has('is_online')
+    && columns.has('last_location_json');
+}
+
+/** Add rep role/profile fields without changing user IDs or dependent foreign keys. */
+export function migrateRepUserProfiles(database) {
+  if (!tableExists(database, 'users')) return;
+
+  const migrationTableExists = tableExists(database, 'schema_migrations');
+  if (!migrationTableExists) {
+    database.exec(`CREATE TABLE schema_migrations (
+      version TEXT PRIMARY KEY,
+      applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`);
+  }
+  const applied = database.prepare('SELECT 1 FROM schema_migrations WHERE version = ?').get(repUserProfileMigration);
+  if (hasRepUserProfileSchema(database)) {
+    database.exec('CREATE INDEX IF NOT EXISTS idx_users_role_presence ON users(role, is_online, active, deleted_at)');
+    if (!applied) database.prepare('INSERT INTO schema_migrations (version) VALUES (?)').run(repUserProfileMigration);
+    return;
+  }
+  if (database.inTransaction) {
+    throw new Error('Rep user profile migration must run outside a transaction to preserve existing user foreign keys.');
+  }
+
+  const foreignKeysWereEnabled = database.pragma('foreign_keys', { simple: true }) === 1;
+  database.pragma('foreign_keys = OFF');
+  try {
+    const rebuild = database.transaction(() => {
+      if (tableExists(database, 'users_rep_migration_v1')) {
+        throw new Error('A prior rep-user migration table exists; refusing to overwrite it.');
+      }
+      const columns = new Set(database.pragma('table_info(users)').map((column) => column.name));
+      const preservedRegions = columns.has('assigned_regions_json') ? "COALESCE(assigned_regions_json, '[]')" : "'[]'";
+      const preservedOnline = columns.has('is_online') ? 'COALESCE(is_online, 0)' : '0';
+      const preservedLocation = columns.has('last_location_json') ? 'last_location_json' : 'NULL';
+
+      database.exec(repUsersTableSql);
+      database.exec(`
+        INSERT INTO users_rep_migration_v1 (
+          id, username, password_hash, full_name, role, active, created_at, deleted_at,
+          assigned_regions_json, is_online, last_location_json
+        )
+        SELECT id, username, password_hash, full_name, role, active, created_at, deleted_at,
+          ${preservedRegions}, ${preservedOnline}, ${preservedLocation}
+        FROM users;
+        DROP TABLE users;
+        ALTER TABLE users_rep_migration_v1 RENAME TO users;
+        CREATE INDEX IF NOT EXISTS idx_users_role_presence ON users(role, is_online, active, deleted_at);
+      `);
+      if (!applied) database.prepare('INSERT INTO schema_migrations (version) VALUES (?)').run(repUserProfileMigration);
+
+      const violations = database.pragma('foreign_key_check').filter((violation) => violation.parent === 'users');
+      if (violations.length) {
+        throw new Error(`Rep user migration would leave foreign-key violations: ${JSON.stringify(violations.slice(0, 5))}`);
+      }
+    });
+    rebuild.immediate();
+  } finally {
+    if (foreignKeysWereEnabled) database.pragma('foreign_keys = ON');
+  }
+}
+
+export function migrateRepVisitIngestion(database) {
+  const applied = database.prepare('SELECT 1 FROM schema_migrations WHERE version = ?')
+    .get(repVisitIngestionMigration);
+  if (applied) return;
+
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS rep_visits (
+      id INTEGER PRIMARY KEY,
+      visit_uuid TEXT NOT NULL UNIQUE,
+      rep_user_id INTEGER NOT NULL REFERENCES users(id),
+      order_id INTEGER REFERENCES maintenance_orders(id) ON DELETE SET NULL,
+      card_id INTEGER REFERENCES maintenance_cards(id) ON DELETE SET NULL,
+      machine_id INTEGER REFERENCES machines(id) ON DELETE SET NULL,
+      order_code TEXT NOT NULL,
+      machine_code TEXT NOT NULL,
+      region_name TEXT NOT NULL,
+      payload_sha256 TEXT NOT NULL CHECK (length(payload_sha256) = 64),
+      status TEXT NOT NULL CHECK (status IN ('receiving', 'completed', 'failed')),
+      reason_ids_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(reason_ids_json)),
+      notes TEXT,
+      captured_at TEXT NOT NULL,
+      location_json TEXT CHECK (location_json IS NULL OR json_valid(location_json)),
+      staging_path TEXT NOT NULL,
+      final_path TEXT NOT NULL,
+      before_path TEXT,
+      after_path TEXT,
+      failure_message TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      completed_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_rep_visits_rep_status_created
+      ON rep_visits(rep_user_id, status, created_at, id);
+    CREATE INDEX IF NOT EXISTS idx_rep_visits_card_created
+      ON rep_visits(card_id, created_at, id);
+  `);
+  database.prepare('INSERT INTO schema_migrations (version) VALUES (?)').run(repVisitIngestionMigration);
+}
+
+export function migrateRepSupervisorRadar(database) {
+  const migrate = database.transaction(() => {
+    const applied = database.prepare('SELECT 1 FROM schema_migrations WHERE version = ?')
+      .get(repSupervisorRadarMigration);
+    if (applied) return;
+
+    const visitColumns = new Set(database.pragma('table_info(rep_visits)').map((column) => column.name));
+    if (!visitColumns.has('before_captured_at')) database.exec('ALTER TABLE rep_visits ADD COLUMN before_captured_at TEXT');
+    if (!visitColumns.has('after_captured_at')) database.exec('ALTER TABLE rep_visits ADD COLUMN after_captured_at TEXT');
+    database.exec(`
+    CREATE TABLE IF NOT EXISTS rep_visit_reviews (
+      visit_id INTEGER PRIMARY KEY REFERENCES rep_visits(id) ON DELETE CASCADE,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'reshoot')),
+      review_note TEXT,
+      reviewed_by INTEGER REFERENCES users(id),
+      reviewed_at TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_rep_visit_reviews_status_created
+      ON rep_visit_reviews(status, created_at, visit_id);
+
+    CREATE TABLE IF NOT EXISTS rep_duty_sessions (
+      id INTEGER PRIMARY KEY,
+      rep_user_id INTEGER NOT NULL REFERENCES users(id),
+      started_at TEXT NOT NULL,
+      ended_at TEXT,
+      start_location_json TEXT CHECK (start_location_json IS NULL OR json_valid(start_location_json)),
+      end_location_json TEXT CHECK (end_location_json IS NULL OR json_valid(end_location_json)),
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_rep_duty_sessions_one_active
+      ON rep_duty_sessions(rep_user_id) WHERE ended_at IS NULL;
+    CREATE INDEX IF NOT EXISTS idx_rep_duty_sessions_rep_started
+      ON rep_duty_sessions(rep_user_id, started_at, ended_at);
+
+    CREATE TABLE IF NOT EXISTS rep_location_points (
+      id INTEGER PRIMARY KEY,
+      rep_user_id INTEGER NOT NULL REFERENCES users(id),
+      duty_session_id INTEGER REFERENCES rep_duty_sessions(id),
+      latitude REAL NOT NULL CHECK (latitude BETWEEN -90 AND 90),
+      longitude REAL NOT NULL CHECK (longitude BETWEEN -180 AND 180),
+      accuracy REAL NOT NULL CHECK (accuracy >= 0 AND accuracy <= 100000),
+      captured_at TEXT NOT NULL,
+      received_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE (rep_user_id, captured_at)
+    );
+    CREATE INDEX IF NOT EXISTS idx_rep_location_points_rep_captured
+      ON rep_location_points(rep_user_id, captured_at, id);
+    `);
+    const locationColumns = new Set(database.pragma('table_info(rep_location_points)').map((column) => column.name));
+    if (!locationColumns.has('duty_session_id')) {
+      database.exec('ALTER TABLE rep_location_points ADD COLUMN duty_session_id INTEGER REFERENCES rep_duty_sessions(id)');
+    }
+    database.prepare('INSERT INTO schema_migrations (version) VALUES (?)').run(repSupervisorRadarMigration);
+  });
+  migrate.immediate();
+}
+
+export function migrateMaintenanceCardMultiReasons(database) {
+  const applied = database.prepare('SELECT 1 FROM schema_migrations WHERE version = ?')
+    .get(maintenanceCardMultiReasonMigration);
+  if (applied) return;
+
+  const columns = new Set(database.pragma('table_info(maintenance_cards)').map((column) => column.name));
+  if (!columns.has('reason_ids_json')) {
+    database.exec("ALTER TABLE maintenance_cards ADD COLUMN reason_ids_json TEXT NOT NULL DEFAULT '[]'");
+  }
+  database.prepare(`
+    UPDATE maintenance_cards
+    SET reason_ids_json = json_array(reason_id)
+    WHERE reason_id IS NOT NULL AND (reason_ids_json IS NULL OR reason_ids_json = '[]')
+  `).run();
+
+  database.prepare('INSERT INTO schema_migrations (version) VALUES (?)')
+    .run(maintenanceCardMultiReasonMigration);
+}
+
+export function migrateMaintenanceUnmatchedFolderDuplicates(database) {
+  const applied = database.prepare('SELECT 1 FROM schema_migrations WHERE version = ?')
+    .get(maintenanceUnmatchedFolderDuplicateMigration);
+  if (applied) return;
+
+  const columns = new Set(database.pragma('table_info(maintenance_unmatched_folders)').map((column) => column.name));
+  if (!columns.has('is_duplicate')) {
+    database.exec('ALTER TABLE maintenance_unmatched_folders ADD COLUMN is_duplicate INTEGER NOT NULL DEFAULT 0 CHECK (is_duplicate IN (0, 1))');
+  }
+  if (!columns.has('duplicate_of_folder')) {
+    database.exec('ALTER TABLE maintenance_unmatched_folders ADD COLUMN duplicate_of_folder TEXT');
+  }
+  if (!columns.has('duplicate_machine_id')) {
+    database.exec('ALTER TABLE maintenance_unmatched_folders ADD COLUMN duplicate_machine_id INTEGER REFERENCES machines(id)');
+  }
+  database.prepare('INSERT INTO schema_migrations (version) VALUES (?)')
+    .run(maintenanceUnmatchedFolderDuplicateMigration);
+}
 
 export function migrateMaintenanceOrderDeletion(database) {
   const applied = database.prepare('SELECT 1 FROM schema_migrations WHERE version = ?')
@@ -93,6 +324,31 @@ export function migrateMaintenanceMachineDecommission(database) {
   `);
   database.prepare('INSERT INTO schema_migrations (version) VALUES (?)')
     .run(maintenanceMachineDecommissionMigration);
+}
+
+export function migrateMaintenanceUnmatchedFolderDeletion(database) {
+  const applied = database.prepare('SELECT 1 FROM schema_migrations WHERE version = ?')
+    .get(maintenanceUnmatchedFolderDeletionMigration);
+  if (applied) return;
+
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS maintenance_unmatched_folder_deletion_operations (
+      operation_id TEXT PRIMARY KEY,
+      folder_id INTEGER NOT NULL,
+      order_id INTEGER NOT NULL,
+      client_code TEXT NOT NULL,
+      order_code TEXT NOT NULL,
+      folder_name TEXT NOT NULL,
+      source_name TEXT,
+      targets_json TEXT NOT NULL,
+      state TEXT NOT NULL CHECK (state IN ('prepared', 'committed')),
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_maintenance_unmatched_folder_deletion_operations_state
+      ON maintenance_unmatched_folder_deletion_operations(state, created_at, operation_id);
+  `);
+  database.prepare('INSERT INTO schema_migrations (version) VALUES (?)')
+    .run(maintenanceUnmatchedFolderDeletionMigration);
 }
 
 export function migrateMaintenanceTripFolders(database) {
@@ -391,18 +647,28 @@ export function initializeDatabase({ database = db, initialAdminPassword = env.i
   const schema = readFileSync(schemaPath, 'utf8');
   let adminCreated = false;
 
+  // Rebuild an existing users table before the main transaction so SQLite can
+  // safely preserve every table that references users(id).
+  migrateRepUserProfiles(database);
+
   const initialize = database.transaction(() => {
     database.exec(schema);
+    migrateRepUserProfiles(database);
     migrateAuthenticationSessions(database);
     migrateOptionalOffcutMaterial(database);
     migrateClientMachineDeployments(database);
     migrateWarehouseLifecycle(database);
     migrateFinanceLifecycle(database);
     migrateV2FeatureParity(database);
+    migrateRepVisitIngestion(database);
+    migrateRepSupervisorRadar(database);
     migrateMaintenanceTripFolders(database);
     migrateMaintenanceOrderDeletion(database);
     migrateMaintenanceCardDeletion(database);
     migrateMaintenanceMachineDecommission(database);
+    migrateMaintenanceUnmatchedFolderDeletion(database);
+    migrateMaintenanceCardMultiReasons(database);
+    migrateMaintenanceUnmatchedFolderDuplicates(database);
 
     const hasUsers = database.prepare('SELECT 1 FROM users LIMIT 1').get();
 

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Alert from '../../components/ui/Alert.jsx';
 import Button from '../../components/ui/Button.jsx';
 import { Select } from '../../components/ui/Field.jsx';
@@ -30,9 +30,15 @@ function filenameFromDisposition(header, fallback) {
   return /filename="?([^";]+)"?/i.exec(header ?? '')?.[1] ?? fallback;
 }
 
-function requestPptxExport(payload, onProgress) {
+function requestPptxExport(payload, { onDownloadStart, onDownloadProgress }) {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
+    let downloadStarted = false;
+    const markDownloadStarted = () => {
+      if (downloadStarted) return;
+      downloadStarted = true;
+      onDownloadStart?.();
+    };
     const query = new URLSearchParams();
     for (const orderId of payload.orderIds ?? []) query.append('orderIds', String(orderId));
     if (payload.reasonId !== null && payload.reasonId !== undefined) query.set('reasonId', String(payload.reasonId));
@@ -41,12 +47,17 @@ function requestPptxExport(payload, onProgress) {
     xhr.withCredentials = true;
     xhr.responseType = 'blob';
     xhr.setRequestHeader('Content-Type', 'application/json');
+    xhr.addEventListener('readystatechange', () => {
+      if (xhr.readyState === XMLHttpRequest.HEADERS_RECEIVED) markDownloadStarted();
+    });
     xhr.addEventListener('progress', (event) => {
-      onProgress(event.lengthComputable ? Math.round((event.loaded / event.total) * 100) : null);
+      markDownloadStarted();
+      onDownloadProgress?.(event.lengthComputable ? Math.round((event.loaded / event.total) * 100) : null);
     });
     xhr.addEventListener('error', () => reject(new Error('تعذر الاتصال بالخادم أثناء إنشاء العرض.')));
     xhr.addEventListener('abort', () => reject(new Error('تم إلغاء إنشاء العرض.')));
     xhr.addEventListener('load', async () => {
+      markDownloadStarted();
       if (xhr.status < 200 || xhr.status >= 300) {
         const text = await xhr.response?.text?.().catch(() => '');
         let message = `تعذر إنشاء العرض (${xhr.status}).`;
@@ -60,6 +71,11 @@ function requestPptxExport(payload, onProgress) {
     });
     xhr.send(JSON.stringify(payload));
   });
+}
+
+function createExportId() {
+  return window.crypto?.randomUUID?.()
+    ?? `${Date.now()}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
 }
 
 export default function MaintenancePptxExportModal({
@@ -76,11 +92,13 @@ export default function MaintenancePptxExportModal({
   const [selectedOrderIds, setSelectedOrderIds] = useState([]);
   const [reasonId, setReasonId] = useState('');
   const [area, setArea] = useState('');
-  const [groupBy, setGroupBy] = useState('none');
+  const [groupBy, setGroupBy] = useState('area');
   const [showReasonFooter, setShowReasonFooter] = useState(false);
+  const [useFixedLogoOnCover, setUseFixedLogoOnCover] = useState(false);
   const [exporting, setExporting] = useState(false);
-  const [downloadProgress, setDownloadProgress] = useState(null);
+  const [liveProgress, setLiveProgress] = useState(null);
   const [error, setError] = useState('');
+  const progressPollingRef = useRef(null);
   const ordersLoading = inProgressLoading || reviewLoading || archivedLoading;
   const allOrders = useMemo(() => {
     const byId = new Map();
@@ -98,12 +116,57 @@ export default function MaintenancePptxExportModal({
     setSelectedOrderIds(currentOrder ? [currentOrder.id] : []);
     setReasonId('');
     setArea('');
-    setGroupBy('none');
+    setGroupBy('area');
     setShowReasonFooter(false);
+    setUseFixedLogoOnCover(false);
     setExporting(false);
-    setDownloadProgress(null);
+    setLiveProgress(null);
     setError('');
   }, [currentOrder?.id, defaultScope, open]);
+
+  useEffect(() => () => {
+    const polling = progressPollingRef.current;
+    if (!polling) return;
+    window.clearInterval(polling.intervalId);
+    polling.controller.abort();
+    progressPollingRef.current = null;
+  }, []);
+
+  function stopProgressPolling() {
+    const polling = progressPollingRef.current;
+    if (!polling) return;
+    window.clearInterval(polling.intervalId);
+    polling.controller.abort();
+    progressPollingRef.current = null;
+  }
+
+  function startProgressPolling(exportId) {
+    stopProgressPolling();
+    const controller = new AbortController();
+    let requestPending = false;
+    const poll = async () => {
+      if (requestPending || controller.signal.aborted) return;
+      requestPending = true;
+      try {
+        const query = new URLSearchParams({ exportId });
+        const response = await fetch(`/api/maintenance/export/pptx/progress?${query}`, {
+          credentials: 'include',
+          cache: 'no-store',
+          signal: controller.signal,
+        });
+        if (!response.ok) return;
+        const progress = await response.json();
+        if (progress && !controller.signal.aborted) setLiveProgress(progress);
+      } catch {
+        // The export request owns error reporting; keep the latest progress during transient poll failures.
+      } finally {
+        requestPending = false;
+      }
+    };
+    const intervalId = window.setInterval(() => { void poll(); }, 500);
+    progressPollingRef.current = { intervalId, controller };
+    void poll();
+  }
 
   function toggleSelectedOrder(orderId) {
     setSelectedOrderIds((current) => current.includes(orderId)
@@ -132,7 +195,9 @@ export default function MaintenancePptxExportModal({
     }
 
     setExporting(true);
-    setDownloadProgress(null);
+    const exportId = createExportId();
+    setLiveProgress({ active: true, total: 0, current: 0, percent: 0, stage: 'جارٍ بدء تجهيز التقرير...' });
+    startProgressPolling(exportId);
     try {
       const result = await requestPptxExport({
         orderIds,
@@ -140,14 +205,38 @@ export default function MaintenancePptxExportModal({
         area: area || null,
         groupBy,
         showReasonFooter,
-      }, setDownloadProgress);
+        useFixedLogoOnCover,
+        exportId,
+      }, {
+        onDownloadStart: () => {
+          stopProgressPolling();
+          setLiveProgress((current) => ({
+            ...current,
+            active: true,
+            percent: Math.max(current?.percent ?? 0, 94),
+            stage: 'جارٍ تنزيل ملف PowerPoint...',
+          }));
+        },
+        onDownloadProgress: (downloadPercent) => {
+          if (downloadPercent === null) return;
+          const percent = 94 + Math.round((downloadPercent / 100) * 6);
+          setLiveProgress((current) => ({
+            ...current,
+            active: true,
+            percent: Math.min(100, percent),
+            stage: 'جارٍ تنزيل ملف PowerPoint...',
+          }));
+        },
+      });
+      setLiveProgress((current) => ({ ...current, active: false, percent: 100, stage: 'اكتمل إنشاء الملف، جارٍ بدء التنزيل...' }));
       downloadFile(result.blob, result.filename);
       onClose?.();
     } catch (caught) {
+      stopProgressPolling();
       setError(errorMessage(caught));
     } finally {
+      stopProgressPolling();
       setExporting(false);
-      setDownloadProgress(null);
     }
   }
 
@@ -216,11 +305,33 @@ export default function MaintenancePptxExportModal({
             <input type="checkbox" checked={showReasonFooter} onChange={(event) => setShowReasonFooter(event.target.checked)} />
             <span><strong>إظهار سبب الصيانة فقط كتذييل لشريحة الماكينة</strong><small>عند التفعيل ينتقل السبب من بيانات الشريحة إلى التذييل، مع بقاء التاريخ والملاحظات في محتوى الشريحة.</small></span>
           </label>
+          <label className="madar-export-radio-option madar-export-radio-inline madar-export-footer-option">
+            <input type="checkbox" checked={useFixedLogoOnCover} onChange={(event) => setUseFixedLogoOnCover(event.target.checked)} />
+            <span><strong>استخدام الشعار الثابت على غلاف التقرير أيضاً</strong><small>يظهر الشعار الثابت على شرائح الماكينات دائماً؛ عند تفعيل هذا الخيار يظهر على الغلاف بدلاً من شعار العميل.</small></span>
+          </label>
         </fieldset>
 
-        {exporting && <div className="madar-export-progress" role="status" aria-live="polite">
-          <span>{downloadProgress === null ? 'جارٍ إنشاء العرض وتجهيزه للتنزيل…' : `جارٍ تنزيل العرض (${downloadProgress}٪)`}</span>
-          <progress value={downloadProgress ?? undefined} max="100" aria-label="تقدم إنشاء وتنزيل PowerPoint" />
+        {exporting && <div className="madar-export-progress-card" role="status" aria-live="polite">
+          <div className="madar-export-progress-header">
+            <div className="madar-export-progress-machine">
+              <strong>{liveProgress?.machineName
+                ? `📍 جارٍ معالجة: ${liveProgress.machineName}${liveProgress.machineCode ? ` · ${liveProgress.machineCode}` : ''}`
+                : liveProgress?.stage || 'جارٍ بدء تجهيز التقرير...'}</strong>
+              {liveProgress?.machineNameEn && <small>{liveProgress.machineNameEn}</small>}
+              {liveProgress?.area && <small>{liveProgress.area}</small>}
+            </div>
+            <span className="madar-export-progress-percent">{liveProgress?.percent ?? 0}٪</span>
+          </div>
+          <progress value={liveProgress?.percent ?? 0} max="100" aria-label="تقدم إنشاء وتنزيل PowerPoint" />
+          <div className="madar-export-progress-details">
+            <span>{liveProgress?.total > 0
+              ? `(${liveProgress.current ?? 0} من ${liveProgress.total} ماكينة)`
+              : 'جارٍ تجهيز قائمة الماكينات...'}</span>
+            <span>{typeof liveProgress?.estimatedSeconds === 'number'
+              ? `⏱️ الوقت المتبقي التقريبي: ${liveProgress.estimatedSeconds} ثانية`
+              : '⏱️ جارٍ تقدير الوقت...'}</span>
+            {liveProgress?.speedSecPerMachine && <span>⚡ السرعة: {liveProgress.speedSecPerMachine} ث/ماكينة</span>}
+          </div>
         </div>}
         <div className="madar-form-actions">
           <Button variant="secondary" disabled={exporting} onClick={close}>إلغاء</Button>

@@ -1,6 +1,7 @@
 import * as XLSX from 'xlsx';
 import { db as defaultDb } from '../../database/connection.js';
 import { HttpError, isoDate, positiveId } from '../http.js';
+import { compareMachineCodes, compareMaintenanceAreas } from './sorting.js';
 
 const SERVICE_DATE = "COALESCE(order_record.archived_at, order_record.created_at)";
 const EXPORT_HEADERS = [
@@ -46,8 +47,11 @@ export function getMaintenanceAreaAnalysis(input = {}, database = defaultDb) {
     SELECT id, code, name_ar, area
     FROM machines
     WHERE active = 1 AND deleted_at IS NULL
-    ORDER BY area COLLATE NOCASE, code COLLATE NOCASE, id
-  `).all();
+  `).all().sort((left, right) => (
+    compareMaintenanceAreas(left.area, right.area)
+    || compareMachineCodes(left.code, right.code)
+    || left.id - right.id
+  ));
 
   const conditions = [
     "order_record.status = 'archived'",
@@ -69,7 +73,7 @@ export function getMaintenanceAreaAnalysis(input = {}, database = defaultDb) {
 
   const areas = new Map();
   for (const machine of machines) {
-    const key = machine.area.trim().toLocaleLowerCase();
+    const key = machine.area.trim().toLocaleLowerCase('ar-EG');
     let area = areas.get(key);
     if (!area) {
       area = { area: machine.area, total_count: 0, completed_count: 0, missing_machines: [] };
@@ -89,7 +93,7 @@ export function getMaintenanceAreaAnalysis(input = {}, database = defaultDb) {
         completion_ratio: area.total_count ? area.completed_count / area.total_count : 0,
       };
     })
-    .sort((left, right) => left.area.localeCompare(right.area, 'ar'));
+    .sort((left, right) => compareMaintenanceAreas(left.area, right.area));
 }
 
 export function getMaintenanceAnalysisRecords(input = {}, database = defaultDb) {
@@ -128,7 +132,10 @@ export function getMaintenanceAnalysisRecords(input = {}, database = defaultDb) 
 }
 
 export function buildMaintenanceAnalysisWorkbook(input = {}, database = defaultDb) {
-  const rows = getMaintenanceAnalysisRecords(input, database).map((record) => [
+  const records = getMaintenanceAnalysisRecords(input, database)
+    .sort((left, right) => compareMaintenanceAreas(left.area, right.area)
+      || compareMachineCodes(left.machine_code, right.machine_code));
+  const rows = records.map((record) => [
     record.area,
     record.machine_code,
     record.machine_name,

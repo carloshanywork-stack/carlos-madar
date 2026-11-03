@@ -2,10 +2,11 @@ import { Router } from 'express';
 import { readFile } from 'node:fs/promises';
 import { extname } from 'node:path';
 import { asyncHandler, HttpError } from '../http.js';
-import { memoryUpload } from '../upload.js';
+import { diskUpload, memoryUpload } from '../upload.js';
 import { requestActorId } from '../actor.js';
-import { listStorageDirectories } from '../storage.js';
-import { exportMaintenancePptx, exportMaintenanceReport } from './export.js';
+import { getMaintenanceThumbnail } from './thumbnails.js';
+import { ensureStorageDirectory, listStorageDirectories, removeStorageFile } from '../storage.js';
+import { exportMaintenancePptx, exportMaintenanceReport, getExportProgress } from './export.js';
 import { buildMaintenanceAnalysisWorkbook, getMaintenanceAreaAnalysis } from './analysis.js';
 import { buildAreaMaintenanceNotesWorkbook, getAreaMaintenanceNotes } from './area-notes.js';
 import {
@@ -20,7 +21,9 @@ import {
   deactivateMachine,
   deactivateMaintenanceReason,
   deleteMaintenanceCard,
+  deleteCardPhoto,
   deleteMaintenanceOrder,
+  deleteUnmatchedMaintenanceFolder,
   decommissionMaintenanceMachineWithoutCard,
   disburseMaintenanceCustody,
   failMaintenanceTripProgress,
@@ -34,6 +37,7 @@ import {
   listMachines,
   listMaintenanceReasons,
   listMaintenanceOrders,
+  moveCardPhoto,
   populateMaintenanceOrderArea,
   processMaintenanceTripFolder,
   previewMachineImport,
@@ -45,12 +49,21 @@ import {
 } from './service.js';
 
 const router = Router();
+const NO_CACHE_HEADERS = {
+  'Cache-Control': 'private, no-cache, no-store, must-revalidate, max-age=0',
+  Pragma: 'no-cache',
+  Expires: '0',
+};
 const photoUpload = memoryUpload({
   maxBytes: 25 * 1024 * 1024,
   extensions: ['.jpg', '.jpeg', '.png', '.webp', '.heic', '.heif'],
 }).single('photo');
 const machineImportUpload = memoryUpload({ maxBytes: 50 * 1024 * 1024, extensions: ['.xlsx', '.xls', '.csv'] }).single('file');
-const tripFolderUpload = memoryUpload({ maxBytes: 1024 * 1024 * 1024, extensions: ['.zip'] }).single('file');
+const tripFolderUpload = diskUpload({
+  maxBytes: 20 * 1024 * 1024 * 1024,
+  extensions: ['.zip'],
+  destination: () => ensureStorageDirectory('.incoming'),
+}).single('file');
 
 function receiveTripFolderUpload(req, res, next) {
   try {
@@ -90,18 +103,14 @@ router.get('/areas', (req, res) => {
   res.json(listAreas());
 });
 
-router.get('/area-notes/export.xlsx', (req, res, next) => {
-  try {
-    const workbook = buildAreaMaintenanceNotesWorkbook({ area: req.query.area });
-    res.set({
-      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      'Content-Disposition': 'attachment; filename="Madar-Area-Maintenance.xlsx"',
-      'Cache-Control': 'private, no-store',
-    }).send(workbook);
-  } catch (error) {
-    next(error);
-  }
-});
+router.get('/area-notes/export.xlsx', asyncHandler(async (req, res) => {
+  const workbook = await buildAreaMaintenanceNotesWorkbook({ area: req.query.area });
+  res.set({
+    'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'Content-Disposition': 'attachment; filename="Madar-Area-Maintenance.xlsx"',
+    'Cache-Control': 'private, no-store',
+  }).send(workbook);
+}));
 
 router.get('/area-notes', (req, res, next) => {
   try { res.json(getAreaMaintenanceNotes()); }
@@ -211,6 +220,7 @@ router.get('/analysis/export.xlsx', (req, res, next) => {
 
 router.get('/orders', (req, res, next) => {
   try {
+    res.set(NO_CACHE_HEADERS);
     res.json(listMaintenanceOrders(req.query.status));
   } catch (error) {
     next(error);
@@ -265,13 +275,16 @@ router.get('/orders/:id/trip-progress', (req, res, next) => {
 
 router.post('/orders/:id/process-folder', receiveTripFolderUpload, asyncHandler(async (req, res) => {
   try {
-    res.json(await processMaintenanceTripFolder(req.params.id, {
+    const result = await processMaintenanceTripFolder(req.params.id, {
       folderPath: req.body?.folderPath,
       file: req.file,
-    }, requestActorId(req)));
+    }, requestActorId(req));
+    res.json(result);
   } catch (error) {
     failMaintenanceTripProgress(req.params.id);
     throw error;
+  } finally {
+    if (req.file?.path) await removeStorageFile(req.file.path);
   }
 }));
 
@@ -280,6 +293,14 @@ router.post('/orders/:id/unmatched/:folderId/bind', asyncHandler(async (req, res
     req.params.id,
     req.params.folderId,
     req.body,
+    requestActorId(req),
+  ));
+}));
+
+router.delete('/orders/:id/unmatched/:folderId', asyncHandler(async (req, res) => {
+  res.json(await deleteUnmatchedMaintenanceFolder(
+    req.params.id,
+    req.params.folderId,
     requestActorId(req),
   ));
 }));
@@ -299,8 +320,17 @@ router.get('/orders/:id/unmatched/:folderId/photos/:filename', asyncHandler(asyn
     '.heic': 'image/heic',
     '.heif': 'image/heif',
   }[extname(req.params.filename).toLowerCase()];
-  res.set({ 'Content-Type': type, 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' });
+  res.set({ ...NO_CACHE_HEADERS, 'Content-Type': type, 'X-Content-Type-Options': 'nosniff' });
   res.send(await readFile(absolutePath));
+}));
+
+router.get('/export/pptx/progress', asyncHandler(async (req, res) => {
+  const exportId = req.query.exportId;
+  if (typeof exportId !== 'string' || !exportId.trim()) {
+    throw new HttpError(400, 'exportId is required.');
+  }
+  res.set('Cache-Control', 'private, no-store');
+  res.json(getExportProgress(exportId.trim()));
 }));
 
 router.get('/export/pptx', asyncHandler(async (req, res) => {
@@ -326,12 +356,31 @@ router.post('/orders/:id/custody-advance', (req, res, next) => {
   }
 });
 
+router.post('/orders/:id/cards/:cardId/photos/move', asyncHandler(async (req, res) => {
+  res.json(await moveCardPhoto(
+    req.params.id,
+    req.params.cardId,
+    req.body,
+    requestActorId(req),
+  ));
+}));
+
 router.post('/orders/:id/cards/:cardId/photos/:phase', photoUpload, asyncHandler(async (req, res) => {
   res.status(201).json(await uploadMaintenancePhoto(
     req.params.id,
     req.params.cardId,
     req.params.phase,
     req.file,
+    requestActorId(req),
+  ));
+}));
+
+router.delete('/orders/:id/cards/:cardId/photos/:phase/:filename', asyncHandler(async (req, res) => {
+  res.json(await deleteCardPhoto(
+    req.params.id,
+    req.params.cardId,
+    req.params.phase,
+    req.params.filename,
     requestActorId(req),
   ));
 }));
@@ -351,8 +400,23 @@ router.get('/orders/:id/cards/:cardId/photos/:phase/:filename', asyncHandler(asy
     '.heic': 'image/heic',
     '.heif': 'image/heif',
   }[extname(req.params.filename).toLowerCase()];
-  res.set({ 'Content-Type': type, 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' });
+  res.set({ ...NO_CACHE_HEADERS, 'Content-Type': type, 'X-Content-Type-Options': 'nosniff' });
   res.send(await readFile(absolutePath));
+}));
+
+router.get('/orders/:id/cards/:cardId/photos/:phase/:filename/thumbnail', asyncHandler(async (req, res) => {
+  const absolutePath = await getMaintenancePhoto(
+    req.params.id,
+    req.params.cardId,
+    req.params.phase,
+    req.params.filename,
+  );
+  const thumbnail = await getMaintenanceThumbnail(absolutePath);
+  res.set({
+    'Content-Type': 'image/webp',
+    ...NO_CACHE_HEADERS,
+    'X-Content-Type-Options': 'nosniff',
+  }).send(thumbnail);
 }));
 
 router.patch('/orders/:id/cards/:cardId', asyncHandler(async (req, res) => {
@@ -382,6 +446,7 @@ router.post('/orders/:id/archive', (req, res, next) => {
 
 router.get('/orders/:id', (req, res, next) => {
   try {
+    res.set(NO_CACHE_HEADERS);
     res.json(getMaintenanceOrder(req.params.id));
   } catch (error) {
     next(error);

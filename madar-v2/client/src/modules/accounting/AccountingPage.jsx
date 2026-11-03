@@ -13,6 +13,7 @@ import Modal from '../../components/ui/Modal.jsx';
 import PageHeader from '../../components/ui/PageHeader.jsx';
 import Tabs from '../../components/ui/Tabs.jsx';
 import Toast from '../../components/ui/Toast.jsx';
+import MonthlyAttendanceMatrix from './MonthlyAttendanceMatrix.jsx';
 
 const departments = ['Maintenance', 'Workshop', 'Management', 'Sales', 'Warehouse', 'Finance', 'Administration'];
 const attendanceStatus = [
@@ -25,10 +26,11 @@ function currentDate() { return new Date().toISOString().slice(0, 10); }
 
 export default function AccountingPage() {
   const [tab, setTab] = useState('staff');
+  const [attendanceView, setAttendanceView] = useState('monthly');
   const [date, setDate] = useState(currentDate());
   const [month, setMonth] = useState(currentMonth());
   const { data: employees, loading: employeesLoading, error: employeesError, reload: reloadEmployees } = useApi('/api/employees?all=1');
-  const { data: attendance, loading: attendanceLoading, error: attendanceError, reload: reloadAttendance } = useApi(`/api/employees/attendance?date=${date}`, { enabled: tab === 'attendance' });
+  const { data: attendance, loading: attendanceLoading, error: attendanceError, reload: reloadAttendance } = useApi(`/api/employees/attendance?date=${date}`, { enabled: tab === 'attendance' && attendanceView === 'daily' });
   const { data: payroll, loading: payrollLoading, error: payrollError, reload: reloadPayroll } = useApi(`/api/employees/payroll?month=${month}`, { enabled: tab === 'payroll' });
   const { data: treasury, loading: treasuryLoading, error: treasuryError } = useApi('/api/finance/treasury', { enabled: tab === 'treasury' });
   const [selectedEmployeeId, setSelectedEmployeeId] = useState('');
@@ -154,9 +156,18 @@ export default function AccountingPage() {
       </>}
 
       {tab === 'attendance' && <>
+        <div className="madar-list-toolbar madar-section madar-attendance-view-toggle">
+          <div><strong>إدارة سجل الحضور</strong><span className="madar-small madar-muted">اختر عرض الشهر الكامل أو تفاصيل يوم واحد.</span></div>
+          <div className="madar-inline-wrap">
+            <Button variant={attendanceView === 'monthly' ? 'primary' : 'secondary'} size="small" onClick={() => setAttendanceView('monthly')}>عرض مصفوفة الشهر كامل</Button>
+            <Button variant={attendanceView === 'daily' ? 'primary' : 'secondary'} size="small" onClick={() => setAttendanceView('daily')}>عرض اليوم الفردي</Button>
+          </div>
+        </div>
+        {attendanceView === 'monthly' ? <MonthlyAttendanceMatrix /> : <>
         <div className="madar-list-toolbar madar-section"><Input label="تاريخ الحضور" type="date" value={date} onChange={(event) => setDate(event.target.value)} /><Button icon="check" disabled={savingAttendance || !attendanceRows.length} onClick={saveAttendance}>{savingAttendance ? 'جارٍ الحفظ…' : 'حفظ الحضور'}</Button></div>
         {attendanceError && <Alert tone="error">{attendanceError}</Alert>}
         <section className="madar-panel madar-section">{attendanceLoading ? <LoadingState /> : attendance?.employees?.length ? <div className="madar-table-wrap"><table className="madar-table"><thead><tr><th>الموظف</th><th>القسم</th><th>الحالة</th><th>ساعات إضافية</th><th>ملاحظات</th></tr></thead><tbody>{attendance.employees.map((employee, index) => <tr key={employee.employee_id}><td>{employee.name}</td><td>{employee.department}</td><td><Select aria-label={`حالة ${employee.name}`} value={attendanceRows[index]?.status ?? 'present'} onChange={(event) => changeAttendance(employee.employee_id, 'status', event.target.value)}>{attendanceStatus.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</Select></td><td><Input type="number" min="0" max="24" step="0.25" aria-label={`الساعات الإضافية لـ ${employee.name}`} value={attendanceRows[index]?.overtimeHours ?? 0} onChange={(event) => changeAttendance(employee.employee_id, 'overtimeHours', Number(event.target.value))} /></td><td><Input aria-label={`ملاحظات ${employee.name}`} value={attendanceRows[index]?.notes ?? ''} maxLength={1000} onChange={(event) => changeAttendance(employee.employee_id, 'notes', event.target.value)} /></td></tr>)}</tbody></table></div> : <EmptyState icon="calendar" title="لا يوجد موظفون نشطون" />}</section>
+        </>}
       </>}
 
       {tab === 'payroll' && <>

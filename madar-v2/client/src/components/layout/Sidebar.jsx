@@ -13,7 +13,7 @@ const sections = [
   { path: '/settings', label: 'إعدادات النظام', icon: 'settings' },
 ];
 
-export default function Sidebar({ open, onNavigate }) {
+export default function Sidebar({ open, onNavigate, user }) {
   const location = useLocation();
   return (
     <>
@@ -28,7 +28,7 @@ export default function Sidebar({ open, onNavigate }) {
         </div>
         <div className="madar-sidebar-caption">مساحات العمل</div>
         <nav className="madar-nav" aria-label="التنقل الرئيسي">
-          {sections.map((item) => {
+          {[...sections.slice(0, 3), ...(user?.role === 'admin' ? [{ path: '/supervisor', label: 'رادار المشرف', icon: 'map' }] : []), ...sections.slice(3)].map((item) => {
             const nested = item.path !== '/' && location.pathname.startsWith(`${item.path}/`);
             return (
               <NavLink

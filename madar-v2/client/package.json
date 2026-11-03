@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:capacitor": "vite build --mode capacitor",
     "preview": "vite preview"
   },
   "dependencies": {

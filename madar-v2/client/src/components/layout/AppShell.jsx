@@ -7,7 +7,7 @@ export default function AppShell({ children, user, onLogout, theme, onThemeToggl
   const closeMenu = () => setMenuOpen(false);
   return (
     <div className="madar-app-shell">
-      <Sidebar open={menuOpen} onNavigate={closeMenu} />
+      <Sidebar open={menuOpen} onNavigate={closeMenu} user={user} />
       <div className="madar-workspace">
         <Topbar
           onMenuClick={() => setMenuOpen(true)}

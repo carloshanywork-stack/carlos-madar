@@ -12,32 +12,72 @@ import {
   TextRun,
   WidthType,
 } from 'docx';
-import { extname } from 'node:path';
-import { readFile } from 'node:fs/promises';
+import { extname, resolve } from 'node:path';
+import { readFile, stat } from 'node:fs/promises';
 import sharp from 'sharp';
 import { db as defaultDatabase } from '../../database/connection.js';
+import { projectRoot } from '../../config/paths.js';
 import { allowOnlyKeys, HttpError, integerIdArray, optionalText, positiveId, requireObject } from '../http.js';
 import { resolveStorageFile } from '../storage.js';
 import { getMaintenanceOrder } from './service.js';
+import { compareMachineCodes, compareMaintenanceAreas } from './sorting.js';
 
 const PPTX_MIME = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 const IMAGE_TYPES = new Map([
   ['.jpg', 'image/jpeg'], ['.jpeg', 'image/jpeg'], ['.png', 'image/png'], ['.webp', 'image/webp'], ['.heic', 'image/heic'], ['.heif', 'image/heif'],
 ]);
-const INDEX_ROWS_PER_SLIDE = 20;
+const INDEX_ROWS_PER_SLIDE = 15;
+const FIXED_LOGO_CANDIDATES = [
+  'server/assets/report-logo.png',
+  'server/assets/report-logo.jpg',
+  'server/assets/report-logo.jpeg',
+  'server/assets/report-logo.webp',
+  'server/assets/logo.png',
+  'server/assets/logo.jpg',
+];
+const EXPORT_PROGRESS_TTL_MS = 10 * 60 * 1000;
+const exportProgressMap = new Map();
 
-async function loadImage(storedPath, { rotateClockwise = false } = {}) {
+function pruneExpiredExportProgress(now = Date.now()) {
+  for (const [exportId, progress] of exportProgressMap) {
+    if (progress.expiresAt && progress.expiresAt <= now) exportProgressMap.delete(exportId);
+  }
+}
+
+function storeExportProgress(exportId, progress, { completed = false } = {}) {
+  if (!exportId) return;
+  const now = Date.now();
+  pruneExpiredExportProgress(now);
+  exportProgressMap.set(exportId, {
+    ...progress,
+    expiresAt: completed ? now + EXPORT_PROGRESS_TTL_MS : null,
+  });
+}
+
+export function getExportProgress(exportId) {
+  if (typeof exportId !== 'string' || !exportId) return null;
+  pruneExpiredExportProgress();
+  const progress = exportProgressMap.get(exportId);
+  if (!progress) return null;
+  const { expiresAt, ...publicProgress } = progress;
+  return publicProgress;
+}
+
+async function loadImage(storedPath, { ensurePortrait = false } = {}) {
   const extension = extname(storedPath).toLowerCase();
   const contentType = IMAGE_TYPES.get(extension);
   if (!contentType) return null;
   try {
     const absolutePath = await resolveStorageFile(storedPath);
     const source = await readFile(absolutePath);
-    const orientedSource = await sharp(source, { failOn: 'none' }).rotate().toBuffer();
-    const image = sharp(orientedSource, { failOn: 'none' });
-    if (rotateClockwise) image.rotate(90);
-    const { data, info } = await image
+    const autoOrientedBuffer = await sharp(source, { failOn: 'none' }).rotate().toBuffer();
+    const metadata = await sharp(autoOrientedBuffer, { failOn: 'none' }).metadata();
+    let pipeline = sharp(autoOrientedBuffer, { failOn: 'none' });
+    if (ensurePortrait && metadata.width && metadata.height && metadata.width > metadata.height) {
+      pipeline = pipeline.rotate(90);
+    }
+    const { data, info } = await pipeline
       .resize({ width: 800, withoutEnlargement: true })
       .jpeg({ quality: 75 })
       .toBuffer({ resolveWithObject: true });
@@ -47,10 +87,40 @@ async function loadImage(storedPath, { rotateClockwise = false } = {}) {
   }
 }
 
+async function loadLocalImageFile(filePath) {
+  try {
+    const source = await readFile(filePath);
+    const { data, info } = await sharp(source, { failOn: 'none' })
+      .rotate()
+      .resize({ width: 1600, height: 1600, fit: 'inside', withoutEnlargement: true })
+      .png({ compressionLevel: 9, adaptiveFiltering: true })
+      .toBuffer({ resolveWithObject: true });
+    if (!info.width || !info.height) return null;
+    return { contentType: 'image/png', data, width: info.width, height: info.height };
+  } catch {
+    return null;
+  }
+}
+
+async function loadFixedReportLogo() {
+  for (const relativePath of FIXED_LOGO_CANDIDATES) {
+    const absolutePath = resolve(projectRoot, relativePath);
+    try {
+      const fileStat = await stat(absolutePath);
+      if (!fileStat.isFile()) continue;
+      const image = await loadLocalImageFile(absolutePath);
+      if (image) return image;
+    } catch {
+      // The candidate may not exist; try the next supported filename.
+    }
+  }
+  return null;
+}
+
 async function loadCardImages(paths) {
   const images = [];
   for (const path of paths.slice(0, 4)) {
-    const image = await loadImage(path, { rotateClockwise: true });
+    const image = await loadImage(path, { ensurePortrait: true });
     if (image) images.push(image);
   }
   return images;
@@ -71,7 +141,7 @@ function addImageFit(slide, image, x, y, width, height) {
   const fittedWidth = ratio > frameRatio ? width : height * ratio;
   const fittedHeight = ratio > frameRatio ? width / ratio : height;
   slide.addImage({
-    data: `data:image/jpeg;base64,${image.data.toString('base64')}`,
+    data: `data:${image.contentType || 'image/jpeg'};base64,${image.data.toString('base64')}`,
     x: x + (width - fittedWidth) / 2,
     y: y + (height - fittedHeight) / 2,
     w: fittedWidth,
@@ -100,15 +170,54 @@ function addImageGrid(slide, pptx, images, x, y, width, height) {
   });
 }
 
-function addSlideFooter(slide, pageNumber, pageCount, reason = null) {
-  slide.addShape('line', { x: 0.48, y: 7.05, w: 12.37, h: 0, line: { color: 'D8E0E8', width: 0.8 } });
-  if (reason) {
-    slide.addText(`سبب الصيانة: ${reason}`, {
-      x: 0.62, y: 7.12, w: 10.25, h: 0.18, fontFace: 'Arial', fontSize: 8, color: '53677B', align: 'right', fit: 'shrink',
-    });
-  }
-  slide.addText(`صفحة ${pageNumber} من ${pageCount}`, {
-    x: 10.95, y: 7.12, w: 1.82, h: 0.18, fontFace: 'Arial', fontSize: 8, color: '53677B', align: 'left',
+function addSlideFooter(slide, pageNumber, pageCount, primary = '07509B', secondary = 'F58220') {
+  const primaryColor = primary || '07509B';
+  const secondaryColor = secondary || 'F58220';
+  slide.addShape('line', {
+    x: 0.48,
+    y: 7.15,
+    w: 10.35,
+    h: 0,
+    line: { color: 'CBD5E1', width: 0.8 },
+  });
+  slide.addShape('roundRect', {
+    x: 10.95,
+    y: 6.94,
+    w: 1.9,
+    h: 0.42,
+    rectRadius: 0.08,
+    line: { color: primaryColor, width: 1.4 },
+    fill: { color: 'FFFFFF' },
+    shadow: {
+      type: 'outer',
+      color: '0F172A',
+      blur: 5,
+      angle: 45,
+      distance: 1.8,
+      opacity: 0.16,
+    },
+  });
+  slide.addShape('roundRect', {
+    x: 12.74,
+    y: 7.02,
+    w: 0.05,
+    h: 0.26,
+    rectRadius: 0.02,
+    line: { color: secondaryColor },
+    fill: { color: secondaryColor },
+  });
+  slide.addText(`\u200Fصفحة ${pageNumber} من ${pageCount}\u200F`, {
+    x: 10.98,
+    y: 6.97,
+    w: 1.74,
+    h: 0.36,
+    fontFace: 'Arial',
+    fontSize: 10.5,
+    bold: true,
+    color: primaryColor,
+    align: 'center',
+    valign: 'mid',
+    rtlMode: true,
   });
 }
 
@@ -119,12 +228,12 @@ function optionalBoolean(value, label, defaultValue = false) {
   throw new HttpError(400, `${label} must be true or false.`);
 }
 
-function addMaintenanceIndexSlide(pptx, rows, indexPage, indexPageCount, pageNumber, pageCount, primary) {
+function addMaintenanceIndexSlide(pptx, rows, areaName, indexPage, indexPageCount, pageNumber, pageCount, primary) {
   const slide = pptx.addSlide();
   slide.background = { color: 'F7F9FC' };
   slide.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: 13.333, h: 0.9, line: { color: primary }, fill: { color: primary } });
-  slide.addText('فهرس الماكينات', { x: 0.62, y: 0.2, w: 7.2, h: 0.38, fontFace: 'Arial', fontSize: 22, bold: true, color: 'FFFFFF', align: 'right' });
-  slide.addText(`صفحة الفهرس ${indexPage} من ${indexPageCount}`, { x: 9.3, y: 0.3, w: 3.35, h: 0.22, fontFace: 'Arial', fontSize: 10, color: 'DDEBFA', align: 'left' });
+  slide.addText(`فهرس الماكينات · ${areaName}`, { x: 0.62, y: 0.2, w: 7.2, h: 0.38, fontFace: 'Arial', fontSize: 20, bold: true, color: 'FFFFFF', align: 'right', fit: 'shrink' });
+  slide.addText(`صفحة ${indexPage} من ${indexPageCount}`, { x: 9.3, y: 0.3, w: 3.35, h: 0.22, fontFace: 'Arial', fontSize: 10, color: 'DDEBFA', align: 'left' });
 
   const columns = [
     { label: 'م', x: 0.58, w: 0.55, align: 'center' },
@@ -145,21 +254,21 @@ function addMaintenanceIndexSlide(pptx, rows, indexPage, indexPageCount, pageNum
       fill: { color: index % 2 ? 'FFFFFF' : 'F0F4F8' },
     });
     const values = [
-      { text: String(row.index), ...columns[0] },
+      { text: String(row.index), ...columns[0], hyperlink: { slide: row.pageNumber, tooltip: `فتح شريحة ${row.pageNumber}` } },
       { text: row.card.machine_name_en || row.card.machine_code, ...columns[1] },
       { text: row.card.machine_area || row.order.area || '—', ...columns[2] },
       { text: row.card.machine_code, ...columns[3] },
-      { text: String(row.pageNumber), ...columns[4] },
+      { text: String(row.pageNumber), ...columns[4], hyperlink: { slide: row.pageNumber, tooltip: `فتح شريحة ${row.pageNumber}` } },
     ];
     for (const value of values) {
       slide.addText(value.text, {
         x: value.x, y: y + 0.045, w: value.w, h: 0.15,
         fontFace: 'Arial', fontSize: 8, color: value === values.at(-1) ? primary : '263B50',
-        bold: value === values.at(-1), align: value.align, fit: 'shrink',
+        bold: value === values.at(-1), align: value.align, fit: 'shrink', hyperlink: value.hyperlink,
       });
     }
   });
-  addSlideFooter(slide, pageNumber, pageCount);
+  addSlideFooter(slide, pageNumber, pageCount, primary);
   return slide;
 }
 
@@ -197,7 +306,7 @@ function maintenanceReportPeriod(entries) {
   return months.map(formatMonth).join(' – ');
 }
 
-function addMaintenanceCoverSlide(pptx, client, logo, primary, secondary, areaIndex, totalMachines, reportPeriod) {
+function addMaintenanceCoverSlide(pptx, client, logo, primary, secondary, areaIndex, totalMachines, reportPeriod, pageCount) {
   const slide = pptx.addSlide();
   slide.background = { color: 'F8FAFC' };
 
@@ -309,6 +418,7 @@ function addMaintenanceCoverSlide(pptx, client, logo, primary, secondary, areaIn
     slide.addText(`ص ${item.startPage}`, {
       x: 6.74, y: y + (rowHeight - 0.26) / 2, w: 0.84, h: 0.26,
       fontFace: 'Arial', fontSize: 10, bold: true, color: 'FFFFFF', align: 'center', valign: 'mid',
+      hyperlink: { slide: item.startPage, tooltip: `فتح شريحة ${item.startPage}` },
     });
   });
 
@@ -317,38 +427,121 @@ function addMaintenanceCoverSlide(pptx, client, logo, primary, secondary, areaIn
   slide.addText('البنك التجاري الدولي (CIB)  ·  تقرير فحص وتوثيق الصيانة الدورية لماكينات الصراف الآلي  ·  سري وخاص بالإدارة', {
     x: 0.8, y: 7.37, w: 11.733, h: 0.12, fontFace: 'Arial', fontSize: 8, color: '64748B', align: 'center',
   });
+  addSlideFooter(slide, 1, pageCount, primary, secondary);
 }
 
-function reportableReason(reasonName) {
-  const reason = String(reasonName ?? '').trim();
-  return reason && reason !== 'غير محدد' ? reason : null;
+function addAreaDividerSlide(pptx, area, entries, pageNumber, pageCount, primary, secondary) {
+  const slide = pptx.addSlide();
+  slide.background = { color: 'F3F7FB' };
+  slide.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: 13.333, h: 0.92, line: { color: primary }, fill: { color: primary } });
+  slide.addShape(pptx.ShapeType.rect, { x: 0, y: 0.92, w: 13.333, h: 0.06, line: { color: secondary }, fill: { color: secondary } });
+  slide.addText('فحص وتوثيق الصيانة الميدانية · تغطية المناطق', {
+    x: 1.1, y: 1.72, w: 11.13, h: 0.3, fontFace: 'Arial', fontSize: 13, bold: true,
+    color: '64748B', align: 'center', rtlMode: true,
+  });
+  slide.addText(area, {
+    x: 1.0, y: 2.24, w: 11.33, h: 0.75, fontFace: 'Arial', fontSize: 28, bold: true,
+    color: primary, align: 'center', valign: 'mid', fit: 'shrink', rtlMode: true,
+  });
+  slide.addShape(pptx.ShapeType.roundRect, {
+    x: 4.2, y: 3.45, w: 4.93, h: 0.72, rectRadius: 0.12,
+    line: { color: primary }, fill: { color: primary },
+  });
+  slide.addText(`${entries.length} ماكينة ATM`, {
+    x: 4.35, y: 3.64, w: 4.63, h: 0.3, fontFace: 'Arial', fontSize: 16, bold: true,
+    color: 'FFFFFF', align: 'center', valign: 'mid', rtlMode: true,
+  });
+  const orderCodes = [...new Set(entries.map(({ order }) => order.order_code).filter(Boolean))];
+  slide.addText(`أوامر التشغيل: ${orderCodes.join('، ') || '—'}`, {
+    x: 1.1, y: 4.75, w: 11.13, h: 0.38, fontFace: 'Arial', fontSize: 13,
+    color: '475569', align: 'center', fit: 'shrink', rtlMode: true,
+  });
+  slide.addShape(pptx.ShapeType.line, { x: 4.25, y: 5.55, w: 4.83, h: 0, line: { color: secondary, width: 1.5, transparency: 14 } });
+  addSlideFooter(slide, pageNumber, pageCount, primary, secondary);
+  return slide;
 }
 
-async function addMaintenanceCardSlide(pptx, order, card, logo, primary, secondary) {
+function addReasonDividerSlide(pptx, groupName, entries, pageNumber, pageCount, primary, secondary) {
+  const slide = pptx.addSlide();
+  slide.background = { color: 'F3F7FB' };
+  slide.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: 13.333, h: 1.0, line: { color: primary }, fill: { color: primary } });
+  slide.addText('MADAR  ·  FIELD MAINTENANCE', { x: 0.65, y: 0.34, w: 12.0, h: 0.28, fontFace: 'Arial', fontSize: 14, bold: true, color: 'FFFFFF', align: 'right' });
+  slide.addShape(pptx.ShapeType.roundRect, { x: 2.0, y: 2.25, w: 9.33, h: 2.5, rectRadius: 0.15, line: { color: 'DCE5EE' }, fill: { color: 'FFFFFF' } });
+  slide.addText('الأسباب', { x: 2.5, y: 2.75, w: 8.33, h: 0.38, fontFace: 'Arial', fontSize: 17, color: '748498', align: 'center' });
+  slide.addText(groupName, { x: 2.5, y: 3.25, w: 8.33, h: 0.72, fontFace: 'Arial', fontSize: 28, bold: true, color: primary, align: 'center', fit: 'shrink' });
+  slide.addText(`${entries.length} ماكينة  ·  ${[...new Set(entries.map(({ order }) => order.order_code))].join('، ')}`, { x: 2.5, y: 4.12, w: 8.33, h: 0.28, fontFace: 'Arial', fontSize: 11, color: '53677B', align: 'center', fit: 'shrink' });
+  addSlideFooter(slide, pageNumber, pageCount, primary, secondary);
+  return slide;
+}
+
+async function addMaintenanceCardSlide(pptx, order, card, clientLogo, fixedLogo, primary, secondary, pageNumber, pageCount) {
   const slide = pptx.addSlide();
   slide.background = { color: 'FFFFFF' };
-  slide.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: 13.333, h: 1.08, line: { color: 'F3F7FB' }, fill: { color: 'F3F7FB' } });
-  slide.addShape(pptx.ShapeType.rect, { x: 0, y: 1.04, w: 13.333, h: 0.05, line: { color: secondary }, fill: { color: secondary } });
-  addClientLogo(slide, pptx, logo, order.client, 0.42, 0.18, 0.82, 0.68);
-  slide.addText(`${card.machine_name_en || card.machine_code} · ${card.machine_code}`, {
-    x: 1.65, y: 0.29, w: 11.1, h: 0.42, fontFace: 'Arial', fontSize: 19, bold: true,
-    color: primary, align: 'right', fit: 'shrink',
+  slide.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: 13.333, h: 1.18, line: { color: 'F3F7FB' }, fill: { color: 'F3F7FB' } });
+  slide.addShape(pptx.ShapeType.rect, { x: 0, y: 1.14, w: 13.333, h: 0.04, line: { color: secondary }, fill: { color: secondary } });
+  addClientLogo(slide, pptx, fixedLogo || clientLogo, order.client, 0.42, 0.18, 0.85, 0.72);
+  slide.addText(`${card.machine_name_en || card.machine_code} • ${card.machine_code}`, {
+    x: 8.6,
+    y: 0.18,
+    w: 4.3,
+    h: 0.75,
+    fontFace: 'Arial',
+    fontSize: 17,
+    bold: true,
+    color: primary,
+    align: 'right',
+    valign: 'mid',
+    fit: 'shrink',
+    rtlMode: true,
   });
-  const [before, after] = await Promise.all([loadCardImages(card.before_photos), loadCardImages(card.after_photos)]);
-  const reason = reportableReason(card.reason_name);
-  const photoGridHeight = reason ? 4.6 : 5.1;
-  slide.addShape(pptx.ShapeType.roundRect, { x: 0.48, y: 1.32, w: 6.05, h: 0.43, rectRadius: 0.1, line: { color: 'DDE6EF' }, fill: { color: 'EAF4F4' } });
-  slide.addText('After', { x: 0.6, y: 1.42, w: 5.8, h: 0.2, fontFace: 'Arial', fontSize: 13, bold: true, color: primary, align: 'center' });
-  slide.addShape(pptx.ShapeType.roundRect, { x: 6.8, y: 1.32, w: 6.05, h: 0.43, rectRadius: 0.1, line: { color: 'DDE6EF' }, fill: { color: 'EEF3FA' } });
-  slide.addText('Before', { x: 6.92, y: 1.42, w: 5.8, h: 0.2, fontFace: 'Arial', fontSize: 13, bold: true, color: primary, align: 'center' });
-  addImageGrid(slide, pptx, after, 0.48, 1.92, 6.05, photoGridHeight);
-  addImageGrid(slide, pptx, before, 6.8, 1.92, 6.05, photoGridHeight);
-  if (reason) {
-    slide.addText(`سبب الصيانة: ${reason}`, {
-      x: 0.62, y: 6.6, w: 12.1, h: 0.35, fontFace: 'Arial', fontSize: 11, bold: true,
-      color: primary, align: 'right', valign: 'mid', fit: 'shrink',
+  const rawReasons = Array.isArray(card.reason_names) && card.reason_names.length
+    ? card.reason_names
+    : (card.reason_name ? card.reason_name.split(' • ') : []);
+  const reasons = rawReasons
+    .map((reason) => String(reason ?? '').trim())
+    .filter((reason) => reason && reason !== 'غير محدد');
+  if (reasons.length) {
+    const fontSize = reasons.length === 1 ? 15.5 : (reasons.length === 2 ? 12.5 : 11);
+    const reasonRuns = reasons.map((reasonText, index) => ({
+      text: `${index + 1}. ${reasonText}`,
+      options: {
+        rtlMode: true,
+        fontSize,
+        bold: true,
+        color: primary,
+        lang: 'ar-EG',
+        breakLine: index < reasons.length - 1,
+      },
+    }));
+    slide.addText(reasonRuns, {
+      x: 1.8,
+      y: 0.16,
+      w: 6.6,
+      h: 0.85,
+      fontFace: 'Arial',
+      align: 'center',
+      valign: 'mid',
+      fit: 'shrink',
+      rtlMode: true,
     });
   }
+  const [before, after] = await Promise.all([loadCardImages(card.before_photos), loadCardImages(card.after_photos)]);
+  const photoGridHeight = 5.1;
+  slide.addShape(pptx.ShapeType.roundRect, { x: 0.48, y: 1.35, w: 6.05, h: 0.43, rectRadius: 0.1, line: { color: 'DDE6EF' }, fill: { color: 'EAF4F4' } });
+  slide.addText('After', { x: 0.6, y: 1.45, w: 5.8, h: 0.2, fontFace: 'Arial', fontSize: 13, bold: true, color: primary, align: 'center' });
+  slide.addShape(pptx.ShapeType.roundRect, { x: 6.8, y: 1.35, w: 6.05, h: 0.43, rectRadius: 0.1, line: { color: 'DDE6EF' }, fill: { color: 'EEF3FA' } });
+  slide.addText('Before', { x: 6.92, y: 1.45, w: 5.8, h: 0.2, fontFace: 'Arial', fontSize: 13, bold: true, color: primary, align: 'center' });
+  addImageGrid(slide, pptx, after, 0.48, 1.92, 6.05, photoGridHeight);
+  addImageGrid(slide, pptx, before, 6.8, 1.92, 6.05, photoGridHeight);
+  slide.addShape(pptx.ShapeType.rect, {
+    x: 6.64,
+    y: 1.35,
+    w: 0.04,
+    h: 5.65,
+    line: { color: secondary },
+    fill: { color: secondary },
+  });
+  if (pageNumber && pageCount) addSlideFooter(slide, pageNumber, pageCount, primary, secondary);
 }
 
 function pptxDocument(title, subject) {
@@ -357,6 +550,7 @@ function pptxDocument(title, subject) {
   pptx.author = 'MADAR';
   pptx.subject = subject;
   pptx.title = title;
+  pptx.rtlMode = true;
   pptx.theme = { headFontFace: 'Arial', bodyFontFace: 'Arial', lang: 'ar-EG' };
   return pptx;
 }
@@ -371,36 +565,39 @@ function downloadReport(res, report) {
   res.send(report.buffer);
 }
 
-export async function buildMaintenancePptx(orderId, database, { showReasonFooter = false } = {}) {
+export async function buildMaintenancePptx(orderId, database, { showReasonFooter = false, useFixedLogoOnCover = false } = {}) {
   const order = getMaintenanceOrder(positiveId(orderId, 'orderId'), database);
   const report = await buildMaintenancePptxExport({
     orderIds: [order.id],
     showReasonFooter,
-    groupBy: 'none',
+    useFixedLogoOnCover,
+    groupBy: 'area',
   }, database);
   return { ...report, filename: safeReportName(order, 'pptx') };
 }
 
 export async function buildMaintenancePptxExport(input, database = defaultDatabase) {
   const body = requireObject(input);
-  allowOnlyKeys(body, ['orderIds', 'reasonId', 'area', 'groupBy', 'showReasonFooter']);
+  allowOnlyKeys(body, ['orderIds', 'reasonId', 'area', 'groupBy', 'showReasonFooter', 'exportId', 'useFixedLogoOnCover']);
   if (!Array.isArray(body.orderIds)) throw new HttpError(400, 'orderIds must be an array of maintenance order IDs.');
   if (body.orderIds.length > 500) throw new HttpError(400, 'Select no more than 500 orders at a time.');
   const requestedOrderIds = integerIdArray(body.orderIds, 'orderIds');
+  const exportId = optionalText(body.exportId, 'exportId', { maxLength: 128 }) || null;
   const reasonId = body.reasonId === undefined || body.reasonId === null || body.reasonId === ''
     ? null
     : positiveId(body.reasonId, 'reasonId');
   const area = optionalText(body.area, 'area', { maxLength: 160 });
-  const groupBy = body.groupBy ?? 'none';
+  const groupBy = body.groupBy ?? 'area';
   if (!['reason', 'area', 'none'].includes(groupBy)) throw new HttpError(400, 'groupBy must be reason, area, or none.');
   optionalBoolean(body.showReasonFooter, 'showReasonFooter');
+  const useFixedLogoOnCover = optionalBoolean(body.useFixedLogoOnCover, 'useFixedLogoOnCover');
 
   let orderIds = requestedOrderIds;
   if (!orderIds.length) {
     orderIds = database.prepare(`
       SELECT id FROM maintenance_orders
       WHERE status = 'archived' AND deleted_at IS NULL
-      ORDER BY created_at DESC, id DESC
+      ORDER BY COALESCE(archived_at, updated_at, created_at) DESC, id DESC
     `).all().map((row) => row.id);
   }
   if (!orderIds.length) throw new HttpError(404, 'No archived maintenance orders are available for export.');
@@ -412,106 +609,283 @@ export async function buildMaintenancePptxExport(input, database = defaultDataba
     if (!reasonName) throw new HttpError(404, 'Maintenance reason was not found.');
   }
   const normalizedArea = area?.toLocaleLowerCase('ar-EG') ?? null;
-  const cards = orders.flatMap((order) => order.cards
-    .filter((card) => (reasonId === null || card.reason_id === reasonId)
-      && (normalizedArea === null || String(card.machine_area || order.area || '').trim().toLocaleLowerCase('ar-EG') === normalizedArea))
-    .map((card) => ({ order, card })));
-  if (!cards.length) throw new HttpError(404, 'No maintenance cards match the selected orders and filters.');
-
-  const pptx = pptxDocument('MADAR Maintenance Report', `Categorized maintenance report · ${cards.length} machine cards`);
-  const firstOrder = cards[0].order;
-  const uniqueOrders = new Map(cards.map(({ order }) => [order.id, order]));
-  const uniqueClients = new Map([...uniqueOrders.values()].map((order) => [order.client.id, order.client]));
-  const logos = new Map();
-  await Promise.all([...uniqueClients.values()].map(async (client) => {
-    const firstClientOrder = [...uniqueOrders.values()].find((order) => order.client.id === client.id);
-    logos.set(client.id, await loadClientLogo(firstClientOrder));
-  }));
-  const primary = hexColor(firstOrder.client?.primary_color);
-  const secondary = hexColor(firstOrder.client?.secondary_color, 'F58220');
-
-  const orderedGroups = new Map();
-  if (groupBy === 'none') orderedGroups.set('', cards);
-  else {
-    const groupLabel = ({ order, card }) => groupBy === 'reason'
-      ? (card.reason_name || 'سبب غير محدد')
-      : (card.machine_area || order.area || 'منطقة غير محددة');
-    for (const entry of cards) {
-      const key = groupLabel(entry);
-      const group = orderedGroups.get(key) ?? [];
-      group.push(entry);
-      orderedGroups.set(key, group);
-    }
-  }
-  const groups = [...orderedGroups.entries()].sort(([left], [right]) => left.localeCompare(right, 'ar'));
-  const indexPageCount = Math.ceil(cards.length / INDEX_ROWS_PER_SLIDE);
-  let slideCursor = 1 + indexPageCount;
-  let machineIndex = 0;
-  const presentationGroups = groups.map(([groupName, entries]) => ({
-    groupName,
-    dividerPageNumber: groupBy === 'none' ? null : ++slideCursor,
-    entries: entries.map((entry) => ({
-      ...entry,
-      index: ++machineIndex,
-      pageNumber: ++slideCursor,
-    })),
-  }));
-  const pageCount = slideCursor;
-  const indexRows = presentationGroups.flatMap((group) => group.entries);
-  const areaIndexByKey = new Map();
-  for (const row of indexRows) {
-    const areaName = String(row.card.machine_area || row.order.area || 'منطقة غير محددة').trim() || 'منطقة غير محددة';
-    const key = areaName.toLocaleLowerCase('ar-EG');
-    const summary = areaIndexByKey.get(key) ?? {
-      area: areaName,
-      count: 0,
-      startPage: 2 + Math.floor((row.index - 1) / INDEX_ROWS_PER_SLIDE),
-    };
-    summary.count += 1;
-    areaIndexByKey.set(key, summary);
-  }
-  const areaIndex = [...areaIndexByKey.values()].sort((left, right) => left.area.localeCompare(right.area, 'ar'));
-  const reportPeriod = maintenanceReportPeriod(cards);
-  addMaintenanceCoverSlide(
-    pptx,
-    firstOrder.client,
-    logos.get(firstOrder.client.id),
-    primary,
-    secondary,
-    areaIndex,
-    cards.length,
-    reportPeriod,
-  );
-
-  for (let page = 0; page < indexPageCount; page += 1) {
-    const indexRowsForPage = indexRows.slice(page * INDEX_ROWS_PER_SLIDE, (page + 1) * INDEX_ROWS_PER_SLIDE);
-    addMaintenanceIndexSlide(pptx, indexRowsForPage, page + 1, indexPageCount, page + 2, pageCount, primary);
-  }
-
-  for (const { groupName, dividerPageNumber, entries } of presentationGroups) {
-    if (groupBy !== 'none') {
-      const divider = pptx.addSlide();
-      divider.background = { color: 'F3F7FB' };
-      divider.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: 13.333, h: 1.0, line: { color: primary }, fill: { color: primary } });
-      divider.addText('MADAR  ·  FIELD MAINTENANCE', { x: 0.65, y: 0.34, w: 12.0, h: 0.28, fontFace: 'Arial', fontSize: 14, bold: true, color: 'FFFFFF', align: 'right' });
-      divider.addShape(pptx.ShapeType.roundRect, { x: 2.0, y: 2.25, w: 9.33, h: 2.5, rectRadius: 0.15, line: { color: 'DCE5EE' }, fill: { color: 'FFFFFF' } });
-      divider.addText(groupBy === 'reason' ? 'سبب الصيانة' : 'المنطقة', { x: 2.5, y: 2.75, w: 8.33, h: 0.38, fontFace: 'Arial', fontSize: 17, color: '748498', align: 'center' });
-      divider.addText(groupName, { x: 2.5, y: 3.25, w: 8.33, h: 0.72, fontFace: 'Arial', fontSize: 28, bold: true, color: primary, align: 'center', fit: 'shrink' });
-      divider.addText(`${entries.length} ماكينة  ·  ${[...new Set(entries.map(({ order }) => order.order_code))].join('، ')}`, { x: 2.5, y: 4.12, w: 8.33, h: 0.28, fontFace: 'Arial', fontSize: 11, color: '53677B', align: 'center', fit: 'shrink' });
-      addSlideFooter(divider, dividerPageNumber, pageCount);
-    }
-    for (const { order, card } of entries) {
-      const clientLogo = logos.get(order.client.id);
-      await addMaintenanceCardSlide(pptx, order, card, clientLogo, hexColor(order.client?.primary_color), hexColor(order.client?.secondary_color, '24A6A0'));
-    }
-  }
-  const filterFilename = [reasonName, area].filter(Boolean).join('_') || 'All_Maintenance';
-  const safeFilter = String(filterFilename).normalize('NFKC').trim().replace(/[^\p{L}\p{N}._-]+/gu, '-').replace(/^-+|-+$/g, '') || 'All_Maintenance';
-  return {
-    buffer: await pptx.write({ outputType: 'nodebuffer' }),
-    filename: `Madar_Report_${safeFilter}.pptx`,
-    contentType: PPTX_MIME,
+  const cardCandidates = orders.flatMap((order) => order.cards.map((card) => ({ order, card })));
+  const timestamp = (value) => {
+    if (!value) return 0;
+    const parsed = new Date(value).getTime();
+    return Number.isFinite(parsed) ? parsed : 0;
   };
+  const recency = ({ order, card }) => Math.max(
+    timestamp(card.updated_at),
+    timestamp(order.archived_at),
+    timestamp(order.updated_at),
+    timestamp(order.created_at),
+  );
+  const latestCardByMachine = new Map();
+  for (const entry of cardCandidates) {
+    const machineKey = entry.card.machine_id ?? entry.card.machine_code;
+    const candidate = { entry, updatedAt: recency(entry) };
+    const existing = latestCardByMachine.get(machineKey);
+    if (!existing
+      || candidate.updatedAt > existing.updatedAt
+      || (candidate.updatedAt === existing.updatedAt
+        && (entry.order.id > existing.entry.order.id
+          || (entry.order.id === existing.entry.order.id && entry.card.id > existing.entry.card.id)))) {
+      latestCardByMachine.set(machineKey, candidate);
+    }
+  }
+  const cards = [...latestCardByMachine.values()].map(({ entry }) => entry).filter(({ order, card }) => (
+    card.status !== 'excluded'
+    && (card.before_photos?.length > 0 || card.after_photos?.length > 0)
+    && (reasonId === null || card.reason_id === reasonId || (Array.isArray(card.reason_ids) && card.reason_ids.includes(reasonId)))
+    && (normalizedArea === null || String(card.machine_area || order.area || '').trim().toLocaleLowerCase('ar-EG') === normalizedArea)
+  ));
+  if (!cards.length) throw new HttpError(404, 'No maintenance cards with photos match the selected orders and filters.');
+
+  const totalCards = cards.length;
+  const startTime = Date.now();
+  storeExportProgress(exportId, {
+    active: true,
+    total: totalCards,
+    current: 0,
+    percent: 0,
+    stage: 'جارٍ تجهيز بيانات التقرير...',
+    machineName: null,
+    machineNameAr: null,
+    machineNameEn: null,
+    machineCode: null,
+    area: null,
+    estimatedSeconds: null,
+    speedSecPerMachine: null,
+  });
+
+  let processedCards = 0;
+  try {
+    const pptx = pptxDocument('MADAR Maintenance Report', `Categorized maintenance report · ${cards.length} machine cards`);
+    const fixedLogo = await loadFixedReportLogo();
+    const firstOrder = cards[0].order;
+    const uniqueOrders = new Map(cards.map(({ order }) => [order.id, order]));
+    const uniqueClients = new Map([...uniqueOrders.values()].map((order) => [order.client.id, order.client]));
+    const logos = new Map();
+    await Promise.all([...uniqueClients.values()].map(async (client) => {
+      const firstClientOrder = [...uniqueOrders.values()].find((order) => order.client.id === client.id);
+      logos.set(client.id, await loadClientLogo(firstClientOrder));
+    }));
+    const primary = hexColor(firstOrder.client?.primary_color);
+    const secondary = hexColor(firstOrder.client?.secondary_color, 'F58220');
+
+    const areaForEntry = ({ order, card }) => String(card.machine_area || order.area || 'منطقة غير محددة').trim() || 'منطقة غير محددة';
+    const sortedCards = [...cards].sort((left, right) => (
+      compareMaintenanceAreas(areaForEntry(left), areaForEntry(right))
+      || compareMachineCodes(left.card.machine_code, right.card.machine_code)
+      || String(left.order.order_code).localeCompare(String(right.order.order_code), undefined, { numeric: true, sensitivity: 'base' })
+      || left.card.id - right.card.id
+    ));
+    const rowsByArea = new Map();
+    for (const entry of sortedCards) {
+      const areaName = areaForEntry(entry);
+      const key = areaName.toLocaleLowerCase('ar-EG');
+      const areaRows = rowsByArea.get(key) ?? { area: areaName, entries: [] };
+      areaRows.entries.push(entry);
+      rowsByArea.set(key, areaRows);
+    }
+    const indexPagePlans = [];
+    const orderedAreas = [...rowsByArea.values()].sort((left, right) => compareMaintenanceAreas(left.area, right.area));
+    for (const areaRows of orderedAreas) {
+      areaRows.entries.sort((left, right) => (
+        compareMachineCodes(left.card.machine_code, right.card.machine_code)
+        || String(left.order.order_code).localeCompare(String(right.order.order_code), undefined, { numeric: true, sensitivity: 'base' })
+        || left.card.id - right.card.id
+      ));
+      const pageCountForArea = Math.ceil(areaRows.entries.length / INDEX_ROWS_PER_SLIDE);
+      for (let page = 0; page < pageCountForArea; page += 1) {
+        indexPagePlans.push({
+          area: areaRows.area,
+          indexPage: page + 1,
+          indexPageCount: pageCountForArea,
+          slideNumber: 2 + indexPagePlans.length,
+          entries: areaRows.entries.slice(page * INDEX_ROWS_PER_SLIDE, (page + 1) * INDEX_ROWS_PER_SLIDE),
+        });
+      }
+    }
+    const indexPageCount = indexPagePlans.length;
+    let slideCursor = 1 + indexPageCount;
+    let machineIndex = 0;
+    const presentedRowsByKey = new Map();
+    const presentationPlan = [];
+    const areaDividerPages = new Map();
+    for (const areaRows of orderedAreas) {
+      const areaKey = areaRows.area.toLocaleLowerCase('ar-EG');
+      const areaDividerPage = ++slideCursor;
+      areaDividerPages.set(areaKey, areaDividerPage);
+      presentationPlan.push({
+        type: 'area-divider',
+        area: areaRows.area,
+        entries: areaRows.entries,
+        pageNumber: areaDividerPage,
+      });
+
+      let cardGroups = [{ groupName: '', entries: areaRows.entries }];
+      if (groupBy === 'reason') {
+        const groupsByReason = new Map();
+        for (const entry of areaRows.entries) {
+          const groupName = entry.card.reason_name || 'سبب غير محدد';
+          const groupKey = groupName.toLocaleLowerCase('ar-EG');
+          if (!groupsByReason.has(groupKey)) groupsByReason.set(groupKey, { groupName, entries: [] });
+          groupsByReason.get(groupKey).entries.push(entry);
+        }
+        cardGroups = [...groupsByReason.values()];
+      }
+
+      for (const { groupName, entries } of cardGroups) {
+        if (groupBy === 'reason') {
+          presentationPlan.push({
+            type: 'reason-divider',
+            groupName,
+            entries,
+            pageNumber: ++slideCursor,
+          });
+        }
+        for (const entry of entries) {
+          const row = { ...entry, index: ++machineIndex, pageNumber: ++slideCursor };
+          presentedRowsByKey.set(`${row.order.id}:${row.card.id}`, row);
+          presentationPlan.push({ type: 'machine', ...row });
+        }
+      }
+    }
+    const pageCount = slideCursor;
+    const indexPages = indexPagePlans.map((plan) => ({
+      ...plan,
+      rows: plan.entries.map((entry) => presentedRowsByKey.get(`${entry.order.id}:${entry.card.id}`)),
+    }));
+    const areaIndex = orderedAreas.map((areaRows) => {
+      const firstRow = presentedRowsByKey.get(`${areaRows.entries[0].order.id}:${areaRows.entries[0].card.id}`);
+      return {
+        area: areaRows.area,
+        count: areaRows.entries.length,
+        startPage: areaDividerPages.get(areaRows.area.toLocaleLowerCase('ar-EG')) ?? firstRow.pageNumber,
+      };
+    });
+    const reportPeriod = maintenanceReportPeriod(cards);
+    addMaintenanceCoverSlide(
+      pptx,
+      firstOrder.client,
+      useFixedLogoOnCover ? (fixedLogo || logos.get(firstOrder.client.id)) : logos.get(firstOrder.client.id),
+      primary,
+      secondary,
+      areaIndex,
+      cards.length,
+      reportPeriod,
+      pageCount,
+    );
+
+    for (const { rows, area, indexPage, indexPageCount: areaPageCount, slideNumber } of indexPages) {
+      addMaintenanceIndexSlide(pptx, rows, area, indexPage, areaPageCount, slideNumber, pageCount, primary);
+    }
+
+    for (const plannedSlide of presentationPlan) {
+      if (plannedSlide.type === 'area-divider') {
+        addAreaDividerSlide(pptx, plannedSlide.area, plannedSlide.entries, plannedSlide.pageNumber, pageCount, primary, secondary);
+        continue;
+      }
+      if (plannedSlide.type === 'reason-divider') {
+        addReasonDividerSlide(pptx, plannedSlide.groupName, plannedSlide.entries, plannedSlide.pageNumber, pageCount, primary, secondary);
+        continue;
+      }
+      if (plannedSlide.type === 'machine') {
+        const { order, card, pageNumber } = plannedSlide;
+        const elapsed = Date.now() - startTime;
+        const avgMsPerCard = processedCards > 0 ? elapsed / processedCards : null;
+        const remainingCards = totalCards - processedCards;
+        const machineName = card.machine_name_ar || card.machine_name_en || card.machine_code;
+        storeExportProgress(exportId, {
+          active: true,
+          total: totalCards,
+          current: processedCards + 1,
+          percent: Math.min(92, Math.round((processedCards / totalCards) * 90)),
+          stage: 'جارٍ معالجة شرائح الماكينات...',
+          machineName,
+          machineNameAr: card.machine_name_ar || '',
+          machineNameEn: card.machine_name_en || '',
+          machineCode: card.machine_code,
+          area: card.machine_area || order.area || '',
+          estimatedSeconds: avgMsPerCard === null
+            ? null
+            : Math.max(0, Math.round((remainingCards * avgMsPerCard) / 1000)),
+          speedSecPerMachine: avgMsPerCard === null ? null : (avgMsPerCard / 1000).toFixed(1),
+        });
+        if (exportId) {
+          // Let the progress endpoint and other requests run between synchronous slide-building steps.
+          await new Promise((resolve) => setImmediate(resolve));
+        }
+        const clientLogo = logos.get(order.client.id);
+        await addMaintenanceCardSlide(
+          pptx,
+          order,
+          card,
+          clientLogo,
+          fixedLogo,
+          hexColor(order.client?.primary_color),
+          hexColor(order.client?.secondary_color, '24A6A0'),
+          pageNumber,
+          pageCount,
+        );
+        processedCards += 1;
+      }
+    }
+    const filterFilename = [reasonName, area].filter(Boolean).join('_') || 'All_Maintenance';
+    const safeFilter = String(filterFilename).normalize('NFKC').trim().replace(/[^\p{L}\p{N}._-]+/gu, '-').replace(/^-+|-+$/g, '') || 'All_Maintenance';
+    storeExportProgress(exportId, {
+      active: true,
+      total: totalCards,
+      current: totalCards,
+      percent: 94,
+      stage: 'جارٍ ضغط وتجهيز ملف PowerPoint...',
+      machineName: null,
+      machineNameAr: null,
+      machineNameEn: null,
+      machineCode: null,
+      area: null,
+      estimatedSeconds: null,
+      speedSecPerMachine: null,
+    });
+    const buffer = await pptx.write({ outputType: 'nodebuffer' });
+    storeExportProgress(exportId, {
+      active: false,
+      total: totalCards,
+      current: totalCards,
+      percent: 100,
+      stage: 'اكتمل إنشاء ملف PowerPoint.',
+      machineName: null,
+      machineNameAr: null,
+      machineNameEn: null,
+      machineCode: null,
+      area: null,
+      estimatedSeconds: 0,
+      speedSecPerMachine: null,
+    }, { completed: true });
+    return {
+      buffer,
+      filename: `Madar_Report_${safeFilter}.pptx`,
+      contentType: PPTX_MIME,
+    };
+  } catch (error) {
+    storeExportProgress(exportId, {
+      active: false,
+      total: totalCards,
+      current: processedCards,
+      percent: Math.min(92, Math.round((processedCards / totalCards) * 90)),
+      stage: 'تعذر إنشاء ملف PowerPoint.',
+      machineName: null,
+      machineNameAr: null,
+      machineNameEn: null,
+      machineCode: null,
+      area: null,
+      estimatedSeconds: null,
+      speedSecPerMachine: null,
+    }, { completed: true });
+    throw error;
+  }
 }
 
 function rtlParagraph(text, options = {}) {
@@ -520,34 +894,53 @@ function rtlParagraph(text, options = {}) {
 
 export async function buildMaintenanceDocx(orderId, database) {
   const order = getMaintenanceOrder(positiveId(orderId, 'orderId'), database);
+  const cards = order.cards ?? [];
+  const completedCards = cards.filter((card) => card.status === 'completed');
+  const missingCards = cards.filter((card) => card.status !== 'completed');
+  const unmatchedFolders = order.unmatched_folders ?? [];
   const content = [
     new Paragraph({ text: 'MADAR', heading: HeadingLevel.TITLE, alignment: AlignmentType.CENTER }),
-    rtlParagraph('تقرير الصيانة الميدانية', { heading: HeadingLevel.HEADING_1, alignment: AlignmentType.CENTER }),
+    rtlParagraph('تقرير الصيانة الميدانية الشامل للرحلة', { heading: HeadingLevel.HEADING_1, alignment: AlignmentType.CENTER }),
     rtlParagraph(`العميل: ${order.client.name}`),
     rtlParagraph(`رقم الأمر: ${order.order_code}    ·    المنطقة: ${order.area || 'غير محددة'}`),
     rtlParagraph(`التاريخ: ${String(order.created_at ?? '').slice(0, 10) || '—'}`),
     rtlParagraph(`الفنيون: ${order.technicians.map((technician) => technician.name).join('، ') || 'غير معيّنين'}`),
-    ...(order.notes ? [rtlParagraph(`ملاحظات الأمر: ${order.notes}`)] : []),
-    rtlParagraph('ملخص بطاقات الفحص', { heading: HeadingLevel.HEADING_1 }),
+    rtlParagraph(`إحصائية الزيارة: ${completedCards.length} ماكينة مكتملة الفحص  ·  ${missingCards.length} ماكينة غير مشمولة / ناقصة  ·  ${unmatchedFolders.length} مجلدات تحتاج مراجعة`),
+    ...(order.notes ? [rtlParagraph(`ملاحظات الزيارة: ${order.notes}`)] : []),
+    rtlParagraph('ملخص فحص الماكينات', { heading: HeadingLevel.HEADING_1 }),
   ];
-  const cell = (text, header = false) => new TableCell({
+  const cell = (text, header = false, color = null) => new TableCell({
     width: { size: 25, type: WidthType.PERCENTAGE },
-    shading: header ? { fill: 'DCE8F1' } : undefined,
+    shading: header ? { fill: 'DCE8F1' } : color ? { fill: color } : undefined,
     children: [rtlParagraph(text)],
   });
   content.push(new Table({
     width: { size: 100, type: WidthType.PERCENTAGE },
     rows: [
       new TableRow({ tableHeader: true, children: [cell('الكود', true), cell('الآلة', true), cell('المنطقة', true), cell('الحالة / السبب', true)] }),
-      ...order.cards.map((card) => new TableRow({ children: [cell(card.machine_code), cell(`${card.machine_name_ar}${card.machine_name_en ? ` · ${card.machine_name_en}` : ''}`), cell(card.machine_area), cell(`${card.status} · ${card.reason_name || '—'}`)] })),
+      ...cards.map((card) => {
+        const isCompleted = card.status === 'completed';
+        const statusLabel = isCompleted ? `مكتمل (${card.reason_name || 'فحص دوري'})` : 'لم يتم الفحص (ناقص)';
+        return new TableRow({
+          children: [
+            cell(card.machine_code),
+            cell(`${card.machine_name_ar}${card.machine_name_en ? ` · ${card.machine_name_en}` : ''}`),
+            cell(card.machine_area),
+            cell(statusLabel, false, isCompleted ? 'ECFDF5' : 'FEF2F2'),
+          ],
+        });
+      }),
     ],
   }));
-  for (const card of order.cards) {
+
+  if (completedCards.length) {
+    content.push(rtlParagraph('بطاقات الماكينات المكتملة الفحص والتوثيق', { heading: HeadingLevel.HEADING_1, pageBreakBefore: true }));
+  }
+  for (const card of completedCards) {
     content.push(rtlParagraph(`${card.machine_code} · ${card.machine_name_ar}`, { heading: HeadingLevel.HEADING_2, pageBreakBefore: true }));
     content.push(rtlParagraph(`المنطقة: ${card.machine_area || '—'}    ·    سبب العطل: ${card.reason_name || 'غير محدد'}`));
     content.push(rtlParagraph(`الفنيون: ${order.technicians.map((technician) => technician.name).join('، ') || 'غير معيّنين'}    ·    تاريخ الزيارة: ${String(order.created_at ?? '').slice(0, 10) || '—'}`));
     if (card.notes) content.push(rtlParagraph(`ملاحظات فنية: ${card.notes}`));
-    if (order.notes) content.push(rtlParagraph(`ملاحظات الزيارة: ${order.notes}`));
     for (const [label, paths] of [['قبل الصيانة', card.before_photos], ['بعد الصيانة', card.after_photos]]) {
       content.push(rtlParagraph(label, { heading: HeadingLevel.HEADING_3 }));
       const images = await loadCardImages(paths);
@@ -561,6 +954,24 @@ export async function buildMaintenanceDocx(orderId, database) {
       }
     }
   }
+
+  if (missingCards.length) {
+    content.push(rtlParagraph('ماكينات غير مشمولة في المجلد / لم يتم فحصها بالرحلة', { heading: HeadingLevel.HEADING_1, pageBreakBefore: true }));
+    content.push(rtlParagraph('الماكينات التالية تقع ضمن نطاق خط السير ولكن لم تكتمل بيانات فحصها أو صورها في ملفات الرحلة:'));
+    for (const card of missingCards) {
+      content.push(rtlParagraph(`• ${card.machine_code} - ${card.machine_name_ar} (${card.machine_area || '—'}) - الحالة: معلّق بدون توثيق مكتمل`));
+    }
+  }
+
+  if (unmatchedFolders.length) {
+    content.push(rtlParagraph('مجلدات الرحلة غير المطابقة (تحتاج مراجعة)', { heading: HeadingLevel.HEADING_1, pageBreakBefore: true }));
+    for (const folder of unmatchedFolders) {
+      const photoCount = folder.photo_count
+        || (folder.before_photos?.length ?? 0) + (folder.after_photos?.length ?? 0);
+      content.push(rtlParagraph(`• مجلد: "${folder.folder_name}" - المصدر: ${folder.source_name || '—'} - عدد الصور: ${photoCount} صور`));
+    }
+  }
+
   const document = new Document({ creator: 'MADAR', title: `Maintenance report ${order.order_code}`, sections: [{ children: content }] });
   return { buffer: await Packer.toBuffer(document), filename: safeReportName(order, 'docx'), contentType: DOCX_MIME };
 }
@@ -568,7 +979,10 @@ export async function buildMaintenanceDocx(orderId, database) {
 export async function exportMaintenanceReport(req, res, format, database) {
   if (!['pptx', 'docx'].includes(format)) throw new HttpError(400, 'Unsupported maintenance report format.');
   const report = format === 'pptx'
-    ? await buildMaintenancePptx(req.params.id, database, { showReasonFooter: req.query?.showReasonFooter })
+    ? await buildMaintenancePptx(req.params.id, database, {
+      showReasonFooter: req.query?.showReasonFooter,
+      useFixedLogoOnCover: req.query?.useFixedLogoOnCover,
+    })
     : await buildMaintenanceDocx(req.params.id, database);
   downloadReport(res, report);
 }
@@ -585,7 +999,7 @@ export async function exportMaintenancePptx(req, res, database = defaultDatabase
       return cleaned ? cleaned.split(',').map((id) => id.trim()) : [];
     });
   }
-  for (const key of ['reasonId', 'area', 'groupBy', 'showReasonFooter']) {
+  for (const key of ['reasonId', 'area', 'groupBy', 'showReasonFooter', 'exportId', 'useFixedLogoOnCover']) {
     if (query[key] !== undefined) input[key] = query[key];
   }
   if (input.orderIds === undefined) input.orderIds = [];

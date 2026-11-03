@@ -1,5 +1,7 @@
-import { lstat, mkdir, readdir, realpath, unlink, writeFile } from 'node:fs/promises';
+import { createReadStream, createWriteStream } from 'node:fs';
+import { lstat, mkdir, readdir, realpath, rename, rm, unlink, writeFile } from 'node:fs/promises';
 import { extname, isAbsolute, join, relative, sep } from 'node:path';
+import { pipeline } from 'node:stream/promises';
 import { storageRoot } from '../config/paths.js';
 import { HttpError } from './http.js';
 
@@ -57,11 +59,85 @@ export async function writeStorageFile(relativePath, contents) {
   return { absolutePath, storedPath: segments.join('/') };
 }
 
+export async function copyStorageFile(sourceAbsolutePath, relativePath) {
+  const segments = parseRelativePath(relativePath);
+  const root = await getStorageRoot();
+  const directory = await ensureDirectorySegments(root, segments.slice(0, -1));
+  const absolutePath = join(directory, segments.at(-1));
+  assertInsideRoot(root, absolutePath);
+  const sourceMetadata = await lstat(sourceAbsolutePath);
+  if (sourceMetadata.isSymbolicLink() || !sourceMetadata.isFile()) {
+    throw new HttpError(400, 'Trip photo source must be a regular file.');
+  }
+  try {
+    await pipeline(
+      createReadStream(sourceAbsolutePath),
+      createWriteStream(absolutePath, { flags: 'wx', mode: 0o600 }),
+    );
+  } catch (error) {
+    try { await unlink(absolutePath); } catch (cleanupError) {
+      if (cleanupError.code !== 'ENOENT') throw cleanupError;
+    }
+    throw error;
+  }
+  return { absolutePath, storedPath: segments.join('/') };
+}
+
 export async function ensureStorageDirectory(...pathSegments) {
   const relativePath = pathSegments.join('/');
   const segments = parseRelativePath(relativePath);
   const root = await getStorageRoot();
   return ensureDirectorySegments(root, segments);
+}
+
+export async function moveStorageDirectory(sourceRelativePath, destinationRelativePath) {
+  const sourceSegments = parseRelativePath(sourceRelativePath);
+  const destinationSegments = parseRelativePath(destinationRelativePath);
+  const root = await getStorageRoot();
+  let source = root;
+  for (const segment of sourceSegments) {
+    source = join(source, segment);
+    const metadata = await lstat(source);
+    if (metadata.isSymbolicLink() || !metadata.isDirectory()) {
+      throw new HttpError(400, 'Staged storage folder is not a safe directory.');
+    }
+  }
+  source = await realpath(source);
+  assertInsideRoot(root, source);
+
+  const destination = join(await ensureDirectorySegments(root, destinationSegments.slice(0, -1)), destinationSegments.at(-1));
+  assertInsideRoot(root, destination);
+  try {
+    await lstat(destination);
+    throw new HttpError(409, 'The destination storage folder already exists.');
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
+  await rename(source, destination);
+  return { sourcePath: sourceRelativePath, destinationPath: destinationSegments.join('/') };
+}
+
+export async function removeStorageDirectory(relativePath) {
+  const segments = parseRelativePath(relativePath);
+  const root = await getStorageRoot();
+  let current = root;
+  for (const segment of segments) {
+    current = join(current, segment);
+    let metadata;
+    try {
+      metadata = await lstat(current);
+    } catch (error) {
+      if (error.code === 'ENOENT') return false;
+      throw error;
+    }
+    if (metadata.isSymbolicLink() || !metadata.isDirectory()) {
+      throw new HttpError(403, 'Cannot remove a storage folder containing a symbolic-link path.');
+    }
+  }
+  current = await realpath(current);
+  assertInsideRoot(root, current);
+  await rm(current, { recursive: true, force: false });
+  return true;
 }
 
 export async function listStorageFiles(relativePath, { maxFiles = 10000, onProgress } = {}) {

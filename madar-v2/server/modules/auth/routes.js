@@ -7,10 +7,12 @@ import {
   getSessionUserFromRequest,
   getTokenFromRequest,
   isSetupRequired,
+  refreshRepPresence,
   revokeSession,
   authenticateUser,
 } from './service.js';
 import { env } from '../../config/env.js';
+import { syncRepTracking } from '../rep/service.js';
 
 const router = Router();
 
@@ -45,7 +47,9 @@ router.post('/login', asyncHandler(async (req, res) => {
   if (typeof password !== 'string' || !password || password.length > 1024) {
     throw new HttpError(400, 'Username and password are required.');
   }
-  const result = authenticateUser(username, password);
+  const result = authenticateUser(username, password, undefined, {
+    allowedRoles: ['admin', 'sales', 'operations', 'purchasing'],
+  });
   if (!result) {
     res.status(401).json({ error: 'اسم المستخدم أو كلمة المرور غير صحيحة' });
     return;
@@ -56,7 +60,10 @@ router.post('/login', asyncHandler(async (req, res) => {
 }));
 
 router.post('/logout', (req, res) => {
+  const user = getSessionUserFromRequest(req);
+  if (user?.role === 'rep') syncRepTracking(user, { onDuty: false });
   revokeSession(getTokenFromRequest(req));
+  if (user?.role === 'rep') refreshRepPresence(user.id);
   res.clearCookie(env.authCookieName, authCookieOptions());
   res.json({ ok: true });
 });

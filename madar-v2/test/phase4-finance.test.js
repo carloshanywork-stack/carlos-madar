@@ -287,3 +287,69 @@ test('Phase 4 finance lifecycle keeps integer-cents, stock, custody, billing, an
   assert.equal(unaffordableExpense.response.status, 409);
   assert.equal((await request('/api/finance/treasury')).body.cashBalanceCents, 10_350_000);
 });
+
+test('monthly attendance matrix exports, bulk-marks present idempotently, and feeds draft payroll', async () => {
+  const firstCreated = await request('/api/employees', jsonOptions('POST', {
+    name: 'Monthly Attendance Alpha', department: 'Maintenance', monthly_salary_cents: 260_000,
+  }));
+  assert.equal(firstCreated.response.status, 201, JSON.stringify(firstCreated.body));
+  const alpha = firstCreated.body;
+  const secondCreated = await request('/api/employees', jsonOptions('POST', {
+    name: 'Monthly Attendance Beta', department: 'Workshop', monthly_salary_cents: 234_000,
+  }));
+  assert.equal(secondCreated.response.status, 201, JSON.stringify(secondCreated.body));
+  const beta = secondCreated.body;
+  const inactive = await request(`/api/employees/${beta.id}`, jsonOptions('PATCH', { active: false }));
+  assert.equal(inactive.response.status, 200);
+
+  const month = '2026-02';
+  const initialMatrix = await request(`/api/employees/attendance/monthly?month=${month}`);
+  assert.equal(initialMatrix.response.status, 200, JSON.stringify(initialMatrix.body));
+  assert.equal(initialMatrix.body.month, month);
+  assert.equal(initialMatrix.body.daysInMonth, 28);
+  assert.ok(initialMatrix.body.employees.some((employee) => employee.employee_id === alpha.id));
+  assert.ok(!initialMatrix.body.employees.some((employee) => employee.employee_id === beta.id));
+
+  const allPresentDate = '2026-02-03';
+  const marked = await request('/api/employees/attendance/mark-all-present', jsonOptions('POST', { date: allPresentDate }));
+  assert.equal(marked.response.status, 200, JSON.stringify(marked.body));
+  assert.equal(marked.body.count, initialMatrix.body.employees.length);
+  const recordsAfterFirstMark = db.prepare('SELECT COUNT(*) AS count FROM employee_daily_attendance WHERE work_date = ?').get(allPresentDate).count;
+  const markedAgain = await request('/api/employees/attendance/mark-all-present', jsonOptions('POST', { date: allPresentDate }));
+  assert.equal(markedAgain.response.status, 200);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM employee_daily_attendance WHERE work_date = ?').get(allPresentDate).count, recordsAfterFirstMark,
+    'repeated bulk marking updates the existing employee/date rows without inserting duplicates');
+
+  const batchSave = await request('/api/employees/attendance/monthly', jsonOptions('POST', {
+    month,
+    records: [
+      { employeeId: alpha.id, date: '2026-02-04', status: 'absent' },
+      { employeeId: alpha.id, date: '2026-02-05', status: 'leave' },
+      { employeeId: alpha.id, date: '2026-02-06', status: 'late', overtimeHours: 2.5, notes: 'Half day.' },
+      { employeeId: alpha.id, date: '2026-02-07', status: 'present' },
+    ],
+  }));
+  assert.equal(batchSave.response.status, 200, JSON.stringify(batchSave.body));
+  assert.equal(batchSave.body.daysInMonth, 28);
+  const payroll = await request(`/api/employees/payroll?month=${month}`);
+  assert.equal(payroll.response.status, 200, JSON.stringify(payroll.body));
+  const alphaPayroll = payroll.body.lines.find((line) => line.employee_id === alpha.id);
+  assert.equal(alphaPayroll.present_days, 3, 'bulk present, late, and present statuses count as payroll attendance');
+  assert.equal(alphaPayroll.absent_days, 1);
+  assert.equal(alphaPayroll.overtime_hours, 2.5);
+
+  const exportResponse = await fetch(`${baseUrl}/api/employees/attendance/export-monthly?month=${month}`, {
+    headers: { cookie: authCookie },
+  });
+  assert.equal(exportResponse.status, 200);
+  assert.match(exportResponse.headers.get('content-type'), /spreadsheetml\.sheet/);
+  assert.equal((await exportResponse.arrayBuffer()).byteLength > 4, true);
+
+  const finalized = await request('/api/employees/payroll/finalize', jsonOptions('POST', { month }));
+  assert.equal(finalized.response.status, 200, JSON.stringify(finalized.body));
+  const lockedAttendance = await request('/api/employees/attendance/monthly', jsonOptions('POST', {
+    month,
+    records: [{ employeeId: alpha.id, date: '2026-02-04', status: 'present' }],
+  }));
+  assert.equal(lockedAttendance.response.status, 409, 'finalized payroll months cannot drift from their attendance snapshot');
+});

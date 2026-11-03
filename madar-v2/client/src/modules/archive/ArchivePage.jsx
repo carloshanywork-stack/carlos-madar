@@ -58,7 +58,23 @@ export default function ArchivePage({ isAdmin = false }) {
       {tab === 'analysis' ? <MaintenanceAreaAnalysis /> : <>
         {error && <div className="madar-section"><Alert tone="error">{error}</Alert></div>}
         <section className="madar-panel madar-section">
-          {loading ? <LoadingState label="جارٍ تحميل الأرشيف" /> : orders?.length ? <div className="madar-table-wrap"><table className="madar-table"><thead><tr><th>رقم الأمر</th><th>العميل</th><th>{tab === 'maintenance' ? 'الآلات' : 'المنتج'}</th><th>تاريخ الإغلاق</th><th>الحالة</th><th>عرض / تصدير</th></tr></thead><tbody>{orders.map((order) => <tr key={order.id}><td className="madar-code">{order.order_code}</td><td>{order.client_name}</td><td>{tab === 'maintenance' ? order.card_count : order.product_name}</td><td>{formatDate(order.archived_at ?? order.delivered_at)}</td><td><Badge status={order.status} /></td><td>{tab === 'maintenance' ? <div className="madar-inline-wrap"><Button size="small" variant="secondary" icon="image" onClick={() => openPhotoReport(order)}>معاينة</Button><Button size="small" variant="primary" icon="presentation" onClick={() => openPptxExport(order)}>تصدير PowerPoint</Button><Button size="small" variant="secondary" icon="file" onClick={() => { window.location.href = `/api/maintenance/orders/${order.id}/export.docx`; }}>Word</Button>{isAdmin && <Button size="small" variant="danger" icon="trash" onClick={() => setOrderToDelete(order)}>حذف</Button>}</div> : <Link className="madar-button madar-button-secondary madar-button-small" to={`/workshop/${order.id}`}>تفاصيل الأمر <Icon name="chevron" size={12} /></Link>}</td></tr>)}</tbody></table></div> : <EmptyState icon="archive" title="لا توجد سجلات مؤرشفة" description="ستظهر هنا الطلبات المكتملة مع الاحتفاظ بسجلها التاريخي." />}
+          {loading ? <LoadingState label="جارٍ تحميل الأرشيف" /> : orders?.length ? <div className="madar-table-wrap"><table className="madar-table"><thead><tr><th>رقم الأمر</th><th>العميل</th>{tab === 'maintenance' && <th>المناطق</th>}<th>{tab === 'maintenance' ? 'الآلات' : 'المنتج'}</th><th>تاريخ الإغلاق</th><th>الحالة</th><th>عرض / تصدير</th></tr></thead><tbody>{orders.map((order) => {
+            const areas = order.areas?.length ? order.areas : order.area ? [order.area] : [];
+            return <tr key={order.id}>
+              <td className="madar-code">{order.order_code}</td>
+              <td>{order.client_name}</td>
+              {tab === 'maintenance' && <td>{areas.length ? <div className="madar-inline-wrap" style={{ gap: '4px', maxWidth: '280px', flexWrap: 'wrap' }}>
+                {areas.map((areaName) => <span key={areaName} className="madar-badge madar-badge-info" style={{
+                  fontSize: '11px', padding: '2px 8px', borderRadius: '6px', background: 'rgba(56, 189, 248, 0.12)',
+                  color: '#38bdf8', border: '1px solid rgba(56, 189, 248, 0.25)', fontWeight: 600,
+                }}>{areaName}</span>)}
+              </div> : <span className="madar-muted">—</span>}</td>}
+              <td>{tab === 'maintenance' ? order.card_count : order.product_name}</td>
+              <td>{formatDate(order.archived_at ?? order.delivered_at)}</td>
+              <td><Badge status={order.status} /></td>
+              <td>{tab === 'maintenance' ? <div className="madar-inline-wrap"><Button size="small" variant="secondary" icon="image" onClick={() => openPhotoReport(order)}>معاينة</Button><Button size="small" variant="primary" icon="presentation" onClick={() => openPptxExport(order)}>تصدير PowerPoint</Button><Button size="small" variant="secondary" icon="file" onClick={() => { window.location.href = `/api/maintenance/orders/${order.id}/export.docx`; }}>Word</Button>{isAdmin && <Button size="small" variant="danger" icon="trash" onClick={() => setOrderToDelete(order)}>حذف</Button>}</div> : <Link className="madar-button madar-button-secondary madar-button-small" to={`/workshop/${order.id}`}>تفاصيل الأمر <Icon name="chevron" size={12} /></Link>}</td>
+            </tr>;
+          })}</tbody></table></div> : <EmptyState icon="archive" title="لا توجد سجلات مؤرشفة" description="ستظهر هنا الطلبات المكتملة مع الاحتفاظ بسجلها التاريخي." />}
         </section>
       </>}
       <Modal open={reportOrder !== null} onClose={() => setReportOrder(null)} title="معاينة تقرير الصيانة" description={reportOrder ? `${reportOrder.order_code} · ${reportOrder.client_name}` : ''} wide>

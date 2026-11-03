@@ -9,17 +9,91 @@ import * as yauzl from 'yauzl';
 import multer from 'multer';
 import { Router } from 'express';
 import { db } from '../../database/connection.js';
-import { dataDirectory, projectRoot, storageRoot } from '../../config/paths.js';
+import { backupRoot, dataDirectory, storageMountPath, storageRoot } from '../../config/paths.js';
 import { recordAudit } from '../audit.js';
 import { requestActorId } from '../actor.js';
 import { asyncHandler, HttpError } from '../http.js';
 import { withMaintenanceOrderStorageLock } from '../maintenance/deletion-lock.js';
+import { getStorageHealth } from './health.js';
 
-const backupRoot = resolve(process.env.MADAR_V2_BACKUP_ROOT || join(projectRoot, 'Backups'));
 const MAX_ARCHIVE_BYTES = 10 * 1024 * 1024 * 1024;
 const MAX_ENTRIES = 250_000;
 const SQLITE_HEADER = Buffer.from('SQLite format 3\0', 'binary');
 const router = Router();
+const backupSchedulerState = { lastRunAt: null, lastError: null, timer: null, running: null, nextRunAt: null, stop: null };
+
+export function checkSystemDatabaseHealth(database = db) {
+  const integrity = database.pragma('integrity_check', { simple: true });
+  const foreignKeyViolations = database.pragma('foreign_key_check');
+  return {
+    status: integrity === 'ok' && foreignKeyViolations.length === 0 ? 'ok' : 'error',
+    integrity,
+    foreignKeyViolations: foreignKeyViolations.length,
+    checkedAt: new Date().toISOString(),
+  };
+}
+
+function checkAndCheckpointDatabase(database) {
+  const checkpoint = database.pragma('wal_checkpoint(PASSIVE)')[0];
+  const health = checkSystemDatabaseHealth(database);
+  if (health.status !== 'ok') {
+    throw new Error(`SQLite health check failed: integrity=${health.integrity}, foreignKeyViolations=${health.foreignKeyViolations}`);
+  }
+  return { checkpoint, health };
+}
+
+function nextDailyBackupDate(now = new Date()) {
+  const hour = Number(process.env.MADAR_V2_BACKUP_HOUR ?? 2);
+  const minute = Number(process.env.MADAR_V2_BACKUP_MINUTE ?? 0);
+  if (!Number.isInteger(hour) || hour < 0 || hour > 23 || !Number.isInteger(minute) || minute < 0 || minute > 59) {
+    throw new Error('MADAR_V2_BACKUP_HOUR/MINUTE must specify a valid daily local time.');
+  }
+  const next = new Date(now);
+  next.setHours(hour, minute, 0, 0);
+  if (next <= now) next.setDate(next.getDate() + 1);
+  return next;
+}
+
+export function startSystemBackupScheduler({ database = db, createBackup = createSystemBackup, logger = console } = {}) {
+  if (backupSchedulerState.stop) return stopSystemBackupScheduler;
+  let stopped = false;
+  const schedule = () => {
+    if (stopped) return;
+    const nextRun = nextDailyBackupDate();
+    backupSchedulerState.nextRunAt = nextRun.toISOString();
+    backupSchedulerState.timer = setTimeout(async () => {
+      backupSchedulerState.timer = null;
+      backupSchedulerState.running = (async () => {
+        try {
+          const backup = await createBackup(database);
+          backupSchedulerState.lastRunAt = new Date().toISOString();
+          backupSchedulerState.lastError = null;
+          logger.info?.(`Scheduled MADAR V2 backup created: ${backup.filename}`);
+        } catch (error) {
+          backupSchedulerState.lastError = error.message;
+          logger.error?.('Scheduled MADAR V2 backup failed:', error);
+        } finally {
+          backupSchedulerState.running = null;
+          schedule();
+        }
+      })();
+      await backupSchedulerState.running;
+    }, Math.max(0, nextRun.getTime() - Date.now()));
+    backupSchedulerState.timer.unref?.();
+  };
+  backupSchedulerState.stop = () => { stopped = true; };
+  schedule();
+  return stopSystemBackupScheduler;
+}
+
+export function stopSystemBackupScheduler() {
+  backupSchedulerState.stop?.();
+  backupSchedulerState.stop = null;
+  if (backupSchedulerState.timer) clearTimeout(backupSchedulerState.timer);
+  backupSchedulerState.timer = null;
+  backupSchedulerState.nextRunAt = null;
+  return backupSchedulerState.running ?? Promise.resolve();
+}
 
 function inside(parent, candidate) {
   const rel = relative(parent, candidate);
@@ -293,6 +367,9 @@ function assertNoPreparedMaintenanceDeletion(database) {
     SELECT 1
     FROM maintenance_machine_decommission_operations
     WHERE state = 'prepared'
+    UNION ALL
+    SELECT 1
+    FROM maintenance_unmatched_folder_deletion_operations
     LIMIT 1
   `).get()) {
     throw new HttpError(409, 'A maintenance photo-folder recovery is pending. Restart the server before continuing.');
@@ -302,6 +379,7 @@ function assertNoPreparedMaintenanceDeletion(database) {
 export async function createSystemBackup(database = db) {
   return withMaintenanceOrderStorageLock(async () => {
     assertNoPreparedMaintenanceDeletion(database);
+    const { health } = checkAndCheckpointDatabase(database);
     await ensureBackupDirectory();
     const storage = await safeStorageTree(storageRoot);
     const createdAt = new Date();
@@ -328,7 +406,7 @@ export async function createSystemBackup(database = db) {
       await archive.finalize();
       await done;
       const metadata = await stat(outputPath);
-      return { filename, sizeBytes: metadata.size, createdAt: createdAt.toISOString() };
+      return { filename, sizeBytes: metadata.size, createdAt: createdAt.toISOString(), databaseHealth: health.status };
     } catch (error) {
       await rm(outputPath, { force: true });
       throw error;
@@ -383,6 +461,38 @@ const restoreUpload = multer({
 }).single('file');
 
 router.use(adminOnly);
+router.get('/health', asyncHandler(async (req, res) => {
+  let database;
+  try {
+    database = checkSystemDatabaseHealth();
+  } catch {
+    database = {
+      status: 'error',
+      integrity: 'unavailable',
+      foreignKeyViolations: null,
+      checkedAt: new Date().toISOString(),
+    };
+  }
+  const storage = await getStorageHealth({
+    storagePath: storageMountPath ?? storageRoot,
+    mountRequired: Boolean(storageMountPath),
+  });
+  const status = database.status !== 'ok' || storage.status === 'error'
+    ? 'error'
+    : storage.status === 'warning' ? 'warning' : 'ok';
+  const health = {
+    status,
+    uptimeSeconds: Math.floor(process.uptime()),
+    database,
+    storage,
+    backups: {
+      lastScheduledAt: backupSchedulerState.lastRunAt,
+      lastError: backupSchedulerState.lastError,
+      nextScheduledAt: backupSchedulerState.nextRunAt,
+    },
+  };
+  res.status(status === 'error' ? 503 : 200).json(health);
+}));
 router.post('/backup', asyncHandler(async (req, res) => {
   const backup = await createSystemBackup();
   recordAudit({ actorId: requestActorId(req), action: 'create', entityType: 'system_backup', entityId: 1, newValues: backup });

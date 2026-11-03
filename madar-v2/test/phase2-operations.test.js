@@ -194,6 +194,43 @@ test('Phase 2 client, maintenance, and workshop flows remain isolated and transa
   assert.equal(maintenanceDetail.body.cards[0].machine_code, machine.code);
   assert.deepEqual(maintenanceDetail.body.cards[0].before_photos, [beforePhoto.body.path]);
 
+  const renamedMachineCard = await request(
+    `/api/maintenance/orders/${maintenanceOrder.id}/cards/${card.id}`,
+    jsonOptions('PATCH', { machineCode: 'MACHINE-ACRYLIC-RENAMED' }),
+  );
+  assert.equal(renamedMachineCard.response.status, 200, JSON.stringify(renamedMachineCard.body));
+  assert.equal(renamedMachineCard.body.machine_id, machine.id);
+  assert.equal(renamedMachineCard.body.machine_code, 'MACHINE-ACRYLIC-RENAMED');
+  assert.equal(db.prepare('SELECT code FROM machines WHERE id = ?').get(machine.id).code, 'MACHINE-ACRYLIC-RENAMED');
+
+  const correctMachineCreated = await request('/api/maintenance/machines', jsonOptions('POST', {
+    code: 'MACHINE-ACRYLIC-CORRECT',
+    name_ar: 'آلة الأكريليك الصحيحة',
+    name_en: 'Correct acrylic machine',
+    area: 'Riyadh',
+  }));
+  assert.equal(correctMachineCreated.response.status, 201);
+  const relinkedCard = await request(
+    `/api/maintenance/orders/${maintenanceOrder.id}/cards/${card.id}`,
+    jsonOptions('PATCH', { machineCode: correctMachineCreated.body.code }),
+  );
+  assert.equal(relinkedCard.response.status, 200, JSON.stringify(relinkedCard.body));
+  assert.equal(relinkedCard.body.machine_id, correctMachineCreated.body.id);
+  assert.equal(relinkedCard.body.machine_code, correctMachineCreated.body.code);
+  const machineCodeAudit = db.prepare(`
+    SELECT action, old_values_json, new_values_json FROM audit_log
+    WHERE entity_type = 'maintenance_card' AND entity_id = ? AND action = 'update_card_machine_code'
+    ORDER BY id DESC LIMIT 1
+  `).get(card.id);
+  assert.equal(machineCodeAudit.action, 'update_card_machine_code');
+  assert.equal(JSON.parse(machineCodeAudit.old_values_json).machine_code, 'MACHINE-ACRYLIC-RENAMED');
+  assert.equal(JSON.parse(machineCodeAudit.new_values_json).machine_code, 'MACHINE-ACRYLIC-CORRECT');
+  const invalidMachineCode = await request(
+    `/api/maintenance/orders/${maintenanceOrder.id}/cards/${card.id}`,
+    jsonOptions('PATCH', { machineCode: '../invalid' }),
+  );
+  assert.equal(invalidMachineCode.response.status, 400);
+
   const legacyPhotoPath = 'Clients/Legacy Client/Archived_Orders/LEGACY-ORDER/MACHINE-ACRYLIC-01/Before/legacy-photo.jpg';
   const legacyPhotoAbsolutePath = join(storageDirectory, ...legacyPhotoPath.split('/'));
   mkdirSync(join(storageDirectory, ...legacyPhotoPath.split('/').slice(0, -1)), { recursive: true });
@@ -286,9 +323,14 @@ test('Phase 2 client, maintenance, and workshop flows remain isolated and transa
   const maintenanceList = await request('/api/maintenance/orders?status=archived');
   const workshopList = await request('/api/workshop/orders?status=ready');
   assert.deepEqual(maintenanceList.body.map((order) => order.order_code), [maintenanceOrder.order_code]);
+  assert.deepEqual(maintenanceList.body[0].areas, ['Riyadh']);
+  assert.equal(maintenanceList.body[0].area_summary, 'Riyadh');
   assert.deepEqual(workshopList.body.map((order) => order.order_code), [workshopOrder.order_code]);
   assert.equal(maintenanceList.body.some((order) => order.order_code.startsWith('MFG-')), false);
   assert.equal(workshopList.body.some((order) => order.order_code.startsWith('MN-')), false);
+  db.prepare('UPDATE maintenance_orders SET area = NULL WHERE id = ?').run(maintenanceOrder.id);
+  const legacyAreaList = await request('/api/maintenance/orders?status=archived');
+  assert.deepEqual(legacyAreaList.body[0].areas, ['Riyadh'], 'machine areas provide a fallback for old orders without an area');
   assert.equal((await request('/api/maintenance/orders?status=all')).response.status, 400);
   assert.equal((await request('/api/workshop/orders')).response.status, 400);
 

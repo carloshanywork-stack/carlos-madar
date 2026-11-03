@@ -2,11 +2,14 @@ import { app } from './app.js';
 import { env } from './config/env.js';
 import { db } from './database/connection.js';
 import { initializeDatabase } from './database/init.js';
+import { startSystemBackupScheduler, stopSystemBackupScheduler } from './modules/system/backup.js';
 import {
   recoverMaintenanceCardDeletions,
   recoverMaintenanceMachineDecommissions,
   recoverMaintenanceOrderDeletions,
+  recoverUnmatchedMaintenanceFolderDeletions,
 } from './modules/maintenance/service.js';
+import { recoverRepVisitUploads } from './modules/rep/service.js';
 
 const initialization = initializeDatabase();
 try {
@@ -22,8 +25,16 @@ try {
   if (machineRecovery.recoveredCount) {
     console.log(`Recovered ${machineRecovery.recoveredCount} staged machine decommission(s).`);
   }
+  const unmatchedRecovery = await recoverUnmatchedMaintenanceFolderDeletions();
+  if (unmatchedRecovery.recoveredCount) {
+    console.log(`Recovered ${unmatchedRecovery.recoveredCount} staged unmatched-folder purge(s).`);
+  }
+  const repVisitRecovery = await recoverRepVisitUploads();
+  if (repVisitRecovery.recoveredCount) {
+    console.log(`Recovered ${repVisitRecovery.recoveredCount} interrupted field-rep visit upload(s).`);
+  }
 } catch (error) {
-  console.error(`Maintenance file deletion recovery failed; API startup stopped: ${error.message}`);
+  console.error(`Persistent file recovery failed; API startup stopped: ${error.message}`);
   if (db.open) db.close();
   throw error;
 }
@@ -39,19 +50,23 @@ if (initialization.adminCreated) {
 
 const server = app.listen(env.port, env.host, () => {
   console.log(`MADAR V2 API listening at http://${env.host}:${env.port}`);
+  startSystemBackupScheduler();
 });
 
 let shuttingDown = false;
 function shutdown(signal) {
   if (shuttingDown) return;
   shuttingDown = true;
+  const scheduledBackup = stopSystemBackupScheduler();
   console.log(`${signal} received; shutting down MADAR V2.`);
   server.close((error) => {
     if (error) {
       console.error('HTTP server shutdown failed:', error);
       process.exitCode = 1;
     }
-    if (db.open) db.close();
+    void scheduledBackup.finally(() => {
+      if (db.open) db.close();
+    });
   });
 }
 

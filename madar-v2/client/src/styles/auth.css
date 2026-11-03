@@ -74,6 +74,15 @@
 #madar-app .auth-card-kicker { margin-bottom: 11px; color: var(--auth-green); font-size: 9px; font-weight: 850; letter-spacing: .17em; }
 #madar-app .auth-card h2 { margin: 0; color: var(--auth-ink); font-size: clamp(25px, 3vw, 31px); font-weight: 760; letter-spacing: -.04em; line-height: 1.2; }
 #madar-app .auth-card-description { margin: 10px 0 26px; color: var(--auth-muted); font-size: 12px; line-height: 1.7; }
+#madar-app .auth-account-switch { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin: -10px 0 13px; padding: 4px; border: 1px solid var(--auth-border); border-radius: 11px; background: var(--auth-soft); }
+#madar-app .auth-account-switch button { min-height: 38px; border-radius: 8px; color: var(--auth-muted); background: transparent; cursor: pointer; font-size: 10px; font-weight: 800; }
+#madar-app .auth-account-switch button.active { color: #fff; background: var(--auth-green); box-shadow: 0 3px 9px rgba(12,88,68,.16); }
+#madar-app .auth-server-status { display: flex; min-height: 35px; align-items: center; gap: 8px; margin-bottom: 14px; padding: 0 10px; border: 1px solid #ead4a4; border-radius: 9px; color: #745313; background: #fff8e6; font-size: 9px; font-weight: 750; }
+#madar-app .auth-server-status i { width: 8px; height: 8px; border-radius: 50%; background: #bd8419; }
+#madar-app .auth-server-status.online { border-color: #bbd9cb; color: #165d47; background: #edf7f1; }
+#madar-app .auth-server-status.online i { background: #198267; box-shadow: 0 0 0 3px rgba(25,130,103,.12); }
+#madar-app .auth-server-status.checking i { animation: madar-auth-pulse 1s ease infinite; }
+@keyframes madar-auth-pulse { 50% { opacity: .35; } }
 #madar-app .auth-form { display: grid; gap: 16px; }
 #madar-app .auth-field { display: grid; gap: 7px; color: var(--auth-ink); font-size: 10px; font-weight: 750; }
 #madar-app .auth-field > input,

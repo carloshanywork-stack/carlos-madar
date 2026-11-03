@@ -8,9 +8,15 @@ export class ApiError extends Error {
 }
 
 async function request(path, options = {}) {
+  const headers = new Headers(options.headers ?? {});
+  headers.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+  headers.set('Pragma', 'no-cache');
+  headers.set('Expires', '0');
   const response = await fetch(path, {
     credentials: 'include',
     ...options,
+    cache: 'no-store',
+    headers,
   });
   const contentType = response.headers.get('content-type') ?? '';
   const payload = contentType.includes('application/json')

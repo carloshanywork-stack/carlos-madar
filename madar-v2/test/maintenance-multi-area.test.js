@@ -15,7 +15,11 @@ process.env.MADAR_V2_STORAGE_ROOT = storageRoot;
 process.env.MADAR_V2_BACKUP_ROOT = join(temporaryDirectory, 'Backups');
 process.env.NODE_ENV = 'test';
 
-const [{ app }, { db }, { initializeDatabase }, { recoverMaintenanceCardDeletions, recoverMaintenanceMachineDecommissions }] = await Promise.all([
+const [{ app }, { db }, { initializeDatabase }, {
+  recoverMaintenanceCardDeletions,
+  recoverMaintenanceMachineDecommissions,
+  recoverUnmatchedMaintenanceFolderDeletions,
+}] = await Promise.all([
   import('../server/app.js'),
   import('../server/database/connection.js'),
   import('../server/database/init.js'),
@@ -61,6 +65,15 @@ function json(method, body) {
   return { method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) };
 }
 
+function assertNoCache(response) {
+  const cacheControl = response.headers.get('cache-control') ?? '';
+  for (const directive of ['private', 'no-cache', 'no-store', 'must-revalidate']) {
+    assert.ok(cacheControl.includes(directive), `cache-control must include ${directive}; got ${cacheControl}`);
+  }
+  assert.equal(response.headers.get('pragma'), 'no-cache');
+  assert.equal(response.headers.get('expires'), '0');
+}
+
 function createZip(entries) {
   return new Promise((resolve, reject) => {
     const chunks = [];
@@ -87,6 +100,12 @@ test('maintenance orders accept multiple areas and use every selected area for p
     autoPopulateAreaMachines: true,
   }));
   assert.equal(arrayOrder.response.status, 201, JSON.stringify(arrayOrder.body));
+  const ordersList = await request('/api/maintenance/orders?status=in_progress');
+  assert.equal(ordersList.response.status, 200);
+  assertNoCache(ordersList.response);
+  const orderDetail = await request(`/api/maintenance/orders/${arrayOrder.body.id}`);
+  assert.equal(orderDetail.response.status, 200);
+  assertNoCache(orderDetail.response);
   assert.equal(arrayOrder.body.area, 'North، South');
   assert.deepEqual(new Set(arrayOrder.body.cards.map((card) => card.machine_id)), new Set([northMachine, southMachine]));
   assert.equal(arrayOrder.body.cards.some((card) => card.machine_id === outsideMachine), false);
@@ -190,6 +209,62 @@ test('maintenance orders accept multiple areas and use every selected area for p
   const storageCompletedProgress = await request(`/api/maintenance/orders/${legacyAreaOrder.body.id}/trip-progress`);
   assert.equal(storageCompletedProgress.body.percent, 100);
   assert.equal(storageCompletedProgress.body.processed, storageCompletedProgress.body.total);
+});
+
+test('duplicate trip folders keep the first machine match and route later folders to review without merging photos', async () => {
+  const clientId = Number(db.prepare('INSERT INTO clients (code, name) VALUES (?, ?)').run('C-DUPLICATE-FOLDERS', 'Duplicate Folder Client').lastInsertRowid);
+  const machineId = Number(db.prepare(`
+    INSERT INTO machines (code, name_ar, name_en, area) VALUES (?, ?, ?, ?)
+  `).run('DUNES-DUP-01', 'فرع ديونز', 'Dunes Branch', 'Duplicate Area').lastInsertRowid);
+  const order = await request('/api/maintenance/orders', json('POST', {
+    clientId,
+    areas: ['Duplicate Area'],
+    employeeIds: [],
+    autoPopulateAreaMachines: false,
+  }));
+  assert.equal(order.response.status, 201, JSON.stringify(order.body));
+  assert.equal(order.body.cards.length, 0);
+
+  const photo = await sharp({ create: { width: 24, height: 18, channels: 3, background: '#ba542c' } }).png().toBuffer();
+  const tripZip = await createZip([
+    ['فرع ديونز/Before/before.png', photo],
+    ['DUNES-DUP-01/After/after.png', photo],
+  ]);
+  const tripForm = new FormData();
+  tripForm.append('file', new Blob([tripZip], { type: 'application/zip' }), 'duplicate-match-trip.zip');
+  const processed = await request(`/api/maintenance/orders/${order.body.id}/process-folder`, {
+    method: 'POST',
+    body: tripForm,
+  });
+  assert.equal(processed.response.status, 200, JSON.stringify(processed.body));
+  assert.equal(processed.body.matchedMachineCount, 1);
+  assert.equal(processed.body.unmatchedFolderCount, 1);
+  assert.deepEqual(processed.body.duplicateWarnings, [{
+    machineId,
+    machineName: 'فرع ديونز',
+    originalFolder: 'فرع ديونز',
+    duplicateFolder: 'DUNES-DUP-01',
+  }]);
+
+  const card = processed.body.order.cards.find((candidate) => candidate.machine_id === machineId);
+  assert.ok(card);
+  assert.equal(card.before_photos.length, 1);
+  assert.equal(card.after_photos.length, 0);
+  const thumbnail = await request(card.before_thumbnail_urls[0]);
+  assert.equal(thumbnail.response.status, 200, JSON.stringify(thumbnail.body));
+  assert.equal(thumbnail.response.headers.get('content-type'), 'image/webp');
+  assertNoCache(thumbnail.response);
+  assert.deepEqual((await sharp(thumbnail.body).metadata()).format, 'webp');
+  const originalPhoto = await request(card.before_photo_urls[0]);
+  assert.equal(originalPhoto.response.status, 200);
+  assertNoCache(originalPhoto.response);
+  const [duplicateFolder] = processed.body.order.unmatched_folders;
+  assert.equal(duplicateFolder.folder_name, 'DUNES-DUP-01');
+  assert.equal(duplicateFolder.is_duplicate, true);
+  assert.equal(duplicateFolder.duplicate_of_folder, 'فرع ديونز');
+  assert.equal(duplicateFolder.duplicate_machine_id, machineId);
+  assert.equal(duplicateFolder.before_photos.length, 0);
+  assert.equal(duplicateFolder.after_photos.length, 1);
 });
 
 test('maintenance card decommission stages files, rolls them back on database failure, audits, and deactivates the machine', async () => {
@@ -302,6 +377,150 @@ test('maintenance card decommission stages files, rolls them back on database fa
   assert.equal(JSON.parse(machineAudit.old_values_json).code, machineCode);
   assert.equal(JSON.parse(machineAudit.new_values_json).active, 0);
   assert.deepEqual(await recoverMaintenanceCardDeletions(), { recoveredCount: 0 });
+});
+
+test('maintenance card photos can be moved or deleted without losing files on DB failure', async () => {
+  const clientCode = 'PHOTO-PHASE-CLIENT';
+  const clientId = Number(db.prepare('INSERT INTO clients (code, name) VALUES (?, ?)').run(clientCode, 'Photo Phase Client').lastInsertRowid);
+  const area = 'Photo Phase North';
+  const machineResponse = await request('/api/maintenance/machines', json('POST', {
+    code: 'PHOTO-PHASE-01',
+    name_ar: 'ماكينة اختبار الصور',
+    area,
+  }));
+  assert.equal(machineResponse.response.status, 201, JSON.stringify(machineResponse.body));
+  const orderResponse = await request('/api/maintenance/orders', json('POST', {
+    clientId,
+    areas: [area],
+    employeeIds: [],
+    autoPopulateAreaMachines: true,
+  }));
+  assert.equal(orderResponse.response.status, 201, JSON.stringify(orderResponse.body));
+  const card = orderResponse.body.cards.find((item) => item.machine_id === machineResponse.body.id);
+  assert.ok(card);
+
+  const photoBytes = Buffer.from('photo phase test bytes');
+  async function uploadPhoto(phase, index) {
+    const form = new FormData();
+    form.append('photo', new Blob([photoBytes], { type: 'image/png' }), `${phase}-${index}.png`);
+    const result = await request(`/api/maintenance/orders/${orderResponse.body.id}/cards/${card.id}/photos/${phase}`, {
+      method: 'POST',
+      body: form,
+    });
+    assert.equal(result.response.status, 201, JSON.stringify(result.body));
+    return result.body;
+  }
+
+  const beforePhotos = [];
+  for (let index = 0; index < 4; index += 1) beforePhotos.push(await uploadPhoto('before', index));
+  const afterPhoto = await uploadPhoto('after', 0);
+  const movedPhoto = beforePhotos[0];
+  const movedFilename = movedPhoto.path.split('/').at(-1);
+  const movedStoredPath = movedPhoto.path.replace(/\/before\//i, '/after/');
+  db.prepare("UPDATE maintenance_cards SET status = 'completed' WHERE id = ?").run(card.id);
+
+  // Unrelated edits should not revalidate paths left in the old phase by earlier move operations.
+  db.prepare('UPDATE maintenance_cards SET after_photos_json = ? WHERE id = ?')
+    .run(JSON.stringify([beforePhotos[1].path]), card.id);
+  const notesOnlyUpdate = await request(`/api/maintenance/orders/${orderResponse.body.id}/cards/${card.id}`, json('PATCH', {
+    notes: 'Card update without photo changes.',
+  }));
+  assert.equal(notesOnlyUpdate.response.status, 200, JSON.stringify(notesOnlyUpdate.body));
+  const restoreAfterPhotos = await request(`/api/maintenance/orders/${orderResponse.body.id}/cards/${card.id}`, json('PATCH', {
+    afterPhotos: [afterPhoto.path],
+  }));
+  assert.equal(restoreAfterPhotos.response.status, 200, JSON.stringify(restoreAfterPhotos.body));
+
+  const fullPhaseMove = await request(`/api/maintenance/orders/${orderResponse.body.id}/cards/${card.id}/photos/move`, json('POST', {
+    fromPhase: 'after',
+    toPhase: 'before',
+    filename: afterPhoto.path.split('/').at(-1),
+  }));
+  assert.equal(fullPhaseMove.response.status, 400);
+  assert.equal(db.prepare('SELECT status FROM maintenance_cards WHERE id = ?').get(card.id).status, 'completed');
+
+  const moved = await request(`/api/maintenance/orders/${orderResponse.body.id}/cards/${card.id}/photos/move`, json('POST', {
+    fromPhase: 'before',
+    toPhase: 'after',
+    filename: movedFilename,
+  }));
+  assert.equal(moved.response.status, 200, JSON.stringify(moved.body));
+  assert.equal(moved.body.status, 'completed');
+  assert.equal(moved.body.path, movedStoredPath);
+  assert.equal(existsSync(join(storageRoot, ...movedPhoto.path.split('/'))), false, 'the old phase path should no longer exist');
+  assert.equal(existsSync(join(storageRoot, ...movedStoredPath.split('/'))), true, 'moving a photo should relocate its file');
+  assert.ok(moved.body.path.includes('/after/'), 'the stored path should reflect the destination phase');
+  const movedDownload = await request(`/api/maintenance/orders/${orderResponse.body.id}/cards/${card.id}/photos/after/${encodeURIComponent(movedFilename)}`);
+  assert.equal(movedDownload.response.status, 200);
+  assert.deepEqual(movedDownload.body, photoBytes);
+
+  const deletedMovedPhoto = await request(`/api/maintenance/orders/${orderResponse.body.id}/cards/${card.id}/photos/after/${encodeURIComponent(movedFilename)}`, {
+    method: 'DELETE',
+  });
+  assert.equal(deletedMovedPhoto.response.status, 200, JSON.stringify(deletedMovedPhoto.body));
+  assert.equal(existsSync(join(storageRoot, ...movedStoredPath.split('/'))), false, 'deleting a photo should remove its stored file');
+  assert.equal(db.prepare('SELECT status FROM maintenance_cards WHERE id = ?').get(card.id).status, 'completed');
+
+  const afterFilename = afterPhoto.path.split('/').at(-1);
+  const deletedLastAfterPhoto = await request(`/api/maintenance/orders/${orderResponse.body.id}/cards/${card.id}/photos/after/${encodeURIComponent(afterFilename)}`, {
+    method: 'DELETE',
+  });
+  assert.equal(deletedLastAfterPhoto.response.status, 200, JSON.stringify(deletedLastAfterPhoto.body));
+  assert.equal(deletedLastAfterPhoto.body.status, 'pending');
+  assert.equal(db.prepare('SELECT status FROM maintenance_cards WHERE id = ?').get(card.id).status, 'pending');
+
+  const retainedPhoto = beforePhotos[1];
+  const retainedFilename = retainedPhoto.path.split('/').at(-1);
+  db.exec(`
+    CREATE TRIGGER fail_maintenance_photo_update
+    BEFORE UPDATE OF before_photos_json, after_photos_json ON maintenance_cards
+    WHEN OLD.id = ${card.id}
+    BEGIN SELECT RAISE(ABORT, 'forced photo update failure'); END;
+  `);
+  const failedDelete = await request(`/api/maintenance/orders/${orderResponse.body.id}/cards/${card.id}/photos/before/${encodeURIComponent(retainedFilename)}`, {
+    method: 'DELETE',
+  });
+  assert.equal(failedDelete.response.status, 500);
+  assert.equal(existsSync(join(storageRoot, ...retainedPhoto.path.split('/'))), true, 'the file must remain when its database update fails');
+  assert.ok(JSON.parse(db.prepare('SELECT before_photos_json FROM maintenance_cards WHERE id = ?').get(card.id).before_photos_json).includes(retainedPhoto.path));
+  db.exec('DROP TRIGGER fail_maintenance_photo_update');
+
+  db.prepare("UPDATE maintenance_orders SET status = 'archived' WHERE id = ?").run(orderResponse.body.id);
+  const archivedMove = await request(`/api/maintenance/orders/${orderResponse.body.id}/cards/${card.id}/photos/move`, json('POST', {
+    fromPhase: 'before',
+    toPhase: 'after',
+    filename: retainedFilename,
+  }));
+  const archivedMovedPath = retainedPhoto.path.replace(/\\/g, '/').replace(/\/before\//i, '/after/');
+  assert.equal(archivedMove.response.status, 200, JSON.stringify(archivedMove.body));
+  assert.equal(archivedMove.body.path, archivedMovedPath);
+  assert.equal(existsSync(join(storageRoot, ...retainedPhoto.path.split('/'))), false, 'archived move removes the original phase path');
+  assert.equal(existsSync(join(storageRoot, ...archivedMovedPath.split('/'))), true, 'archived move keeps the photo in the destination phase');
+  assert.ok(JSON.parse(db.prepare('SELECT after_photos_json FROM maintenance_cards WHERE id = ?').get(card.id).after_photos_json).includes(archivedMovedPath));
+
+  const archivedDelete = await request(`/api/maintenance/orders/${orderResponse.body.id}/cards/${card.id}/photos/after/${encodeURIComponent(retainedFilename)}`, {
+    method: 'DELETE',
+  });
+  assert.equal(archivedDelete.response.status, 200, JSON.stringify(archivedDelete.body));
+  assert.equal(existsSync(join(storageRoot, ...archivedMovedPath.split('/'))), false, 'archived deletion removes the stored photo');
+  assert.ok(!JSON.parse(db.prepare('SELECT after_photos_json FROM maintenance_cards WHERE id = ?').get(card.id).after_photos_json).includes(archivedMovedPath));
+
+  const moveAudit = db.prepare(`
+    SELECT action, old_values_json, new_values_json
+    FROM audit_log WHERE entity_type = 'maintenance_card' AND entity_id = ? AND action = 'photo_move'
+    ORDER BY id DESC LIMIT 1
+  `).get(card.id);
+  assert.equal(moveAudit.action, 'photo_move');
+  assert.equal(JSON.parse(moveAudit.old_values_json).fromPhase, 'before');
+  assert.equal(JSON.parse(moveAudit.new_values_json).status, 'completed');
+  const deleteAudit = db.prepare(`
+    SELECT action, old_values_json FROM audit_log
+    WHERE entity_type = 'maintenance_card' AND entity_id = ? AND action = 'photo_delete'
+    ORDER BY id DESC LIMIT 1
+  `).get(card.id);
+  assert.equal(deleteAudit.action, 'photo_delete');
+  assert.equal(JSON.parse(deleteAudit.old_values_json).phase, 'after');
+  assert.equal(JSON.parse(deleteAudit.old_values_json).photo, archivedMovedPath);
 });
 
 test('maintenance card startup recovery restores staged folders for an uncommitted deletion', async () => {
@@ -435,6 +654,200 @@ test('machine decommission startup recovery restores folders before the DB commi
   assert.equal(machine.active, 1);
   assert.equal(machine.deleted_at, null);
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM maintenance_machine_decommission_operations').get().count, 0);
+});
+
+test('unmatched-folder purge stages archive/source directories, rolls back failures, deletes rows, and audits', async () => {
+  const clientCode = 'UNMATCHED-PURGE-CLIENT';
+  const clientId = Number(db.prepare('INSERT INTO clients (code, name) VALUES (?, ?)').run(clientCode, 'Unmatched Purge Client').lastInsertRowid);
+  const orderResponse = await request('/api/maintenance/orders', json('POST', {
+    clientId,
+    areas: ['Purge North'],
+    employeeIds: [],
+    autoPopulateAreaMachines: false,
+  }));
+  assert.equal(orderResponse.response.status, 201, JSON.stringify(orderResponse.body));
+
+  const folderName = 'Unknown Compressor';
+  const sourceName = 'Areas/Purge Source';
+  const archiveDirectory = `Clients/${clientCode}/Archived_Orders/${orderResponse.body.order_code}/Unmatched/${folderName}`;
+  const sourceDirectory = `${sourceName}/ ${folderName}`;
+  const beforePhoto = `${archiveDirectory}/Before/before.png`;
+  const afterPhoto = `${archiveDirectory}/After/after.png`;
+  for (const [path, contents] of [
+    [beforePhoto, 'before-photo'],
+    [afterPhoto, 'after-photo'],
+    [`${sourceDirectory}/Before/source-before.png`, 'source-before'],
+    [`${sourceDirectory}/After/source-after.png`, 'source-after'],
+  ]) {
+    const segments = path.split('/');
+    mkdirSync(join(storageRoot, ...segments.slice(0, -1)), { recursive: true });
+    writeFileSync(join(storageRoot, ...segments), contents);
+  }
+  const folderId = Number(db.prepare(`
+    INSERT INTO maintenance_unmatched_folders
+      (order_id, folder_name, source_name, before_photos_json, after_photos_json)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(orderResponse.body.id, folderName, sourceName, JSON.stringify([beforePhoto]), JSON.stringify([afterPhoto])).lastInsertRowid);
+
+  db.exec(`
+    CREATE TRIGGER fail_unmatched_folder_purge
+    BEFORE DELETE ON maintenance_unmatched_folders
+    WHEN OLD.id = ${folderId}
+    BEGIN SELECT RAISE(ABORT, 'forced unmatched folder purge failure'); END;
+  `);
+  const failed = await request(`/api/maintenance/orders/${orderResponse.body.id}/unmatched/${folderId}`, { method: 'DELETE' });
+  assert.equal(failed.response.status, 500);
+  assert.equal(db.prepare('SELECT status FROM maintenance_unmatched_folders WHERE id = ?').get(folderId).status, 'pending');
+  assert.equal(existsSync(join(storageRoot, ...archiveDirectory.split('/'))), true);
+  assert.equal(existsSync(join(storageRoot, ...sourceDirectory.split('/'))), true);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM maintenance_unmatched_folder_deletion_operations').get().count, 0);
+  db.exec('DROP TRIGGER fail_unmatched_folder_purge');
+
+  const deleted = await request(`/api/maintenance/orders/${orderResponse.body.id}/unmatched/${folderId}`, { method: 'DELETE' });
+  assert.equal(deleted.response.status, 200, JSON.stringify(deleted.body));
+  assert.equal(deleted.body.deleted, true);
+  assert.equal(deleted.body.folderName, folderName);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM maintenance_unmatched_folders WHERE id = ?').get(folderId).count, 0);
+  assert.equal(existsSync(join(storageRoot, ...archiveDirectory.split('/'))), false);
+  assert.equal(existsSync(join(storageRoot, ...sourceDirectory.split('/'))), false);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM maintenance_unmatched_folder_deletion_operations').get().count, 0);
+  const audit = db.prepare(`
+    SELECT action, entity_type, entity_id, old_values_json, new_values_json
+    FROM audit_log WHERE action = 'delete_unmatched_folder' AND entity_type = 'maintenance_unmatched_folder' AND entity_id = ?
+    ORDER BY id DESC LIMIT 1
+  `).get(folderId);
+  assert.equal(audit.action, 'delete_unmatched_folder');
+  assert.equal(audit.entity_type, 'maintenance_unmatched_folder');
+  assert.equal(audit.entity_id, folderId);
+  assert.deepEqual(JSON.parse(audit.old_values_json), {
+    folder_name: folderName,
+    source_name: sourceName,
+    before_count: 1,
+    after_count: 1,
+  });
+  assert.equal(audit.new_values_json, null);
+});
+
+test('unmatched-folder startup recovery restores prepared purges and completes committed purges', async () => {
+  const clientCode = 'UNMATCHED-RECOVERY-CLIENT';
+  const clientId = Number(db.prepare('INSERT INTO clients (code, name) VALUES (?, ?)').run(clientCode, 'Unmatched Recovery Client').lastInsertRowid);
+  const orderResponse = await request('/api/maintenance/orders', json('POST', {
+    clientId,
+    areas: ['Purge Recovery North'],
+    employeeIds: [],
+    autoPopulateAreaMachines: false,
+  }));
+  assert.equal(orderResponse.response.status, 201, JSON.stringify(orderResponse.body));
+
+  const createFixture = (folderName, sourceName) => {
+    const archiveDirectory = `Clients/${clientCode}/Archived_Orders/${orderResponse.body.order_code}/Unmatched/${folderName}`;
+    const sourceDirectory = `${sourceName}/${folderName}`;
+    mkdirSync(join(storageRoot, ...archiveDirectory.split('/')), { recursive: true });
+    mkdirSync(join(storageRoot, ...sourceDirectory.split('/')), { recursive: true });
+    writeFileSync(join(storageRoot, ...archiveDirectory.split('/'), 'photo.png'), folderName);
+    writeFileSync(join(storageRoot, ...sourceDirectory.split('/'), 'source.png'), folderName);
+    const folderId = Number(db.prepare(`
+      INSERT INTO maintenance_unmatched_folders (order_id, folder_name, source_name)
+      VALUES (?, ?, ?)
+    `).run(orderResponse.body.id, folderName, sourceName).lastInsertRowid);
+    const targets = [
+      { path: archiveDirectory, kind: 'directory' },
+      { path: sourceDirectory, kind: 'directory' },
+    ];
+    return { folderId, folderName, sourceName, archiveDirectory, sourceDirectory, targets };
+  };
+  const stageFixture = (fixture, state) => {
+    const operationId = randomUUID();
+    const stageDirectory = join(storageRoot, '.madar-recovery', 'maintenance-unmatched-folder-deletions', operationId);
+    mkdirSync(stageDirectory, { recursive: true });
+    for (const [index, target] of fixture.targets.entries()) {
+      const source = join(storageRoot, ...target.path.split('/'));
+      renameSync(source, join(stageDirectory, `item-${index}`));
+    }
+    db.prepare(`
+      INSERT INTO maintenance_unmatched_folder_deletion_operations
+        (operation_id, folder_id, order_id, client_code, order_code, folder_name, source_name, targets_json, state)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      operationId,
+      fixture.folderId,
+      orderResponse.body.id,
+      clientCode,
+      orderResponse.body.order_code,
+      fixture.folderName,
+      fixture.sourceName,
+      JSON.stringify(fixture.targets),
+      state,
+    );
+    return { operationId, stageDirectory };
+  };
+
+  const preparedFixture = createFixture('Prepared Unknown', 'Areas/Prepared Purge');
+  const preparedStage = stageFixture(preparedFixture, 'prepared');
+  const committedFixture = createFixture('Committed Unknown', 'Areas/Committed Purge');
+  const committedStage = stageFixture(committedFixture, 'committed');
+  db.prepare('DELETE FROM maintenance_unmatched_folders WHERE id = ?').run(committedFixture.folderId);
+  db.prepare(`
+    INSERT INTO audit_log (action, entity_type, entity_id, old_values_json, new_values_json)
+    VALUES ('delete_unmatched_folder', 'maintenance_unmatched_folder', ?, '{}', NULL)
+  `).run(committedFixture.folderId);
+
+  assert.deepEqual(await recoverUnmatchedMaintenanceFolderDeletions(), { recoveredCount: 2 });
+  assert.equal(existsSync(join(storageRoot, ...preparedFixture.archiveDirectory.split('/'))), true);
+  assert.equal(existsSync(join(storageRoot, ...preparedFixture.sourceDirectory.split('/'))), true);
+  assert.equal(existsSync(preparedStage.stageDirectory), false);
+  assert.equal(db.prepare('SELECT status FROM maintenance_unmatched_folders WHERE id = ?').get(preparedFixture.folderId).status, 'pending');
+  assert.equal(existsSync(join(storageRoot, ...committedFixture.archiveDirectory.split('/'))), false);
+  assert.equal(existsSync(join(storageRoot, ...committedFixture.sourceDirectory.split('/'))), false);
+  assert.equal(existsSync(committedStage.stageDirectory), false);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM maintenance_unmatched_folder_deletion_operations').get().count, 0);
+});
+
+test('unmatched-folder purge rejects archived and bound folders without deleting ZIP sources', async () => {
+  const clientCode = 'UNMATCHED-PURGE-ZIP-CLIENT';
+  const clientId = Number(db.prepare('INSERT INTO clients (code, name) VALUES (?, ?)').run(clientCode, 'Unmatched ZIP Client').lastInsertRowid);
+  const orderResponse = await request('/api/maintenance/orders', json('POST', {
+    clientId,
+    areas: ['ZIP Purge North'],
+    employeeIds: [],
+    autoPopulateAreaMachines: false,
+  }));
+  assert.equal(orderResponse.response.status, 201, JSON.stringify(orderResponse.body));
+
+  const folderName = 'ZIP Unknown';
+  const sourceName = 'maintenance-trip.zip';
+  const archiveDirectory = `Clients/${clientCode}/Archived_Orders/${orderResponse.body.order_code}/Unmatched/${folderName}`;
+  const photoPath = `${archiveDirectory}/Before/photo.png`;
+  mkdirSync(join(storageRoot, ...archiveDirectory.split('/'), 'Before'), { recursive: true });
+  writeFileSync(join(storageRoot, ...photoPath.split('/')), 'zip-photo');
+  const zipPath = join(storageRoot, sourceName);
+  writeFileSync(zipPath, 'original-zip');
+  const folderId = Number(db.prepare(`
+    INSERT INTO maintenance_unmatched_folders
+      (order_id, folder_name, source_name, before_photos_json)
+    VALUES (?, ?, ?, ?)
+  `).run(orderResponse.body.id, folderName, sourceName, JSON.stringify([photoPath])).lastInsertRowid);
+
+  db.prepare("UPDATE maintenance_orders SET status = 'archived' WHERE id = ?").run(orderResponse.body.id);
+  const archivedDelete = await request(`/api/maintenance/orders/${orderResponse.body.id}/unmatched/${folderId}`, { method: 'DELETE' });
+  assert.equal(archivedDelete.response.status, 409);
+  assert.equal(db.prepare('SELECT status FROM maintenance_unmatched_folders WHERE id = ?').get(folderId).status, 'pending');
+  assert.equal(existsSync(join(storageRoot, ...archiveDirectory.split('/'))), true);
+  assert.equal(existsSync(zipPath), true);
+
+  db.prepare("UPDATE maintenance_orders SET status = 'in_progress' WHERE id = ?").run(orderResponse.body.id);
+  const deleted = await request(`/api/maintenance/orders/${orderResponse.body.id}/unmatched/${folderId}`, { method: 'DELETE' });
+  assert.equal(deleted.response.status, 200, JSON.stringify(deleted.body));
+  assert.equal(existsSync(join(storageRoot, ...archiveDirectory.split('/'))), false);
+  assert.equal(existsSync(zipPath), true, 'the original ZIP source must not be deleted');
+
+  const boundFolderId = Number(db.prepare(`
+    INSERT INTO maintenance_unmatched_folders (order_id, folder_name, source_name, status)
+    VALUES (?, 'Already Bound', ?, 'bound')
+  `).run(orderResponse.body.id, sourceName).lastInsertRowid);
+  const boundDelete = await request(`/api/maintenance/orders/${orderResponse.body.id}/unmatched/${boundFolderId}`, { method: 'DELETE' });
+  assert.equal(boundDelete.response.status, 404);
+  assert.equal(db.prepare('SELECT status FROM maintenance_unmatched_folders WHERE id = ?').get(boundFolderId).status, 'bound');
 });
 
 test('machine creation restores matching soft-deleted and inactive codes, audits changes, and rejects active duplicates', async () => {

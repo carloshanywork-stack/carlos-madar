@@ -107,7 +107,9 @@ function revokeLinkedLogin(employee, actorId, database) {
   if (!employee.user_id) return;
   const user = database.prepare('SELECT id, active, deleted_at FROM users WHERE id = ?').get(employee.user_id);
   if (!user) return;
-  if (!user.deleted_at && user.active !== 0) database.prepare('UPDATE users SET active = 0 WHERE id = ?').run(user.id);
+  if (!user.deleted_at && user.active !== 0) {
+    database.prepare('UPDATE users SET active = 0, is_online = 0 WHERE id = ?').run(user.id);
+  }
   const revokedSessions = database.prepare(`
     UPDATE sessions SET revoked_at = CURRENT_TIMESTAMP WHERE user_id = ? AND revoked_at IS NULL
   `).run(user.id).changes;
@@ -183,6 +185,7 @@ export function saveAttendance(input, actorId = null, database = db) {
   allowOnlyKeys(body, ['date', 'records']);
   const date = isoDate(body.date, 'date');
   if (!date) throw new HttpError(400, 'date is required.');
+  assertAttendanceMonthOpen(date.slice(0, 7), database);
   if (!Array.isArray(body.records) || body.records.length > 1000) throw new HttpError(400, 'records must be an array of at most 1,000 attendance records.');
   const records = body.records.map((record, index) => {
     const item = requireObject(record, `records[${index}]`);
@@ -265,6 +268,123 @@ function parseMonth(value) {
   const start = `${value}-01`;
   const end = month === 12 ? `${year + 1}-01-01` : `${year}-${String(month + 1).padStart(2, '0')}-01`;
   return { month: value, start, end };
+}
+
+function assertAttendanceMonthOpen(month, database) {
+  const payrollRun = database.prepare('SELECT status FROM payroll_runs WHERE month_year = ?').get(month);
+  if (payrollRun?.status === 'finalized') {
+    throw new HttpError(409, `Attendance for ${month} is locked because payroll has been finalized.`);
+  }
+}
+
+function attendanceRecord(record, index, { includeDate = false } = {}) {
+  const item = requireObject(record, `records[${index}]`);
+  allowOnlyKeys(item, ['employeeId', 'status', 'overtimeHours', 'notes', ...(includeDate ? ['date'] : [])]);
+  const employeeId = positiveId(item.employeeId, `records[${index}].employeeId`);
+  if (!ATTENDANCE_STATUSES.includes(item.status)) throw new HttpError(400, `records[${index}].status is not valid.`);
+  const overtimeHours = item.overtimeHours === undefined ? 0 : item.overtimeHours;
+  if (typeof overtimeHours !== 'number' || !Number.isFinite(overtimeHours) || overtimeHours < 0 || overtimeHours > 24) {
+    throw new HttpError(400, `records[${index}].overtimeHours must be between 0 and 24.`);
+  }
+  const normalized = {
+    employeeId,
+    status: item.status,
+    overtimeHours,
+    notes: optionalText(item.notes, `records[${index}].notes`, { maxLength: 1000 }),
+  };
+  if (includeDate) {
+    normalized.date = isoDate(item.date, `records[${index}].date`);
+    if (!normalized.date) throw new HttpError(400, `records[${index}].date is required.`);
+  }
+  return normalized;
+}
+
+export function getMonthlyAttendance(monthValue, database = db) {
+  const { month, start, end } = parseMonth(monthValue);
+  const [year, monthNumber] = month.split('-').map(Number);
+  const daysInMonth = new Date(year, monthNumber, 0).getDate();
+  const employees = database.prepare(`
+    SELECT id AS employee_id, name, COALESCE(department_label, department) AS department
+    FROM employees
+    WHERE active = 1 AND deleted_at IS NULL
+    ORDER BY COALESCE(department_label, department) COLLATE NOCASE, name COLLATE NOCASE, id
+  `).all();
+  const records = database.prepare(`
+    SELECT attendance.employee_id, attendance.work_date AS date, attendance.status,
+      attendance.overtime_hours, attendance.notes
+    FROM employee_daily_attendance attendance
+    JOIN employees employee ON employee.id = attendance.employee_id
+    WHERE work_date >= ? AND work_date < ?
+      AND employee.active = 1 AND employee.deleted_at IS NULL
+    ORDER BY attendance.work_date, attendance.employee_id
+  `).all(start, end);
+  return { month, daysInMonth, employees, records };
+}
+
+export function markAllPresent(dateValue, actorId = null, database = db) {
+  const date = isoDate(dateValue, 'date');
+  if (!date) throw new HttpError(400, 'date is required.');
+  const month = date.slice(0, 7);
+  assertAttendanceMonthOpen(month, database);
+  const employees = database.prepare(`
+    SELECT id FROM employees WHERE active = 1 AND deleted_at IS NULL ORDER BY id
+  `).all();
+  const existingAttendance = database.prepare(`
+    SELECT status, overtime_hours, notes FROM employee_daily_attendance
+    WHERE employee_id = ? AND work_date = ?
+  `);
+  const upsert = database.prepare(`
+    INSERT INTO employee_daily_attendance (employee_id, work_date, status, overtime_hours)
+    VALUES (?, ?, 'present', 0)
+    ON CONFLICT(employee_id, work_date) DO UPDATE SET status = 'present'
+  `);
+  database.transaction(() => {
+    for (const employee of employees) {
+      const old = existingAttendance.get(employee.id, date) ?? null;
+      upsert.run(employee.id, date);
+      recordAudit({ database, actorId, action: old ? 'update_attendance' : 'record_attendance',
+        entityType: 'employee_attendance', entityId: employee.id, oldValues: old,
+        newValues: { date, employeeId: employee.id, status: 'present',
+          overtimeHours: old?.overtime_hours ?? 0, notes: old?.notes ?? null } });
+    }
+  }).immediate();
+  return { success: true, count: employees.length, date };
+}
+
+export function saveMonthlyAttendance(input, actorId = null, database = db) {
+  const body = requireObject(input);
+  allowOnlyKeys(body, ['month', 'records']);
+  const { month, start, end } = parseMonth(body.month);
+  if (!Array.isArray(body.records) || body.records.length > 31_000) {
+    throw new HttpError(400, 'records must be an array of at most 31,000 attendance records.');
+  }
+  const records = body.records.map((record, index) => attendanceRecord(record, index, { includeDate: true }));
+  if (records.some((record) => record.date < start || record.date >= end)) {
+    throw new HttpError(400, 'Every attendance date must fall within the selected month.');
+  }
+  const keys = records.map((record) => `${record.employeeId}:${record.date}`);
+  if (new Set(keys).size !== records.length) throw new HttpError(400, 'Each employee may appear only once per date.');
+  assertAttendanceMonthOpen(month, database);
+  const upsert = database.prepare(`
+    INSERT INTO employee_daily_attendance (employee_id, work_date, status, overtime_hours, notes)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(employee_id, work_date) DO UPDATE SET status = excluded.status,
+      overtime_hours = excluded.overtime_hours, notes = excluded.notes
+  `);
+  database.transaction(() => {
+    for (const record of records) {
+      const employee = database.prepare('SELECT name FROM employees WHERE id = ? AND active = 1 AND deleted_at IS NULL')
+        .get(record.employeeId);
+      if (!employee) throw new HttpError(404, `Active employee ${record.employeeId} was not found.`);
+      const old = database.prepare(`SELECT status, overtime_hours, notes FROM employee_daily_attendance
+        WHERE employee_id = ? AND work_date = ?`).get(record.employeeId, record.date) ?? null;
+      upsert.run(record.employeeId, record.date, record.status, record.overtimeHours, record.notes);
+      recordAudit({ database, actorId, action: old ? 'update_attendance' : 'record_attendance',
+        entityType: 'employee_attendance', entityId: record.employeeId, oldValues: old,
+        newValues: { date: record.date, ...record } });
+    }
+  }).immediate();
+  return getMonthlyAttendance(month, database);
 }
 
 function calculateDraftPayroll(monthValue, database) {

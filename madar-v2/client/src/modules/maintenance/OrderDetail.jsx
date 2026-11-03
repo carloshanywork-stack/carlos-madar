@@ -19,6 +19,7 @@ import MaintenancePptxExportModal from './MaintenancePptxExportModal.jsx';
 import StorageFileExplorer, { TripScanProgress } from './StorageFileExplorer.jsx';
 
 const EMPTY_MACHINES = [];
+const CARD_NOTE_SAVE_DELAY_MS = 800;
 const EMPTY_TRIP_PROGRESS = { percent: 0, processed: 0, total: 0, stage: 'جارٍ فحص المجلد وربط الصور...' };
 
 function sortCards(cards, sortMode) {
@@ -90,7 +91,7 @@ function sortMachines(machines, sortMode) {
 export default function MaintenanceOrderDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { data: order, setData: setOrderData, loading, error, reload } = useApi(`/api/maintenance/orders/${id}`);
+  const { data: order, setData: setOrderData, loading, error, reload: reloadOrder } = useApi(`/api/maintenance/orders/${id}`);
   const machinePath = order?.area ? `/api/maintenance/machines?area=${encodeURIComponent(order.area)}&limit=500` : '';
   const { data: machineData, loading: machinesLoading } = useApi(machinePath, { enabled: Boolean(machinePath) });
   const { data: apiAreas } = useApi('/api/maintenance/areas');
@@ -101,15 +102,21 @@ export default function MaintenanceOrderDetail() {
   const [populateOpen, setPopulateOpen] = useState(false);
   const [folderOpen, setFolderOpen] = useState(false);
   const [pptxExportOpen, setPptxExportOpen] = useState(false);
+  const [machineCodeCard, setMachineCodeCard] = useState(null);
+  const [machineCodeDraft, setMachineCodeDraft] = useState('');
+  const [machineCodeError, setMachineCodeError] = useState('');
+  const [lightboxState, setLightboxState] = useState(null);
   const [saving, setSaving] = useState(false);
   const [tripProcessing, setTripProcessing] = useState(false);
   const [tripProgress, setTripProgress] = useState(EMPTY_TRIP_PROGRESS);
   const [selectedAreaFilter, setSelectedAreaFilter] = useState('all');
+  const [matchedSearch, setMatchedSearch] = useState('');
   const [cardSort, setCardSort] = useState('name_asc');
-  const [cardDrafts, setCardDrafts] = useState({});
+  const [, setCardDrafts] = useState({});
   const [expandedFolderIds, setExpandedFolderIds] = useState(() => new Set());
   const [expandedCardIds, setExpandedCardIds] = useState(() => new Set());
   const [actionError, setActionError] = useState('');
+  const [tripDuplicateWarnings, setTripDuplicateWarnings] = useState([]);
   const [expenseError, setExpenseError] = useState('');
   const [custodyError, setCustodyError] = useState('');
   const [populateArea, setPopulateArea] = useState('');
@@ -117,6 +124,12 @@ export default function MaintenanceOrderDetail() {
   const [tripZip, setTripZip] = useState(null);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [bindingMachineCodes, setBindingMachineCodes] = useState({});
+  const cardDraftsRef = useRef({});
+  const cardNoteSaveTimersRef = useRef(new Map());
+  const cardSavePromisesRef = useRef(new Map());
+  const cardSavePayloadsRef = useRef(new Map());
+  const orderRef = useRef(order);
+  orderRef.current = order;
   const { notice, showToast, clearToast } = useToast();
   const orderAreaNames = useMemo(() => [...new Set((order?.area ?? '').split(/[،,]/).map((area) => area.trim()).filter(Boolean))], [order?.area]);
   const populateAreaOptions = useMemo(() => orderAreaNames.length
@@ -126,7 +139,8 @@ export default function MaintenanceOrderDetail() {
   const activeMachines = machineData?.machines ?? EMPTY_MACHINES;
   const cardsByMachineId = useMemo(() => new Map((order?.cards ?? []).map((card) => [card.machine_id, card])), [order?.cards]);
   const matchedCards = useMemo(() => (order?.cards ?? []).filter((card) =>
-    card.status === 'completed' && (card.before_photo_urls?.length ?? 0) > 0 && (card.after_photo_urls?.length ?? 0) > 0,
+    card.status !== 'excluded'
+      && ((card.before_photo_urls?.length ?? 0) > 0 || (card.after_photo_urls?.length ?? 0) > 0),
   ), [order?.cards]);
   const areaBreakdown = useMemo(() => {
     const map = new Map();
@@ -155,12 +169,25 @@ export default function MaintenanceOrderDetail() {
     return [...map.values()].sort((a, b) => a.area.localeCompare(b.area, 'ar'));
   }, [activeMachines, matchedCards, order?.area]);
   const displayedMatchedCards = useMemo(() => {
-    let filtered = matchedCards;
-    if (selectedAreaFilter !== 'all') {
-      filtered = matchedCards.filter((card) => String(card.machine_area || '').trim() === selectedAreaFilter);
-    }
+    const query = matchedSearch.trim().toLowerCase();
+    const filtered = matchedCards.filter((card) => {
+      const area = String(card.machine_area || order?.area || '').trim();
+      const matchesArea = selectedAreaFilter === 'all' || area === selectedAreaFilter;
+      if (!matchesArea) return false;
+      if (!query) return true;
+      const nameAr = String(card.machine_name_ar || '').toLowerCase();
+      const nameEn = String(card.machine_name_en || '').toLowerCase();
+      const code = String(card.machine_code || '').toLowerCase();
+      return nameAr.includes(query) || nameEn.includes(query) || code.includes(query) || area.toLowerCase().includes(query);
+    });
     return sortCards(filtered, cardSort);
-  }, [matchedCards, selectedAreaFilter, cardSort]);
+  }, [matchedCards, selectedAreaFilter, matchedSearch, cardSort, order?.area]);
+  const lightboxCards = useMemo(() => {
+    if (!lightboxState) return displayedMatchedCards;
+    const activeCard = (order?.cards ?? []).find((card) => card.id === lightboxState.cardId);
+    if (!activeCard || displayedMatchedCards.some((card) => card.id === activeCard.id)) return displayedMatchedCards;
+    return sortCards([...displayedMatchedCards, activeCard], cardSort);
+  }, [displayedMatchedCards, lightboxState, order?.cards, cardSort]);
   const tripMatchedMachineIds = useMemo(() => new Set(matchedCards.map((card) => card.machine_id)), [matchedCards]);
   const missingMachines = useMemo(() => {
     const list = activeMachines.filter((machine) => !tripMatchedMachineIds.has(machine.id));
@@ -168,6 +195,64 @@ export default function MaintenanceOrderDetail() {
   }, [activeMachines, tripMatchedMachineIds, cardSort]);
   const unmatchedMachineCandidates = order?.unmatched_machine_candidates ?? EMPTY_MACHINES;
   const knownFolderIds = useRef(new Set());
+
+  function clearCardNoteSaveTimers() {
+    for (const timer of cardNoteSaveTimersRef.current.values()) window.clearTimeout(timer);
+    cardNoteSaveTimersRef.current.clear();
+  }
+
+  function setCardDraft(cardId, draft) {
+    const next = { ...cardDraftsRef.current, [cardId]: draft };
+    cardDraftsRef.current = next;
+    setCardDrafts(next);
+  }
+
+  function clearAllCardDrafts() {
+    clearCardNoteSaveTimers();
+    cardDraftsRef.current = {};
+    cardSavePayloadsRef.current.clear();
+    setCardDrafts({});
+  }
+
+  async function flushPendingCardSaves() {
+    clearCardNoteSaveTimers();
+    const currentOrder = orderRef.current;
+    const failedCardIds = new Set();
+    if (!currentOrder) return failedCardIds;
+
+    for (const card of currentOrder.cards ?? []) {
+      const draft = cardDraftsRef.current[card.id];
+      const queuedPayload = cardSavePayloadsRef.current.get(card.id);
+      const hasInFlightSave = cardSavePromisesRef.current.has(card.id);
+      if (!draft && !queuedPayload && !hasInFlightSave) continue;
+      const reasonIds = draft?.reasonIds ?? queuedPayload?.reasonIds ?? card.reason_ids ?? (card.reason_id ? [card.reason_id] : []);
+      const notes = draft?.notes ?? queuedPayload?.notes ?? card.notes ?? '';
+      const saved = await saveCardFields(card, reasonIds, notes, { showSuccess: false });
+      if (!saved) failedCardIds.add(card.id);
+    }
+    return failedCardIds;
+  }
+
+  async function reload() {
+    const failedCardIds = await flushPendingCardSaves();
+    const freshOrder = await reloadOrder();
+    if (freshOrder) {
+      orderRef.current = freshOrder;
+      if (!failedCardIds.size) {
+        clearAllCardDrafts();
+      } else {
+        const freshCardIds = new Set((freshOrder.cards ?? []).map((card) => card.id));
+        const retainedDrafts = Object.fromEntries(
+          Object.entries(cardDraftsRef.current).filter(([cardId]) => (
+            failedCardIds.has(Number(cardId)) && freshCardIds.has(Number(cardId))
+          )),
+        );
+        cardDraftsRef.current = retainedDrafts;
+        setCardDrafts(retainedDrafts);
+      }
+    }
+    return freshOrder;
+  }
 
   useEffect(() => {
     if (!tripProcessing) return undefined;
@@ -193,6 +278,43 @@ export default function MaintenanceOrderDetail() {
 
   useEffect(() => {
     setSelectedAreaFilter('all');
+  }, [id]);
+
+  useEffect(() => {
+    clearAllCardDrafts();
+  }, [id]);
+
+  useEffect(() => {
+    let flushed = false;
+    const flushDraftsBeforeLeave = () => {
+      if (flushed) return;
+      flushed = true;
+      for (const timer of cardNoteSaveTimersRef.current.values()) window.clearTimeout(timer);
+      cardNoteSaveTimersRef.current.clear();
+      const currentOrder = orderRef.current;
+      if (!currentOrder) return;
+      for (const card of currentOrder.cards ?? []) {
+        const draft = cardDraftsRef.current[card.id];
+        if (!draft) continue;
+        const serverReasonIds = card.reason_ids ?? (card.reason_id ? [card.reason_id] : []);
+        const draftReasonIds = Array.isArray(draft.reasonIds) ? draft.reasonIds : serverReasonIds;
+        const sameReasons = serverReasonIds.length === draftReasonIds.length
+          && serverReasonIds.every((reasonId, index) => reasonId === draftReasonIds[index]);
+        if (sameReasons && (draft.notes ?? '') === (card.notes ?? '')) continue;
+        void api.patch(`/api/maintenance/orders/${currentOrder.id}/cards/${card.id}`, {
+          reasonIds: draftReasonIds,
+          notes: draft.notes ?? '',
+        }, { keepalive: true }).catch(() => {});
+      }
+    };
+    const resetLeaveFlush = () => { flushed = false; };
+    window.addEventListener('pagehide', flushDraftsBeforeLeave);
+    window.addEventListener('pageshow', resetLeaveFlush);
+    return () => {
+      window.removeEventListener('pagehide', flushDraftsBeforeLeave);
+      window.removeEventListener('pageshow', resetLeaveFlush);
+      flushDraftsBeforeLeave();
+    };
   }, [id]);
 
   useEffect(() => {
@@ -258,6 +380,41 @@ export default function MaintenanceOrderDetail() {
     finally { setSaving(false); }
   }
 
+  async function handleDeletePhoto(card, phase, filename) {
+    if (!window.confirm('هل تريد حذف هذه الصورة نهائياً من كارت الفحص؟')) return false;
+    setSaving(true);
+    try {
+      await api.delete(`/api/maintenance/orders/${id}/cards/${card.id}/photos/${phase}/${encodeURIComponent(filename)}`);
+      await reload();
+      showToast('تم حذف الصورة بنجاح.');
+      return true;
+    } catch (caught) {
+      showToast(errorMessage(caught), 'error');
+      return false;
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleMovePhoto(card, fromPhase, toPhase, filename) {
+    setSaving(true);
+    try {
+      await api.post(`/api/maintenance/orders/${id}/cards/${card.id}/photos/move`, {
+        fromPhase,
+        toPhase,
+        filename,
+      });
+      await reload();
+      showToast(`تم نقل الصورة إلى مرحلة ${toPhase === 'before' ? 'قبل الصيانة' : 'بعد الصيانة'}.`);
+      return true;
+    } catch (caught) {
+      showToast(errorMessage(caught), 'error');
+      return false;
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function archiveOrder(event) {
     event.preventDefault();
     setSaving(true);
@@ -316,6 +473,8 @@ export default function MaintenanceOrderDetail() {
     setFolderOpen(false);
     setTripZip(null);
     setUploadProgress(0);
+    const duplicateWarnings = Array.isArray(result.duplicateWarnings) ? result.duplicateWarnings : [];
+    setTripDuplicateWarnings(duplicateWarnings);
     await reload();
     showToast(`تمت مطابقة ${result.matchedMachineCount} ماكينة، وربط ${result.attachedBefore + result.attachedAfter} صورة. مجلدات للمراجعة: ${result.unmatchedFolderCount}.`);
   }
@@ -326,6 +485,7 @@ export default function MaintenanceOrderDetail() {
     setTripProgress(EMPTY_TRIP_PROGRESS);
     setTripProcessing(true);
     setActionError('');
+    setTripDuplicateWarnings([]);
     try {
       const result = await api.post(`/api/maintenance/orders/${id}/process-folder`, { folderPath: folder.fullStoragePath });
       await completeTripFolder(result);
@@ -341,6 +501,7 @@ export default function MaintenanceOrderDetail() {
     setTripProcessing(true);
     setUploadProgress(0);
     setActionError('');
+    setTripDuplicateWarnings([]);
     try {
       const form = new FormData();
       form.append('file', tripZip);
@@ -362,6 +523,27 @@ export default function MaintenanceOrderDetail() {
       showToast(`تم ربط المجلد واعتماد الاسم ${result.machineCode}.`);
     } catch (caught) { showToast(errorMessage(caught), 'error'); }
     finally { setSaving(false); }
+  }
+
+  async function deleteUnmatchedFolder(folder) {
+    const confirmed = window.confirm(
+      `هل أنت متأكد من حذف المجلد "${folder.folder_name}" نهائياً؟\n\n- سيتم مسح صور المجلد واستبعاده بالكامل من مراجعة الرحلة.\n- سيتم حذف مجلد المصدر من Areas إن وُجد.\n- لن يتم حذف ملف ZIP الأصلي.`
+    );
+    if (!confirmed) return;
+
+    setSaving(true);
+    setActionError('');
+    try {
+      const result = await api.delete(`/api/maintenance/orders/${id}/unmatched/${folder.id}`);
+      await reload();
+      showToast(result.cleanupPending
+        ? `تم استبعاد المجلد "${folder.folder_name}"، وسيكتمل تنظيف الملفات المادية عند استعادة النظام.`
+        : `تم حذف المجلد "${folder.folder_name}" واستبعاده نهائياً من النظام.`);
+    } catch (caught) {
+      showToast(errorMessage(caught), 'error');
+    } finally {
+      setSaving(false);
+    }
   }
 
   function getBindingMachine(folderId) {
@@ -446,59 +628,161 @@ export default function MaintenanceOrderDetail() {
     setExpandedCardIds(new Set());
   }
 
-  function getCardDraft(card) {
-    return cardDrafts[card.id] ?? { reasonId: card.reason_id ?? '', notes: card.notes ?? '' };
+  function expandAllMatchedCards() {
+    setExpandedCardIds((current) => {
+      const next = new Set(current);
+      for (const card of displayedMatchedCards) next.add(card.id);
+      return next;
+    });
   }
 
-  async function saveCardFields(card, reasonId, notes) {
-    const normalizedReasonId = reasonId === '' || reasonId === null ? null : Number(reasonId);
-    const normalizedNotes = notes ?? '';
-    if (normalizedReasonId === (card.reason_id ?? null) && normalizedNotes === (card.notes ?? '')) return;
+  function collapseAllMatchedCards() {
+    setExpandedCardIds((current) => {
+      const next = new Set(current);
+      for (const card of displayedMatchedCards) next.delete(card.id);
+      return next;
+    });
+  }
 
-    setCardDrafts((current) => ({
-      ...current,
-      [card.id]: { reasonId: normalizedReasonId ?? '', notes: normalizedNotes },
-    }));
+  function getCardDraft(card) {
+    const defaultReasonIds = card.reason_ids ?? (card.reason_id ? [card.reason_id] : []);
+    return cardDraftsRef.current[card.id] ?? { reasonIds: defaultReasonIds, notes: card.notes ?? '' };
+  }
+
+  async function saveCardFields(card, reasonIds, notes, { showSuccess = true } = {}) {
+    const normalizedReasonIds = Array.isArray(reasonIds) ? reasonIds.map(Number).filter(Boolean) : [];
+    const normalizedNotes = notes ?? '';
+    const payload = { reasonIds: normalizedReasonIds, notes: normalizedNotes };
+    const saveTimer = cardNoteSaveTimersRef.current.get(card.id);
+    if (saveTimer) window.clearTimeout(saveTimer);
+    cardNoteSaveTimersRef.current.delete(card.id);
+    setCardDraft(card.id, payload);
+
+    const serverCard = orderRef.current?.cards?.find((item) => item.id === card.id) ?? card;
+    const serverReasonIds = serverCard.reason_ids ?? (serverCard.reason_id ? [serverCard.reason_id] : []);
+    const sameAsServer = serverReasonIds.length === normalizedReasonIds.length
+      && serverReasonIds.every((reasonId, index) => reasonId === normalizedReasonIds[index])
+      && (serverCard.notes ?? '') === normalizedNotes;
+    if (sameAsServer
+      && !cardSavePayloadsRef.current.has(card.id)
+      && !cardSavePromisesRef.current.has(card.id)) {
+      return true;
+    }
+
+    cardSavePayloadsRef.current.set(card.id, payload);
+    const activeSave = cardSavePromisesRef.current.get(card.id);
+    if (activeSave) return activeSave;
+
+    const savePromise = (async () => {
+      while (cardSavePayloadsRef.current.has(card.id)) {
+        const currentPayload = cardSavePayloadsRef.current.get(card.id);
+        try {
+          const updatedCard = await api.patch(`/api/maintenance/orders/${id}/cards/${card.id}`, currentPayload);
+          const currentOrder = orderRef.current;
+          if (currentOrder) {
+            orderRef.current = {
+              ...currentOrder,
+              cards: (currentOrder.cards ?? []).map((item) => item.id === card.id ? { ...item, ...updatedCard } : item),
+            };
+          }
+          setOrderData((current) => current ? {
+            ...current,
+            cards: (current.cards ?? []).map((item) => item.id === card.id ? { ...item, ...updatedCard } : item),
+          } : current);
+
+          if (cardSavePayloadsRef.current.get(card.id) === currentPayload) {
+            cardSavePayloadsRef.current.delete(card.id);
+            const currentDraft = cardDraftsRef.current[card.id];
+            const draftMatchesSaved = currentDraft
+              && currentDraft.notes === currentPayload.notes
+              && currentDraft.reasonIds?.length === currentPayload.reasonIds.length
+              && currentDraft.reasonIds.every((reasonId, index) => reasonId === currentPayload.reasonIds[index]);
+            if (draftMatchesSaved) {
+              setCardDraft(card.id, {
+                reasonIds: updatedCard.reason_ids ?? (updatedCard.reason_id ? [updatedCard.reason_id] : []),
+                notes: updatedCard.notes ?? '',
+              });
+            }
+            if (showSuccess) showToast('تم حفظ أوامر الصيانة والملاحظات الفنية.');
+          }
+        } catch (caught) {
+          showToast(errorMessage(caught), 'error');
+          return false;
+        }
+      }
+      return true;
+    })().finally(() => {
+      cardSavePromisesRef.current.delete(card.id);
+    });
+    cardSavePromisesRef.current.set(card.id, savePromise);
+    return savePromise;
+  }
+
+  async function updateInspectionMachineCode(event) {
+    event.preventDefault();
+    if (!machineCodeCard) return;
+    const form = new FormData(event.currentTarget);
+    const machineCode = String(form.get('machineCode') ?? '').trim();
+    setSaving(true);
+    setMachineCodeError('');
     try {
-      const updatedCard = await api.patch(`/api/maintenance/orders/${id}/cards/${card.id}`, {
-        reasonId: normalizedReasonId,
-        notes: normalizedNotes,
-      });
-      setOrderData((current) => current ? {
-        ...current,
-        cards: current.cards.map((item) => item.id === card.id ? { ...item, ...updatedCard } : item),
-      } : current);
-      setCardDrafts((current) => ({
-        ...current,
-        [card.id]: { reasonId: updatedCard.reason_id ?? '', notes: updatedCard.notes ?? '' },
-      }));
-      showToast('تم حفظ سبب العطل والملاحظات الفنية.');
+      await api.patch(`/api/maintenance/orders/${id}/cards/${machineCodeCard.id}`, { machineCode });
+      await reload();
+      setMachineCodeCard(null);
+      setMachineCodeDraft('');
+      showToast('تم تحديث كود الماكينة في بطاقة الفحص والتقرير.');
     } catch (caught) {
-      showToast(errorMessage(caught), 'error');
+      setMachineCodeError(errorMessage(caught));
+    } finally {
+      setSaving(false);
     }
   }
 
-  function setCardReason(card, value) {
+  function openMachineCodeEditor(card) {
+    setMachineCodeError('');
+    setMachineCodeDraft(card.machine_code ?? '');
+    setMachineCodeCard(card);
+  }
+
+  function addCardReason(card, value) {
+    if (!value) return;
     const draft = getCardDraft(card);
-    void saveCardFields(card, value, draft.notes);
+    const num = Number(value);
+    if ((draft.reasonIds ?? []).includes(num)) return;
+    const nextIds = [...(draft.reasonIds ?? []), num];
+    void saveCardFields(card, nextIds, draft.notes);
+  }
+
+  function removeCardReason(card, value) {
+    const draft = getCardDraft(card);
+    const num = Number(value);
+    const nextIds = (draft.reasonIds ?? []).filter((id) => id !== num);
+    void saveCardFields(card, nextIds, draft.notes);
   }
 
   function updateCardNotesDraft(card, value) {
     const draft = getCardDraft(card);
-    setCardDrafts((current) => ({
-      ...current,
-      [card.id]: { ...draft, notes: value },
-    }));
+    const nextDraft = { ...draft, notes: value };
+    setCardDraft(card.id, nextDraft);
+    const existingTimer = cardNoteSaveTimersRef.current.get(card.id);
+    if (existingTimer) window.clearTimeout(existingTimer);
+    const timer = window.setTimeout(() => {
+      cardNoteSaveTimersRef.current.delete(card.id);
+      const latestDraft = cardDraftsRef.current[card.id] ?? nextDraft;
+      void saveCardFields(card, latestDraft.reasonIds, latestDraft.notes, { showSuccess: false });
+    }, CARD_NOTE_SAVE_DELAY_MS);
+    cardNoteSaveTimersRef.current.set(card.id, timer);
   }
 
   function setCardNotes(card, value) {
     const draft = getCardDraft(card);
-    void saveCardFields(card, draft.reasonId, value);
+    void saveCardFields(card, draft.reasonIds, value);
   }
 
   function renderInspectionCard(card, { embedded = false } = {}) {
     const expanded = expandedCardIds.has(card.id);
     const photoCount = (card.before_photo_urls?.length ?? 0) + (card.after_photo_urls?.length ?? 0);
+    const missingAfterPhotos = (card.after_photo_urls?.length ?? 0) === 0;
     const detailsId = `inspection-card-${card.id}-details`;
     return (
       <section
@@ -517,12 +801,43 @@ export default function MaintenanceOrderDetail() {
           >
             <span className="madar-accordion-chevron" aria-hidden="true">{expanded ? '▼' : '▶'}</span>
             <span className="madar-accordion-identity">
-              <strong>{card.machine_name_ar}{card.machine_name_en ? ` · ${card.machine_name_en}` : ''}</strong>
-              <small><span className="madar-code">{card.machine_code}</span> · {card.machine_area}</small>
+              <strong style={{ display: 'inline-flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px' }}>
+                {missingAfterPhotos && <span
+                  className="madar-dot-missing-after"
+                  title="الماكينة ينقصها صور بعد الصيانة (After)"
+                  aria-label="الماكينة ينقصها صور بعد الصيانة"
+                  style={{
+                    display: 'inline-block', width: '10px', height: '10px', borderRadius: '50%',
+                    backgroundColor: '#ef4444', boxShadow: '0 0 8px rgba(239, 68, 68, 0.8)',
+                    marginRight: '6px', flexShrink: 0,
+                  }}
+                />}
+                <span>{card.machine_name_ar}{card.machine_name_en ? ` · ${card.machine_name_en}` : ''}</span>
+                {missingAfterPhotos && <span className="madar-badge madar-badge-danger" style={{
+                  background: 'rgba(239, 68, 68, 0.15)', color: '#f87171', border: '1px solid rgba(239, 68, 68, 0.3)',
+                  fontWeight: 700, fontSize: '10px',
+                }}>● ناقصة After</span>}
+              </strong>
             </span>
             <Badge tone={photoCount ? 'info' : 'warning'}>{photoCount} صور</Badge>
             <Badge status={card.status} />
           </button>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', flex: '0 0 auto', flexWrap: 'wrap' }}>
+            <small><span className="madar-code">{card.machine_code}</span> · {card.machine_area}</small>
+            {order.status !== 'archived' && (
+              <button
+                type="button"
+                className="madar-button-ghost"
+                style={{
+                  padding: '2px 8px', fontSize: '11px', fontWeight: 'bold', color: '#38bdf8',
+                  background: 'rgba(56, 189, 248, 0.15)', border: '1px solid rgba(56, 189, 248, 0.35)',
+                  borderRadius: '5px', cursor: 'pointer', marginInlineStart: '8px',
+                }}
+                title="تعديل كود هذه الماكينة"
+                onClick={(event) => { event.stopPropagation(); openMachineCodeEditor(card); }}
+              >✏️ تعديل الكود</button>
+            )}
+          </span>
           {order.status === 'in_progress' && (
             <button
               type="button"
@@ -544,12 +859,101 @@ export default function MaintenanceOrderDetail() {
         </div>
         <div className={`madar-panel-body madar-accordion-content ${expanded ? 'is-expanded' : ''}`} id={detailsId} aria-hidden={!expanded} inert={!expanded}>
           <div className="madar-accordion-content-inner">
+            {missingAfterPhotos && (card.before_photo_urls?.length ?? 0) > 0 && <div
+              role="status"
+              style={{
+                marginBottom: '0.9rem', padding: '0.65rem 0.8rem', borderRadius: '8px',
+                background: 'rgba(239, 68, 68, 0.1)', color: '#fca5a5',
+                border: '1px solid rgba(239, 68, 68, 0.25)', fontSize: '12px',
+              }}
+            >تنبيه: جميع الصور مسجلة في (قبل الصيانة). يمكنك الضغط على أيقونة النقل ⇄ على أي صورة لنقلها إلى (بعد الصيانة) لإكمال البطاقة.</div>}
             <div className="madar-inspection-card-fields">
-              <Select label="سبب العطل *" value={getCardDraft(card).reasonId} disabled={order.status === 'archived'} onChange={(event) => setCardReason(card, event.target.value)}>
-                <option value="">غير محدد</option>{(reasons ?? []).map((reason) => <option key={reason.id} value={reason.id}>{reason.name}</option>)}
-                {reasons && card.reason_id && card.reason_name && !reasons.some((reason) => reason.id === card.reason_id)
-                  && <option value={card.reason_id} disabled>{card.reason_name} (معطّل)</option>}
-              </Select>
+              <div className="madar-card-reasons-select-wrap">
+                <Select
+                  label="أوامر / أسباب الصيانة *"
+                  value=""
+                  disabled={order.status === 'archived'}
+                  onChange={(event) => {
+                    addCardReason(card, event.target.value);
+                    event.target.value = '';
+                  }}
+                >
+                  <option value="">
+                    {(getCardDraft(card).reasonIds ?? []).length === 0
+                      ? 'اختر أمر صيانة...'
+                      : '+ إضافة أمر صيانة آخر...'}
+                  </option>
+                  {(reasons ?? [])
+                    .filter((reason) => !(getCardDraft(card).reasonIds ?? []).includes(reason.id))
+                    .map((reason) => (
+                      <option key={reason.id} value={reason.id}>
+                        {reason.name}
+                      </option>
+                    ))}
+                </Select>
+
+                <div
+                  className="madar-card-reasons-chips"
+                  style={{
+                    display: 'flex',
+                    flexWrap: 'wrap',
+                    alignItems: 'center',
+                    gap: '6px',
+                    marginTop: '8px',
+                    minHeight: '26px',
+                  }}
+                >
+                  {(getCardDraft(card).reasonIds ?? []).map((rid) => {
+                    const found = (reasons ?? []).find((r) => r.id === rid);
+                    const name = found?.name
+                      ?? (card.reason_names?.[card.reason_ids?.indexOf(rid)] || `أمر صيانة #${rid}`);
+                    return (
+                      <span
+                        key={rid}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          padding: '3px 10px',
+                          borderRadius: '999px',
+                          background: 'rgba(36, 166, 160, 0.15)',
+                          border: '1px solid rgba(36, 166, 160, 0.4)',
+                          color: '#2dd4bf',
+                          fontSize: '12px',
+                          fontWeight: 500,
+                        }}
+                      >
+                        <span>{name}</span>
+                        {order.status !== 'archived' && (
+                          <button
+                            type="button"
+                            onClick={() => removeCardReason(card, rid)}
+                            style={{
+                              background: 'transparent',
+                              border: 'none',
+                              color: '#94a3b8',
+                              cursor: 'pointer',
+                              padding: '0 2px',
+                              fontSize: '14px',
+                              lineHeight: 1,
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                            }}
+                            title="إزالة هذا الأمر"
+                          >
+                            ×
+                          </button>
+                        )}
+                      </span>
+                    );
+                  })}
+                  {(getCardDraft(card).reasonIds ?? []).length === 0 && (
+                    <span style={{ fontSize: '12px', color: 'var(--madar-muted)', fontStyle: 'italic' }}>
+                      غير محدد (اختر من القائمة لإضافة أمر أو سبب صيانة)
+                    </span>
+                  )}
+                </div>
+              </div>
               <Input
                 label="ملاحظات الفحص الفنية"
                 value={getCardDraft(card).notes}
@@ -561,12 +965,42 @@ export default function MaintenanceOrderDetail() {
               />
             </div>
             <div className="madar-grid madar-grid-2">
-              <PhotoPhase title="قبل الصيانة" phase="before" urls={card.before_photo_urls} disabled={order.status === 'archived' || saving} onUpload={(event) => uploadPhotos(card, 'before', event)} />
-              <PhotoPhase title="بعد الصيانة" phase="after" urls={card.after_photo_urls} disabled={order.status === 'archived' || saving} onUpload={(event) => uploadPhotos(card, 'after', event)} />
+              <PhotoPhase
+                title="قبل الصيانة"
+                phase="before"
+                urls={card.before_photo_urls}
+                thumbnailUrls={card.before_thumbnail_urls}
+                card={card}
+                disabled={saving}
+                canUpload={order.status !== 'archived'}
+                onUpload={(event) => uploadPhotos(card, 'before', event)}
+                onDeletePhoto={handleDeletePhoto}
+                onMovePhoto={handleMovePhoto}
+                onOpenLightbox={(currentCard, currentPhase, photoIndex) => setLightboxState({ cardId: currentCard.id, phase: currentPhase, photoIndex })}
+              />
+              <PhotoPhase
+                title="بعد الصيانة"
+                phase="after"
+                urls={card.after_photo_urls}
+                thumbnailUrls={card.after_thumbnail_urls}
+                card={card}
+                disabled={saving}
+                canUpload={order.status !== 'archived'}
+                onUpload={(event) => uploadPhotos(card, 'after', event)}
+                onDeletePhoto={handleDeletePhoto}
+                onMovePhoto={handleMovePhoto}
+                onOpenLightbox={(currentCard, currentPhase, photoIndex) => setLightboxState({ cardId: currentCard.id, phase: currentPhase, photoIndex })}
+              />
             </div>
-            {order.status === 'in_progress' && (
-              <div style={{ marginTop: '1rem', paddingTop: '0.75rem', borderTop: '1px solid var(--madar-border)', display: 'flex', justifyContent: 'flex-end' }}>
-                <button
+            {order.status !== 'archived' && (
+              <div style={{ marginTop: '1rem', paddingTop: '0.75rem', borderTop: '1px solid var(--madar-border)', display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                <Button
+                  variant="secondary"
+                  disabled={saving}
+                  style={{ color: '#38bdf8', borderColor: 'rgba(56, 189, 248, 0.4)' }}
+                  onClick={() => openMachineCodeEditor(card)}
+                >✏️ تعديل كود الماكينة ({card.machine_code})</Button>
+                {order.status === 'in_progress' && <button
                   type="button"
                   className="madar-button madar-button-small"
                   style={{ background: 'rgba(239, 68, 68, 0.15)', color: '#fca5a5', border: '1px solid rgba(239, 68, 68, 0.3)', fontSize: '11px', fontWeight: 'bold', display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '5px 12px', borderRadius: '6px', cursor: 'pointer' }}
@@ -580,7 +1014,7 @@ export default function MaintenanceOrderDetail() {
                   title="حذف كارت الفحص وصوره وإلغاء تفعيل الماكينة"
                 >
                   🗑️ إزالة الماكينة وحذف مجلدها نهائياً
-                </button>
+                </button>}
               </div>
             )}
           </div>
@@ -617,6 +1051,16 @@ export default function MaintenanceOrderDetail() {
         </div>
       </section>
       {actionError && <div className="madar-section"><Alert tone="error">{actionError}</Alert></div>}
+      {tripDuplicateWarnings.length > 0 && <div className="madar-section">
+        <Alert tone="warning">
+          <strong>تنبيه: تم العثور على {tripDuplicateWarnings.length} مجلدات متشابهة أو مكررة وتم عزلها للمراجعة لمنع تداخل الصور:</strong>
+          <ul style={{ margin: '8px 0 0', paddingInlineStart: '1.25rem' }}>
+            {tripDuplicateWarnings.map((warning, index) => <li key={`${warning.machineId}-${warning.duplicateFolder}-${index}`}>
+              {warning.duplicateFolder} ↔ {warning.originalFolder} · {warning.machineName}
+            </li>)}
+          </ul>
+        </Alert>
+      </div>}
       <div className="madar-reconciliation-toolbar madar-section">
         <div><strong>لوحة فرز ومطابقة الرحلة</strong><span>راجع المجلدات غير المطابقة، ثم استكمل تغطية ماكينات المناطق المحددة.</span></div>
         <div className="madar-inline-wrap">
@@ -637,15 +1081,43 @@ export default function MaintenanceOrderDetail() {
               const bindingMatches = getBindingMachineMatches(folder.id);
               return (
                 <article className="madar-unmatched-item" key={folder.id}>
-                  <button className="madar-accordion-header madar-unmatched-toggle" type="button" aria-expanded={expanded} aria-controls={detailsId} onClick={() => toggleFolder(folder.id)}>
-                    <span className="madar-accordion-chevron" aria-hidden="true">{expanded ? '▼' : '▶'}</span>
-                    <span className="madar-accordion-identity">
-                      <strong>{folder.folder_name}</strong>
-                      <small>المنطقة: {order.area} · المصدر: {folder.source_name}</small>
-                    </span>
-                    <Badge tone="info">{folder.photo_count} صور</Badge>
-                    <Badge tone="warning">تحتاج مطابقة</Badge>
-                  </button>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <button
+                      className="madar-accordion-header madar-unmatched-toggle"
+                      type="button"
+                      aria-expanded={expanded}
+                      aria-controls={detailsId}
+                      style={{ flex: 1, width: 'auto', minWidth: 0 }}
+                      onClick={() => toggleFolder(folder.id)}
+                    >
+                      <span className="madar-accordion-chevron" aria-hidden="true">{expanded ? '▼' : '▶'}</span>
+                      <span className="madar-accordion-identity">
+                        <strong>{folder.folder_name}</strong>
+                        {folder.is_duplicate && <Badge tone="warning" title={`يطابق ماكينة موجودة بالفعل؛ المجلد الأول: ${folder.duplicate_of_folder || 'غير معروف'}`}>
+                          مجلد مكرر
+                        </Badge>}
+                        <small>المنطقة: {order.area} · المصدر: {folder.source_name}</small>
+                        {folder.is_duplicate && <small style={{ color: '#fbbf24' }}>
+                          (مجلد مكرر: يطابق ماكينة موجودة بالفعل){folder.duplicate_of_folder ? ` · المجلد الأول: ${folder.duplicate_of_folder}` : ''}
+                        </small>}
+                      </span>
+                      <Badge tone="info">{folder.photo_count} صور</Badge>
+                      <Badge tone="warning">تحتاج مطابقة</Badge>
+                    </button>
+                    {order.status === 'in_progress' && (
+                      <button
+                        type="button"
+                        className="madar-button-icon"
+                        style={{ background: 'transparent', border: 'none', color: '#ef4444', fontSize: '14px', cursor: 'pointer', padding: '4px', marginRight: '6px', flex: '0 0 auto' }}
+                        title="حذف المجلد نهائياً من النظام"
+                        aria-label={`حذف المجلد ${folder.folder_name}`}
+                        disabled={saving}
+                        onClick={() => deleteUnmatchedFolder(folder)}
+                      >
+                        🗑️
+                      </button>
+                    )}
+                  </div>
                   <div className={`madar-unmatched-details ${expanded ? 'is-expanded' : ''}`} id={detailsId} aria-hidden={!expanded} inert={!expanded}>
                     <div className="madar-unmatched-details-inner">
                       <div className="madar-unmatched-source"><strong>مسار المصدر</strong><code>{folder.source_name}</code></div>
@@ -685,7 +1157,33 @@ export default function MaintenanceOrderDetail() {
                             <span>· {bindingMachine.name_en || 'بدون اسم إنجليزي'}</span>
                           </> : <span>ستظهر بيانات الماكينة هنا بعد اختيار كود صحيح</span>}
                         </div>
-                        <Button icon="check" disabled={saving || !bindingMachine} onClick={() => bindUnmatchedFolder(folder)}>ربط واعتماد الاسم</Button>
+                        <div className="madar-inline-wrap" style={{ gap: '0.5rem', alignItems: 'center' }}>
+                          <Button icon="check" disabled={saving || !bindingMachine} onClick={() => bindUnmatchedFolder(folder)}>ربط واعتماد الاسم</Button>
+                          {order.status === 'in_progress' && (
+                            <button
+                              type="button"
+                              className="madar-button"
+                              style={{
+                                background: 'rgba(239, 68, 68, 0.15)',
+                                color: '#fca5a5',
+                                border: '1px solid rgba(239, 68, 68, 0.3)',
+                                fontSize: '12px',
+                                fontWeight: 'bold',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '6px',
+                                padding: '6px 12px',
+                                borderRadius: '6px',
+                                cursor: 'pointer',
+                              }}
+                              disabled={saving}
+                              onClick={() => deleteUnmatchedFolder(folder)}
+                              title="حذف هذا المجلد وصوره واستبعاده نهائياً من النظام"
+                            >
+                              🗑️ حذف المجلد نهائياً
+                            </button>
+                          )}
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -697,12 +1195,12 @@ export default function MaintenanceOrderDetail() {
       </section>
 
       <section className="madar-panel madar-section madar-reconciliation-section">
-        <div className="madar-panel-header"><div><h2>ماكينات مكتملة الفحص (Matched Machines)</h2><p>بطاقات مكتملة وبها صور قبل وبعد الصيانة من ملفات الرحلة.</p></div><Badge tone="success">{matchedCards.length}</Badge></div>
+        <div className="madar-panel-header"><div><h2>ماكينات تمت مطابقتها (Matched Machines)</h2><p>الماكينات المرتبطة ببطاقات تحتوي على صور، مع تنبيه للبطاقات التي ينقصها صور بعد الصيانة.</p></div><Badge tone="success">{matchedCards.length}</Badge></div>
         <div className="madar-panel-body">
           {areaBreakdown.length > 0 && (
             <div className="madar-area-breakdown-box" style={{ padding: '1rem', marginBottom: '1.2rem', borderRadius: '12px', background: 'rgba(255, 255, 255, 0.03)', border: '1px solid var(--madar-border)' }}>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', alignItems: 'center', marginBottom: '1rem' }}>
-                <strong style={{ fontSize: '13px' }}>إجمالي الفحص المكتمل:</strong>
+                <strong style={{ fontSize: '13px' }}>إجمالي الماكينات التي بها صور:</strong>
                 <span className="madar-badge madar-badge-success">{matchedCards.length} ماكينة مقروءة</span>
                 <span className="madar-badge" style={{ background: '#334155', color: '#f8fafc' }}>المتبقي: {missingMachines.length} ماكينة</span>
                 <span className="madar-muted" style={{ fontSize: '12px' }}>من إجمالي {activeMachines.length} ماكينة في خط السير</span>
@@ -728,6 +1226,49 @@ export default function MaintenanceOrderDetail() {
               </div>
 
               <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', gap: '0.75rem', marginTop: '1rem', paddingTop: '0.75rem', borderTop: '1px solid var(--madar-border)', alignItems: 'center' }}>
+                <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem', width: '100%', marginBottom: '0.5rem' }}>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.4rem' }}>
+                    <span style={{ fontSize: '11px', color: '#94a3b8' }}>التحكم في العرض:</span>
+                    <button
+                      type="button"
+                      className="madar-button madar-button-small madar-button-secondary"
+                      onClick={expandAllMatchedCards}
+                      title="فرد وتوسيع جميع بطاقات الماكينات المعروضة"
+                    >
+                      فرد الكل (Expand All)
+                    </button>
+                    <button
+                      type="button"
+                      className="madar-button madar-button-small madar-button-secondary"
+                      onClick={collapseAllMatchedCards}
+                      title="طي وقفل جميع بطاقات الماكينات المعروضة"
+                    >
+                      طي الكل (Collapse All)
+                    </button>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', position: 'relative' }}>
+                    <input
+                      type="text"
+                      placeholder="بحث باسم أو كود الماكينة..."
+                      value={matchedSearch}
+                      onChange={(event) => setMatchedSearch(event.target.value)}
+                      className="madar-input"
+                      aria-label="بحث في الماكينات المكتملة"
+                      style={{ padding: '4px 10px', fontSize: '12px', width: '220px', borderRadius: '6px' }}
+                    />
+                    {matchedSearch && (
+                      <button
+                        type="button"
+                        onClick={() => setMatchedSearch('')}
+                        style={{ background: 'transparent', border: 'none', color: '#94a3b8', cursor: 'pointer', padding: '0 4px', fontSize: '13px' }}
+                        title="مسح البحث"
+                        aria-label="مسح البحث"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+                </div>
                 {areaBreakdown.length > 1 ? (
                   <div role="group" aria-label="تصفية البطاقات حسب المنطقة" style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem', alignItems: 'center' }}>
                     <span style={{ fontSize: '11px', color: '#94a3b8' }}>تصفية المنطقة:</span>
@@ -798,8 +1339,8 @@ export default function MaintenanceOrderDetail() {
           {displayedMatchedCards.length ? <div className="madar-maintenance-cards">{displayedMatchedCards.map((card) => renderInspectionCard(card))}</div>
             : <EmptyState
               icon="image"
-              title={selectedAreaFilter === 'all' ? 'لا توجد ماكينات مطابقة بصور' : 'لا توجد ماكينات مكتملة في هذه المنطقة'}
-              description={selectedAreaFilter === 'all' ? 'بعد معالجة المجلد ستظهر هنا بطاقات الماكينات التي تم ربط صورها.' : 'اختر منطقة أخرى أو اعرض كل المناطق لمراجعة البطاقات المكتملة.'}
+              title={matchedSearch.trim() ? 'لا توجد نتائج مطابقة للبحث' : selectedAreaFilter === 'all' ? 'لا توجد ماكينات مطابقة بصور' : 'لا توجد ماكينات مكتملة في هذه المنطقة'}
+              description={matchedSearch.trim() ? 'جرّب البحث باسم الماكينة أو كودها أو منطقتها.' : selectedAreaFilter === 'all' ? 'بعد معالجة المجلد ستظهر هنا بطاقات الماكينات التي تم ربط صورها.' : 'اختر منطقة أخرى أو اعرض كل المناطق لمراجعة البطاقات المكتملة.'}
             />}
         </div>
       </section>
@@ -882,6 +1423,33 @@ export default function MaintenanceOrderDetail() {
         </form>
       </Modal>
 
+      <Modal
+        open={Boolean(machineCodeCard)}
+        onClose={() => { if (!saving) setMachineCodeCard(null); }}
+        title="تعديل كود الماكينة"
+        description="إذا كان الكود مسجلاً لماكينة نشطة، ستُربط البطاقة بها. وإلا سيتم تحديث كود الماكينة الحالية."
+      >
+        <form onSubmit={updateInspectionMachineCode}>
+          <div className="madar-form-stack">
+            <Input
+              label="كود الماكينة *"
+              name="machineCode"
+              value={machineCodeDraft}
+              onChange={(event) => setMachineCodeDraft(event.target.value)}
+              maxLength={64}
+              pattern="[A-Za-z0-9][A-Za-z0-9._-]*"
+              required
+              autoFocus
+            />
+            {machineCodeError && <Alert tone="error">{machineCodeError}</Alert>}
+          </div>
+          <div className="madar-form-actions">
+            <Button variant="secondary" disabled={saving} onClick={() => setMachineCodeCard(null)}>إلغاء</Button>
+            <Button type="submit" disabled={saving || !machineCodeDraft.trim()}>{saving ? 'جارٍ تحديث الكود…' : 'حفظ الكود'}</Button>
+          </div>
+        </form>
+      </Modal>
+
       <Modal open={populateOpen} onClose={() => setPopulateOpen(false)} title="إدراج ماكينات منطقة" description="تُضاف البطاقات للماكينات النشطة غير الموجودة مسبقاً على الأمر.">
         <form onSubmit={populateAreaMachines}><div className="madar-form-stack"><Select label="المنطقة *" value={populateArea} onChange={(event) => setPopulateArea(event.target.value)} required><option value="">اختر المنطقة</option>{populateAreaOptions.map((item) => <option key={item} value={item}>{item}</option>)}</Select></div>
           <div className="madar-form-actions"><Button variant="secondary" onClick={() => setPopulateOpen(false)}>إلغاء</Button><Button type="submit" disabled={saving || !populateArea}>{saving ? 'جارٍ الإدراج…' : 'إدراج الماكينات'}</Button></div></form>
@@ -950,18 +1518,443 @@ export default function MaintenanceOrderDetail() {
         currentOrder={order}
         defaultScope="current"
       />
+      {lightboxState && (
+        <PhotoLightboxModal
+          lightboxState={lightboxState}
+          onClose={(newState) => setLightboxState(newState)}
+          cards={lightboxCards}
+          onMovePhoto={handleMovePhoto}
+          onDeletePhoto={handleDeletePhoto}
+          onEditMachineCode={openMachineCodeEditor}
+          machineCodeEditorOpen={Boolean(machineCodeCard)}
+          disabled={saving}
+          canEditMachineCode={order.status !== 'archived'}
+        />
+      )}
       <Toast notice={notice} onClose={clearToast} />
     </>
   );
 }
 
-function PhotoPhase({ title, phase, urls, disabled, onUpload }) {
+function maintenancePhotoFilename(url) {
+  return decodeURIComponent(new URL(url, window.location.origin).pathname.split('/').at(-1) ?? '');
+}
+
+function PhotoPhase({ title, phase, urls, thumbnailUrls, card, disabled, canUpload = true, onUpload, onDeletePhoto, onMovePhoto, onOpenLightbox }) {
+  const [isDragOver, setIsDragOver] = useState(false);
+
+  function handleDragOver(event) {
+    if (disabled) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    setIsDragOver(true);
+  }
+
+  function handleDragLeave(event) {
+    if (event.currentTarget.contains(event.relatedTarget)) return;
+    setIsDragOver(false);
+  }
+
+  function handleDrop(event) {
+    if (disabled) return;
+    event.preventDefault();
+    setIsDragOver(false);
+    try {
+      const data = JSON.parse(event.dataTransfer.getData('text/plain'));
+      if (data && ['before', 'after'].includes(data.phase) && data.phase !== phase && typeof data.filename === 'string' && data.filename) {
+        onMovePhoto(card, data.phase, phase, data.filename);
+      }
+    } catch {
+      // Ignore invalid drag payloads.
+    }
+  }
+
   return (
-    <section className="madar-photo-section">
+    <section
+      className={`madar-photo-section ${isDragOver ? 'is-drag-over' : ''}`}
+      onDragOver={handleDragOver}
+      onDragEnter={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+      style={{
+        transition: 'all 0.2s',
+        border: isDragOver ? '2px dashed #10b981' : undefined,
+        background: isDragOver ? 'rgba(16, 185, 129, 0.05)' : undefined,
+        borderRadius: '8px',
+        padding: '0.5rem',
+      }}
+    >
       <div className="madar-photo-heading"><span>{title}</span><span className="madar-muted">{urls?.length ?? 0} / 4</span></div>
-      {urls?.length ? <div className="madar-photo-grid">{urls.map((url, index) => <a key={`${url}-${index}`} href={url} target="_blank" rel="noreferrer"><img className="madar-photo" src={url} alt={`${title} ${index + 1}`} loading="lazy" /></a>)}</div> : <div className="madar-photo-empty">لا توجد صور بعد</div>}
-      {!disabled && (urls?.length ?? 0) < 4 && <label className="madar-photo-upload"><Icon name="upload" size={13} /> رفع 2–4 صور<input type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" multiple onChange={onUpload} aria-label={`رفع صور ${title}`} /></label>}
-      {phase && <span className="madar-visually-hidden">{phase}</span>}
+      {urls?.length ? (
+        <div className="madar-photo-grid">
+          {urls.map((url, index) => {
+            const filename = maintenancePhotoFilename(url);
+            return (
+              <div
+                key={`${url}-${index}`}
+                className="madar-photo-wrapper"
+                draggable={!disabled}
+                onDragStart={(event) => {
+                  event.dataTransfer.setData('text/plain', JSON.stringify({ phase, filename }));
+                  event.dataTransfer.effectAllowed = 'move';
+                }}
+                style={{ position: 'relative', display: 'inline-block', cursor: disabled ? 'default' : 'grab' }}
+              >
+                <button
+                  type="button"
+                  className="madar-photo-thumb-btn"
+                  style={{ all: 'unset', display: 'block', cursor: 'zoom-in', width: '100%', height: '100%' }}
+                  title="اضغط لتكبير الصورة والتنقل بين الماكينات"
+                  onClick={() => onOpenLightbox?.(card, phase, index)}
+                >
+                  <img className="madar-photo" src={thumbnailUrls?.[index] ?? url} alt={`${title} ${index + 1}`} loading="lazy" />
+                </button>
+                {!disabled && (
+                  <div
+                    className="madar-photo-actions"
+                    style={{
+                      position: 'absolute',
+                      top: '4px',
+                      left: '4px',
+                      right: '4px',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      pointerEvents: 'auto',
+                    }}
+                  >
+                    <button
+                      type="button"
+                      aria-label={phase === 'before' ? 'نقل الصورة إلى بعد الصيانة' : 'نقل الصورة إلى قبل الصيانة'}
+                      style={{
+                        background: 'rgba(15, 23, 42, 0.85)',
+                        border: '1px solid rgba(255,255,255,0.2)',
+                        color: '#38bdf8',
+                        borderRadius: '4px',
+                        padding: '2px 5px',
+                        fontSize: '11px',
+                        cursor: 'pointer',
+                        lineHeight: 1,
+                      }}
+                      title={phase === 'before' ? 'نقل إلى بعد الصيانة' : 'نقل إلى قبل الصيانة'}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        event.preventDefault();
+                        onMovePhoto(card, phase, phase === 'before' ? 'after' : 'before', filename);
+                      }}
+                    >
+                      ⇄
+                    </button>
+                    <button
+                      type="button"
+                      aria-label="حذف هذه الصورة"
+                      style={{
+                        background: 'rgba(15, 23, 42, 0.85)',
+                        border: '1px solid rgba(255,255,255,0.2)',
+                        color: '#f87171',
+                        borderRadius: '4px',
+                        padding: '2px 5px',
+                        fontSize: '11px',
+                        cursor: 'pointer',
+                        lineHeight: 1,
+                      }}
+                      title="حذف هذه الصورة"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        event.preventDefault();
+                        onDeletePhoto(card, phase, filename);
+                      }}
+                    >
+                      🗑️
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="madar-photo-empty" style={{ padding: '1.5rem', textAlign: 'center', border: '1px dashed var(--madar-border)', borderRadius: '6px', color: '#94a3b8', fontSize: '12px' }}>
+          {isDragOver ? 'أفلت الصورة هنا لنقلها...' : 'لا توجد صور بعد (يمكن سحب وإفلات صورة هنا)'}
+        </div>
+      )}
+      {canUpload && !disabled && (urls?.length ?? 0) < 4 && <label className="madar-photo-upload"><Icon name="upload" size={13} /> رفع 2–4 صور<input type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" multiple onChange={onUpload} aria-label={`رفع صور ${title}`} /></label>}
     </section>
+  );
+}
+
+function PhotoLightboxModal({ lightboxState, onClose, cards, onMovePhoto, onDeletePhoto, onEditMachineCode, machineCodeEditorOpen, disabled, canEditMachineCode = true }) {
+  const currentCardIndex = lightboxState
+    ? cards.findIndex((card) => card.id === lightboxState.cardId)
+    : -1;
+  const currentCard = currentCardIndex >= 0 ? cards[currentCardIndex] : null;
+  const prevCard = currentCardIndex > 0 ? cards[currentCardIndex - 1] : null;
+  const nextCard = currentCardIndex >= 0 && currentCardIndex < cards.length - 1 ? cards[currentCardIndex + 1] : null;
+  const beforeUrls = currentCard?.before_photo_urls ?? [];
+  const afterUrls = currentCard?.after_photo_urls ?? [];
+  const allPhotos = [
+    ...beforeUrls.map((url, index) => ({ phase: 'before', phaseLabel: 'قبل الصيانة', url, index })),
+    ...afterUrls.map((url, index) => ({ phase: 'after', phaseLabel: 'بعد الصيانة', url, index })),
+  ];
+  const currentPhotoIndex = allPhotos.findIndex((photo) => (
+    photo.phase === lightboxState?.phase && photo.index === lightboxState?.photoIndex
+  ));
+  const currentPhoto = currentPhotoIndex >= 0 ? allPhotos[currentPhotoIndex] : allPhotos[0] ?? null;
+
+  function goToMachine(targetCard) {
+    if (!targetCard) return;
+    const targetPhase = (targetCard.before_photo_urls?.length ?? 0) > 0 ? 'before' : 'after';
+    onClose({ cardId: targetCard.id, phase: targetPhase, photoIndex: 0 });
+  }
+
+  function goToNextPhoto() {
+    if (currentPhotoIndex >= 0 && currentPhotoIndex < allPhotos.length - 1) {
+      const nextPhoto = allPhotos[currentPhotoIndex + 1];
+      onClose({ cardId: currentCard.id, phase: nextPhoto.phase, photoIndex: nextPhoto.index });
+    } else if (nextCard) {
+      goToMachine(nextCard);
+    }
+  }
+
+  function goToPrevPhoto() {
+    if (currentPhotoIndex > 0) {
+      const previousPhoto = allPhotos[currentPhotoIndex - 1];
+      onClose({ cardId: currentCard.id, phase: previousPhoto.phase, photoIndex: previousPhoto.index });
+    } else if (prevCard) {
+      goToMachine(prevCard);
+    }
+  }
+
+  useEffect(() => {
+    if (!currentCard || !currentPhoto) {
+      onClose(null);
+      return undefined;
+    }
+    function handleKeyDown(event) {
+      if (event.key === 'Escape') {
+        onClose(null);
+      } else if (event.key === 'ArrowRight') {
+        event.preventDefault();
+        goToPrevPhoto();
+      } else if (event.key === 'ArrowLeft') {
+        event.preventDefault();
+        goToNextPhoto();
+      } else if (event.key === 'ArrowUp' && prevCard) {
+        event.preventDefault();
+        goToMachine(prevCard);
+      } else if (event.key === 'ArrowDown' && nextCard) {
+        event.preventDefault();
+        goToMachine(nextCard);
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  });
+
+  if (!currentCard || !currentPhoto) return null;
+
+  const currentFilename = maintenancePhotoFilename(currentPhoto.url);
+  const targetMovePhase = currentPhoto.phase === 'before' ? 'after' : 'before';
+  const phasePhotoCount = currentPhoto.phase === 'before' ? beforeUrls.length : afterUrls.length;
+
+  async function moveCurrentPhoto() {
+    const moved = await onMovePhoto(currentCard, currentPhoto.phase, targetMovePhase, currentFilename);
+    if (!moved) return;
+    const targetIndex = targetMovePhase === 'before' ? beforeUrls.length : afterUrls.length;
+    onClose({ cardId: currentCard.id, phase: targetMovePhase, photoIndex: targetIndex });
+  }
+
+  async function deleteCurrentPhoto() {
+    const deleted = await onDeletePhoto(currentCard, currentPhoto.phase, currentFilename);
+    if (!deleted) return;
+    const remainingPhotos = allPhotos.filter((_, index) => index !== currentPhotoIndex);
+    if (!remainingPhotos.length) {
+      onClose(null);
+      return;
+    }
+    const nextPhoto = remainingPhotos[Math.min(currentPhotoIndex, remainingPhotos.length - 1)];
+    const indexAfterRemoval = nextPhoto.phase === currentPhoto.phase && nextPhoto.index > currentPhoto.index
+      ? nextPhoto.index - 1
+      : nextPhoto.index;
+    onClose({ cardId: currentCard.id, phase: nextPhoto.phase, photoIndex: indexAfterRemoval });
+  }
+
+  return (
+    <div
+      className="madar-lightbox-backdrop"
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: machineCodeEditorOpen ? 70 : 9999,
+        background: 'rgba(5, 10, 20, 0.94)',
+        backdropFilter: 'blur(10px)',
+        display: 'flex',
+        flexDirection: 'column',
+        justifyContent: 'space-between',
+        padding: '1rem',
+        animation: 'madar-fade-in 0.2s ease-out',
+      }}
+      onClick={(event) => {
+        if (event.target === event.currentTarget) onClose(null);
+      }}
+      role="dialog"
+      aria-modal="true"
+      aria-label={`عرض صور ${currentCard.machine_name_ar}`}
+    >
+      <header
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: '1rem',
+          padding: '0.6rem 1rem',
+          background: 'rgba(255, 255, 255, 0.04)',
+          borderRadius: '10px',
+          border: '1px solid rgba(255, 255, 255, 0.08)',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+          <strong style={{ fontSize: '15px', color: '#f8fafc' }}>
+            {currentCard.machine_name_ar}{currentCard.machine_name_en ? ` · ${currentCard.machine_name_en}` : ''}
+          </strong>
+          <span className="madar-code" style={{ fontSize: '12px' }}>{currentCard.machine_code}</span>
+          {!disabled && canEditMachineCode && (
+            <button
+              type="button"
+              className="madar-button madar-button-small"
+              style={{
+                background: 'rgba(56, 189, 248, 0.2)', color: '#38bdf8', border: '1px solid #0284c7',
+                fontSize: '11px', fontWeight: 'bold', cursor: 'pointer', borderRadius: '6px', padding: '4px 10px',
+              }}
+              onClick={() => onEditMachineCode?.(currentCard)}
+            >✏️ تعديل الكود</button>
+          )}
+          <span style={{ fontSize: '12px', color: '#94a3b8' }}>({currentCard.machine_area || '—'})</span>
+          <span
+            style={{
+              padding: '2px 8px',
+              borderRadius: '6px',
+              fontSize: '11px',
+              fontWeight: 'bold',
+              background: currentPhoto.phase === 'before' ? 'rgba(56, 189, 248, 0.2)' : 'rgba(16, 185, 129, 0.2)',
+              color: currentPhoto.phase === 'before' ? '#38bdf8' : '#34d399',
+              border: `1px solid ${currentPhoto.phase === 'before' ? '#0284c7' : '#059669'}`,
+            }}
+          >
+            {currentPhoto.phaseLabel} ({currentPhoto.index + 1} من {phasePhotoCount})
+          </span>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', marginInlineEnd: '0.5rem' }}>
+            <button
+              type="button"
+              className="madar-button madar-button-small madar-button-secondary"
+              disabled={!prevCard}
+              onClick={() => goToMachine(prevCard)}
+              title={prevCard ? `الانتقال لماكينة ${prevCard.machine_code}` : 'أول ماكينة'}
+            >
+              ❮ السابقة
+            </button>
+            <button
+              type="button"
+              className="madar-button madar-button-small madar-button-secondary"
+              disabled={!nextCard}
+              onClick={() => goToMachine(nextCard)}
+              title={nextCard ? `الانتقال لماكينة ${nextCard.machine_code}` : 'آخر ماكينة'}
+            >
+              التالية ❯
+            </button>
+          </div>
+
+          {!disabled && (
+            <>
+              <button
+                type="button"
+                className="madar-button madar-button-small"
+                style={{ background: 'rgba(14, 165, 233, 0.2)', color: '#38bdf8', border: '1px solid #0284c7', fontSize: '11px', fontWeight: 'bold' }}
+                onClick={() => { void moveCurrentPhoto(); }}
+                title={`نقل الصورة إلى ${targetMovePhase === 'before' ? 'قبل الصيانة' : 'بعد الصيانة'}`}
+              >
+                ⇄ نقل إلى {targetMovePhase === 'before' ? 'قبل الصيانة' : 'بعد الصيانة'}
+              </button>
+              <button
+                type="button"
+                className="madar-button madar-button-small"
+                style={{ background: 'rgba(239, 68, 68, 0.2)', color: '#f87171', border: '1px solid #b91c1c', fontSize: '11px', fontWeight: 'bold' }}
+                onClick={() => { void deleteCurrentPhoto(); }}
+                title="حذف هذه الصورة نهائياً"
+              >
+                🗑️ حذف الصورة
+              </button>
+            </>
+          )}
+
+          <button
+            type="button"
+            className="madar-button-icon"
+            style={{ background: 'rgba(255, 255, 255, 0.1)', border: 'none', color: '#ffffff', fontSize: '18px', padding: '4px 10px', borderRadius: '6px', cursor: 'pointer' }}
+            onClick={() => onClose(null)}
+            title="إغلاق (Esc)"
+            aria-label="إغلاق عارض الصور"
+          >
+            ✕
+          </button>
+        </div>
+      </header>
+
+      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'relative', padding: '1rem 0', minHeight: 0 }}>
+        <button
+          type="button"
+          onClick={goToPrevPhoto}
+          style={{ background: 'rgba(15, 23, 42, 0.65)', border: '1px solid rgba(255, 255, 255, 0.15)', color: '#ffffff', fontSize: '28px', width: '48px', height: '48px', borderRadius: '50%', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10, flexShrink: 0 }}
+          title="الصورة السابقة (السهم الأيمن)"
+          aria-label="الصورة السابقة"
+        >
+          ❯
+        </button>
+        <div style={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', minWidth: 0 }}>
+          <img
+            src={currentPhoto.url}
+            alt={`${currentCard.machine_name_ar} - ${currentPhoto.phaseLabel}`}
+            style={{ maxWidth: '85vw', maxHeight: '70vh', objectFit: 'contain', borderRadius: '12px', boxShadow: '0 20px 40px rgba(0, 0, 0, 0.7)', border: '1px solid rgba(255, 255, 255, 0.1)' }}
+          />
+        </div>
+        <button
+          type="button"
+          onClick={goToNextPhoto}
+          style={{ background: 'rgba(15, 23, 42, 0.65)', border: '1px solid rgba(255, 255, 255, 0.15)', color: '#ffffff', fontSize: '28px', width: '48px', height: '48px', borderRadius: '50%', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10, flexShrink: 0 }}
+          title="الصورة التالية (السهم الأيسر)"
+          aria-label="الصورة التالية"
+        >
+          ❮
+        </button>
+      </div>
+
+      <footer
+        style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '0.6rem', padding: '0.5rem', background: 'rgba(255, 255, 255, 0.03)', borderRadius: '10px', overflowX: 'auto', maxHeight: '80px' }}
+      >
+        {allPhotos.map((photo, index) => {
+          const isSelected = photo.phase === currentPhoto.phase && photo.index === currentPhoto.index;
+          return (
+            <button
+              key={`${photo.url}-${index}`}
+              type="button"
+              onClick={() => onClose({ cardId: currentCard.id, phase: photo.phase, photoIndex: photo.index })}
+              style={{ all: 'unset', cursor: 'pointer', position: 'relative', borderRadius: '6px', overflow: 'hidden', border: isSelected ? '2px solid #10b981' : '1px solid rgba(255, 255, 255, 0.2)', opacity: isSelected ? 1 : 0.6, transform: isSelected ? 'scale(1.08)' : 'scale(1)', transition: 'all 0.2s', width: '60px', height: '45px', flexShrink: 0 }}
+              title={`${photo.phaseLabel} ${photo.index + 1}`}
+              aria-label={`عرض ${photo.phaseLabel} ${photo.index + 1}`}
+            >
+              <img src={photo.url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              <span
+                style={{ position: 'absolute', bottom: 0, insetInline: 0, fontSize: '8px', textAlign: 'center', background: photo.phase === 'before' ? 'rgba(2, 132, 199, 0.85)' : 'rgba(5, 150, 105, 0.85)', color: '#ffffff' }}
+              >
+                {photo.phase === 'before' ? 'قبل' : 'بعد'}
+              </span>
+            </button>
+          );
+        })}
+      </footer>
+    </div>
   );
 }

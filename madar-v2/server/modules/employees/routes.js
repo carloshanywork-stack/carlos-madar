@@ -1,16 +1,20 @@
 import { Router } from 'express';
 import { requestActorId } from '../actor.js';
+import { buildMonthlyAttendanceWorkbook } from './attendance-export.js';
 import {
   createEmployee,
   deactivateEmployee,
   finalizePayroll,
   getAttendance,
+  getMonthlyAttendance,
   getPayroll,
   issueEmployeeTool,
   listEmployees,
   listEmployeeTools,
   returnEmployeeTool,
   saveAttendance,
+  saveMonthlyAttendance,
+  markAllPresent,
   updateEmployee,
 } from './service.js';
 
@@ -31,6 +35,24 @@ router.delete('/:id', (req, res) => {
 
 router.get('/attendance', (req, res) => {
   res.json(getAttendance(req.query.date));
+});
+router.get('/attendance/monthly', (req, res) => {
+  res.json(getMonthlyAttendance(req.query.month));
+});
+router.post('/attendance/monthly', (req, res) => {
+  res.json(saveMonthlyAttendance(req.body, requestActorId(req)));
+});
+router.post('/attendance/mark-all-present', (req, res) => {
+  res.json(markAllPresent(req.body?.date, requestActorId(req)));
+});
+router.get('/attendance/export-monthly', (req, res) => {
+  const month = req.query.month;
+  const workbook = buildMonthlyAttendanceWorkbook(month);
+  res.set({
+    'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'Content-Disposition': `attachment; filename="attendance-${month}.xlsx"; filename*=UTF-8''${encodeURIComponent(`كشف-الحضور-${month}.xlsx`)}`,
+    'Cache-Control': 'private, no-store',
+  }).send(workbook);
 });
 router.post('/attendance', (req, res) => {
   res.json(saveAttendance(req.body, requestActorId(req)));

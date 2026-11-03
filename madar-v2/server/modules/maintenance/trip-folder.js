@@ -1,23 +1,40 @@
 import yauzl from 'yauzl';
 import sharp from 'sharp';
-import { extname } from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { createWriteStream } from 'node:fs';
+import { rm, stat } from 'node:fs/promises';
+import { extname, join } from 'node:path';
+import { pipeline } from 'node:stream/promises';
 import { HttpError } from '../http.js';
 
 export const TRIP_PHOTO_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.heic', '.heif']);
 
-const MAX_ZIP_BYTES = 1024 * 1024 * 1024;
-const MAX_ZIP_ENTRIES = 10000;
-const MAX_ZIP_FILE_BYTES = 100 * 1024 * 1024;
-const MAX_ZIP_UNCOMPRESSED_BYTES = 2048 * 1024 * 1024;
+const MAX_ZIP_BYTES = 20 * 1024 * 1024 * 1024;
+const MAX_ZIP_ENTRIES = 50000;
+const MAX_ZIP_FILE_BYTES = 200 * 1024 * 1024;
+const MAX_ZIP_UNCOMPRESSED_BYTES = 20 * 1024 * 1024 * 1024;
+const COMMON_MACHINE_FOLDER_WORDS = new Set(['atm', 'ماكينه', 'ماكينات', 'فرع']);
 
-export function normalizeMachineFolderName(value) {
-  return String(value ?? '')
+function normalizeArabicDigits(value) {
+  return String(value ?? '').replace(/[٠-٩]/gu, (digit) => String(digit.charCodeAt(0) - 0x0660));
+}
+
+export function normalizeMachineFolderName(value, { ignoreCommonWords = true } = {}) {
+  const normalized = normalizeArabicDigits(value)
     .normalize('NFKC')
     .toLocaleLowerCase('ar')
     .replace(/[أإآٱ]/gu, 'ا')
     .replace(/[ىئ]/gu, 'ي')
+    .replace(/ة/gu, 'ه')
     .replace(/[\u0640\u064B-\u065F\u0670]/gu, '')
-    .replace(/[^\p{L}\p{N}]/gu, '');
+    .replace(/([\p{L}])(\p{N})/gu, '$1 $2')
+    .replace(/(\p{N})(\p{L})/gu, '$1 $2')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
+  const tokens = normalized.split(/\s+/u).filter(Boolean);
+  return tokens
+    .filter((token) => !ignoreCommonWords || !COMMON_MACHINE_FOLDER_WORDS.has(token))
+    .join('');
 }
 
 export function matchMachineFolder(folderName, machines) {
@@ -25,12 +42,33 @@ export function matchMachineFolder(folderName, machines) {
   if (!raw) return null;
 
   const splitTokens = (value) => String(value ?? '')
-    .split(/[\s\-–—_·/\\|()\[\]]+/u)
+    .replace(/[٠-٩]/gu, (digit) => String(digit.charCodeAt(0) - 0x0660))
+    .replace(/([\p{L}])(\p{N})/gu, '$1 $2')
+    .replace(/(\p{N})(\p{L})/gu, '$1 $2')
+    .split(/[^\p{L}\p{N}]+/u)
     .map((token) => token.trim())
     .filter(Boolean);
-  const normalizeToken = (value) => String(value ?? '').normalize('NFKC').toLocaleLowerCase('ar');
+  const normalizeToken = (value) => normalizeMachineFolderName(value);
   const tokens = splitTokens(raw);
-  const normalizedTokens = tokens.map(normalizeToken);
+  const normalizedTokens = tokens.map(normalizeToken).filter(Boolean);
+  const rawNormalizedTokens = tokens.map((token) => normalizeMachineFolderName(token, { ignoreCommonWords: false }));
+  const nameTokenScores = (machine) => [machine.name_ar, machine.name_en]
+    .flatMap((name) => splitTokens(name).map((token) => normalizeMachineFolderName(token, { ignoreCommonWords: false })))
+    .filter(Boolean)
+    .filter((token, index, values) => values.indexOf(token) === index)
+    .filter((token) => rawNormalizedTokens.includes(token)).length;
+  const shortNumericNameMatches = machines
+    .filter((machine) => /^\d{1,2}$/u.test(String(machine.code ?? '').trim()))
+    .filter((machine) => {
+      const code = Number.parseInt(machine.code, 10);
+      return tokens.some((token) => /^\d+$/u.test(token) && Number.parseInt(token, 10) === code)
+        && nameTokenScores(machine) >= 2;
+    })
+    .sort((a, b) => nameTokenScores(b) - nameTokenScores(a));
+  if (shortNumericNameMatches.length
+    && (shortNumericNameMatches.length === 1 || nameTokenScores(shortNumericNameMatches[0]) > nameTokenScores(shortNumericNameMatches[1]))) {
+    return shortNumericNameMatches[0];
+  }
   const hasTokenSequence = (sequence) => sequence.length > 0
     && sequence.length <= normalizedTokens.length
     && normalizedTokens.some((_, start) => sequence.every((token, offset) => (
@@ -42,23 +80,55 @@ export function matchMachineFolder(folderName, machines) {
   const exactTokenMatches = machines.filter((machine) => {
     const code = String(machine.code ?? '').trim();
     if (!code) return false;
-    if (tokens.some((token) => normalizeToken(token) === normalizeToken(code))) return true;
-    return hasTokenSequence(splitTokens(code));
+    const shortNumericCode = /^\d{1,2}$/u.test(code);
+    if (shortNumericCode) {
+      const numericCode = Number.parseInt(code, 10);
+      const numericFolderOnly = tokens.length === 1
+        && /^\d+$/u.test(tokens[0])
+        && Number.parseInt(tokens[0], 10) === numericCode;
+      const explicitNumericLabel = tokens.length === 2
+        && /^(?:atm|code)$/iu.test(tokens[0])
+        && /^\d+$/u.test(tokens[1])
+        && Number.parseInt(tokens[1], 10) === numericCode;
+      return numericFolderOnly || explicitNumericLabel;
+    }
+    const normalizedCode = normalizeToken(code);
+    if (normalizedCode && normalizedTokens.includes(normalizedCode)) return true;
+    const codeTokens = splitTokens(code).map(normalizeToken).filter(Boolean);
+    if (hasTokenSequence(codeTokens)) return true;
+    if (/^\d+$/u.test(code)) {
+      const numericCode = Number.parseInt(code, 10);
+      return Number.isFinite(numericCode) && tokens.some((token) => (
+        /^\d+$/u.test(token) && Number.parseInt(token, 10) === numericCode
+      ));
+    }
+    return false;
   });
 
   if (exactTokenMatches.length === 1) return exactTokenMatches[0];
 
   if (exactTokenMatches.length > 1) {
-    const normFolder = normalizeMachineFolderName(raw);
+    const shortNumericMatches = exactTokenMatches.filter((machine) => /^\d{1,2}$/u.test(String(machine.code ?? '').trim()));
+    if (shortNumericMatches.length > 1) return null;
+    const normFolder = normalizeMachineFolderName(raw, { ignoreCommonWords: false });
     const sorted = [...exactTokenMatches].sort((a, b) => {
-      const aName = normalizeMachineFolderName(a.name_ar);
-      const bName = normalizeMachineFolderName(b.name_ar);
+      const aName = normalizeMachineFolderName(a.name_ar, { ignoreCommonWords: false });
+      const bName = normalizeMachineFolderName(b.name_ar, { ignoreCommonWords: false });
       const aNameMatch = aName && normFolder.includes(aName) ? 1 : 0;
       const bNameMatch = bName && normFolder.includes(bName) ? 1 : 0;
       if (aNameMatch !== bNameMatch) return bNameMatch - aNameMatch;
       return String(b.code).length - String(a.code).length;
     });
-    return sorted[0];
+    const best = sorted[0];
+    const second = sorted[1];
+    const bestNameMatch = [best.name_ar, best.name_en]
+      .some((name) => normalizeMachineFolderName(name, { ignoreCommonWords: false })
+        && normFolder.includes(normalizeMachineFolderName(name, { ignoreCommonWords: false })));
+    const secondNameMatch = [second.name_ar, second.name_en]
+      .some((name) => normalizeMachineFolderName(name, { ignoreCommonWords: false })
+        && normFolder.includes(normalizeMachineFolderName(name, { ignoreCommonWords: false })));
+    if (bestNameMatch === secondNameMatch && String(best.code).length === String(second.code).length) return null;
+    return best;
   }
 
   // Exact normalized Arabic or English name, for legacy folders without codes.
@@ -68,6 +138,23 @@ export function matchMachineFolder(folderName, machines) {
     .some((name) => normalizeMachineFolderName(name) === normalizedFolder));
   if (exactNameMatches.length === 1) return exactNameMatches[0];
 
+  // A short branch label such as "فرع ديونز" can identify a longer Arabic
+  // machine name, but only if the catalog name also identifies it as a branch.
+  // This avoids confusing it with a similarly named compound/site.
+  if (rawNormalizedTokens[0] === normalizeMachineFolderName('فرع', { ignoreCommonWords: false })) {
+    const branchKeywords = rawNormalizedTokens.slice(1).filter(Boolean);
+    const branchNameMatches = machines.filter((machine) => String(machine.name_ar ?? '')
+      .split(/[\s\p{P}\p{S}]+/u)
+      .map((token) => normalizeMachineFolderName(token, { ignoreCommonWords: false }))
+      .filter(Boolean)
+      .some((nameTokens) => nameTokens === normalizeMachineFolderName('فرع', { ignoreCommonWords: false }))
+      && branchKeywords.every((keyword) => String(machine.name_ar ?? '')
+        .split(/[\s\p{P}\p{S}]+/u)
+        .map((token) => normalizeMachineFolderName(token, { ignoreCommonWords: false }))
+        .includes(keyword)));
+    if (branchNameMatches.length === 1) return branchNameMatches[0];
+  }
+
   // Allow one uniquely identifying name to be contained by the folder, or vice versa.
   const containedNameMatches = machines.filter((machine) => [machine.name_ar, machine.name_en]
     .some((name) => {
@@ -76,6 +163,26 @@ export function matchMachineFolder(folderName, machines) {
         && (normalizedFolder.includes(normalizedName) || normalizedName.includes(normalizedFolder));
     }));
   return containedNameMatches.length === 1 ? containedNameMatches[0] : null;
+}
+
+export function matchMachineFolderGroups(folderNames, machines) {
+  const matches = folderNames.map((folderName) => ({ folderName, machine: matchMachineFolder(folderName, machines) }));
+  const firstFolderByMachine = new Map();
+  return matches.map((match) => {
+    if (!match.machine) return { ...match, duplicate: false };
+    const originalFolder = firstFolderByMachine.get(match.machine.id);
+    if (originalFolder) {
+      return {
+        ...match,
+        machine: null,
+        duplicate: true,
+        duplicateMachine: match.machine,
+        duplicateOfFolder: originalFolder,
+      };
+    }
+    firstFolderByMachine.set(match.machine.id, match.folderName);
+    return { ...match, duplicate: false };
+  });
 }
 
 function safeZipPath(filename) {
@@ -90,32 +197,30 @@ function safeZipPath(filename) {
   return { clean, segments };
 }
 
-function readZipEntry(zipfile, entry) {
+function extractZipEntry(zipfile, entry, destinationPath) {
   return new Promise((resolve, reject) => {
     zipfile.openReadStream(entry, (error, stream) => {
       if (error) return reject(error);
-      const buffer = Buffer.allocUnsafe(entry.uncompressedSize);
-      let size = 0;
-      stream.on('data', (chunk) => {
-        if (size + chunk.length > MAX_ZIP_FILE_BYTES || size + chunk.length > buffer.length) {
-          stream.destroy(new HttpError(413, 'A photo in the trip ZIP exceeds the 100 MB limit.'));
-          return;
-        }
-        chunk.copy(buffer, size);
-        size += chunk.length;
-      });
-      stream.once('error', reject);
-      stream.once('end', () => resolve(buffer.subarray(0, size)));
+      pipeline(stream, createWriteStream(destinationPath, { flags: 'wx', mode: 0o600 }))
+        .then(resolve)
+        .catch(async (streamError) => {
+          try { await rm(destinationPath, { force: true }); } catch { /* retain the stream failure */ }
+          reject(streamError);
+        });
     });
   });
 }
 
-export async function readTripZip(buffer, { onProgress } = {}) {
-  if (!Buffer.isBuffer(buffer) || !buffer.length) throw new HttpError(400, 'A trip ZIP file is required.');
-  if (buffer.length > MAX_ZIP_BYTES) throw new HttpError(413, 'The trip ZIP exceeds the 1 GB upload limit.');
+export async function readTripZip(zipPath, { tempDirectory, onProgress } = {}) {
+  if (typeof zipPath !== 'string' || !zipPath || typeof tempDirectory !== 'string' || !tempDirectory) {
+    throw new HttpError(400, 'A trip ZIP file and a temporary processing directory are required.');
+  }
+  const zipMetadata = await stat(zipPath);
+  if (!zipMetadata.isFile() || zipMetadata.size === 0) throw new HttpError(400, 'A trip ZIP file is required.');
+  if (zipMetadata.size > MAX_ZIP_BYTES) throw new HttpError(413, 'The trip ZIP exceeds the 20 GB upload limit.');
 
   return new Promise((resolve, reject) => {
-    yauzl.fromBuffer(buffer, { lazyEntries: true, validateEntrySizes: true, decodeStrings: true }, (openError, zipfile) => {
+    yauzl.open(zipPath, { lazyEntries: true, validateEntrySizes: true, decodeStrings: true }, (openError, zipfile) => {
       if (openError) return reject(new HttpError(400, 'The uploaded trip ZIP could not be opened.'));
 
       const files = [];
@@ -168,7 +273,7 @@ export async function readTripZip(buffer, { onProgress } = {}) {
         const extension = extname(path.clean).toLowerCase();
         uncompressedBytes += entry.uncompressedSize;
         if (uncompressedBytes > MAX_ZIP_UNCOMPRESSED_BYTES) {
-          return fail(new HttpError(413, 'The trip ZIP expands beyond the 2 GB processing limit.'));
+          return fail(new HttpError(413, 'The trip ZIP expands beyond the 20 GB processing limit.'));
         }
         if (path.segments.some((segment) => segment.toLocaleLowerCase('en') === '.incoming')) {
           markEntryProcessed('جارٍ استبعاد مجلدات الرفع المؤقتة...');
@@ -181,16 +286,17 @@ export async function readTripZip(buffer, { onProgress } = {}) {
           return;
         }
         if (entry.uncompressedSize > MAX_ZIP_FILE_BYTES) {
-          return fail(new HttpError(413, 'A photo in the trip ZIP exceeds the 100 MB limit.'));
+          return fail(new HttpError(413, 'A photo in the trip ZIP exceeds the 200 MB limit.'));
         }
 
         onProgress?.({ totalFiles, processedFiles, stage: `جارٍ فك وفحص ${path.segments.at(-1)}...` });
-        readZipEntry(zipfile, entry).then((contents) => {
+        const sourceAbsolutePath = join(tempDirectory, `${randomUUID()}${extension}`);
+        extractZipEntry(zipfile, entry, sourceAbsolutePath).then(() => {
           if (settled) return;
           files.push({
             relativePath: path.clean,
             name: path.segments.at(-1),
-            buffer: contents,
+            sourceAbsolutePath,
             modifiedAt: entry.getLastModDate?.()?.getTime() ?? null,
           });
           markEntryProcessed('جارٍ فك وفحص صور الرحلة...');
@@ -276,7 +382,7 @@ function filenameTimestamp(filename) {
 export async function photoTimestamp(photo) {
   let exifTimestamp = null;
   try {
-    const metadata = await sharp(photo.buffer, { failOn: 'none' }).metadata();
+    const metadata = await sharp(photo.sourceAbsolutePath ?? photo.buffer, { failOn: 'none' }).metadata();
     exifTimestamp = parseExifDate(metadata.exif);
   } catch { /* retain raw source bytes; use the filename or filesystem timestamp */ }
   return exifTimestamp ?? filenameTimestamp(photo.name) ?? photo.modifiedAt ?? 0;

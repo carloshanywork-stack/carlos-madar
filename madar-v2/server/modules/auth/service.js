@@ -9,11 +9,43 @@ const sessionLifetimeSeconds = 7 * 24 * 60 * 60;
 const dummyPasswordHash = bcrypt.hashSync('MADAR-invalid-login-timing-only', 12);
 
 function publicUser(row) {
-  return {
+  const user = {
     id: Number(row.id),
     username: row.username,
     fullName: row.full_name,
     role: row.role,
+  };
+  if (row.role !== 'rep') return user;
+
+  let assignedRegions = [];
+  try {
+    const parsed = JSON.parse(row.assigned_regions_json ?? '[]');
+    if (Array.isArray(parsed)) assignedRegions = parsed.filter((region) => typeof region === 'string');
+  } catch {
+    assignedRegions = [];
+  }
+
+  let lastLocation = null;
+  try {
+    const parsed = row.last_location_json ? JSON.parse(row.last_location_json) : null;
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        && Number.isFinite(parsed.latitude) && Number.isFinite(parsed.longitude)) {
+      lastLocation = {
+        latitude: parsed.latitude,
+        longitude: parsed.longitude,
+        accuracy: Number.isFinite(parsed.accuracy) ? parsed.accuracy : null,
+        updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : null,
+      };
+    }
+  } catch {
+    lastLocation = null;
+  }
+
+  return {
+    ...user,
+    assignedRegions,
+    isOnline: Boolean(row.is_online),
+    lastLocation,
   };
 }
 
@@ -74,20 +106,28 @@ export async function createFirstAdmin(input, database = db) {
   }
 }
 
-export function authenticateUser(username, password, database = db) {
+export function authenticateUser(username, password, database = db, { allowedRoles } = {}) {
   if (typeof username !== 'string' || !username.trim() || username.length > 64) return null;
   if (typeof password !== 'string' || !password || password.length > 1024
       || Buffer.byteLength(password, 'utf8') > 72) return null;
+  const roles = allowedRoles === undefined ? null : [...new Set(allowedRoles)];
+  const roleClause = roles === null ? '' : `AND role IN (${roles.map(() => '?').join(', ')})`;
   const row = database.prepare(`
-    SELECT id, username, password_hash, full_name, role
+    SELECT id, username, password_hash, full_name, role,
+      assigned_regions_json, is_online, last_location_json
     FROM users
     WHERE username = ? COLLATE NOCASE AND active = 1 AND deleted_at IS NULL
+      ${roleClause}
     LIMIT 1
-  `).get(username.trim());
+  `).get(username.trim(), ...(roles ?? []));
   const passwordMatches = bcrypt.compareSync(password, row?.password_hash ?? dummyPasswordHash);
   if (!row || !passwordMatches) return null;
-  const user = publicUser(row);
-  return { user, token: createSession(user, database) };
+  const token = createSession(row, database);
+  const refreshedRow = row.role === 'rep'
+    ? database.prepare(`SELECT id, username, full_name, role, assigned_regions_json, is_online, last_location_json
+      FROM users WHERE id = ?`).get(row.id)
+    : row;
+  return { user: publicUser(refreshedRow), token };
 }
 
 export function createSession(user, database = db) {
@@ -104,6 +144,10 @@ export function createSession(user, database = db) {
       INSERT INTO sessions (token_hash, user_id, expires_at)
       VALUES (?, ?, ?)
     `).run(hashToken(token), user.id, expiresAt);
+    if (user.role === 'rep') {
+      database.prepare('UPDATE users SET is_online = 1 WHERE id = ? AND role = \'rep\' AND active = 1 AND deleted_at IS NULL')
+        .run(user.id);
+    }
   });
   create();
   return token;
@@ -139,7 +183,8 @@ export function verifyToken(token, database = db) {
   if (!Number.isSafeInteger(userId) || userId < 1) return null;
 
   const row = database.prepare(`
-    SELECT user.id, user.username, user.full_name, user.role
+    SELECT user.id, user.username, user.full_name, user.role,
+      user.assigned_regions_json, user.is_online, user.last_location_json
     FROM sessions session
     JOIN users user ON user.id = session.user_id
     WHERE session.token_hash = ? AND session.user_id = ?
@@ -163,6 +208,19 @@ export function revokeSession(token, database = db) {
     UPDATE sessions SET revoked_at = CURRENT_TIMESTAMP
     WHERE token_hash = ? AND revoked_at IS NULL
   `).run(hashToken(token));
+}
+
+export function refreshRepPresence(userId, database = db) {
+  database.prepare(`
+    UPDATE users
+    SET is_online = CASE WHEN active = 1 AND deleted_at IS NULL AND EXISTS (
+      SELECT 1 FROM sessions
+      WHERE sessions.user_id = users.id
+        AND sessions.revoked_at IS NULL
+        AND datetime(sessions.expires_at) > datetime('now')
+    ) THEN 1 ELSE 0 END
+    WHERE id = ? AND role = 'rep'
+  `).run(userId);
 }
 
 export function requireAuthentication(req, res, next) {
