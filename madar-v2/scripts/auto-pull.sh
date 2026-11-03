@@ -69,22 +69,44 @@ fi
 
 CHANGED="$(git diff --name-only "$LOCAL" "$REMOTE")"
 
-if ! git merge --ff-only --quiet "$REMOTE" >>"$LOG_FILE" 2>&1; then
+# Run a deploy step without dumping its whole output into the log.
+# Success -> one summary line. Failure -> summary plus the tail of the output.
+run_step() {
+  local dir="$1" label="$2" out
+  shift 2
+  out="$(mktemp)"
+  if ( cd "$dir" && "$@" ) >"$out" 2>&1; then
+    log "$label: ok"
+    rm -f "$out"
+    return 0
+  fi
+  log "$label: FAILED (last 40 lines below)"
+  tail -n 40 "$out" | sed 's/^/  /' >>"$LOG_FILE"
+  rm -f "$out"
+  return 1
+}
+
+MERGE_OUT="$(mktemp)"
+if git merge --ff-only --quiet "$REMOTE" >"$MERGE_OUT" 2>&1; then
+  rm -f "$MERGE_OUT"
+  log "fast-forwarded $LOCAL..$REMOTE"
+else
   log_throttled diverged "fast-forward failed: local branch and $REMOTE_REF diverged; manual reconcile required"
+  tail -n 20 "$MERGE_OUT" | sed 's/^/  /' >>"$LOG_FILE"
+  rm -f "$MERGE_OUT"
   exit 0
 fi
-log "fast-forwarded $LOCAL..$REMOTE"
 
 if printf '%s\n' "$CHANGED" | grep -qx 'madar-v2/package-lock.json'; then
   log "backend lockfile changed; running npm ci"
-  ( cd "$PROJECT_DIR" && npm ci --prefer-offline --no-audit --no-fund ) >>"$LOG_FILE" 2>&1 \
-    || { log "backend npm ci failed; not restarting"; exit 0; }
+  run_step "$PROJECT_DIR" "backend npm ci" npm ci --prefer-offline --no-audit --no-fund \
+    || { log "backend deps not updated; not restarting"; exit 0; }
 fi
 
 if printf '%s\n' "$CHANGED" | grep -qE '^madar-v2/client/(package-lock\.json|src/|index\.html|vite\.config\.js)'; then
   log "client changed; installing and building"
-  if ( cd "$PROJECT_DIR/client" && npm ci --prefer-offline --no-audit --no-fund \
-       && npm run build -- --outDir dist-next --emptyOutDir ) >>"$LOG_FILE" 2>&1; then
+  if run_step "$PROJECT_DIR/client" "client npm ci" npm ci --prefer-offline --no-audit --no-fund \
+     && run_step "$PROJECT_DIR/client" "client build" npm run build -- --outDir dist-next --emptyOutDir; then
     rm -rf "$PROJECT_DIR/client/dist"
     mv "$PROJECT_DIR/client/dist-next" "$PROJECT_DIR/client/dist"
   else
@@ -94,8 +116,8 @@ if printf '%s\n' "$CHANGED" | grep -qE '^madar-v2/client/(package-lock\.json|src
   fi
 fi
 
-if ( cd "$PROJECT_DIR" && pm2 restart madar-v2 --update-env ) >>"$LOG_FILE" 2>&1; then
-  log "PM2 madar-v2 restarted with the new commit"
+if run_step "$PROJECT_DIR" "PM2 restart" pm2 restart madar-v2 --update-env; then
+  log "madar-v2 now running commit $(git rev-parse --short HEAD)"
 else
-  log "PM2 restart failed"
+  log "PM2 restart failed; new commit is on disk but not loaded"
 fi
