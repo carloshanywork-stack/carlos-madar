@@ -1,0 +1,414 @@
+{
+  "../node_modules/@capacitor/app/dist/esm/web.js": {
+    "file": "assets/web-DcmE_ZOE.js",
+    "name": "web",
+    "src": "../node_modules/@capacitor/app/dist/esm/web.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_RepApp-fdShPJ7U.js",
+      "_react-vendor-DGbYTHPG.js",
+      "index.html",
+      "_react-dom-vendor-CtNGUtKY.js",
+      "_scheduler-vendor-CoSDG3-6.js",
+      "_router-vendor-CHc_B4Kd.js"
+    ]
+  },
+  "../node_modules/@capacitor/filesystem/dist/esm/web.js": {
+    "file": "assets/web-C6-vELS-.js",
+    "name": "web",
+    "src": "../node_modules/@capacitor/filesystem/dist/esm/web.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_RepApp-fdShPJ7U.js",
+      "_react-vendor-DGbYTHPG.js",
+      "index.html",
+      "_react-dom-vendor-CtNGUtKY.js",
+      "_scheduler-vendor-CoSDG3-6.js",
+      "_router-vendor-CHc_B4Kd.js"
+    ]
+  },
+  "../node_modules/@capacitor/geolocation/dist/esm/web.js": {
+    "file": "assets/web-Dyu-7j-Y.js",
+    "name": "web",
+    "src": "../node_modules/@capacitor/geolocation/dist/esm/web.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_RepApp-fdShPJ7U.js",
+      "_react-vendor-DGbYTHPG.js",
+      "index.html",
+      "_react-dom-vendor-CtNGUtKY.js",
+      "_scheduler-vendor-CoSDG3-6.js",
+      "_router-vendor-CHc_B4Kd.js"
+    ]
+  },
+  "../node_modules/@capacitor/network/dist/esm/web.js": {
+    "file": "assets/web-rd3QL30-.js",
+    "name": "web",
+    "src": "../node_modules/@capacitor/network/dist/esm/web.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_RepApp-fdShPJ7U.js",
+      "_react-vendor-DGbYTHPG.js",
+      "index.html",
+      "_react-dom-vendor-CtNGUtKY.js",
+      "_scheduler-vendor-CoSDG3-6.js",
+      "_router-vendor-CHc_B4Kd.js"
+    ]
+  },
+  "_Alert-CIT7h0rG.js": {
+    "file": "assets/Alert-CIT7h0rG.js",
+    "name": "Alert",
+    "imports": [
+      "_react-vendor-DGbYTHPG.js",
+      "index.html"
+    ]
+  },
+  "_Badge-QJEsKJjT.js": {
+    "file": "assets/Badge-QJEsKJjT.js",
+    "name": "Badge",
+    "imports": [
+      "_react-vendor-DGbYTHPG.js",
+      "_Alert-CIT7h0rG.js"
+    ]
+  },
+  "_Checkbox-CEYtWA8Z.js": {
+    "file": "assets/Checkbox-CEYtWA8Z.js",
+    "name": "Checkbox",
+    "imports": [
+      "_react-vendor-DGbYTHPG.js"
+    ]
+  },
+  "_EmployeeCheckboxList-BGzExkA8.js": {
+    "file": "assets/EmployeeCheckboxList-BGzExkA8.js",
+    "name": "EmployeeCheckboxList",
+    "imports": [
+      "_react-vendor-DGbYTHPG.js",
+      "index.html",
+      "_Checkbox-CEYtWA8Z.js",
+      "_Alert-CIT7h0rG.js"
+    ]
+  },
+  "_MaintenancePptxExportModal-XC3YkUy3.js": {
+    "file": "assets/MaintenancePptxExportModal-XC3YkUy3.js",
+    "name": "MaintenancePptxExportModal",
+    "imports": [
+      "_react-vendor-DGbYTHPG.js",
+      "_Alert-CIT7h0rG.js",
+      "index.html",
+      "_Modal-DEyFsnVj.js"
+    ]
+  },
+  "_Modal-DEyFsnVj.js": {
+    "file": "assets/Modal-DEyFsnVj.js",
+    "name": "Modal",
+    "imports": [
+      "_react-vendor-DGbYTHPG.js",
+      "index.html"
+    ]
+  },
+  "_RepApp-BMqrHA3l.css": {
+    "file": "assets/RepApp-BMqrHA3l.css",
+    "src": "_RepApp-BMqrHA3l.css"
+  },
+  "_RepApp-fdShPJ7U.js": {
+    "file": "assets/RepApp-fdShPJ7U.js",
+    "name": "RepApp",
+    "isDynamicEntry": true,
+    "imports": [
+      "_react-vendor-DGbYTHPG.js",
+      "index.html"
+    ],
+    "dynamicImports": [
+      "../node_modules/@capacitor/app/dist/esm/web.js",
+      "../node_modules/@capacitor/filesystem/dist/esm/web.js",
+      "../node_modules/@capacitor/geolocation/dist/esm/web.js",
+      "../node_modules/@capacitor/network/dist/esm/web.js"
+    ],
+    "css": [
+      "assets/RepApp-BMqrHA3l.css"
+    ]
+  },
+  "_Tabs-Cu-GGHV2.js": {
+    "file": "assets/Tabs-Cu-GGHV2.js",
+    "name": "Tabs",
+    "imports": [
+      "_react-vendor-DGbYTHPG.js"
+    ]
+  },
+  "_Toast-C9rKF6xo.js": {
+    "file": "assets/Toast-C9rKF6xo.js",
+    "name": "Toast",
+    "imports": [
+      "_react-vendor-DGbYTHPG.js",
+      "index.html"
+    ]
+  },
+  "_react-dom-vendor-CtNGUtKY.js": {
+    "file": "assets/react-dom-vendor-CtNGUtKY.js",
+    "name": "react-dom-vendor",
+    "imports": [
+      "_react-vendor-DGbYTHPG.js",
+      "_scheduler-vendor-CoSDG3-6.js"
+    ]
+  },
+  "_react-vendor-DGbYTHPG.js": {
+    "file": "assets/react-vendor-DGbYTHPG.js",
+    "name": "react-vendor"
+  },
+  "_router-vendor-CHc_B4Kd.js": {
+    "file": "assets/router-vendor-CHc_B4Kd.js",
+    "name": "router-vendor",
+    "imports": [
+      "_react-vendor-DGbYTHPG.js"
+    ]
+  },
+  "_scheduler-vendor-CoSDG3-6.js": {
+    "file": "assets/scheduler-vendor-CoSDG3-6.js",
+    "name": "scheduler-vendor"
+  },
+  "index.html": {
+    "file": "assets/index-BhN4cM53.js",
+    "name": "index",
+    "src": "index.html",
+    "isEntry": true,
+    "imports": [
+      "_react-vendor-DGbYTHPG.js",
+      "_react-dom-vendor-CtNGUtKY.js",
+      "_router-vendor-CHc_B4Kd.js",
+      "_scheduler-vendor-CoSDG3-6.js"
+    ],
+    "dynamicImports": [
+      "_RepApp-fdShPJ7U.js",
+      "src/modules/supervisor/SupervisorRadarPage.jsx",
+      "src/modules/dashboard/OverviewPage.jsx",
+      "src/modules/clients/ClientsPage.jsx",
+      "src/modules/maintenance/MaintenancePage.jsx",
+      "src/modules/maintenance/OrderDetail.jsx",
+      "src/modules/workshop/WorkshopPage.jsx",
+      "src/modules/workshop/WorkshopOrderDetail.jsx",
+      "src/modules/warehouse/WarehousePage.jsx",
+      "src/modules/finance/FinancePage.jsx",
+      "src/modules/accounting/AccountingPage.jsx",
+      "src/modules/archive/ArchivePage.jsx",
+      "src/modules/settings/SettingsPage.jsx"
+    ],
+    "css": [
+      "assets/index-CBfn0Fuc.css"
+    ]
+  },
+  "src/modules/accounting/AccountingPage.jsx": {
+    "file": "assets/AccountingPage-C3EyNbnd.js",
+    "name": "AccountingPage",
+    "src": "src/modules/accounting/AccountingPage.jsx",
+    "isDynamicEntry": true,
+    "imports": [
+      "_react-vendor-DGbYTHPG.js",
+      "index.html",
+      "_Alert-CIT7h0rG.js",
+      "_Toast-C9rKF6xo.js",
+      "_Badge-QJEsKJjT.js",
+      "_Modal-DEyFsnVj.js",
+      "_Tabs-Cu-GGHV2.js",
+      "_react-dom-vendor-CtNGUtKY.js",
+      "_scheduler-vendor-CoSDG3-6.js",
+      "_router-vendor-CHc_B4Kd.js"
+    ],
+    "css": [
+      "assets/AccountingPage-C_dlUm-b.css"
+    ]
+  },
+  "src/modules/archive/ArchivePage.jsx": {
+    "file": "assets/ArchivePage-C_W1q6Ev.js",
+    "name": "ArchivePage",
+    "src": "src/modules/archive/ArchivePage.jsx",
+    "isDynamicEntry": true,
+    "imports": [
+      "_react-vendor-DGbYTHPG.js",
+      "index.html",
+      "_Alert-CIT7h0rG.js",
+      "_Badge-QJEsKJjT.js",
+      "_Modal-DEyFsnVj.js",
+      "_Tabs-Cu-GGHV2.js",
+      "_MaintenancePptxExportModal-XC3YkUy3.js",
+      "_router-vendor-CHc_B4Kd.js",
+      "_react-dom-vendor-CtNGUtKY.js",
+      "_scheduler-vendor-CoSDG3-6.js"
+    ]
+  },
+  "src/modules/clients/ClientsPage.jsx": {
+    "file": "assets/ClientsPage-B4I8RZPw.js",
+    "name": "ClientsPage",
+    "src": "src/modules/clients/ClientsPage.jsx",
+    "isDynamicEntry": true,
+    "imports": [
+      "_react-vendor-DGbYTHPG.js",
+      "index.html",
+      "_Alert-CIT7h0rG.js",
+      "_Toast-C9rKF6xo.js",
+      "_Modal-DEyFsnVj.js",
+      "_react-dom-vendor-CtNGUtKY.js",
+      "_scheduler-vendor-CoSDG3-6.js",
+      "_router-vendor-CHc_B4Kd.js"
+    ]
+  },
+  "src/modules/dashboard/OverviewPage.jsx": {
+    "file": "assets/OverviewPage-M2jqAhx6.js",
+    "name": "OverviewPage",
+    "src": "src/modules/dashboard/OverviewPage.jsx",
+    "isDynamicEntry": true,
+    "imports": [
+      "_react-vendor-DGbYTHPG.js",
+      "index.html",
+      "_Alert-CIT7h0rG.js",
+      "_Badge-QJEsKJjT.js",
+      "_router-vendor-CHc_B4Kd.js",
+      "_react-dom-vendor-CtNGUtKY.js",
+      "_scheduler-vendor-CoSDG3-6.js"
+    ]
+  },
+  "src/modules/finance/FinancePage.jsx": {
+    "file": "assets/FinancePage-CoCcmZGA.js",
+    "name": "FinancePage",
+    "src": "src/modules/finance/FinancePage.jsx",
+    "isDynamicEntry": true,
+    "imports": [
+      "_react-vendor-DGbYTHPG.js",
+      "index.html",
+      "_Alert-CIT7h0rG.js",
+      "_Toast-C9rKF6xo.js",
+      "_Badge-QJEsKJjT.js",
+      "_Modal-DEyFsnVj.js",
+      "_Tabs-Cu-GGHV2.js",
+      "_router-vendor-CHc_B4Kd.js",
+      "_react-dom-vendor-CtNGUtKY.js",
+      "_scheduler-vendor-CoSDG3-6.js"
+    ]
+  },
+  "src/modules/maintenance/MaintenancePage.jsx": {
+    "file": "assets/MaintenancePage-BjvS-p2N.js",
+    "name": "MaintenancePage",
+    "src": "src/modules/maintenance/MaintenancePage.jsx",
+    "isDynamicEntry": true,
+    "imports": [
+      "_react-vendor-DGbYTHPG.js",
+      "index.html",
+      "_Alert-CIT7h0rG.js",
+      "_Toast-C9rKF6xo.js",
+      "_Badge-QJEsKJjT.js",
+      "_EmployeeCheckboxList-BGzExkA8.js",
+      "_Modal-DEyFsnVj.js",
+      "_Tabs-Cu-GGHV2.js",
+      "_router-vendor-CHc_B4Kd.js",
+      "_react-dom-vendor-CtNGUtKY.js",
+      "_scheduler-vendor-CoSDG3-6.js",
+      "_Checkbox-CEYtWA8Z.js"
+    ]
+  },
+  "src/modules/maintenance/OrderDetail.jsx": {
+    "file": "assets/OrderDetail-DRJ3tXGw.js",
+    "name": "OrderDetail",
+    "src": "src/modules/maintenance/OrderDetail.jsx",
+    "isDynamicEntry": true,
+    "imports": [
+      "_react-vendor-DGbYTHPG.js",
+      "index.html",
+      "_Alert-CIT7h0rG.js",
+      "_Toast-C9rKF6xo.js",
+      "_Badge-QJEsKJjT.js",
+      "_Modal-DEyFsnVj.js",
+      "_Tabs-Cu-GGHV2.js",
+      "_MaintenancePptxExportModal-XC3YkUy3.js",
+      "_router-vendor-CHc_B4Kd.js",
+      "_react-dom-vendor-CtNGUtKY.js",
+      "_scheduler-vendor-CoSDG3-6.js"
+    ]
+  },
+  "src/modules/settings/SettingsPage.jsx": {
+    "file": "assets/SettingsPage-BNCtGUQw.js",
+    "name": "SettingsPage",
+    "src": "src/modules/settings/SettingsPage.jsx",
+    "isDynamicEntry": true,
+    "imports": [
+      "_react-vendor-DGbYTHPG.js",
+      "index.html",
+      "_Alert-CIT7h0rG.js",
+      "_Toast-C9rKF6xo.js",
+      "_Badge-QJEsKJjT.js",
+      "_Modal-DEyFsnVj.js",
+      "_react-dom-vendor-CtNGUtKY.js",
+      "_scheduler-vendor-CoSDG3-6.js",
+      "_router-vendor-CHc_B4Kd.js"
+    ]
+  },
+  "src/modules/supervisor/SupervisorRadarPage.jsx": {
+    "file": "assets/SupervisorRadarPage-DkquG1b4.js",
+    "name": "SupervisorRadarPage",
+    "src": "src/modules/supervisor/SupervisorRadarPage.jsx",
+    "isDynamicEntry": true,
+    "imports": [
+      "_react-vendor-DGbYTHPG.js",
+      "index.html",
+      "_react-dom-vendor-CtNGUtKY.js",
+      "_scheduler-vendor-CoSDG3-6.js",
+      "_router-vendor-CHc_B4Kd.js"
+    ],
+    "css": [
+      "assets/SupervisorRadarPage-UyUqBR_d.css"
+    ]
+  },
+  "src/modules/warehouse/WarehousePage.jsx": {
+    "file": "assets/WarehousePage-DNjVGYN4.js",
+    "name": "WarehousePage",
+    "src": "src/modules/warehouse/WarehousePage.jsx",
+    "isDynamicEntry": true,
+    "imports": [
+      "_react-vendor-DGbYTHPG.js",
+      "index.html",
+      "_Alert-CIT7h0rG.js",
+      "_Toast-C9rKF6xo.js",
+      "_Badge-QJEsKJjT.js",
+      "_Checkbox-CEYtWA8Z.js",
+      "_Modal-DEyFsnVj.js",
+      "_Tabs-Cu-GGHV2.js",
+      "_router-vendor-CHc_B4Kd.js",
+      "_react-dom-vendor-CtNGUtKY.js",
+      "_scheduler-vendor-CoSDG3-6.js"
+    ]
+  },
+  "src/modules/workshop/WorkshopOrderDetail.jsx": {
+    "file": "assets/WorkshopOrderDetail-DxxqIDJQ.js",
+    "name": "WorkshopOrderDetail",
+    "src": "src/modules/workshop/WorkshopOrderDetail.jsx",
+    "isDynamicEntry": true,
+    "imports": [
+      "_react-vendor-DGbYTHPG.js",
+      "index.html",
+      "_Alert-CIT7h0rG.js",
+      "_Toast-C9rKF6xo.js",
+      "_Badge-QJEsKJjT.js",
+      "_router-vendor-CHc_B4Kd.js",
+      "_react-dom-vendor-CtNGUtKY.js",
+      "_scheduler-vendor-CoSDG3-6.js"
+    ]
+  },
+  "src/modules/workshop/WorkshopPage.jsx": {
+    "file": "assets/WorkshopPage-27xMzi9c.js",
+    "name": "WorkshopPage",
+    "src": "src/modules/workshop/WorkshopPage.jsx",
+    "isDynamicEntry": true,
+    "imports": [
+      "_react-vendor-DGbYTHPG.js",
+      "index.html",
+      "_Alert-CIT7h0rG.js",
+      "_Toast-C9rKF6xo.js",
+      "_Badge-QJEsKJjT.js",
+      "_Checkbox-CEYtWA8Z.js",
+      "_EmployeeCheckboxList-BGzExkA8.js",
+      "_Modal-DEyFsnVj.js",
+      "_Tabs-Cu-GGHV2.js",
+      "_router-vendor-CHc_B4Kd.js",
+      "_react-dom-vendor-CtNGUtKY.js",
+      "_scheduler-vendor-CoSDG3-6.js"
+    ]
+  }
+}
