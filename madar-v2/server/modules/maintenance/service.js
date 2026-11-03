@@ -572,8 +572,12 @@ export function listMaintenanceOrders(status, database = db) {
           AND m.area IS NOT NULL
           AND m.area != ''
       ) AS card_areas,
-      (SELECT COUNT(*) FROM maintenance_cards card WHERE card.order_id = order_record.id AND card.deleted_at IS NULL) AS card_count,
-      (SELECT COUNT(*) FROM maintenance_order_technicians assigned WHERE assigned.order_id = order_record.id) AS technician_count
+       (SELECT COUNT(*) FROM maintenance_cards card WHERE card.order_id = order_record.id AND card.deleted_at IS NULL) AS card_count,
+       (SELECT COUNT(*) FROM maintenance_order_technicians assigned WHERE assigned.order_id = order_record.id) AS technician_count,
+       (SELECT COUNT(*) FROM maintenance_order_reps assigned WHERE assigned.order_id = order_record.id) AS representative_count,
+       (SELECT GROUP_CONCAT(user.full_name, '، ')
+         FROM maintenance_order_reps assigned JOIN users user ON user.id = assigned.user_id
+         WHERE assigned.order_id = order_record.id) AS representative_names
     FROM maintenance_orders AS order_record
     JOIN clients AS client ON client.id = order_record.client_id
     WHERE order_record.status = ? AND order_record.deleted_at IS NULL
@@ -1843,6 +1847,18 @@ function assertActiveEmployees(employeeIds, department, database) {
   }
 }
 
+function assertActiveRepresentatives(repUserIds, database) {
+  if (!repUserIds.length) return;
+  const placeholders = repUserIds.map(() => '?').join(', ');
+  const representatives = database.prepare(`
+    SELECT id FROM users
+    WHERE id IN (${placeholders}) AND role = 'rep' AND active = 1 AND deleted_at IS NULL
+  `).all(...repUserIds);
+  if (representatives.length !== repUserIds.length) {
+    throw new HttpError(400, 'All assigned representatives must exist, be active, and have the rep role.');
+  }
+}
+
 function nextOrderCode(database) {
   const orderCodes = database.prepare("SELECT order_code FROM maintenance_orders WHERE order_code GLOB 'MN-[0-9]*'").all();
   const largest = orderCodes.reduce((maximum, row) => {
@@ -1854,7 +1870,7 @@ function nextOrderCode(database) {
 
 export function createMaintenanceOrder(input, actorId = null, database = db) {
   const body = requireObject(input);
-  allowOnlyKeys(body, ['clientId', 'area', 'areas', 'employeeIds', 'notes', 'pettyCashDisbursedCents', 'autoPopulateAreaMachines']);
+  allowOnlyKeys(body, ['clientId', 'area', 'areas', 'employeeIds', 'repUserIds', 'notes', 'pettyCashDisbursedCents', 'autoPopulateAreaMachines']);
   const clientId = positiveId(body.clientId, 'clientId');
   if (body.areas !== undefined && !Array.isArray(body.areas)) {
     throw new HttpError(400, 'areas must be an array of area names.');
@@ -1867,6 +1883,7 @@ export function createMaintenanceOrder(input, actorId = null, database = db) {
   }
   const autoPopulateAreaMachines = body.autoPopulateAreaMachines === true;
   const employeeIds = integerIdArray(body.employeeIds, 'employeeIds');
+  const repUserIds = body.repUserIds === undefined ? [] : integerIdArray(body.repUserIds, 'repUserIds');
   const notes = optionalText(body.notes, 'notes', { maxLength: 10000 });
   const pettyCashDisbursedCents = body.pettyCashDisbursedCents === undefined
     ? 0
@@ -1875,6 +1892,7 @@ export function createMaintenanceOrder(input, actorId = null, database = db) {
   const orderId = database.transaction(() => {
     assertActiveClient(clientId, database);
     assertActiveEmployees(employeeIds, 'Maintenance', database);
+    assertActiveRepresentatives(repUserIds, database);
     if (pettyCashDisbursedCents > 0) assertCashAvailable(pettyCashDisbursedCents, database);
     const orderCode = nextOrderCode(database);
     const result = database.prepare(`
@@ -1899,6 +1917,10 @@ export function createMaintenanceOrder(input, actorId = null, database = db) {
       INSERT INTO maintenance_order_technicians (order_id, employee_id) VALUES (?, ?)
     `);
     for (const employeeId of employeeIds) assign.run(id, employeeId);
+    const assignRepresentative = database.prepare(`
+      INSERT INTO maintenance_order_reps (order_id, user_id, assigned_by) VALUES (?, ?, ?)
+    `);
+    for (const userId of repUserIds) assignRepresentative.run(id, userId, actorId);
     let populatedMachineCount = 0;
     if (autoPopulateAreaMachines) {
       const areaMachines = database.prepare(`
@@ -1931,6 +1953,7 @@ export function createMaintenanceOrder(input, actorId = null, database = db) {
         area,
         areas: selectedAreas,
         employee_ids: employeeIds,
+        representative_user_ids: repUserIds,
         notes,
         auto_populated_machine_count: populatedMachineCount,
         petty_cash_disbursed_cents: pettyCashDisbursedCents,
@@ -1941,6 +1964,54 @@ export function createMaintenanceOrder(input, actorId = null, database = db) {
   }).immediate();
 
   return getMaintenanceOrder(orderId, database);
+}
+
+export function listMaintenanceRepresentatives(database = db) {
+  return database.prepare(`
+    SELECT id, username, full_name, assigned_regions_json
+    FROM users WHERE role = 'rep' AND active = 1 AND deleted_at IS NULL
+    ORDER BY full_name COLLATE NOCASE, id
+  `).all().map((row) => {
+    let assignedRegions = [];
+    try {
+      const parsed = JSON.parse(row.assigned_regions_json ?? '[]');
+      if (Array.isArray(parsed)) assignedRegions = parsed.filter((region) => typeof region === 'string');
+    } catch { /* Treat malformed legacy region data as unassigned. */ }
+    return { id: Number(row.id), username: row.username, full_name: row.full_name, assignedRegions };
+  });
+}
+
+export function replaceMaintenanceOrderRepresentatives(orderId, input, actorId = null, database = db) {
+  const id = positiveId(orderId, 'orderId');
+  const body = requireObject(input);
+  allowOnlyKeys(body, ['repUserIds']);
+  const repUserIds = integerIdArray(body.repUserIds, 'repUserIds');
+  const result = database.transaction(() => {
+    const order = findMaintenanceOrder(id, database);
+    if (order.status === 'archived') throw new HttpError(409, 'Archived maintenance orders cannot be reassigned.');
+    assertActiveRepresentatives(repUserIds, database);
+    const previous = database.prepare(`
+      SELECT user_id FROM maintenance_order_reps WHERE order_id = ? ORDER BY user_id
+    `).all(id).map((row) => Number(row.user_id));
+    database.prepare('DELETE FROM maintenance_order_reps WHERE order_id = ?').run(id);
+    const assign = database.prepare(`
+      INSERT INTO maintenance_order_reps (order_id, user_id, assigned_by) VALUES (?, ?, ?)
+    `);
+    for (const userId of repUserIds) assign.run(id, userId, actorId);
+    recordAudit({
+      database,
+      actorId,
+      action: 'assign_representatives',
+      entityType: 'maintenance_order',
+      entityId: id,
+      oldValues: { representative_user_ids: previous },
+      newValues: { representative_user_ids: repUserIds },
+    });
+    return repUserIds;
+  }).immediate();
+  return { representatives: result.map((userId) => database.prepare(`
+    SELECT id, username, full_name FROM users WHERE id = ?
+  `).get(userId)) };
 }
 
 export function disburseMaintenanceCustody(orderId, input, actorId = null, database = db) {
@@ -1996,6 +2067,13 @@ export function disburseMaintenanceCustody(orderId, input, actorId = null, datab
 
 export function getMaintenanceOrder(orderId, database = db) {
   const order = findMaintenanceOrder(orderId, database);
+  const representatives = database.prepare(`
+    SELECT user.id, user.username, user.full_name, user.active, assigned.assigned_at
+    FROM maintenance_order_reps assigned
+    JOIN users user ON user.id = assigned.user_id
+    WHERE assigned.order_id = ?
+    ORDER BY user.full_name COLLATE NOCASE, user.id
+  `).all(order.id);
   const technicians = database.prepare(`
     SELECT employee.id, employee.name, employee.job_title, employee.department
     FROM maintenance_order_technicians assigned
@@ -2005,6 +2083,22 @@ export function getMaintenanceOrder(orderId, database = db) {
   `).all(order.id);
   const allReasons = database.prepare('SELECT id, name FROM maintenance_reasons').all();
   const reasonMap = new Map(allReasons.map((r) => [r.id, r.name]));
+  const repPhotosByCard = new Map();
+  const repPhotoRows = database.prepare(`
+    SELECT visit.card_id, visit.visit_uuid, photo.phase, photo.stored_path, photo.captured_at,
+      user.full_name AS rep_name, review.status AS review_status
+    FROM rep_visit_photos photo
+    JOIN rep_visits visit ON visit.id = photo.visit_id AND visit.status = 'completed'
+    JOIN users user ON user.id = visit.rep_user_id
+    LEFT JOIN rep_visit_reviews review ON review.visit_id = visit.id
+    WHERE visit.order_id = ? AND visit.card_id IS NOT NULL
+    ORDER BY visit.id, photo.phase, photo.ordinal, photo.id
+  `).all(order.id);
+  for (const photo of repPhotoRows) {
+    const cardId = Number(photo.card_id);
+    if (!repPhotosByCard.has(cardId)) repPhotosByCard.set(cardId, []);
+    repPhotosByCard.get(cardId).push(photo);
+  }
 
   const cards = database.prepare(`
     SELECT card.*, reason.name AS single_reason_name, machine.code AS machine_code, machine.name_ar AS machine_name_ar,
@@ -2017,6 +2111,18 @@ export function getMaintenanceOrder(orderId, database = db) {
   `).all(order.id).map((card) => {
     const beforePhotos = parsePhotoJson(card.before_photos_json);
     const afterPhotos = parsePhotoJson(card.after_photos_json);
+    const repPhotoMetadata = {};
+    for (const photo of repPhotosByCard.get(Number(card.id)) ?? []) {
+      const list = photo.phase === 'before' ? beforePhotos : afterPhotos;
+      if (!list.includes(photo.stored_path)) list.push(photo.stored_path);
+      repPhotoMetadata[photo.stored_path.split('/').at(-1)] = {
+        repName: photo.rep_name,
+        capturedAt: photo.captured_at,
+        visitUuid: photo.visit_uuid,
+        reviewStatus: photo.review_status ?? 'pending',
+        phase: photo.phase,
+      };
+    }
     let reasonIds = [];
     try {
       reasonIds = JSON.parse(card.reason_ids_json || '[]');
@@ -2039,6 +2145,7 @@ export function getMaintenanceOrder(orderId, database = db) {
       reason_name: compositeReasonName,
       before_photos: beforePhotos,
       after_photos: afterPhotos,
+      rep_photo_metadata: repPhotoMetadata,
       before_photo_urls: beforePhotos.map((storedPath) =>
         `/api/maintenance/orders/${order.id}/cards/${card.id}/photos/before/${encodeURIComponent(storedPath.split('/').at(-1))}`),
       after_photo_urls: afterPhotos.map((storedPath) =>
@@ -2099,7 +2206,15 @@ export function getMaintenanceOrder(orderId, database = db) {
       ORDER BY machine.code COLLATE NOCASE, machine.id
     `).all(...orderAreas, order.id, order.id)
     : [];
-  return { ...order, client, technicians, cards, unmatched_folders: unmatchedFolders, unmatched_machine_candidates: unmatchedMachineCandidates };
+  return {
+    ...order,
+    client,
+    technicians,
+    representatives,
+    cards,
+    unmatched_folders: unmatchedFolders,
+    unmatched_machine_candidates: unmatchedMachineCandidates,
+  };
 }
 
 function safeTripFolderSegment(value) {
@@ -3357,10 +3472,6 @@ export async function moveCardPhoto(orderId, cardId, input, actorId = null, data
     const sourceIndex = sourceList.findIndex((photoPath) => photoPath.split('/').at(-1) === name);
     if (sourceIndex === -1) throw new HttpError(404, 'Photo was not found in source phase.');
     if (fromPhase === toPhase) return { ok: true, cardId: targetCardId, status: card.status };
-    if (destinationList.length >= 4) {
-      throw new HttpError(400, `لا يمكن نقل الصورة، مرحلة ${toPhase === 'before' ? 'قبل الصيانة' : 'بعد الصيانة'} تحتوي على الحد الأقصى (4 صور).`);
-    }
-
     const [sourceStoredPath] = sourceList.splice(sourceIndex, 1);
     const pathSegments = sourceStoredPath.replace(/\\/g, '/').split('/');
     const phaseDirectoryIndex = pathSegments.length - 2;
@@ -3440,10 +3551,18 @@ export async function getMaintenancePhoto(orderId, cardId, phase, filename, data
   const storedPath = photos.includes(`${prefix}${name}`)
     ? `${prefix}${name}`
     : photos.find((photoPath) => typeof photoPath === 'string' && photoPath.split('/').at(-1) === name);
-  if (!PHOTO_EXTENSIONS.has(extname(name).toLowerCase()) || !storedPath) {
+  const repPhotoPath = database.prepare(`
+    SELECT photo.stored_path
+    FROM rep_visit_photos photo
+    JOIN rep_visits visit ON visit.id = photo.visit_id AND visit.status = 'completed'
+    WHERE visit.order_id = ? AND visit.card_id = ? AND photo.phase = ?
+    ORDER BY photo.id
+  `).all(id, targetCardId, phase).find((photo) => photo.stored_path.split('/').at(-1) === name)?.stored_path;
+  const attachedStoredPath = storedPath ?? repPhotoPath;
+  if (!PHOTO_EXTENSIONS.has(extname(name).toLowerCase()) || !attachedStoredPath) {
     throw new HttpError(404, 'Photo is not attached to this inspection card.');
   }
-  return resolveStorageFile(storedPath);
+  return resolveStorageFile(attachedStoredPath);
 }
 
 export function transitionMaintenanceToReview(orderId, actorId = null, database = db) {

@@ -22,6 +22,13 @@ const EMPTY_MACHINES = [];
 const CARD_NOTE_SAVE_DELAY_MS = 800;
 const EMPTY_TRIP_PROGRESS = { percent: 0, processed: 0, total: 0, stage: 'جارٍ فحص المجلد وربط الصور...' };
 
+function formatCaptureTime(value) {
+  if (!value) return 'وقت الالتقاط غير معروف';
+  const date = new Date(value);
+  if (Number.isNaN(date.valueOf())) return 'وقت الالتقاط غير معروف';
+  return new Intl.DateTimeFormat('ar-EG', { dateStyle: 'medium', timeStyle: 'short' }).format(date);
+}
+
 function sortCards(cards, sortMode) {
   if (!cards || !cards.length) return [];
   const list = [...cards];
@@ -92,12 +99,17 @@ export default function MaintenanceOrderDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { data: order, setData: setOrderData, loading, error, reload: reloadOrder } = useApi(`/api/maintenance/orders/${id}`);
+  const { data: representativeOptions } = useApi(`/api/maintenance/representatives?orderId=${encodeURIComponent(id)}`, { enabled: order?.canAssignRepresentatives === true });
   const machinePath = order?.area ? `/api/maintenance/machines?area=${encodeURIComponent(order.area)}&limit=500` : '';
   const { data: machineData, loading: machinesLoading } = useApi(machinePath, { enabled: Boolean(machinePath) });
   const { data: apiAreas } = useApi('/api/maintenance/areas');
   const { data: reasons } = useApi('/api/maintenance/reasons');
   const [cardOpen, setCardOpen] = useState(false);
   const [custodyOpen, setCustodyOpen] = useState(false);
+  const [representativesOpen, setRepresentativesOpen] = useState(false);
+  const [representativeIds, setRepresentativeIds] = useState([]);
+  const [representativeSaving, setRepresentativeSaving] = useState(false);
+  const [representativeError, setRepresentativeError] = useState('');
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [populateOpen, setPopulateOpen] = useState(false);
   const [folderOpen, setFolderOpen] = useState(false);
@@ -279,6 +291,10 @@ export default function MaintenanceOrderDetail() {
   useEffect(() => {
     setSelectedAreaFilter('all');
   }, [id]);
+
+  useEffect(() => {
+    setRepresentativeIds((order?.representatives ?? []).filter((rep) => Number(rep.active) === 1).map((rep) => Number(rep.id)));
+  }, [order?.id, order?.representatives]);
 
   useEffect(() => {
     clearAllCardDrafts();
@@ -738,6 +754,22 @@ export default function MaintenanceOrderDetail() {
     }
   }
 
+  async function saveRepresentativeAssignments(event) {
+    event.preventDefault();
+    setRepresentativeSaving(true);
+    setRepresentativeError('');
+    try {
+      await api.put(`/api/maintenance/orders/${id}/representatives`, { repUserIds: representativeIds });
+      await reload();
+      setRepresentativesOpen(false);
+      showToast('تم تحديث مناديب أمر الصيانة.');
+    } catch (caught) {
+      setRepresentativeError(errorMessage(caught));
+    } finally {
+      setRepresentativeSaving(false);
+    }
+  }
+
   function openMachineCodeEditor(card) {
     setMachineCodeError('');
     setMachineCodeDraft(card.machine_code ?? '');
@@ -970,6 +1002,7 @@ export default function MaintenanceOrderDetail() {
                 phase="before"
                 urls={card.before_photo_urls}
                 thumbnailUrls={card.before_thumbnail_urls}
+                photoMetadata={card.rep_photo_metadata}
                 card={card}
                 disabled={saving}
                 canUpload={order.status !== 'archived'}
@@ -983,6 +1016,7 @@ export default function MaintenanceOrderDetail() {
                 phase="after"
                 urls={card.after_photo_urls}
                 thumbnailUrls={card.after_thumbnail_urls}
+                photoMetadata={card.rep_photo_metadata}
                 card={card}
                 disabled={saving}
                 canUpload={order.status !== 'archived'}
@@ -1036,6 +1070,7 @@ export default function MaintenanceOrderDetail() {
          <span>المنطقة / المناطق <strong>{order.area || areas.join('، ') || 'لم تُحدد بعد'}</strong></span>
             <span>الآلات <strong>{order.cards.length}</strong></span>
             <span>الفنيون <strong>{order.technicians.map((technician) => technician.name).join('، ') || 'غير معيّنين'}</strong></span>
+            <span>المناديب <strong>{order.representatives?.map((rep) => `${rep.full_name}${Number(rep.active) ? '' : ' (حساب موقوف)'}`).join('، ') || 'غير معيّنين'}</strong></span>
             <span>تاريخ الإنشاء <strong>{order.created_at?.slice(0, 10)}</strong></span>
           </div>
           {order.notes && <p className="madar-order-notes">{order.notes}</p>}
@@ -1045,6 +1080,7 @@ export default function MaintenanceOrderDetail() {
           {order.status === 'in_progress' && <Button variant="secondary" icon="factory" onClick={() => { setActionError(''); setPopulateArea(orderAreaNames[0] ?? ''); setPopulateOpen(true); }}>إدراج ماكينات منطقة...</Button>}
           {order.status === 'in_progress' && <Button variant="secondary" icon="upload" onClick={() => { setActionError(''); setFolderSourceMode('storage'); setTripZip(null); setFolderOpen(true); }}>فحص مجلد رحلة الصيانة</Button>}
           {order.status === 'in_progress' && <Button variant="secondary" icon="wallet" onClick={() => { setCustodyError(''); setCustodyOpen(true); }}>صرف عهدة</Button>}
+          {order.canAssignRepresentatives && order.status !== 'archived' && <Button variant="secondary" icon="users" onClick={() => { setRepresentativeError(''); setRepresentativesOpen(true); }}>تعيين المندوبين</Button>}
           {order.status === 'in_progress' && <Button icon="check" disabled={saving} onClick={transitionToReview}>إرسال للمراجعة</Button>}
           {order.status === 'review' && <Button icon="archive" onClick={() => { setExpenseError(''); setArchiveOpen(true); }}>أرشفة وتسوية العهدة</Button>}
           <Button variant="secondary" icon="file" onClick={() => { window.location.href = `/api/maintenance/orders/${id}/export.docx`; }}>تقرير Word</Button>
@@ -1512,6 +1548,29 @@ export default function MaintenanceOrderDetail() {
           <div className="madar-form-actions"><Button variant="secondary" onClick={() => setArchiveOpen(false)}>إلغاء</Button><Button type="submit" disabled={saving}>{saving ? 'جارٍ الأرشفة…' : 'تأكيد الأرشفة'}</Button></div>
         </form>
       </Modal>
+
+      <Modal open={representativesOpen} onClose={() => { if (!representativeSaving) setRepresentativesOpen(false); }} title="تعيين مندوبي أمر الصيانة" description="سيظهر هذا الأمر وبطاقات ماكيناته فقط للمناديب النشطين المعيّنين ضمن مناطقهم.">
+        <form onSubmit={saveRepresentativeAssignments}>
+          <div className="madar-form-stack">
+            {(representativeOptions ?? []).length ? <div className="madar-employee-picker" role="group" aria-label="اختيار مندوبي أمر الصيانة">
+              {representativeOptions.map((rep) => {
+                const selected = representativeIds.includes(Number(rep.id));
+                return <label key={rep.id} className={`employee-checkbox-card ${selected ? 'selected' : ''}`}>
+                  <input className="madar-checkbox" type="checkbox" checked={selected}
+                    onChange={() => setRepresentativeIds((current) => selected
+                      ? current.filter((userId) => userId !== Number(rep.id))
+                      : [...current, Number(rep.id)])} />
+                  <span className="madar-checkbox-title">{rep.full_name}</span>
+                  <small className="madar-field-hint">{rep.username} · {rep.assignedRegions?.join('، ') || 'لا توجد مناطق محددة'}</small>
+                </label>;
+              })}
+            </div> : <Alert tone="info">لا توجد حسابات مندوب نشطة. يمكنك إنشاء حساب من صفحة الإعدادات.</Alert>}
+            {order.representatives?.some((rep) => Number(rep.active) !== 1) && <Alert tone="warning">توجد حسابات مندوب موقوفة على هذا الأمر؛ لن تظهر ضمن الخيارات، وسيؤدي الحفظ إلى إزالة إسنادها.</Alert>}
+            {representativeError && <Alert tone="error">{representativeError}</Alert>}
+          </div>
+          <div className="madar-form-actions"><Button variant="secondary" disabled={representativeSaving} onClick={() => setRepresentativesOpen(false)}>إلغاء</Button><Button type="submit" disabled={representativeSaving}>{representativeSaving ? 'جارٍ الحفظ…' : 'حفظ التعيين'}</Button></div>
+        </form>
+      </Modal>
       <MaintenancePptxExportModal
         open={pptxExportOpen}
         onClose={() => setPptxExportOpen(false)}
@@ -1540,7 +1599,7 @@ function maintenancePhotoFilename(url) {
   return decodeURIComponent(new URL(url, window.location.origin).pathname.split('/').at(-1) ?? '');
 }
 
-function PhotoPhase({ title, phase, urls, thumbnailUrls, card, disabled, canUpload = true, onUpload, onDeletePhoto, onMovePhoto, onOpenLightbox }) {
+function PhotoPhase({ title, phase, urls, thumbnailUrls, photoMetadata = {}, card, disabled, canUpload = true, onUpload, onDeletePhoto, onMovePhoto, onOpenLightbox }) {
   const [isDragOver, setIsDragOver] = useState(false);
 
   function handleDragOver(event) {
@@ -1584,21 +1643,23 @@ function PhotoPhase({ title, phase, urls, thumbnailUrls, card, disabled, canUplo
         padding: '0.5rem',
       }}
     >
-      <div className="madar-photo-heading"><span>{title}</span><span className="madar-muted">{urls?.length ?? 0} / 4</span></div>
+      <div className="madar-photo-heading"><span>{title}</span><span className="madar-muted">{urls?.length ?? 0} صور</span></div>
       {urls?.length ? (
         <div className="madar-photo-grid">
           {urls.map((url, index) => {
             const filename = maintenancePhotoFilename(url);
+            const evidence = photoMetadata?.[filename];
             return (
               <div
                 key={`${url}-${index}`}
                 className="madar-photo-wrapper"
-                draggable={!disabled}
+                draggable={!disabled && !evidence}
                 onDragStart={(event) => {
+                  if (evidence) { event.preventDefault(); return; }
                   event.dataTransfer.setData('text/plain', JSON.stringify({ phase, filename }));
                   event.dataTransfer.effectAllowed = 'move';
                 }}
-                style={{ position: 'relative', display: 'inline-block', cursor: disabled ? 'default' : 'grab' }}
+                style={{ position: 'relative', display: 'inline-block', cursor: disabled || evidence ? 'default' : 'grab' }}
               >
                 <button
                   type="button"
@@ -1609,7 +1670,7 @@ function PhotoPhase({ title, phase, urls, thumbnailUrls, card, disabled, canUplo
                 >
                   <img className="madar-photo" src={thumbnailUrls?.[index] ?? url} alt={`${title} ${index + 1}`} loading="lazy" />
                 </button>
-                {!disabled && (
+                {!disabled && !evidence && (
                   <div
                     className="madar-photo-actions"
                     style={{
@@ -1668,6 +1729,10 @@ function PhotoPhase({ title, phase, urls, thumbnailUrls, card, disabled, canUplo
                     </button>
                   </div>
                 )}
+                {evidence && <small className="madar-rep-photo-caption" title={`زيارة ${evidence.visitUuid}`}>
+                  <b>{evidence.repName}</b><span>{formatCaptureTime(evidence.capturedAt)}</span>
+                  <span>{evidence.reviewStatus === 'approved' ? 'معتمدة' : evidence.reviewStatus === 'reshoot' ? 'إعادة تصوير مطلوبة' : 'بانتظار مراجعة المشرف'}</span>
+                </small>}
               </div>
             );
           })}
@@ -1677,7 +1742,7 @@ function PhotoPhase({ title, phase, urls, thumbnailUrls, card, disabled, canUplo
           {isDragOver ? 'أفلت الصورة هنا لنقلها...' : 'لا توجد صور بعد (يمكن سحب وإفلات صورة هنا)'}
         </div>
       )}
-      {canUpload && !disabled && (urls?.length ?? 0) < 4 && <label className="madar-photo-upload"><Icon name="upload" size={13} /> رفع 2–4 صور<input type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" multiple onChange={onUpload} aria-label={`رفع صور ${title}`} /></label>}
+      {canUpload && !disabled && <label className="madar-photo-upload"><Icon name="upload" size={13} /> رفع صور<input type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" multiple onChange={onUpload} aria-label={`رفع صور ${title}`} /></label>}
     </section>
   );
 }

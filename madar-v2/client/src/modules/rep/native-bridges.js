@@ -121,25 +121,39 @@ function visitFolder(visitUuid) {
   return `${PENDING_ROOT}/${visitUuid}`;
 }
 
+function pendingPhotos(visit, phase) {
+  const photos = visit?.[`${phase}Photos`];
+  if (Array.isArray(photos)) return photos.map((photo) => photo?.blob ?? photo).filter(Boolean);
+  const legacyPhoto = visit?.[`${phase}Photo`];
+  return legacyPhoto ? [legacyPhoto] : [];
+}
+
 export async function saveNativePendingBackup(visit) {
   if (!isNativeRepApp()) return null;
   const folder = visitFolder(visit.visitUuid);
-  const beforePath = `${folder}/before.jpg`;
-  const afterPath = `${folder}/after.jpg`;
   const metadataPath = `${folder}/visit.json`;
-  await Filesystem.writeFile({
-    path: beforePath,
-    data: await blobToBase64(visit.beforePhoto),
-    directory: Directory.External,
-    recursive: true,
-  });
   try {
-    await Filesystem.writeFile({
-      path: afterPath,
-      data: await blobToBase64(visit.afterPhoto),
-      directory: Directory.External,
-      recursive: true,
-    });
+    const savedPhotos = {};
+    for (const phase of ['before', 'after']) {
+      const photos = pendingPhotos(visit, phase);
+      if (!photos.length) throw new Error(`لا توجد صور ${phase} في الزيارة التي يجري حفظها.`);
+      savedPhotos[`${phase}Photos`] = [];
+      for (const [index, photo] of photos.entries()) {
+        const path = `${folder}/${phase}-${String(index + 1).padStart(4, '0')}.jpg`;
+        await Filesystem.writeFile({
+          path,
+          data: await blobToBase64(photo),
+          directory: Directory.External,
+          recursive: true,
+        });
+        savedPhotos[`${phase}Photos`].push({
+          path,
+          capturedAt: visit.payload?.[`${phase}CapturedAt`]?.[index]
+            ?? visit.payload?.[`${phase}CapturedAt`]
+            ?? visit.createdAt,
+        });
+      }
+    }
     await Filesystem.writeFile({
       path: metadataPath,
       data: JSON.stringify({
@@ -150,8 +164,7 @@ export async function saveNativePendingBackup(visit) {
         payload: visit.payload,
         status: visit.status,
         attempts: visit.attempts,
-        beforePath,
-        afterPath,
+        ...savedPhotos,
       }),
       directory: Directory.External,
       recursive: true,
@@ -187,18 +200,30 @@ export async function restoreNativePendingBackups(repId) {
       const metadata = JSON.parse(metadataFile.data);
       if (Number(metadata.repId) !== Number(repId) || metadata.visitUuid !== entry.name) continue;
       if (await getPendingVisit(metadata.visitUuid)) continue;
-      const [beforeFile, afterFile] = await Promise.all([
-        Filesystem.readFile({ path: metadata.beforePath, directory: Directory.External }),
-        Filesystem.readFile({ path: metadata.afterPath, directory: Directory.External }),
-      ]);
+      const readPhotos = async (phase) => {
+        const entries = Array.isArray(metadata[`${phase}Photos`])
+          ? metadata[`${phase}Photos`]
+          : metadata[`${phase}Path`] ? [{ path: metadata[`${phase}Path`] }] : [];
+        const photos = [];
+        for (const entry of entries) {
+          if (typeof entry?.path !== 'string' || !entry.path.startsWith(`${folder}/`)) {
+            throw new Error('مسار صورة النسخة الاحتياطية غير صالح.');
+          }
+          const image = await Filesystem.readFile({ path: entry.path, directory: Directory.External });
+          photos.push(base64ToBlob(image.data));
+        }
+        return photos;
+      };
+      const [beforePhotos, afterPhotos] = await Promise.all([readPhotos('before'), readPhotos('after')]);
+      if (!beforePhotos.length || !afterPhotos.length) throw new Error('صور الزيارة الاحتياطية غير مكتملة.');
       await addPendingVisit({
         visitUuid: metadata.visitUuid,
         repId: Number(metadata.repId),
         repUsername: metadata.repUsername,
         createdAt: metadata.createdAt,
         payload: metadata.payload,
-        beforePhoto: base64ToBlob(beforeFile.data),
-        afterPhoto: base64ToBlob(afterFile.data),
+        beforePhotos,
+        afterPhotos,
         status: 'queued',
         attempts: Number(metadata.attempts ?? 0),
         lastError: 'استُعيدت الزيارة من النسخة الاحتياطية المحلية للهاتف.',

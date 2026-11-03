@@ -11,19 +11,19 @@ export default function MachineVisitSheet({ machine, reasons, gps, gpsError, cap
   const [machineCondition, setMachineCondition] = useState('');
   const [reasonIds, setReasonIds] = useState([]);
   const [notes, setNotes] = useState('');
-  const [beforePhoto, setBeforePhoto] = useState(null);
-  const [afterPhoto, setAfterPhoto] = useState(null);
+  const [photos, setPhotos] = useState({ before: [], after: [] });
   const [processingPhase, setProcessingPhase] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const beforeInput = useRef(null);
   const afterInput = useRef(null);
+  const previewUrls = useRef(new Set());
   const nativeApp = isNativeRepApp();
 
   useEffect(() => () => {
-    if (beforePhoto?.previewUrl) URL.revokeObjectURL(beforePhoto.previewUrl);
-    if (afterPhoto?.previewUrl) URL.revokeObjectURL(afterPhoto.previewUrl);
-  }, [beforePhoto?.previewUrl, afterPhoto?.previewUrl]);
+    for (const previewUrl of previewUrls.current) URL.revokeObjectURL(previewUrl);
+    previewUrls.current.clear();
+  }, []);
 
   const toggleReason = (id) => {
     setReasonIds((current) => current.includes(Number(id))
@@ -31,36 +31,41 @@ export default function MachineVisitSheet({ machine, reasons, gps, gpsError, cap
       : [...current, Number(id)]);
   };
 
-  const processCapture = async (phase, file) => {
-    if (!file) return;
-    setProcessingPhase(phase);
+  const processCaptures = async (phase, files) => {
+    const selectedFiles = Array.from(files ?? []).filter(Boolean);
+    if (!selectedFiles.length) return;
     setError('');
-    try {
-      const capturedAt = new Date();
-      const blob = await compressAndWatermark(file, {
-        machineCode: machine.machineCode,
-        regionName: machine.regionName,
-        phase,
-        capturedAt,
-        location: locationPayload(gps),
-      });
-      const photo = { blob, previewUrl: URL.createObjectURL(blob), capturedAt: capturedAt.toISOString() };
-      const setter = phase === 'before' ? setBeforePhoto : setAfterPhoto;
-      setter((current) => {
-        if (current?.previewUrl) URL.revokeObjectURL(current.previewUrl);
-        return photo;
-      });
-    } catch (captureError) {
-      setError(captureError.message || 'تعذر تجهيز الصورة. حاول التقاطها مرة أخرى.');
-    } finally {
-      setProcessingPhase('');
+    const preparedPhotos = [];
+    for (const [index, file] of selectedFiles.entries()) {
+      setProcessingPhase(phase);
+      try {
+        const capturedAt = new Date();
+        const blob = await compressAndWatermark(file, {
+          machineCode: machine.machineCode,
+          regionName: machine.regionName,
+          phase,
+          capturedAt,
+          location: locationPayload(gps),
+        });
+        const previewUrl = URL.createObjectURL(blob);
+        previewUrls.current.add(previewUrl);
+        preparedPhotos.push({ blob, previewUrl, capturedAt: capturedAt.toISOString() });
+      } catch (captureError) {
+        setError(captureError.message || `تعذر تجهيز الصورة ${index + 1}. حاول التقاطها مرة أخرى.`);
+        break;
+      } finally {
+        setProcessingPhase('');
+      }
+    }
+    if (preparedPhotos.length) {
+      setPhotos((current) => ({ ...current, [phase]: [...current[phase], ...preparedPhotos] }));
     }
   };
 
   const captureFromPicker = (phase) => async (event) => {
-    const file = event.target.files?.[0];
+    const files = Array.from(event.target.files ?? []);
     event.target.value = '';
-    await processCapture(phase, file);
+    await processCaptures(phase, files);
   };
 
   const openCamera = (phase, inputRef) => async () => {
@@ -68,23 +73,22 @@ export default function MachineVisitSheet({ machine, reasons, gps, gpsError, cap
       inputRef.current?.click();
       return;
     }
-    setProcessingPhase(phase);
-    setError('');
     try {
       const photo = await captureNativeCameraPhoto();
-      await processCapture(phase, photo);
+      await processCaptures(phase, [photo]);
     } catch (captureError) {
       setError(captureError.message || 'تعذر فتح الكاميرا. تحقق من إذن الكاميرا وحاول مجدداً.');
-    } finally {
-      setProcessingPhase('');
     }
   };
 
-  const removePhoto = (phase) => {
-    const setter = phase === 'before' ? setBeforePhoto : setAfterPhoto;
-    setter((current) => {
-      if (current?.previewUrl) URL.revokeObjectURL(current.previewUrl);
-      return null;
+  const removePhoto = (phase, index) => {
+    setPhotos((current) => {
+      const removed = current[phase][index];
+      if (removed?.previewUrl) {
+        URL.revokeObjectURL(removed.previewUrl);
+        previewUrls.current.delete(removed.previewUrl);
+      }
+      return { ...current, [phase]: current[phase].filter((_, photoIndex) => photoIndex !== index) };
     });
   };
 
@@ -93,7 +97,7 @@ export default function MachineVisitSheet({ machine, reasons, gps, gpsError, cap
       setError('رُفضت الزيارة: أوقف تطبيق تزييف الموقع وأعد تشغيل الوردية قبل المتابعة.');
       return;
     }
-    if (!beforePhoto || !afterPhoto) {
+    if (!photos.before.length || !photos.after.length) {
       setError('يلزم التقاط صورة واحدة على الأقل قبل الصيانة وبعدها.');
       return;
     }
@@ -109,10 +113,10 @@ export default function MachineVisitSheet({ machine, reasons, gps, gpsError, cap
         machineCondition,
         reasonIds,
         notes: notes.trim(),
-        beforePhoto: beforePhoto.blob,
-        afterPhoto: afterPhoto.blob,
-        beforeCapturedAt: beforePhoto.capturedAt,
-        afterCapturedAt: afterPhoto.capturedAt,
+        beforePhotos: photos.before.map(({ blob }) => blob),
+        afterPhotos: photos.after.map(({ blob }) => blob),
+        beforeCapturedAt: photos.before.map(({ capturedAt }) => capturedAt),
+        afterCapturedAt: photos.after.map(({ capturedAt }) => capturedAt),
         capturedAt: new Date().toISOString(),
         location: locationPayload(capturedLocation) ?? locationPayload(gps),
       });
@@ -123,7 +127,7 @@ export default function MachineVisitSheet({ machine, reasons, gps, gpsError, cap
     }
   };
 
-  const photoField = (phase, photo, inputRef) => {
+  const photoField = (phase, phasePhotos, inputRef) => {
     const label = phase === 'before' ? 'قبل الصيانة' : 'بعد الصيانة';
     return (
       <section className="rep-photo-card" aria-label={`صور ${label}`}>
@@ -132,38 +136,34 @@ export default function MachineVisitSheet({ machine, reasons, gps, gpsError, cap
             <span className="rep-eyebrow">{phase === 'before' ? '01 · BEFORE' : '02 · AFTER'}</span>
             <h3>{label}</h3>
           </div>
-          <span className={`rep-photo-state ${photo ? 'is-ready' : ''}`}>{photo ? 'جاهزة' : 'مطلوبة'}</span>
+          <span className={`rep-photo-state ${phasePhotos.length ? 'is-ready' : ''}`}>{phasePhotos.length ? `${phasePhotos.length} صور` : 'مطلوبة'}</span>
         </div>
-        {photo ? (
-          <div className="rep-photo-preview">
-            <img src={photo.previewUrl} alt={`صورة ${label} للماكينة ${machine.machineCode}`} />
-            <div className="rep-photo-actions">
-              <button type="button" className="rep-button rep-button-light" onClick={openCamera(phase, inputRef)} disabled={Boolean(processingPhase)}>
-                إعادة التصوير
-              </button>
-              <button type="button" className="rep-button rep-button-danger-light" onClick={() => removePhoto(phase)}>
-                حذف
-              </button>
-            </div>
-            <small>{Math.max(1, Math.round(photo.blob.size / 1024))} KB · جرى ضغطها وختمها على الهاتف</small>
-          </div>
-        ) : (
+        {phasePhotos.length > 0 && <div className="rep-photo-preview-grid">
+          {phasePhotos.map((photo, index) => <div className="rep-photo-preview" key={`${photo.capturedAt}-${index}`}>
+            <img src={photo.previewUrl} alt={`صورة ${label} رقم ${index + 1} للماكينة ${machine.machineCode}`} />
+            <small>{index + 1} · {Math.max(1, Math.round(photo.blob.size / 1024))} KB · {new Intl.DateTimeFormat('ar-EG', { timeStyle: 'short' }).format(new Date(photo.capturedAt))}</small>
+            <button type="button" className="rep-button rep-button-danger-light" onClick={() => removePhoto(phase, index)} disabled={saving}>حذف الصورة</button>
+          </div>)}
+        </div>}
+        <div className="rep-photo-capture-actions">
           <button
             type="button"
             className="rep-camera-button"
             onClick={openCamera(phase, inputRef)}
-            disabled={Boolean(processingPhase)}
+            disabled={Boolean(processingPhase) || saving}
           >
             <span className="rep-camera-icon" aria-hidden="true">⌖</span>
-            <span>{processingPhase === phase ? 'جارٍ تجهيز الصورة...' : `${nativeApp ? 'التقط صورة بالكاميرا' : 'افتح الكاميرا'} · ${label}`}</span>
+            <span>{processingPhase === phase ? 'جارٍ تجهيز الصورة...' : `${nativeApp ? 'التقط صورة أخرى بالكاميرا' : 'أضف صورة بالكاميرا'} · ${label}`}</span>
           </button>
-        )}
+          {!nativeApp && <button type="button" className="rep-button rep-button-light" onClick={() => inputRef.current?.click()} disabled={Boolean(processingPhase) || saving}>اختيار صور متعددة</button>}
+        </div>
         {!nativeApp && <input
           ref={inputRef}
           className="rep-visually-hidden"
           type="file"
           accept="image/*"
           capture="environment"
+          multiple
           onChange={captureFromPicker(phase)}
           aria-label={`التقاط صورة ${label}`}
         />}
@@ -247,8 +247,8 @@ export default function MachineVisitSheet({ machine, reasons, gps, gpsError, cap
               <small>صورة واضحة للماكينة كاملة</small>
             </div>
             <div className="rep-photo-grid">
-              {photoField('before', beforePhoto, beforeInput)}
-              {photoField('after', afterPhoto, afterInput)}
+              {photoField('before', photos.before, beforeInput)}
+              {photoField('after', photos.after, afterInput)}
             </div>
             <p className="rep-watermark-note">يُضاف على الصورة ختم تعريفي من الهاتف يتضمن الوقت والموقع الملتقطين. هذا الختم مفيد للتوثيق لكنه ليس دليلاً غير قابل للتعديل.</p>
           </section>
@@ -262,7 +262,7 @@ export default function MachineVisitSheet({ machine, reasons, gps, gpsError, cap
 
         <footer className="rep-sheet-footer">
           <button type="button" className="rep-button rep-button-light" onClick={onClose}>إلغاء</button>
-          <button type="button" className="rep-button rep-button-primary rep-save-visit" onClick={save} disabled={saving || !machineCondition || !beforePhoto || !afterPhoto || Boolean(processingPhase) || (nativeApp && /تزييف الموقع/.test(gpsError ?? ''))}>
+          <button type="button" className="rep-button rep-button-primary rep-save-visit" onClick={save} disabled={saving || !machineCondition || !photos.before.length || !photos.after.length || Boolean(processingPhase) || (nativeApp && /تزييف الموقع/.test(gpsError ?? ''))}>
             {saving ? 'جارٍ تحديد الموقع وحفظ الزيارة…' : '💾 حفظ الزيارة على الهاتف'}
           </button>
         </footer>

@@ -35,10 +35,12 @@ import {
   importMaintenanceServerFolder,
   listAreas,
   listMachines,
+  listMaintenanceRepresentatives,
   listMaintenanceReasons,
   listMaintenanceOrders,
   moveCardPhoto,
   populateMaintenanceOrderArea,
+  replaceMaintenanceOrderRepresentatives,
   processMaintenanceTripFolder,
   previewMachineImport,
   transitionMaintenanceToReview,
@@ -150,6 +152,11 @@ router.get('/machines', (req, res) => {
   res.json(listMachines({ area: req.query.area, search: req.query.search ?? req.query.q, page: req.query.page, limit: req.query.limit }));
 });
 
+router.get('/representatives', requireRole('admin'), (_req, res) => {
+  res.set(NO_CACHE_HEADERS);
+  res.json(listMaintenanceRepresentatives());
+});
+
 router.post('/machines/import/preview', machineImportUpload, (req, res, next) => {
   try { res.json(previewMachineImport(req.file)); }
   catch (error) { next(error); }
@@ -229,7 +236,18 @@ router.get('/orders', (req, res, next) => {
 
 router.post('/orders', (req, res, next) => {
   try {
+    if (req.body?.repUserIds !== undefined && req.user?.role !== 'admin') {
+      throw new HttpError(403, 'Only administrators may assign field representatives to an order.');
+    }
     res.status(201).json(createMaintenanceOrder(req.body, requestActorId(req)));
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.put('/orders/:id/representatives', requireRole('admin'), (req, res, next) => {
+  try {
+    res.json(replaceMaintenanceOrderRepresentatives(req.params.id, req.body, requestActorId(req)));
   } catch (error) {
     next(error);
   }
@@ -447,7 +465,7 @@ router.post('/orders/:id/archive', (req, res, next) => {
 router.get('/orders/:id', (req, res, next) => {
   try {
     res.set(NO_CACHE_HEADERS);
-    res.json(getMaintenanceOrder(req.params.id));
+    res.json({ ...getMaintenanceOrder(req.params.id), canAssignRepresentatives: req.user?.role === 'admin' });
   } catch (error) {
     next(error);
   }

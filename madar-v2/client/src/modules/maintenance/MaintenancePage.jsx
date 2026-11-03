@@ -32,8 +32,10 @@ export default function MaintenancePage() {
   const { data: orders, loading, error, reload } = useApi(`/api/maintenance/orders?status=${status}`);
   const { data: clients } = useApi('/api/clients');
   const { data: areas } = useApi('/api/maintenance/areas');
+  const { data: representatives, loading: representativesLoading } = useApi('/api/maintenance/representatives');
   const [createOpen, setCreateOpen] = useState(false);
   const [employeeIds, setEmployeeIds] = useState([]);
+  const [repUserIds, setRepUserIds] = useState([]);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState('');
   const [search, setSearch] = useState('');
@@ -59,15 +61,18 @@ export default function MaintenancePage() {
     setFormError('');
     const form = new FormData(event.currentTarget);
     try {
-      await api.post('/api/maintenance/orders', {
+      const orderPayload = {
         clientId: Number(form.get('clientId')),
         areas: selectedAreas,
         autoPopulateAreaMachines: Boolean(selectedAreas.length && autoPopulate),
         employeeIds,
         notes: form.get('notes') || undefined,
-      });
+      };
+      if (Array.isArray(representatives)) orderPayload.repUserIds = repUserIds;
+      await api.post('/api/maintenance/orders', orderPayload);
       setCreateOpen(false);
       setEmployeeIds([]);
+      setRepUserIds([]);
       setSelectedAreas([]);
       if (status !== 'in_progress') setStatus('in_progress');
       else await reload();
@@ -85,7 +90,7 @@ export default function MaintenancePage() {
         kicker="الخدمة الميدانية · الصيانة"
         title={view === 'reasons' ? 'أسباب الأعطال' : view === 'machines' ? 'قاعدة الماكينات' : view === 'area_notes' ? 'صيانات المناطق' : 'أوامر الصيانة'}
         description={view === 'reasons' ? 'إدارة أسباب الأعطال التي تظهر في بطاقات فحص الصيانة.' : view === 'machines' ? 'دليل الماكينات النشطة ومناطق الخدمة والاستيراد.' : view === 'area_notes' ? 'عرض أحدث الملاحظات الفنية المسجلة لكل ماكينة حسب المنطقة.' : 'من إنشاء أمر الخدمة حتى فحص الآلات، التوثيق بالصور، والمراجعة والأرشفة.'}
-        actions={view === 'orders' && <Button icon="plus" onClick={() => { setFormError(''); setEmployeeIds([]); setSelectedAreas([]); setAutoPopulate(true); setCreateOpen(true); }}>إنشاء أمر صيانة</Button>}
+        actions={view === 'orders' && <Button icon="plus" onClick={() => { setFormError(''); setEmployeeIds([]); setRepUserIds([]); setSelectedAreas([]); setAutoPopulate(true); setCreateOpen(true); }}>إنشاء أمر صيانة</Button>}
       />
       <div className="madar-section"><Tabs items={[
         { value: 'orders', label: 'أوامر الصيانة (Orders)' },
@@ -102,7 +107,7 @@ export default function MaintenancePage() {
       <section className="madar-panel madar-section">
         {loading ? <LoadingState label="جارٍ تحميل أوامر الصيانة" /> : filteredOrders.length ? (
           <div className="madar-table-wrap"><table className="madar-table">
-            <thead><tr><th>أمر الخدمة</th><th>العميل</th><th>المناطق</th><th>عدد الآلات</th><th>الفنيون</th><th>تاريخ الإنشاء</th><th>الحالة</th><th /></tr></thead>
+            <thead><tr><th>أمر الخدمة</th><th>العميل</th><th>المناطق</th><th>عدد الآلات</th><th>الفنيون</th><th>المناديب</th><th>تاريخ الإنشاء</th><th>الحالة</th><th /></tr></thead>
             <tbody>{filteredOrders.map((order) => (
               <tr key={order.id}>
                 <td><Link className="madar-table-link madar-code" to={`/maintenance/${order.id}`}>{order.order_code}</Link></td>
@@ -122,7 +127,7 @@ export default function MaintenancePage() {
                     }}>{order.area}</span>
                   ) : <span style={{ color: 'var(--madar-muted)' }}>—</span>}
                 </td>
-                <td>{order.card_count}</td><td>{order.technician_count}</td><td>{formatDate(order.created_at)}</td>
+                <td>{order.card_count}</td><td>{order.technician_count}</td><td>{order.representative_names || '—'}</td><td>{formatDate(order.created_at)}</td>
                 <td><Badge status={order.status} /></td>
                 <td><Link className="madar-button madar-button-ghost madar-button-small" to={`/maintenance/${order.id}`} aria-label="فتح أمر الصيانة"><Icon name="chevron" size={13} /></Link></td>
               </tr>
@@ -131,7 +136,7 @@ export default function MaintenancePage() {
         ) : <EmptyState icon="wrench" title={search ? 'لا توجد نتائج' : 'لا توجد أوامر في هذه المرحلة'} description={search ? 'جرّب كلمة بحث أخرى.' : 'يمكنك إنشاء أمر صيانة جديد لبدء الزيارة الميدانية.'} action={status === 'in_progress' && !search && <Button icon="plus" onClick={() => setCreateOpen(true)}>إنشاء أمر صيانة</Button>} />}
       </section>
 
-      <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="إنشاء أمر صيانة" description="أمر ميداني مستقل عن أوامر الإنتاج. تُضاف الآلات وبطاقات الفحص لاحقاً من صفحة التفاصيل.">
+        <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="إنشاء أمر صيانة" description="أمر ميداني مستقل عن أوامر الإنتاج. عيّن المندوبين لتظهر لهم بطاقات هذا الأمر في التطبيق.">
         <form onSubmit={createOrder}>
           <div className="madar-form-stack">
             <Select label="العميل *" name="clientId" required defaultValue="">
@@ -161,6 +166,24 @@ export default function MaintenancePage() {
               </small>
             </div>
             {selectedAreas.length > 0 && <label className="madar-check-row"><input type="checkbox" checked={autoPopulate} onChange={(event) => setAutoPopulate(event.target.checked)} /><span>إدراج جميع ماكينات المناطق المحددة تلقائياً في أمر الصيانة (عدد: {areaMachines?.total ?? 0})</span></label>}
+            {Array.isArray(representatives) && <div className="madar-field">
+              <span>المناديب المكلّفون بالتطبيق</span>
+              {representativesLoading ? <small className="madar-field-hint">جارٍ تحميل حسابات المناديب…</small> : representatives.length ? (
+                <div className="madar-employee-picker" role="group" aria-label="المناديب المكلّفون">
+                  {representatives.map((rep) => {
+                    const selected = repUserIds.includes(Number(rep.id));
+                    return <label key={rep.id} className={`employee-checkbox-card ${selected ? 'selected' : ''}`}>
+                      <input className="madar-checkbox" type="checkbox" checked={selected}
+                        onChange={() => setRepUserIds((current) => selected
+                          ? current.filter((userId) => userId !== Number(rep.id))
+                          : [...current, Number(rep.id)])} />
+                      <span className="madar-checkbox-title">{rep.full_name}</span>
+                      <small className="madar-field-hint">{rep.username} · {rep.assignedRegions?.join('، ') || 'لا توجد مناطق محددة'}</small>
+                    </label>;
+                  })}
+                </div>
+              ) : <small className="madar-field-hint">لا توجد حسابات مندوب نشطة. أنشئ حساباً من الإعدادات أولاً.</small>}
+            </div>}
             <EmployeeCheckboxList department="Maintenance" selectedIds={employeeIds} onChange={setEmployeeIds} title="الفنيون المكلّفون (اختياري)" />
             <Textarea label="ملاحظات الخدمة" name="notes" maxLength={10000} placeholder="وصف موجز للزيارة أو نطاق العمل…" />
           </div>

@@ -1,8 +1,9 @@
 import { Router } from 'express';
-import multer from 'multer';
 import { env } from '../../config/env.js';
 import { db } from '../../database/connection.js';
 import { asyncHandler, allowOnlyKeys, HttpError, requireObject, requireText } from '../http.js';
+import { diskUploadMany } from '../upload.js';
+import { ensureStorageDirectory, removeStorageFile } from '../storage.js';
 import {
   authenticateRepUser,
   authCookieOptions,
@@ -12,20 +13,11 @@ import {
 import { getRepFaultReasons, getRepTodayRoute, requireRepUsername, syncRepTracking, syncRepVisit } from './service.js';
 
 const router = Router();
-const syncVisitUpload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 3 * 1024 * 1024, files: 2, fields: 1, fieldSize: 64 * 1024, parts: 3 },
-  fileFilter(_req, file, callback) {
-    if (!['image/jpeg', 'image/webp'].includes(file.mimetype)) {
-      callback(new HttpError(400, 'Visit photos must be JPEG or WebP images.'));
-      return;
-    }
-    callback(null, true);
-  },
-}).fields([
-  { name: 'beforePhoto', maxCount: 1 },
-  { name: 'afterPhoto', maxCount: 1 },
-]);
+const syncVisitUpload = diskUploadMany({
+  maxBytes: 3 * 1024 * 1024,
+  extensions: ['.jpg', '.jpeg', '.webp'],
+  destination: () => ensureStorageDirectory('.incoming'),
+});
 
 function setSessionCookie(res, token) {
   res.cookie(env.authCookieName, token, {
@@ -83,19 +75,27 @@ router.post(['/tracking', '/track-location'], (req, res, next) => {
   }
 });
 
-router.post('/sync-visit', syncVisitUpload, asyncHandler(async (req, res) => {
-  let visit;
+router.post('/sync-visit', syncVisitUpload.any(), asyncHandler(async (req, res) => {
   try {
-    visit = JSON.parse(req.body?.visit ?? '');
-  } catch {
-    throw new HttpError(400, 'visit must contain valid JSON.');
+    let visit;
+    try {
+      visit = JSON.parse(req.body?.visit ?? '');
+    } catch {
+      throw new HttpError(400, 'visit must contain valid JSON.');
+    }
+    const files = req.files ?? [];
+    if (files.some((file) => !['beforePhoto', 'afterPhoto'].includes(file.fieldname))) {
+      throw new HttpError(400, 'Visit photos must use beforePhoto or afterPhoto fields.');
+    }
+    const result = await syncRepVisit(req.user, visit, {
+      beforePhotos: files.filter((file) => file.fieldname === 'beforePhoto'),
+      afterPhotos: files.filter((file) => file.fieldname === 'afterPhoto'),
+    });
+    res.set({ 'Cache-Control': 'private, no-store', Pragma: 'no-cache' });
+    res.status(result.status === 'processing' ? 202 : 200).json(result);
+  } finally {
+    await Promise.all((req.files ?? []).map((file) => removeStorageFile(file.path).catch(() => undefined)));
   }
-  const result = await syncRepVisit(req.user, visit, {
-    beforePhoto: req.files?.beforePhoto?.[0],
-    afterPhoto: req.files?.afterPhoto?.[0],
-  });
-  res.set({ 'Cache-Control': 'private, no-store', Pragma: 'no-cache' });
-  res.status(result.status === 'processing' ? 202 : 200).json(result);
 }));
 
 export default router;

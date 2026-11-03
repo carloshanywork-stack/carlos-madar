@@ -30,6 +30,8 @@ const repUserProfileMigration = '20261102-rep-user-profile';
 const repVisitIngestionMigration = '20261102-rep-offline-visit-ingestion';
 const repSupervisorRadarMigration = '20261102-rep-supervisor-radar-qa';
 const repVisitConditionMigration = '20261103-rep-visit-machine-condition';
+const maintenanceOrderRepsMigration = '20261103-maintenance-order-representatives';
+const repVisitPhotosMigration = '20261103-rep-visit-photo-collections';
 
 const repUsersTableSql = `
   CREATE TABLE users_rep_migration_v1 (
@@ -229,6 +231,62 @@ export function migrateRepVisitMachineCondition(database) {
         CHECK (machine_condition IN ('working', 'faulty', 'preventive_maintenance'))`);
     }
     database.prepare('INSERT INTO schema_migrations (version) VALUES (?)').run(repVisitConditionMigration);
+  });
+  migrate.immediate();
+}
+
+export function migrateMaintenanceOrderRepresentatives(database) {
+  const migrate = database.transaction(() => {
+    const applied = database.prepare('SELECT 1 FROM schema_migrations WHERE version = ?')
+      .get(maintenanceOrderRepsMigration);
+    if (applied) return;
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS maintenance_order_reps (
+        order_id INTEGER NOT NULL REFERENCES maintenance_orders(id) ON DELETE CASCADE,
+        user_id INTEGER NOT NULL REFERENCES users(id),
+        assigned_by INTEGER REFERENCES users(id),
+        assigned_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (order_id, user_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_maintenance_order_reps_user_order
+        ON maintenance_order_reps(user_id, order_id);
+    `);
+    database.prepare('INSERT INTO schema_migrations (version) VALUES (?)').run(maintenanceOrderRepsMigration);
+  });
+  migrate.immediate();
+}
+
+export function migrateRepVisitPhotoCollections(database) {
+  const migrate = database.transaction(() => {
+    const applied = database.prepare('SELECT 1 FROM schema_migrations WHERE version = ?')
+      .get(repVisitPhotosMigration);
+    if (applied) return;
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS rep_visit_photos (
+        id INTEGER PRIMARY KEY,
+        visit_id INTEGER NOT NULL REFERENCES rep_visits(id) ON DELETE CASCADE,
+        phase TEXT NOT NULL CHECK (phase IN ('before', 'after')),
+        ordinal INTEGER NOT NULL CHECK (ordinal >= 0),
+        stored_path TEXT NOT NULL UNIQUE,
+        captured_at TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (visit_id, phase, ordinal)
+      );
+      CREATE INDEX IF NOT EXISTS idx_rep_visit_photos_visit_phase
+        ON rep_visit_photos(visit_id, phase, ordinal, id);
+    `);
+    const columns = new Set(database.pragma('table_info(rep_visits)').map((column) => column.name));
+    if (columns.has('before_path') && columns.has('after_path')) {
+      database.exec(`
+        INSERT OR IGNORE INTO rep_visit_photos (visit_id, phase, ordinal, stored_path, captured_at)
+        SELECT id, 'before', 0, before_path, COALESCE(before_captured_at, captured_at)
+        FROM rep_visits WHERE before_path IS NOT NULL;
+        INSERT OR IGNORE INTO rep_visit_photos (visit_id, phase, ordinal, stored_path, captured_at)
+        SELECT id, 'after', 0, after_path, COALESCE(after_captured_at, captured_at)
+        FROM rep_visits WHERE after_path IS NOT NULL;
+      `);
+    }
+    database.prepare('INSERT INTO schema_migrations (version) VALUES (?)').run(repVisitPhotosMigration);
   });
   migrate.immediate();
 }
@@ -679,6 +737,8 @@ export function initializeDatabase({ database = db, initialAdminPassword = env.i
     migrateRepVisitIngestion(database);
     migrateRepSupervisorRadar(database);
     migrateRepVisitMachineCondition(database);
+    migrateMaintenanceOrderRepresentatives(database);
+    migrateRepVisitPhotoCollections(database);
     migrateMaintenanceTripFolders(database);
     migrateMaintenanceOrderDeletion(database);
     migrateMaintenanceCardDeletion(database);

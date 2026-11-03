@@ -76,6 +76,13 @@ function formatGps(location) {
   return `${location.latitude.toFixed(5)}, ${location.longitude.toFixed(5)} · دقة ±${Math.round(location.accuracy)}م`;
 }
 
+function queuedPhotos(visit, phase) {
+  const photos = visit?.[`${phase}Photos`];
+  if (Array.isArray(photos)) return photos;
+  const legacyPhoto = visit?.[`${phase}Photo`];
+  return legacyPhoto ? [legacyPhoto] : [];
+}
+
 function mapsUrl(address) {
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`;
 }
@@ -212,7 +219,7 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
       if (closeAfterFlush || !chunks.length) {
         const response = await api.post('/api/rep/tracking', {
           onDuty: closeAfterFlush ? false : Boolean(duty) && !mocked,
-          location: closeAfterFlush ? null : location,
+          location,
           trail: [],
         });
         return Boolean(response?.success);
@@ -535,8 +542,14 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
         await updatePendingVisit(queuedVisit.visitUuid, { status: 'syncing', lastAttemptAt: new Date().toISOString() });
         const formData = new FormData();
         formData.append('visit', JSON.stringify(queuedVisit.payload));
-        formData.append('beforePhoto', queuedVisit.beforePhoto, `${queuedVisit.visitUuid}-before.jpg`);
-        formData.append('afterPhoto', queuedVisit.afterPhoto, `${queuedVisit.visitUuid}-after.jpg`);
+        for (const [phase, photos] of [
+          ['before', queuedPhotos(queuedVisit, 'before')],
+          ['after', queuedPhotos(queuedVisit, 'after')],
+        ]) {
+          photos.forEach((photo, index) => {
+            formData.append(`${phase}Photo`, photo, `${queuedVisit.visitUuid}-${phase}-${String(index + 1).padStart(4, '0')}.jpg`);
+          });
+        }
         try {
           const result = await api.upload('/api/rep/sync-visit', formData);
           if (result?.success && ['pending_review', 'approved', 'reshoot_requested'].includes(result.status)) {
@@ -691,30 +704,31 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
   };
 
   const toggleDuty = async () => {
-    if (!nativeApp) {
-      const nextDuty = !onDuty;
-      setOnDuty(nextDuty);
-      void syncTracking({ duty: nextDuty, location: gps });
-      return;
-    }
-    if (onDuty) {
-      try {
-        await syncTracking({ duty: false, stop: true });
-        await stopNativeDutyTracking();
-        setOnDuty(false);
-        setToast('تم إيقاف تتبع GPS للوردية.');
-      } catch (error) {
-        setToast(error.message || 'تعذر إيقاف تتبع الوردية.');
-      }
+    if (offlineOnly || !navigator.onLine || serverState !== 'online') {
+      setToast('يلزم الاتصال بالخادم لتسجيل الحضور أو الانصراف.');
       return;
     }
     try {
-      await startNativeDutyTracking();
+      const location = await captureVisitLocation();
+      if (!location) throw new Error('تعذر تحديد الموقع؛ اسمح باستخدام GPS ثم أعد المحاولة.');
+      if (onDuty) {
+        const saved = await syncTracking({ duty: false, stop: true, location });
+        if (!saved) throw new Error('تعذر تسجيل الانصراف على الخادم؛ بقيت الوردية مفتوحة.');
+        if (nativeApp) await stopNativeDutyTracking();
+        setOnDuty(false);
+        setToast('تم تسجيل الانصراف والوقت والموقع.');
+        return;
+      }
+      if (nativeApp) await startNativeDutyTracking();
+      const saved = await syncTracking({ duty: true, location });
+      if (!saved) {
+        if (nativeApp) await stopNativeDutyTracking().catch(() => undefined);
+        throw new Error('تعذر تسجيل الحضور على الخادم؛ لم تبدأ الوردية.');
+      }
       setOnDuty(true);
-      void syncTracking({ duty: true });
-      setToast('بدأ تتبع GPS أثناء الوردية. يمكنك إيقافه من زر أوف ديوتي.');
+      setToast('تم تسجيل الحضور والوقت والموقع.');
     } catch (error) {
-      setToast(error.message || 'تعذر بدء تتبع الوردية.');
+      setToast(error.message || `تعذر تسجيل ${onDuty ? 'الانصراف' : 'الحضور'}.`);
     }
   };
 
@@ -732,7 +746,7 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
     await onLogout();
   };
 
-  const saveVisit = async ({ machineCondition, reasonIds, notes, beforePhoto, afterPhoto, beforeCapturedAt, afterCapturedAt, capturedAt, location }) => {
+  const saveVisit = async ({ machineCondition, reasonIds, notes, beforePhotos, afterPhotos, beforeCapturedAt, afterCapturedAt, capturedAt, location }) => {
     const visitUuid = createVisitUuid();
     const payload = {
       visitUuid,
@@ -753,8 +767,8 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
       repUsername: user.username,
       createdAt: new Date().toISOString(),
       payload,
-      beforePhoto,
-      afterPhoto,
+      beforePhotos,
+      afterPhotos,
       status: 'queued',
       attempts: 0,
       lastError: '',
@@ -772,7 +786,7 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
       try { await refreshPending(); } catch { /* The IndexedDB add transaction already confirmed durable storage. */ }
       setSelectedMachine(null);
       setShowQueue(true);
-      setToast('حُفظت الزيارة والصورتان على هذا الهاتف. ستتم المزامنة عند اتصال الخادم.');
+      setToast(`حُفظت الزيارة و${beforePhotos.length + afterPhotos.length} صورة على هذا الهاتف. ستتم المزامنة عند اتصال الخادم.`);
     } catch (error) {
       setStorageError(error.message || 'لم يتم حفظ الزيارة. تحقق من مساحة الهاتف وحاول مجدداً.');
       throw error;
@@ -800,7 +814,7 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
             <i aria-hidden="true" />{serverLabel}
           </span>
           <button className={`rep-duty-toggle ${onDuty ? 'on-duty' : ''}`} type="button" onClick={() => void toggleDuty()} aria-pressed={onDuty}>
-            {onDuty ? 'أون ديوتي 🟢' : 'أوف ديوتي 🔴'}
+            {onDuty ? 'تسجيل الانصراف ↧' : 'تسجيل الحضور ↥'}
           </button>
           <button className="rep-queue-count" type="button" onClick={() => setShowQueue((value) => !value)} aria-expanded={showQueue}>
             <span>⏳</span><b>{pendingVisits.length}</b><small>معلق</small>
@@ -836,7 +850,7 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
 
       <section className="rep-route-section">
         <div className="rep-route-heading">
-          <div><span className="rep-eyebrow">الفولدرات الميدانية</span><h2>ماكيناتك اليوم <small>{summary.totalMachines} إجمالي</small></h2></div>
+          <div><span className="rep-eyebrow">أوامر الصيانة المعيّنة لك</span><h2>ماكيناتك <small>{summary.totalMachines} بطاقة</small></h2></div>
           <label className="rep-search">
             <span aria-hidden="true">⌕</span>
             <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="ابحث بكود الماكينة أو اسمها" aria-label="ابحث بكود الماكينة أو اسمها" />
@@ -878,6 +892,7 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
                           disabled={machine.canVisit === false}
                         >
                           <div className="rep-machine-card-top"><span className="rep-machine-code" dir="ltr">{machine.machineCode}</span><span className="rep-machine-status">{machine.isCompleted ? '✅ معتمدة' : machine.reviewStatus === 'pending' ? '🟡 بانتظار الاعتماد' : machine.reviewStatus === 'reshoot' ? '🔁 إعادة تصوير' : machine.canVisit === false ? 'مغلقة' : '⏳ متبقية'}</span></div>
+                          <small className="rep-work-order-code">أمر الصيانة · {machine.workOrderCode}</small>
                           {machine.clientName && <strong className="rep-machine-branch">{machine.clientName}</strong>}
                           <span className="rep-machine-name">{machine.arabicName || `ماكينة ${machine.machineCode}`}</span>
                           <span className="rep-machine-address"><i aria-hidden="true">⌖</i>{machine.address || 'عنوان العميل غير مسجل'}</span>
@@ -913,7 +928,7 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
         <button type="button" className="rep-button rep-button-primary rep-sync-now" disabled={!pendingVisits.length || serverState !== 'online' || offlineOnly} onClick={() => void drainQueue()}>{serverState === 'online' ? 'مزامنة الآن ↻' : 'ستتم المزامنة عند الاتصال'}</button>
       </section>}
 
-      <footer className="rep-app-footer"><span>مَــدَارْ · تطبيق المندوب الميداني</span><span>{gps ? `آخر GPS: ${formatGps(gps)}` : onDuty ? gpsError : nativeApp ? 'فعّل أون ديوتي لتسجيل GPS بالخلفية' : 'GPS يعمل أثناء فتح التطبيق فقط'}</span></footer>
+        <footer className="rep-app-footer"><span>مَــدَارْ · تطبيق المندوب الميداني</span><span>{gps ? `آخر GPS: ${formatGps(gps)}` : onDuty ? gpsError : nativeApp ? 'فعّل الحضور لتسجيل GPS أثناء الوردية' : 'يُسجّل GPS مع الحضور والانصراف والزيارة'}</span></footer>
 
       {selectedMachine && <MachineVisitSheet machine={selectedMachine} reasons={reasons} gps={gps} gpsError={gpsError} captureLocation={captureVisitLocation} onClose={() => setSelectedMachine(null)} onSave={saveVisit} />}
       {tutorialOpen && <Tutorial nativeApp={nativeApp} onFinish={finishTutorial} />}

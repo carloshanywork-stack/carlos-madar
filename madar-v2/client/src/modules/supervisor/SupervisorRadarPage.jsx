@@ -221,8 +221,8 @@ export default function SupervisorRadarPage() {
                   <span className="qa-pending-badge">بانتظار الاعتماد</span>
                 </div>
                 <div className="qa-photo-pair">
-                  <button type="button" onClick={() => setSelectedVisit({ ...visit, zoomPhoto: 'before' })} aria-label="تكبير صورة قبل الصيانة"><img src={visit.beforePhotoUrl} alt={`قبل الصيانة ${visit.machineCode}`} /><span>قبل الصيانة ↗</span></button>
-                  <button type="button" onClick={() => setSelectedVisit({ ...visit, zoomPhoto: 'after' })} aria-label="تكبير صورة بعد الصيانة"><img src={visit.afterPhotoUrl} alt={`بعد الصيانة ${visit.machineCode}`} /><span>بعد الصيانة ↗</span></button>
+                  {(visit.beforePhotos ?? [{ url: visit.beforePhotoUrl }]).map((photo, index) => <button key={`before-${index}`} type="button" onClick={() => setSelectedVisit({ ...visit, zoomPhoto: 'before', zoomPhotoIndex: index })} aria-label={`تكبير صورة قبل الصيانة ${index + 1}`}><img src={photo.url} alt={`قبل الصيانة ${visit.machineCode} ${index + 1}`} /><span>قبل الصيانة · {index + 1} ↗</span></button>)}
+                  {(visit.afterPhotos ?? [{ url: visit.afterPhotoUrl }]).map((photo, index) => <button key={`after-${index}`} type="button" onClick={() => setSelectedVisit({ ...visit, zoomPhoto: 'after', zoomPhotoIndex: index })} aria-label={`تكبير صورة بعد الصيانة ${index + 1}`}><img src={photo.url} alt={`بعد الصيانة ${visit.machineCode} ${index + 1}`} /><span>بعد الصيانة · {index + 1} ↗</span></button>)}
                 </div>
                 <div className="qa-visit-meta">
                   <span>المندوب <b>{visit.repName}</b></span>
@@ -246,7 +246,13 @@ export default function SupervisorRadarPage() {
       {selectedVisit?.zoomPhoto && <div className="qa-zoom-backdrop" role="presentation" onClick={() => setSelectedVisit(null)}>
         <section role="dialog" aria-modal="true" aria-label="تكبير صورة الزيارة" onClick={(event) => event.stopPropagation()}>
           <header><strong>ماكينة {selectedVisit.machineCode} · {selectedVisit.zoomPhoto === 'before' ? 'قبل الصيانة' : 'بعد الصيانة'}</strong><button type="button" onClick={() => setSelectedVisit(null)} aria-label="إغلاق">×</button></header>
-          <img src={selectedVisit.zoomPhoto === 'before' ? selectedVisit.beforePhotoUrl : selectedVisit.afterPhotoUrl} alt={`صورة ${selectedVisit.zoomPhoto} للماكينة ${selectedVisit.machineCode}`} />
+          {(() => {
+            const photos = selectedVisit.zoomPhoto === 'before'
+              ? (selectedVisit.beforePhotos ?? [{ url: selectedVisit.beforePhotoUrl }])
+              : (selectedVisit.afterPhotos ?? [{ url: selectedVisit.afterPhotoUrl }]);
+            const photo = photos[selectedVisit.zoomPhotoIndex ?? 0] ?? photos[0];
+            return <><img src={photo?.url} alt={`صورة ${selectedVisit.zoomPhoto} للماكينة ${selectedVisit.machineCode}`} /><small>{formatTime(photo?.capturedAt)} · {selectedVisit.repName}</small></>;
+          })()}
         </section>
       </div>}
     </div>

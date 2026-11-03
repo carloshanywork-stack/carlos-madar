@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto';
+import { createReadStream } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import sharp from 'sharp';
 import { db } from '../../database/connection.js';
 import { recordAudit } from '../audit.js';
@@ -114,6 +116,8 @@ export function getRepTodayRoute(rep, database = db) {
       machine.name_ar AS machine_name_ar, machine.area AS region_name,
       client.name AS client_name, client.address AS client_address
     FROM maintenance_orders order_record
+    JOIN maintenance_order_reps assignment
+      ON assignment.order_id = order_record.id AND assignment.user_id = ?
     JOIN clients client ON client.id = order_record.client_id
     JOIN maintenance_cards card ON card.order_id = order_record.id
     JOIN machines machine ON machine.id = card.machine_id
@@ -130,7 +134,7 @@ export function getRepTodayRoute(rep, database = db) {
       )
     ORDER BY machine.area COLLATE NOCASE, machine.code COLLATE NOCASE,
       order_record.created_at DESC, order_record.id DESC, card.id DESC
-  `).all(dayStart, dayEnd);
+  `).all(rep.id, dayStart, dayEnd);
 
   const visitReviews = database.prepare(`
     SELECT visit.card_id, review.status AS review_status, review.review_note, visit.visit_uuid
@@ -150,15 +154,12 @@ export function getRepTodayRoute(rep, database = db) {
   `).all(dayStart, dayEnd).map((row) => Number(row.entity_id)));
 
   const regionsByKey = new Map();
-  const seenMachineIds = new Set();
   let totalMachines = 0;
   let completed = 0;
   let pendingReview = 0;
   for (const row of cards) {
     const key = regionKey(row.region_name);
     if (!assignedByKey.has(key)) continue;
-    if (seenMachineIds.has(Number(row.machine_id))) continue;
-    seenMachineIds.add(Number(row.machine_id));
     const beforePhotos = parsePhotoList(row.before_photos_json);
     const afterPhotos = parsePhotoList(row.after_photos_json);
     const latestVisit = reviewByCard.get(Number(row.card_id));
@@ -171,6 +172,8 @@ export function getRepTodayRoute(rep, database = db) {
     regionsByKey.get(key).machines.push({
       machineCode: row.machine_code,
       arabicName: row.machine_name_ar,
+      workOrderId: Number(row.order_id),
+      workOrderCode: row.order_code,
       clientName: row.client_name,
       address: row.client_address ?? '',
       isCompleted,
@@ -188,7 +191,8 @@ export function getRepTodayRoute(rep, database = db) {
   const regions = [...regionsByKey.values()]
     .map((region) => ({
       ...region,
-      machines: region.machines.sort((left, right) => compareArabic(left.machineCode, right.machineCode)),
+      machines: region.machines.sort((left, right) => compareArabic(left.machineCode, right.machineCode)
+        || compareArabic(left.workOrderCode, right.workOrderCode)),
     }))
     .sort((left, right) => compareArabic(left.regionName, right.regionName));
   const pending = totalMachines - completed;
@@ -259,28 +263,34 @@ function normalizeVisitInput(input) {
     reasonIds,
     notes,
     capturedAt: capturedDate.toISOString(),
-    beforeCapturedAt: parseCapturedTimestamp(body.beforeCapturedAt, capturedDate, 'beforeCapturedAt'),
-    afterCapturedAt: parseCapturedTimestamp(body.afterCapturedAt, capturedDate, 'afterCapturedAt'),
+    beforeCapturedAt: parseCapturedTimestamps(body.beforeCapturedAt, capturedDate, 'beforeCapturedAt'),
+    afterCapturedAt: parseCapturedTimestamps(body.afterCapturedAt, capturedDate, 'afterCapturedAt'),
     location,
   };
 }
 
-function parseCapturedTimestamp(value, fallback, field) {
-  if (value === undefined || value === null || value === '') return fallback.toISOString();
-  const text = requireText(value, field, { maxLength: 64 });
-  const date = new Date(text);
-  if (Number.isNaN(date.valueOf())) throw new HttpError(400, `${field} must be a valid date and time.`);
-  return date.toISOString();
+function parseCapturedTimestamps(value, fallback, field) {
+  const values = value === undefined || value === null || value === '' ? [fallback.toISOString()]
+    : Array.isArray(value) ? value : [value];
+  if (!values.length) throw new HttpError(400, `${field} must include a timestamp for every photo.`);
+  return values.map((item, index) => {
+    const text = requireText(item, `${field}[${index}]`, { maxLength: 64 });
+    const date = new Date(text);
+    if (Number.isNaN(date.valueOf())) throw new HttpError(400, `${field}[${index}] must be a valid date and time.`);
+    return date.toISOString();
+  });
 }
 
 async function prepareVisitImage(file, label) {
-  if (!file?.buffer?.length) throw new HttpError(400, `A ${label} photo is required.`);
+  const imageBuffer = file?.buffer?.length ? file.buffer
+    : typeof file?.path === 'string' ? await readFile(file.path) : null;
+  if (!imageBuffer?.length) throw new HttpError(400, `A ${label} photo is required.`);
   try {
-    const metadata = await sharp(file.buffer, { limitInputPixels: 40000000 }).metadata();
+    const metadata = await sharp(imageBuffer, { limitInputPixels: 40000000 }).metadata();
     if (!['jpeg', 'webp'].includes(metadata.format) || !metadata.width || !metadata.height) {
       throw new HttpError(400, `${label} photo must be a valid JPEG or WebP image.`);
     }
-    return await sharp(file.buffer, { limitInputPixels: 40000000 })
+    return await sharp(imageBuffer, { limitInputPixels: 40000000 })
       .rotate()
       .resize({ width: 1600, height: 1600, fit: 'inside', withoutEnlargement: true })
       .jpeg({ quality: 82, mozjpeg: true })
@@ -291,11 +301,32 @@ async function prepareVisitImage(file, label) {
   }
 }
 
-function visitPayloadHash(repId, visit, beforeBuffer, afterBuffer) {
+function visitPhotoFiles(files, phase) {
+  const plural = files?.[`${phase}Photos`];
+  if (Array.isArray(plural)) return plural;
+  const singular = files?.[`${phase}Photo`];
+  if (Array.isArray(singular)) return singular;
+  return singular ? [singular] : [];
+}
+
+async function visitPayloadHash(repId, visit, beforePhotos, afterPhotos) {
   const hash = createHash('sha256');
   hash.update(JSON.stringify({ repId, ...visit }));
-  hash.update(`\0${beforeBuffer.length}\0`).update(beforeBuffer);
-  hash.update(`\0${afterBuffer.length}\0`).update(afterBuffer);
+  for (const [phase, photos] of [['before', beforePhotos], ['after', afterPhotos]]) {
+    hash.update(`\0${phase}:${photos.length}\0`);
+    for (const [index, photo] of photos.entries()) {
+      const size = Number(photo.size ?? photo.buffer?.length);
+      if (!Number.isSafeInteger(size) || size < 1) throw new HttpError(400, `${phase} photo ${index + 1} is empty or invalid.`);
+      hash.update(`\0${phase}:${index}:${size}\0`);
+      if (photo.buffer?.length) {
+        hash.update(photo.buffer);
+      } else if (typeof photo.path === 'string') {
+        for await (const chunk of createReadStream(photo.path)) hash.update(chunk);
+      } else {
+        throw new HttpError(400, `${phase} photo ${index + 1} is missing.`);
+      }
+    }
+  }
   return hash.digest('hex');
 }
 
@@ -304,11 +335,17 @@ function visitResult(row, database = db, { idempotent = false, processing = fals
     return { success: false, status: 'processing', visitUuid: row.visit_uuid, retryAfterMs: 1500 };
   }
   const reviewStatus = database.prepare('SELECT status FROM rep_visit_reviews WHERE visit_id = ?').get(row.id)?.status ?? 'pending';
+  const photoCounts = database.prepare(`
+    SELECT phase, COUNT(*) AS count FROM rep_visit_photos WHERE visit_id = ? GROUP BY phase
+  `).all(row.id);
+  const counts = Object.fromEntries(photoCounts.map((item) => [item.phase, Number(item.count)]));
   return {
     success: true,
     status: reviewStatus === 'approved' ? 'approved' : reviewStatus === 'reshoot' ? 'reshoot_requested' : 'pending_review',
     visitUuid: row.visit_uuid,
     machineCode: row.machine_code,
+    beforePhotoCount: counts.before ?? 0,
+    afterPhotoCount: counts.after ?? 0,
     idempotent,
   };
 }
@@ -327,7 +364,8 @@ function findRepVisitCard(rep, visit, database) {
   const card = database.prepare(`
     SELECT card.id AS card_id, card.order_id, card.machine_id, card.before_photos_json,
       card.after_photos_json, card.reason_id, card.reason_ids_json, card.notes AS card_notes,
-      card.status AS card_status, order_record.order_code, order_record.status AS order_status,
+      card.status AS card_status, order_record.order_code, order_record.area AS order_area,
+      order_record.status AS order_status,
       client.code AS client_code, client.deleted_at AS client_deleted_at,
       machine.code AS machine_code, machine.area AS machine_area, machine.active AS machine_active,
       machine.deleted_at AS machine_deleted_at
@@ -341,9 +379,18 @@ function findRepVisitCard(rep, visit, database) {
       || card.card_status === 'excluded' || card.order_status === 'archived') {
     throw new HttpError(409, 'This machine visit is no longer available on the active route.');
   }
+  if (!database.prepare(`
+    SELECT 1 FROM maintenance_order_reps WHERE order_id = ? AND user_id = ?
+  `).get(card.order_id, rep.id)) {
+    throw new HttpError(403, 'This work order is not assigned to your account.');
+  }
   const assigned = new Set((rep.assignedRegions ?? []).map(regionKey));
   if (!assigned.has(regionKey(card.machine_area))) {
     throw new HttpError(403, 'This machine is outside your assigned regions.');
+  }
+  const orderAreas = String(card.order_area ?? '').split(/[،,]/).map(regionKey).filter(Boolean);
+  if (orderAreas.length && !orderAreas.includes(regionKey(card.machine_area))) {
+    throw new HttpError(403, 'This machine is outside the work order regions.');
   }
   if (regionKey(visit.regionName) !== regionKey(card.machine_area)
       || visit.machineCode.normalize('NFKC').toLocaleLowerCase('en-US')
@@ -400,13 +447,25 @@ function createVisitReservation(rep, visit, payloadHash, card, stagingPath, fina
   }).immediate();
 }
 
-function recordReceivedVisit(rep, visit, visitId, beforePath, afterPath, database) {
+function recordReceivedVisit(rep, visit, visitId, photoRows, database) {
   return database.transaction(() => {
+    const beforePhotos = photoRows.filter((photo) => photo.phase === 'before');
+    const afterPhotos = photoRows.filter((photo) => photo.phase === 'after');
+    const beforePath = beforePhotos[0].storedPath;
+    const afterPath = afterPhotos[0].storedPath;
     database.prepare(`
       UPDATE rep_visits SET status = 'completed', before_path = ?, after_path = ?,
+        before_captured_at = ?, after_captured_at = ?,
         failure_message = NULL, updated_at = CURRENT_TIMESTAMP, completed_at = CURRENT_TIMESTAMP
       WHERE id = ? AND status = 'receiving'
-    `).run(beforePath, afterPath, visitId);
+    `).run(beforePath, afterPath, beforePhotos[0].capturedAt, afterPhotos[0].capturedAt, visitId);
+    const insertPhoto = database.prepare(`
+      INSERT INTO rep_visit_photos (visit_id, phase, ordinal, stored_path, captured_at)
+      VALUES (?, ?, ?, ?, ?)
+    `);
+    for (const photo of photoRows) {
+      insertPhoto.run(visitId, photo.phase, photo.ordinal, photo.storedPath, photo.capturedAt);
+    }
     database.prepare(`
       INSERT INTO rep_visit_reviews (visit_id, status)
       VALUES (?, 'pending')
@@ -429,7 +488,32 @@ function recordReceivedVisit(rep, visit, visitId, beforePath, afterPath, databas
         captured_at: visit.capturedAt,
         before_captured_at: visit.beforeCapturedAt,
         after_captured_at: visit.afterCapturedAt,
+        before_photo_count: beforePhotos.length,
+        after_photo_count: afterPhotos.length,
         location: visit.location,
+        review_status: 'pending',
+      },
+    });
+    const card = database.prepare(`
+      SELECT before_photos_json, after_photos_json FROM maintenance_cards WHERE id = ? AND order_id = ?
+    `).get(visit.cardId, findVisit(visit.visitUuid, database).order_id);
+    if (!card) throw new HttpError(409, 'The maintenance card was removed while the visit was uploading.');
+    database.prepare('UPDATE maintenance_cards SET updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(visit.cardId);
+    recordAudit({
+      database,
+      actorId: rep.id,
+      action: 'rep_photos_attached',
+      entityType: 'maintenance_card',
+      entityId: visit.cardId,
+      oldValues: {
+        before_photo_count: parsePhotoList(card.before_photos_json).length,
+        after_photo_count: parsePhotoList(card.after_photos_json).length,
+      },
+      newValues: {
+        visit_uuid: visit.visitUuid,
+        rep_user_id: rep.id,
+        before: beforePhotos.map(({ storedPath, capturedAt }) => ({ path: storedPath, captured_at: capturedAt })),
+        after: afterPhotos.map(({ storedPath, capturedAt }) => ({ path: storedPath, captured_at: capturedAt })),
         review_status: 'pending',
       },
     });
@@ -437,13 +521,17 @@ function recordReceivedVisit(rep, visit, visitId, beforePath, afterPath, databas
   }).immediate();
 }
 
-/** Receive one immutable visit bundle; UUID + content hash makes retries safe. */
+/** Receive an immutable visit bundle with any number of before/after photos; UUID + content hash makes retries safe. */
 export async function syncRepVisit(rep, input, files, database = db) {
   if (rep?.role !== 'rep') throw new HttpError(403, 'Field representative access is required.');
   const visit = normalizeVisitInput(input);
-  const beforeBuffer = await prepareVisitImage(files?.beforePhoto, 'before');
-  const afterBuffer = await prepareVisitImage(files?.afterPhoto, 'after');
-  const payloadHash = visitPayloadHash(rep.id, visit, beforeBuffer, afterBuffer);
+  const beforeFiles = visitPhotoFiles(files, 'before');
+  const afterFiles = visitPhotoFiles(files, 'after');
+  if (!beforeFiles.length || !afterFiles.length) throw new HttpError(400, 'At least one before and one after photo are required.');
+  if (visit.beforeCapturedAt.length !== beforeFiles.length || visit.afterCapturedAt.length !== afterFiles.length) {
+    throw new HttpError(400, 'Each before and after photo must have a matching capture timestamp.');
+  }
+  const payloadHash = await visitPayloadHash(rep.id, visit, beforeFiles, afterFiles);
 
   let existing = findVisit(visit.visitUuid, database);
   if (existing) {
@@ -462,18 +550,28 @@ export async function syncRepVisit(rep, input, files, database = db) {
   if (reservation.kind === 'completed') return visitResult(reservation.row, database, { idempotent: true });
   if (reservation.kind === 'processing') return visitResult(reservation.row, database, { processing: true });
 
-  const beforePath = storageDirectory(finalPath, `${visit.visitUuid}-before.jpg`);
-  const afterPath = storageDirectory(finalPath, `${visit.visitUuid}-after.jpg`);
   let finalDirectoryMoved = false;
   try {
     await ensureStorageDirectory('.madar-recovery', 'rep-visits', visit.visitUuid);
-    await writeStorageFile(storageDirectory(stagingPath, `${visit.visitUuid}-before.jpg`), beforeBuffer);
-    await writeStorageFile(storageDirectory(stagingPath, `${visit.visitUuid}-after.jpg`), afterBuffer);
+    const photoRows = [];
+    for (const [phase, phaseFiles, capturedAtList] of [
+      ['before', beforeFiles, visit.beforeCapturedAt],
+      ['after', afterFiles, visit.afterCapturedAt],
+    ]) {
+      for (const [ordinal, file] of phaseFiles.entries()) {
+        const buffer = await prepareVisitImage(file, `${phase} ${ordinal + 1}`);
+        const filename = `${visit.visitUuid}-${phase}-${String(ordinal + 1).padStart(4, '0')}.jpg`;
+        const stagedPath = storageDirectory(stagingPath, filename);
+        const storedPath = storageDirectory(finalPath, filename);
+        await writeStorageFile(stagedPath, buffer);
+        photoRows.push({ phase, ordinal, stagedPath, storedPath, capturedAt: capturedAtList[ordinal] });
+      }
+    }
     await ensureStorageDirectory('clients', card.client_code, 'maintenance', card.order_code, card.machine_code, 'visits');
     await moveStorageDirectory(stagingPath, finalPath);
     finalDirectoryMoved = true;
 
-    const completedVisit = recordReceivedVisit(rep, visit, reservation.row.id, beforePath, afterPath, database);
+    const completedVisit = recordReceivedVisit(rep, visit, reservation.row.id, photoRows, database);
     return visitResult(completedVisit, database);
   } catch (error) {
     try {

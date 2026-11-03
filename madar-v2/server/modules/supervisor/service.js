@@ -173,9 +173,23 @@ export function getPendingVisitReviews(database = defaultDatabase) {
   `).all();
   const reasonNames = database.prepare('SELECT id, name FROM maintenance_reasons WHERE active = 1').all();
   const namesById = new Map(reasonNames.map((reason) => [Number(reason.id), reason.name]));
+  const photoRows = database.prepare(`
+    SELECT visit_id, phase, ordinal, stored_path, captured_at
+    FROM rep_visit_photos WHERE visit_id IN (${visits.map(() => '?').join(',') || 'NULL'})
+    ORDER BY visit_id, phase, ordinal, id
+  `).all(...visits.map((visit) => visit.id));
+  const photosByVisit = new Map();
+  for (const photo of photoRows) {
+    if (!photosByVisit.has(Number(photo.visit_id))) photosByVisit.set(Number(photo.visit_id), { before: [], after: [] });
+    photosByVisit.get(Number(photo.visit_id))[photo.phase].push(photo);
+  }
   return visits.map((visit) => {
     const beforeMs = visit.before_captured_at ? new Date(visit.before_captured_at).valueOf() : NaN;
     const afterMs = visit.after_captured_at ? new Date(visit.after_captured_at).valueOf() : NaN;
+    const storedPhotos = photosByVisit.get(Number(visit.id)) ?? { before: [], after: [] };
+    const beforePhotos = storedPhotos.before.length ? storedPhotos.before : (visit.before_path ? [{ ordinal: 0, stored_path: visit.before_path, captured_at: visit.before_captured_at ?? visit.captured_at }] : []);
+    const afterPhotos = storedPhotos.after.length ? storedPhotos.after : (visit.after_path ? [{ ordinal: 0, stored_path: visit.after_path, captured_at: visit.after_captured_at ?? visit.captured_at }] : []);
+    const photoUrl = (phase, photo, index) => `/api/supervisor/visits/${visit.id}/photos/${phase}/${index + 1}`;
     return {
       id: Number(visit.id), visitUuid: visit.visit_uuid, repId: Number(visit.rep_user_id), repName: visit.rep_name,
       orderId: Number(visit.order_id), cardId: Number(visit.card_id), machineId: Number(visit.machine_id),
@@ -187,22 +201,40 @@ export function getPendingVisitReviews(database = defaultDatabase) {
       siteDurationSeconds: Number.isFinite(beforeMs) && Number.isFinite(afterMs) && afterMs >= beforeMs
         ? Math.floor((afterMs - beforeMs) / 1000) : null,
       reviewNote: visit.review_note,
-      beforePhotoUrl: `/api/supervisor/visits/${visit.id}/photos/before`,
-      afterPhotoUrl: `/api/supervisor/visits/${visit.id}/photos/after`,
+      beforePhotos: beforePhotos.map((photo, index) => ({
+        url: photoUrl('before', photo, index), capturedAt: photo.captured_at ?? visit.before_captured_at ?? visit.captured_at,
+      })),
+      afterPhotos: afterPhotos.map((photo, index) => ({
+        url: photoUrl('after', photo, index), capturedAt: photo.captured_at ?? visit.after_captured_at ?? visit.captured_at,
+      })),
+      beforePhotoUrl: photoUrl('before', beforePhotos[0], 0),
+      afterPhotoUrl: photoUrl('after', afterPhotos[0], 0),
       createdAt: visit.created_at,
     };
   });
 }
 
-export async function getSupervisorVisitPhoto(visitIdInput, phase, database = defaultDatabase) {
+export async function getSupervisorVisitPhoto(visitIdInput, phase, ordinalInput = null, database = defaultDatabase) {
   const visitId = positiveId(Number(visitIdInput), 'visitId');
   if (!['before', 'after'].includes(phase)) throw new HttpError(400, 'phase must be before or after.');
   const visit = database.prepare(`
-    SELECT before_path, after_path FROM rep_visits visit
+    SELECT visit.before_path, visit.after_path, visit.before_captured_at, visit.after_captured_at, visit.captured_at
+    FROM rep_visits visit
     JOIN rep_visit_reviews review ON review.visit_id = visit.id
     WHERE visit.id = ? AND visit.status = 'completed'
   `).get(visitId);
-  const storedPath = phase === 'before' ? visit?.before_path : visit?.after_path;
+  if (!visit) throw new HttpError(404, 'Visit photo was not found.');
+  let storedPath;
+  if (ordinalInput !== null && ordinalInput !== undefined) {
+    const ordinal = positiveId(Number(ordinalInput), 'ordinal') - 1;
+    storedPath = database.prepare(`
+      SELECT stored_path FROM rep_visit_photos WHERE visit_id = ? AND phase = ? AND ordinal = ?
+    `).get(visitId, phase, ordinal)?.stored_path;
+  } else {
+    storedPath = database.prepare(`
+      SELECT stored_path FROM rep_visit_photos WHERE visit_id = ? AND phase = ? ORDER BY ordinal, id LIMIT 1
+    `).get(visitId, phase)?.stored_path ?? (phase === 'before' ? visit.before_path : visit.after_path);
+  }
   if (!storedPath) throw new HttpError(404, 'Visit photo was not found.');
   return resolveStorageFile(storedPath);
 }
@@ -255,8 +287,15 @@ export function reviewRepVisit(visitIdInput, input, actorId, database = defaultD
       ...(visit.card_reason_id ? [Number(visit.card_reason_id)] : []),
       ...incomingReasons.filter((id) => Number.isSafeInteger(Number(id)) && Number(id) > 0).map(Number),
     ])];
-    const nextBefore = [...beforePhotos, visit.before_path];
-    const nextAfter = [...afterPhotos, visit.after_path];
+    const receivedPhotos = database.prepare(`
+      SELECT phase, stored_path FROM rep_visit_photos WHERE visit_id = ? ORDER BY phase, ordinal, id
+    `).all(visitId);
+    const incomingBefore = receivedPhotos.filter((photo) => photo.phase === 'before').map((photo) => photo.stored_path);
+    const incomingAfter = receivedPhotos.filter((photo) => photo.phase === 'after').map((photo) => photo.stored_path);
+    if (!incomingBefore.length && visit.before_path) incomingBefore.push(visit.before_path);
+    if (!incomingAfter.length && visit.after_path) incomingAfter.push(visit.after_path);
+    const nextBefore = [...new Set([...beforePhotos, ...incomingBefore])];
+    const nextAfter = [...new Set([...afterPhotos, ...incomingAfter])];
     let notes = visit.card_notes;
     if (visit.notes) {
       const visitNote = `[مندوب · ${visit.captured_at}] ${visit.notes}`;

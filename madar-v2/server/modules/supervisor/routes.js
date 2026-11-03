@@ -30,12 +30,14 @@ router.get('/qa/queue', (_req, res) => {
   res.json({ success: true, visits: getPendingVisitReviews() });
 });
 
-router.get('/visits/:id/photos/:phase', asyncHandler(async (req, res) => {
-  const absolutePath = await getSupervisorVisitPhoto(req.params.id, req.params.phase);
+const sendVisitPhoto = asyncHandler(async (req, res) => {
+  const absolutePath = await getSupervisorVisitPhoto(req.params.id, req.params.phase, req.params.ordinal);
   const contentType = req.params.phase === 'before' || req.params.phase === 'after' ? 'image/jpeg' : 'application/octet-stream';
   res.set({ 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff', 'Content-Type': contentType });
   res.send(await readFile(absolutePath));
-}));
+});
+router.get('/visits/:id/photos/:phase', sendVisitPhoto);
+router.get('/visits/:id/photos/:phase/:ordinal', sendVisitPhoto);
 
 router.post('/visits/:id/review', (req, res, next) => {
   try {

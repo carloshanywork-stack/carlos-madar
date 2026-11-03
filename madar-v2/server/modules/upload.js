@@ -27,7 +27,7 @@ export function memoryUpload({ maxBytes, extensions }) {
   });
 }
 
-export function diskUpload({ maxBytes, extensions, destination }) {
+function createDiskUpload({ maxBytes, extensions, destination, limits }) {
   const storage = multer.diskStorage({
     destination(req, file, callback) {
       Promise.resolve(typeof destination === 'function' ? destination(req, file) : destination)
@@ -39,7 +39,26 @@ export function diskUpload({ maxBytes, extensions, destination }) {
   });
   return multer({
     storage,
-    limits: { fileSize: maxBytes, files: 1, fields: 20, parts: 21 },
+    limits,
     fileFilter: createFileFilter(extensions),
+  });
+}
+
+export function diskUpload({ maxBytes, extensions, destination }) {
+  return createDiskUpload({
+    maxBytes,
+    extensions,
+    destination,
+    limits: { fileSize: maxBytes, files: 1, fields: 20, parts: 21 },
+  });
+}
+
+/** Disk-backed multipart upload with no file-count cap; every file remains individually size-limited. */
+export function diskUploadMany({ maxBytes, extensions, destination, fields = 1, fieldSize = 64 * 1024 }) {
+  return createDiskUpload({
+    maxBytes,
+    extensions,
+    destination,
+    limits: { fileSize: maxBytes, fields, fieldSize },
   });
 }
