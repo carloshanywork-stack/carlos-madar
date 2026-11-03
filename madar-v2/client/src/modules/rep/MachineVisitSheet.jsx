@@ -7,6 +7,15 @@ function showLocation(location) {
   return `${location.latitude.toFixed(5)}, ${location.longitude.toFixed(5)} · دقة ±${Math.round(location.accuracy)}م`;
 }
 
+function distanceMeters(first, second) {
+  const radians = (degrees) => degrees * Math.PI / 180;
+  const dLat = radians(second.latitude - first.latitude);
+  const dLon = radians(second.longitude - first.longitude);
+  const a = Math.sin(dLat / 2) ** 2
+    + Math.cos(radians(first.latitude)) * Math.cos(radians(second.latitude)) * Math.sin(dLon / 2) ** 2;
+  return 6371000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(Math.max(0, 1 - a)));
+}
+
 export default function MachineVisitSheet({ machine, reasons, gps, gpsError, captureLocation, onClose, onSave }) {
   const [machineCondition, setMachineCondition] = useState('');
   const [reasonIds, setReasonIds] = useState([]);
@@ -25,6 +34,22 @@ export default function MachineVisitSheet({ machine, reasons, gps, gpsError, cap
     previewUrls.current.clear();
   }, []);
 
+  useEffect(() => {
+    void captureLocation?.();
+    const timer = window.setInterval(() => { void captureLocation?.(); }, 20000);
+    return () => window.clearInterval(timer);
+  }, [captureLocation]);
+
+  const locationLocked = machine.isLocationLocked === true;
+  const hasMachinePin = Number.isFinite(machine.latitude) && Number.isFinite(machine.longitude);
+  const measuredDistance = gps && hasMachinePin
+    ? distanceMeters(gps, { latitude: machine.latitude, longitude: machine.longitude })
+    : null;
+  const effectiveDistance = measuredDistance === null ? null : Math.max(0, measuredDistance - Number(gps.accuracy ?? 0));
+  const radius = Math.max(1, Number(machine.geofenceRadiusMeters) || 50);
+  const withinGeofence = !locationLocked || (hasMachinePin && effectiveDistance !== null && effectiveDistance <= radius);
+  const canCapture = Boolean(gps) && withinGeofence;
+
   const toggleReason = (id) => {
     setReasonIds((current) => current.includes(Number(id))
       ? current.filter((item) => item !== Number(id))
@@ -35,6 +60,18 @@ export default function MachineVisitSheet({ machine, reasons, gps, gpsError, cap
     const selectedFiles = Array.from(files ?? []).filter(Boolean);
     if (!selectedFiles.length) return;
     setError('');
+    const capturedLocation = await captureLocation?.();
+    const currentLocation = capturedLocation ?? gps;
+    if (!currentLocation) {
+      setError('يلزم تحديد موقع GPS قبل التقاط صور الزيارة.');
+      return;
+    }
+    if (locationLocked && (!hasMachinePin || Math.max(0,
+      distanceMeters(currentLocation, { latitude: machine.latitude, longitude: machine.longitude })
+        - Number(currentLocation.accuracy ?? 0)) > radius)) {
+      setError('أنت خارج نطاق الماكينة؛ اقترب منها لتفعيل التصوير.');
+      return;
+    }
     const preparedPhotos = [];
     for (const [index, file] of selectedFiles.entries()) {
       setProcessingPhase(phase);
@@ -45,7 +82,7 @@ export default function MachineVisitSheet({ machine, reasons, gps, gpsError, cap
           regionName: machine.regionName,
           phase,
           capturedAt,
-          location: locationPayload(gps),
+          location: locationPayload(currentLocation),
         });
         const previewUrl = URL.createObjectURL(blob);
         previewUrls.current.add(previewUrl);
@@ -109,6 +146,19 @@ export default function MachineVisitSheet({ machine, reasons, gps, gpsError, cap
     setSaving(true);
     try {
       const capturedLocation = await captureLocation?.();
+      const currentLocation = capturedLocation ?? gps;
+      if (!currentLocation) throw new Error('يلزم تحديد موقع GPS قبل حفظ الزيارة.');
+      if (locationLocked && (!hasMachinePin || Math.max(0,
+        distanceMeters(currentLocation, { latitude: machine.latitude, longitude: machine.longitude })
+          - Number(currentLocation.accuracy ?? 0)) > radius)) {
+        const distance = hasMachinePin
+          ? Math.max(0, distanceMeters(currentLocation, { latitude: machine.latitude, longitude: machine.longitude })
+            - Number(currentLocation.accuracy ?? 0))
+          : null;
+        throw new Error(distance === null
+          ? 'إحداثيات الماكينة المقفلة غير مكتملة؛ تواصل مع الإدارة.'
+          : `أنت خارج نطاق الماكينة (المسافة الفعالة: ${Math.round(distance)} متر، المسموح: ${radius} متر).`);
+      }
       await onSave({
         machineCondition,
         reasonIds,
@@ -118,7 +168,7 @@ export default function MachineVisitSheet({ machine, reasons, gps, gpsError, cap
         beforeCapturedAt: photos.before.map(({ capturedAt }) => capturedAt),
         afterCapturedAt: photos.after.map(({ capturedAt }) => capturedAt),
         capturedAt: new Date().toISOString(),
-        location: locationPayload(capturedLocation) ?? locationPayload(gps),
+        location: locationPayload(currentLocation),
       });
     } catch (saveError) {
       setError(saveError.message || 'تعذر حفظ الزيارة محلياً. لم تُحذف الصور؛ حاول مرة أخرى.');
@@ -150,12 +200,12 @@ export default function MachineVisitSheet({ machine, reasons, gps, gpsError, cap
             type="button"
             className="rep-camera-button"
             onClick={openCamera(phase, inputRef)}
-            disabled={Boolean(processingPhase) || saving}
+            disabled={Boolean(processingPhase) || saving || !canCapture}
           >
             <span className="rep-camera-icon" aria-hidden="true">⌖</span>
             <span>{processingPhase === phase ? 'جارٍ تجهيز الصورة...' : `${nativeApp ? 'التقط صورة أخرى بالكاميرا' : 'أضف صورة بالكاميرا'} · ${label}`}</span>
           </button>
-          {!nativeApp && <button type="button" className="rep-button rep-button-light" onClick={() => inputRef.current?.click()} disabled={Boolean(processingPhase) || saving}>اختيار صور متعددة</button>}
+          {!nativeApp && <button type="button" className="rep-button rep-button-light" onClick={() => inputRef.current?.click()} disabled={Boolean(processingPhase) || saving || !canCapture}>اختيار صور متعددة</button>}
         </div>
         {!nativeApp && <input
           ref={inputRef}
@@ -194,6 +244,18 @@ export default function MachineVisitSheet({ machine, reasons, gps, gpsError, cap
               <small>{showLocation(gps)}</small>
             </div>
             <span className="rep-gps-label">GPS</span>
+          </div>
+
+          <div className={`rep-geofence-status ${!gps || (locationLocked && !withinGeofence) ? 'outside' : 'inside'}`} role="status">
+            {!gps
+              ? 'جارٍ انتظار إشارة GPS؛ يلزم الموقع لتفعيل التصوير.'
+              : !locationLocked
+                ? 'أول زيارة: سيُثبّت النظام موقع الماكينة عند مزامنة الصور.'
+                : !hasMachinePin
+                  ? 'إحداثيات قفل الماكينة غير مكتملة؛ التصوير متوقف.'
+                  : withinGeofence
+                    ? `أنت داخل النطاق · المسافة ${Math.round(effectiveDistance)} متر (المسموح ${radius} متر).`
+                    : `أنت خارج النطاق · المسافة الفعالة ${Math.round(effectiveDistance)} متر (المسموح ${radius} متر).`}
           </div>
 
           <section className="rep-form-section">
@@ -262,7 +324,7 @@ export default function MachineVisitSheet({ machine, reasons, gps, gpsError, cap
 
         <footer className="rep-sheet-footer">
           <button type="button" className="rep-button rep-button-light" onClick={onClose}>إلغاء</button>
-          <button type="button" className="rep-button rep-button-primary rep-save-visit" onClick={save} disabled={saving || !machineCondition || !photos.before.length || !photos.after.length || Boolean(processingPhase) || (nativeApp && /تزييف الموقع/.test(gpsError ?? ''))}>
+          <button type="button" className="rep-button rep-button-primary rep-save-visit" onClick={save} disabled={saving || !canCapture || !machineCondition || !photos.before.length || !photos.after.length || Boolean(processingPhase) || (nativeApp && /تزييف الموقع/.test(gpsError ?? ''))}>
             {saving ? 'جارٍ تحديد الموقع وحفظ الزيارة…' : '💾 حفظ الزيارة على الهاتف'}
           </button>
         </footer>

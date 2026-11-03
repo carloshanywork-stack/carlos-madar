@@ -67,10 +67,13 @@ function employeeInput(input, { partial = false } = {}) {
   return result;
 }
 
-export function listEmployees(department, database = db, { includeInactive = false } = {}) {
+export function listEmployees(department, database = db, { includeInactive = false, includeLoginUsers = false } = {}) {
   const parameters = [];
   const filters = ['deleted_at IS NULL'];
   if (!includeInactive) filters.push('active = 1');
+  // Account-linked profiles remain part of attendance/payroll, but should not
+  // appear as ordinary staff choices on custody, sales, and order selectors.
+  if (!includeLoginUsers) filters.push('can_login = 0');
   if (department !== undefined && department !== '') {
     const normalized = requireText(department, 'department', { maxLength: 80 });
     if (!DEPARTMENTS.includes(normalized)) throw new HttpError(400, `department must be one of: ${DEPARTMENTS.join(', ')}.`);
@@ -100,7 +103,8 @@ export function createEmployee(input, actorId = null, database = db) {
       newValues: { ...employee, department: stored.departmentLabel ?? stored.department } });
     return id;
   }).immediate();
-  return listEmployees(undefined, database, { includeInactive: true }).find((employeeRow) => employeeRow.id === result);
+  return listEmployees(undefined, database, { includeInactive: true, includeLoginUsers: true })
+    .find((employeeRow) => employeeRow.id === result);
 }
 
 function revokeLinkedLogin(employee, actorId, database) {
@@ -149,7 +153,8 @@ export function updateEmployee(employeeId, input, actorId = null, database = db)
       newValues: { name: next.name, department: next.department_label ?? next.department, job_title: next.job_title,
         phone: next.phone, monthly_salary_cents: next.base_salary_cents, daily_rate_cents: next.daily_rate_cents, active: next.active } });
   }).immediate();
-  return listEmployees(undefined, database, { includeInactive: true }).find((employee) => employee.id === id);
+  return listEmployees(undefined, database, { includeInactive: true, includeLoginUsers: true })
+    .find((employee) => employee.id === id);
 }
 
 export function deactivateEmployee(employeeId, actorId = null, database = db) {
@@ -170,10 +175,15 @@ export function getAttendance(dateValue, database = db) {
   if (!date) throw new HttpError(400, 'date is required.');
   const employees = database.prepare(`
     SELECT employee.id AS employee_id, employee.name, COALESCE(employee.department_label, employee.department) AS department,
-      attendance.id, attendance.status, COALESCE(attendance.overtime_hours, 0) AS overtime_hours,
-      attendance.notes, attendance.work_date
+      employee.user_id, user.role AS user_role, attendance.id, attendance.status,
+      COALESCE(attendance.overtime_hours, 0) AS overtime_hours, attendance.notes, attendance.work_date,
+      attendance.clock_in_time, attendance.clock_in_source, attendance.clock_in_lat, attendance.clock_in_lng,
+      attendance.clock_out_time, attendance.clock_out_source, COALESCE(attendance.total_hours, 0) AS total_hours,
+      COALESCE(attendance.regular_hours, 0) AS regular_hours, COALESCE(attendance.overtime_status, 'none') AS overtime_status,
+      attendance.overtime_approved_by
     FROM employees employee
     LEFT JOIN employee_daily_attendance attendance ON attendance.employee_id = employee.id AND attendance.work_date = ?
+    LEFT JOIN users user ON user.id = employee.user_id
     WHERE employee.active = 1 AND employee.deleted_at IS NULL
     ORDER BY department, employee.name COLLATE NOCASE, employee.id
   `).all(date);
@@ -203,16 +213,22 @@ export function saveAttendance(input, actorId = null, database = db) {
     INSERT INTO employee_daily_attendance (employee_id, work_date, status, overtime_hours, notes)
     VALUES (?, ?, ?, ?, ?)
     ON CONFLICT(employee_id, work_date) DO UPDATE SET status = excluded.status,
-      overtime_hours = excluded.overtime_hours, notes = excluded.notes
+      overtime_hours = CASE
+        WHEN employee_daily_attendance.clock_in_time IS NOT NULL OR employee_daily_attendance.clock_out_time IS NOT NULL
+          THEN employee_daily_attendance.overtime_hours
+        ELSE excluded.overtime_hours
+      END, notes = excluded.notes
   `);
   database.transaction(() => {
     for (const record of records) {
       const employee = database.prepare('SELECT name FROM employees WHERE id = ? AND active = 1 AND deleted_at IS NULL').get(record.employeeId);
       if (!employee) throw new HttpError(404, `Active employee ${record.employeeId} was not found.`);
-      const old = database.prepare('SELECT status, overtime_hours, notes FROM employee_daily_attendance WHERE employee_id = ? AND work_date = ?').get(record.employeeId, date) ?? null;
+      const old = database.prepare(`SELECT status, overtime_hours, notes, clock_in_time, clock_out_time
+        FROM employee_daily_attendance WHERE employee_id = ? AND work_date = ?`).get(record.employeeId, date) ?? null;
       upsert.run(record.employeeId, date, record.status, record.overtimeHours, record.notes);
       recordAudit({ database, actorId, action: old ? 'update_attendance' : 'record_attendance', entityType: 'employee_attendance',
-        entityId: record.employeeId, oldValues: old, newValues: { date, ...record } });
+        entityId: record.employeeId, oldValues: old, newValues: { date, ...record,
+          overtimeHours: old?.clock_in_time || old?.clock_out_time ? old.overtime_hours : record.overtimeHours } });
     }
   }).immediate();
   return getAttendance(date, database);
@@ -311,7 +327,8 @@ export function getMonthlyAttendance(monthValue, database = db) {
   `).all();
   const records = database.prepare(`
     SELECT attendance.employee_id, attendance.work_date AS date, attendance.status,
-      attendance.overtime_hours, attendance.notes
+      attendance.overtime_hours, attendance.notes, attendance.clock_in_time, attendance.clock_out_time,
+      attendance.total_hours, attendance.regular_hours, attendance.overtime_status
     FROM employee_daily_attendance attendance
     JOIN employees employee ON employee.id = attendance.employee_id
     WHERE work_date >= ? AND work_date < ?
@@ -369,19 +386,24 @@ export function saveMonthlyAttendance(input, actorId = null, database = db) {
     INSERT INTO employee_daily_attendance (employee_id, work_date, status, overtime_hours, notes)
     VALUES (?, ?, ?, ?, ?)
     ON CONFLICT(employee_id, work_date) DO UPDATE SET status = excluded.status,
-      overtime_hours = excluded.overtime_hours, notes = excluded.notes
+      overtime_hours = CASE
+        WHEN employee_daily_attendance.clock_in_time IS NOT NULL OR employee_daily_attendance.clock_out_time IS NOT NULL
+          THEN employee_daily_attendance.overtime_hours
+        ELSE excluded.overtime_hours
+      END, notes = excluded.notes
   `);
   database.transaction(() => {
     for (const record of records) {
       const employee = database.prepare('SELECT name FROM employees WHERE id = ? AND active = 1 AND deleted_at IS NULL')
         .get(record.employeeId);
       if (!employee) throw new HttpError(404, `Active employee ${record.employeeId} was not found.`);
-      const old = database.prepare(`SELECT status, overtime_hours, notes FROM employee_daily_attendance
+      const old = database.prepare(`SELECT status, overtime_hours, notes, clock_in_time, clock_out_time FROM employee_daily_attendance
         WHERE employee_id = ? AND work_date = ?`).get(record.employeeId, record.date) ?? null;
       upsert.run(record.employeeId, record.date, record.status, record.overtimeHours, record.notes);
       recordAudit({ database, actorId, action: old ? 'update_attendance' : 'record_attendance',
         entityType: 'employee_attendance', entityId: record.employeeId, oldValues: old,
-        newValues: { date: record.date, ...record } });
+        newValues: { date: record.date, ...record,
+          overtimeHours: old?.clock_in_time || old?.clock_out_time ? old.overtime_hours : record.overtimeHours } });
     }
   }).immediate();
   return getMonthlyAttendance(month, database);
@@ -403,6 +425,7 @@ function calculateDraftPayroll(monthValue, database) {
         total_deductions_cents: existingRun.total_deductions_cents,
         net_total_cents: existingRun.net_total_cents,
       },
+      pending_overtime_count: 0,
       finalized: true,
     };
   }
@@ -414,9 +437,15 @@ function calculateDraftPayroll(monthValue, database) {
   const attendance = database.prepare(`
     SELECT employee_id, SUM(CASE WHEN status IN ('present', 'late') THEN 1 ELSE 0 END) AS present_days,
       SUM(CASE WHEN status = 'absent' THEN 1 ELSE 0 END) AS absent_days,
-      COALESCE(SUM(overtime_hours), 0) AS overtime_hours
+      COALESCE(SUM(CASE
+        WHEN clock_in_time IS NULL AND clock_out_time IS NULL THEN overtime_hours
+        WHEN overtime_status = 'approved' THEN overtime_hours
+        ELSE 0
+      END), 0) AS overtime_hours
     FROM employee_daily_attendance WHERE work_date >= ? AND work_date < ? GROUP BY employee_id
   `).all(start, end);
+  const pendingOvertimeCount = database.prepare(`SELECT COUNT(*) AS count FROM employee_daily_attendance
+    WHERE work_date >= ? AND work_date < ? AND overtime_status = 'pending'`).get(start, end).count;
   const byEmployee = new Map(attendance.map((row) => [row.employee_id, row]));
   const lines = employees.map((employee) => {
     const record = byEmployee.get(employee.id) ?? { present_days: 0, absent_days: 0, overtime_hours: 0 };
@@ -439,7 +468,7 @@ function calculateDraftPayroll(monthValue, database) {
     if (value > BigInt(Number.MAX_SAFE_INTEGER)) throw new HttpError(400, `Payroll ${key} exceeds the safe cents range.`);
     totals[key] = Number(value);
   }
-  return { run: existingRun ?? null, month, lines, totals, finalized: false };
+  return { run: existingRun ?? null, month, lines, totals, pending_overtime_count: Number(pendingOvertimeCount), finalized: false };
 }
 
 export function getPayroll(monthValue, database = db) {
@@ -451,8 +480,17 @@ export function finalizePayroll(input, actorId = null, database = db) {
   allowOnlyKeys(body, ['month']);
   const draft = calculateDraftPayroll(body.month, database);
   if (draft.finalized) throw new HttpError(409, `Payroll for ${draft.month} has already been finalized.`);
+  if (draft.pending_overtime_count > 0) {
+    throw new HttpError(409, `Review ${draft.pending_overtime_count} pending overtime record(s) before finalizing payroll for ${draft.month}.`);
+  }
+  const { start, end } = parseMonth(draft.month);
   const runId = database.transaction(() => {
     if (draft.run?.status === 'finalized') throw new HttpError(409, `Payroll for ${draft.month} has already been finalized.`);
+    const pendingOvertime = database.prepare(`SELECT COUNT(*) AS count FROM employee_daily_attendance
+      WHERE work_date >= ? AND work_date < ? AND overtime_status = 'pending'`).get(start, end).count;
+    if (pendingOvertime > 0) {
+      throw new HttpError(409, `Review ${pendingOvertime} pending overtime record(s) before finalizing payroll for ${draft.month}.`);
+    }
     const existing = draft.run?.id;
     let id;
     if (existing) {

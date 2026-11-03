@@ -177,10 +177,10 @@ export default function SignInPage({ setupRequired, initialError = '', onLoginSu
                     dir="ltr"
                     autoComplete={setupRequired ? 'new-password' : 'current-password'}
                     maxLength={72}
-                    minLength={setupRequired ? 12 : 1}
+                    minLength={setupRequired ? 4 : 1}
                     name="password"
                     onChange={update('password')}
-                    placeholder={setupRequired ? '12 حرفاً على الأقل' : 'أدخل كلمة المرور'}
+                    placeholder={setupRequired ? '4 خانات على الأقل' : 'أدخل كلمة المرور'}
                     required
                     type={showPassword ? 'text' : 'password'}
                     value={form.password}
@@ -189,7 +189,7 @@ export default function SignInPage({ setupRequired, initialError = '', onLoginSu
                     {showPassword ? 'إخفاء' : 'إظهار'}
                   </button>
                 </span>
-                {setupRequired && <small>استخدم 12 حرفاً على الأقل. سيكون لهذا الحساب صلاحيات المدير.</small>}
+                {setupRequired && <small>استخدم 4 خانات على الأقل. سيكون لهذا الحساب صلاحيات المدير.</small>}
               </label>
 
               {setupRequired && (
@@ -198,7 +198,7 @@ export default function SignInPage({ setupRequired, initialError = '', onLoginSu
                   <input
                     autoComplete="new-password"
                     maxLength={72}
-                    minLength={12}
+                    minLength={4}
                     name="confirmPassword"
                     onChange={update('confirmPassword')}
                     placeholder="أعد إدخال كلمة المرور"

@@ -164,7 +164,7 @@ The application must not be publicly reachable while first-run administrator set
 ssh -L 3000:127.0.0.1:3000 <ssh-user>@<server-address>
 ```
 
-While that SSH connection is open, visit `http://127.0.0.1:3000` in a browser on the workstation and create the first administrator with a unique password of at least 12 characters. Sign out and back in to verify the account. The setup endpoint is single-use once an account exists. Do not expose the app through a public hostname until this step is complete.
+While that SSH connection is open, visit `http://127.0.0.1:3000` in a browser on the workstation and create the first administrator with a unique password of at least 4 characters (and no more than 72 UTF-8 bytes). Sign out and back in to verify the account. The setup endpoint is single-use once an account exists. Do not expose the app through a public hostname until this step is complete.
 
 ## 7. Configure the production Cloudflare Tunnel
 

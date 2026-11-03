@@ -21,7 +21,11 @@ import {
 const router = Router();
 
 router.get('/', (req, res) => {
-  res.json(listEmployees(req.query.department, undefined, { includeInactive: req.query.all === '1' }));
+  const includeAll = req.query.all === '1';
+  res.json(listEmployees(req.query.department, undefined, {
+    includeInactive: includeAll,
+    includeLoginUsers: includeAll,
+  }));
 });
 router.post('/', (req, res) => {
   res.status(201).json(createEmployee(req.body, requestActorId(req)));

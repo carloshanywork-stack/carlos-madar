@@ -52,7 +52,11 @@ function dayRange(day, database) {
   };
   const nextDate = new Date(Date.UTC(parts.year, parts.month - 1, parts.day + 1));
   const next = { year: nextDate.getUTCFullYear(), month: nextDate.getUTCMonth() + 1, day: nextDate.getUTCDate() };
-  return { start: midnight(parts).toISOString(), end: midnight(next).toISOString(), day: midnight(parts).toISOString().slice(0, 10) };
+  return {
+    start: midnight(parts).toISOString(),
+    end: midnight(next).toISOString(),
+    day: `${parts.year}-${String(parts.month).padStart(2, '0')}-${String(parts.day).padStart(2, '0')}`,
+  };
 }
 
 function parseJson(value, fallback = null) {
@@ -84,7 +88,8 @@ function estimateDistance(points) {
 }
 
 export function getSupervisorRadar(database = defaultDatabase, now = new Date()) {
-  const { start, end } = dayRange(undefined, database);
+  const todayRange = dayRange(undefined, database);
+  const { start, end } = todayRange;
   const reps = database.prepare(`
     SELECT user.id, user.username, user.full_name, user.assigned_regions_json, user.is_online,
       user.last_location_json, employee.phone,
@@ -151,7 +156,51 @@ export function getSupervisorRadar(database = defaultDatabase, now = new Date())
       trail,
     };
   });
-  return { success: true, generatedAt: now.toISOString(), representatives: result };
+  return { success: true, generatedAt: now.toISOString(), businessDate: todayRange.day, representatives: result };
+}
+
+export function getSupervisorRepRoute(repIdInput, dateInput, database = defaultDatabase) {
+  const repId = positiveId(Number(repIdInput), 'repId');
+  const day = dateInput ?? dayRange(undefined, database).day;
+  const { start, end } = dayRange(day, database);
+  const rep = database.prepare(`SELECT id, username, full_name FROM users
+    WHERE id = ? AND role = 'rep' AND deleted_at IS NULL`).get(repId);
+  if (!rep) throw new HttpError(404, 'Representative was not found.');
+
+  const points = database.prepare(`SELECT id, latitude, longitude, accuracy, speed, recorded_at,
+      is_stop, stop_duration_minutes, stop_name, stop_arrived_at, stop_departed_at
+    FROM rep_location_breadcrumbs
+    WHERE user_id = ? AND work_date = ?
+      AND datetime(recorded_at) >= datetime(?) AND datetime(recorded_at) < datetime(?)
+    ORDER BY datetime(recorded_at), id`).all(repId, day, start, end);
+  const stopRows = database.prepare(`SELECT stop_arrived_at AS arrived_at,
+      stop_departed_at AS departed_at, MAX(stop_duration_minutes) AS duration_minutes,
+      stop_name, AVG(latitude) AS latitude, AVG(longitude) AS longitude
+    FROM rep_location_breadcrumbs
+    WHERE user_id = ? AND work_date = ? AND is_stop = 1 AND stop_arrived_at IS NOT NULL
+    GROUP BY stop_arrived_at, stop_departed_at, stop_name
+    ORDER BY datetime(stop_arrived_at)`).all(repId, day);
+
+  return {
+    success: true,
+    representative: { id: Number(rep.id), username: rep.username, fullName: rep.full_name },
+    date: day,
+    polyline: points.map((point) => ({
+      latitude: Number(point.latitude),
+      longitude: Number(point.longitude),
+      accuracy: Number(point.accuracy),
+      speed: Number(point.speed),
+      recordedAt: point.recorded_at,
+    })),
+    stops: stopRows.map((stop) => ({
+      latitude: Number(stop.latitude),
+      longitude: Number(stop.longitude),
+      arrivedAt: stop.arrived_at,
+      departedAt: stop.departed_at,
+      durationMinutes: Number(stop.duration_minutes),
+      name: stop.stop_name,
+    })),
+  };
 }
 
 export function getPendingVisitReviews(database = defaultDatabase) {

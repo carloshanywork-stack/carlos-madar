@@ -59,6 +59,11 @@ CREATE TABLE IF NOT EXISTS machines (
   name_ar TEXT NOT NULL,
   name_en TEXT,
   area TEXT NOT NULL,
+  latitude REAL,
+  longitude REAL,
+  is_location_locked INTEGER NOT NULL DEFAULT 0 CHECK (is_location_locked IN (0, 1)),
+  geofence_radius_meters INTEGER NOT NULL DEFAULT 50 CHECK (geofence_radius_meters BETWEEN 1 AND 10000),
+  area_name TEXT,
   active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   deleted_at TEXT
@@ -189,6 +194,27 @@ CREATE TABLE IF NOT EXISTS rep_location_points (
 
 CREATE INDEX IF NOT EXISTS idx_rep_location_points_rep_captured
   ON rep_location_points(rep_user_id, captured_at, id);
+
+CREATE TABLE IF NOT EXISTS rep_location_breadcrumbs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  duty_session_id INTEGER REFERENCES rep_duty_sessions(id),
+  work_date TEXT NOT NULL,
+  latitude REAL NOT NULL CHECK (latitude BETWEEN -90 AND 90),
+  longitude REAL NOT NULL CHECK (longitude BETWEEN -180 AND 180),
+  accuracy REAL NOT NULL DEFAULT 0 CHECK (accuracy >= 0 AND accuracy <= 100000),
+  speed REAL NOT NULL DEFAULT 0 CHECK (speed >= 0),
+  recorded_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  is_stop INTEGER NOT NULL DEFAULT 0 CHECK (is_stop IN (0, 1)),
+  stop_duration_minutes INTEGER NOT NULL DEFAULT 0 CHECK (stop_duration_minutes >= 0),
+  stop_name TEXT,
+  stop_arrived_at TEXT,
+  stop_departed_at TEXT,
+  UNIQUE (user_id, recorded_at)
+);
+
+CREATE INDEX IF NOT EXISTS idx_rep_breadcrumbs_user_date
+  ON rep_location_breadcrumbs(user_id, work_date, recorded_at, id);
 
 CREATE TABLE IF NOT EXISTS workshop_orders (
   id INTEGER PRIMARY KEY,

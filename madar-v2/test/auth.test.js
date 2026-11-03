@@ -71,7 +71,7 @@ test('auth status, one-time setup, protected APIs, login and revocable sessions'
   const weakSetup = await request('/api/auth/setup', jsonOptions('POST', {
     fullName: 'Root Administrator',
     username: 'root',
-    password: 'too-short',
+    password: '123',
   }));
   assert.equal(weakSetup.response.status, 400);
   assert.equal((await request('/api/auth/status')).body.setupRequired, true);
@@ -79,7 +79,7 @@ test('auth status, one-time setup, protected APIs, login and revocable sessions'
   const setup = await request('/api/auth/setup', jsonOptions('POST', {
     fullName: 'Root Administrator',
     username: 'root',
-    password: 'Root-Setup-Password-2026!',
+    password: '1234',
   }));
   assert.equal(setup.response.status, 201);
   assert.deepEqual(setup.body, {
@@ -117,7 +117,7 @@ test('auth status, one-time setup, protected APIs, login and revocable sessions'
 
   const login = await request('/api/auth/login', jsonOptions('POST', {
     username: 'ROOT',
-    password: 'Root-Setup-Password-2026!',
+    password: '1234',
   }));
   assert.equal(login.response.status, 200);
   assert.deepEqual(login.body, {
@@ -155,7 +155,7 @@ test('auth status, one-time setup, protected APIs, login and revocable sessions'
 
   const relogin = await request('/api/auth/login', jsonOptions('POST', {
     username: 'root',
-    password: 'Root-Setup-Password-2026!',
+    password: '1234',
   }));
   const reloginCookie = cookieValue(relogin.setCookie);
   db.prepare('UPDATE users SET active = 0 WHERE username = ?').run('root');

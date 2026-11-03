@@ -61,7 +61,7 @@ function BusinessRoutes({ user }) {
         <Route path="/workshop/:id" element={<WorkshopOrderDetail />} />
         <Route path="/warehouse" element={<WarehousePage />} />
         <Route path="/finance" element={<FinancePage />} />
-        <Route path="/accounting" element={<AccountingPage />} />
+        <Route path="/accounting" element={<AccountingPage isAdmin={user?.role === 'admin'} />} />
         <Route path="/archive" element={<ArchivePage isAdmin={user?.role === 'admin'} />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />

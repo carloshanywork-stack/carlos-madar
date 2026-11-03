@@ -4,13 +4,21 @@ import { db } from '../../database/connection.js';
 import { asyncHandler, allowOnlyKeys, HttpError, requireObject, requireText } from '../http.js';
 import { diskUploadMany } from '../upload.js';
 import { ensureStorageDirectory, removeStorageFile } from '../storage.js';
+import { clockInForRep, clockOutForRep, getTodayAttendanceForRep } from '../employees/attendance.js';
 import {
   authenticateRepUser,
   authCookieOptions,
   REP_ACCOUNT_DISABLED_MESSAGE,
   requireActiveRep,
 } from '../auth/service.js';
-import { getRepFaultReasons, getRepTodayRoute, requireRepUsername, syncRepTracking, syncRepVisit } from './service.js';
+import {
+  getRepFaultReasons,
+  getRepTodayRoute,
+  requireRepUsername,
+  syncRepLocationPing,
+  syncRepTracking,
+  syncRepVisit,
+} from './service.js';
 
 const router = Router();
 const syncVisitUpload = diskUploadMany({
@@ -51,6 +59,21 @@ router.post('/login', asyncHandler(async (req, res) => {
 
 router.use(requireActiveRep);
 
+router.get('/attendance/today', (req, res) => {
+  res.set({ 'Cache-Control': 'private, no-store', Pragma: 'no-cache' });
+  res.json({ success: true, ...getTodayAttendanceForRep(req.user.id) });
+});
+
+router.post('/attendance/clock-in', (req, res) => {
+  const attendance = clockInForRep(req.user.id, req.body);
+  res.status(201).json({ success: true, attendance });
+});
+
+router.post('/attendance/clock-out', (req, res) => {
+  const attendance = clockOutForRep(req.user.id, req.body);
+  res.json({ success: true, attendance });
+});
+
 router.get('/today-route', (req, res, next) => {
   try {
     requireRepUsername(req.query.username, req.user.username);
@@ -70,6 +93,15 @@ router.post(['/tracking', '/track-location'], (req, res, next) => {
   try {
     res.set({ 'Cache-Control': 'private, no-store', Pragma: 'no-cache' });
     res.json({ success: true, ...syncRepTracking(req.user, req.body) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/location-ping', (req, res, next) => {
+  try {
+    res.set({ 'Cache-Control': 'private, no-store', Pragma: 'no-cache' });
+    res.json({ success: true, ...syncRepLocationPing(req.user, req.body) });
   } catch (error) {
     next(error);
   }

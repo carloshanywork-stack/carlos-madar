@@ -32,6 +32,39 @@ function compareArabic(left, right) {
   return left.localeCompare(right, 'ar', { numeric: true, sensitivity: 'base' });
 }
 
+function safeStorageSegment(value, fallback = 'unknown') {
+  const cleaned = String(value ?? '').normalize('NFKC').trim()
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_')
+    .replace(/\s+/g, '_')
+    .replace(/\.+$/g, '')
+    .slice(0, 120);
+  return cleaned || fallback;
+}
+
+export function calculateDistanceMeters(latitude1, longitude1, latitude2, longitude2) {
+  const radians = (degrees) => degrees * Math.PI / 180;
+  const latitudeDifference = radians(latitude2 - latitude1);
+  const longitudeDifference = radians(longitude2 - longitude1);
+  const a = Math.sin(latitudeDifference / 2) ** 2
+    + Math.cos(radians(latitude1)) * Math.cos(radians(latitude2)) * Math.sin(longitudeDifference / 2) ** 2;
+  return 6371000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(Math.max(0, 1 - a)));
+}
+
+function validateMachineGeofence(machine, location) {
+  if (!location) throw new HttpError(400, 'يلزم تفعيل GPS وإرسال الموقع الحالي قبل رفع صور الزيارة.');
+  const radius = Math.max(1, Number(machine.geofence_radius_meters) || 50);
+  if (Number(machine.is_location_locked) !== 1) return { pinned: true, radiusMeters: radius };
+  if (!Number.isFinite(machine.latitude) || !Number.isFinite(machine.longitude)) {
+    throw new HttpError(409, 'موقع الماكينة مقفل لكن إحداثياته غير مكتملة؛ يلزم تصحيحها من الإدارة.');
+  }
+  const distance = calculateDistanceMeters(location.latitude, location.longitude, machine.latitude, machine.longitude);
+  const effectiveDistance = Math.max(0, distance - location.accuracy);
+  if (effectiveDistance > radius) {
+    throw new HttpError(403, `أنت خارج نطاق الماكينة (المسافة الفعالة: ${Math.round(effectiveDistance)} متر، المسموح: ${radius} متر).`);
+  }
+  return { pinned: false, distanceMeters: distance, effectiveDistanceMeters: effectiveDistance, radiusMeters: radius };
+}
+
 function getTimeZone(database) {
   const configured = database.prepare("SELECT value FROM settings WHERE key = 'timezone'").get()?.value;
   if (typeof configured === 'string' && configured.trim()) {
@@ -114,6 +147,8 @@ export function getRepTodayRoute(rep, database = db) {
       card.id AS card_id, card.before_photos_json, card.after_photos_json,
       machine.id AS machine_id, machine.code AS machine_code,
       machine.name_ar AS machine_name_ar, machine.area AS region_name,
+      machine.area_name, machine.latitude, machine.longitude, machine.is_location_locked,
+      machine.geofence_radius_meters,
       client.name AS client_name, client.address AS client_address
     FROM maintenance_orders order_record
     JOIN maintenance_order_reps assignment
@@ -182,6 +217,10 @@ export function getRepTodayRoute(rep, database = db) {
       reviewNote: latestVisit?.review_status === 'reshoot' ? latestVisit.review_note : null,
       cardId: Number(row.card_id),
       canVisit: row.order_status !== 'archived' && !isCompleted && !isSubmitted,
+      latitude: row.latitude === null ? null : Number(row.latitude),
+      longitude: row.longitude === null ? null : Number(row.longitude),
+      isLocationLocked: Number(row.is_location_locked) === 1,
+      geofenceRadiusMeters: Number(row.geofence_radius_meters) || 50,
     });
     totalMachines += 1;
     if (isCompleted) completed += 1;
@@ -367,7 +406,9 @@ function findRepVisitCard(rep, visit, database) {
       card.status AS card_status, order_record.order_code, order_record.area AS order_area,
       order_record.status AS order_status,
       client.code AS client_code, client.deleted_at AS client_deleted_at,
-      machine.code AS machine_code, machine.area AS machine_area, machine.active AS machine_active,
+       machine.code AS machine_code, machine.name_ar AS machine_name_ar, machine.area AS machine_area,
+       machine.area_name, machine.latitude, machine.longitude, machine.is_location_locked,
+       machine.geofence_radius_meters, machine.active AS machine_active,
       machine.deleted_at AS machine_deleted_at
     FROM maintenance_cards card
     JOIN maintenance_orders order_record ON order_record.id = card.order_id
@@ -406,6 +447,7 @@ function findRepVisitCard(rep, visit, database) {
       throw new HttpError(409, 'One or more selected maintenance reasons are no longer active. Refresh the reasons and try again.');
     }
   }
+  validateMachineGeofence(card, visit.location);
   return card;
 }
 
@@ -449,6 +491,40 @@ function createVisitReservation(rep, visit, payloadHash, card, stagingPath, fina
 
 function recordReceivedVisit(rep, visit, visitId, photoRows, database) {
   return database.transaction(() => {
+    const machine = database.prepare(`SELECT id, code, name_ar, area, area_name, latitude, longitude,
+      is_location_locked, geofence_radius_meters FROM machines WHERE id = ?`).get(
+      database.prepare('SELECT machine_id FROM rep_visits WHERE id = ?').get(visitId)?.machine_id,
+    );
+    if (!machine) throw new HttpError(409, 'The machine was removed while the visit was uploading.');
+    const geofence = validateMachineGeofence(machine, visit.location);
+    if (geofence.pinned) {
+      const pin = database.prepare(`UPDATE machines
+        SET latitude = ?, longitude = ?, area_name = COALESCE(NULLIF(trim(area_name), ''), area), is_location_locked = 1
+        WHERE id = ? AND is_location_locked = 0`).run(
+        visit.location.latitude, visit.location.longitude, machine.id,
+      );
+      if (pin.changes) {
+        recordAudit({
+          database,
+          actorId: rep.id,
+          action: 'pin_machine_location',
+          entityType: 'machine',
+          entityId: machine.id,
+          oldValues: { latitude: machine.latitude, longitude: machine.longitude, is_location_locked: machine.is_location_locked },
+          newValues: {
+            latitude: visit.location.latitude,
+            longitude: visit.location.longitude,
+            is_location_locked: 1,
+            geofence_radius_meters: machine.geofence_radius_meters,
+          },
+        });
+      } else {
+        // Another visit pinned this machine while the photos were being received.
+        const lockedMachine = database.prepare(`SELECT id, latitude, longitude, is_location_locked,
+          geofence_radius_meters FROM machines WHERE id = ?`).get(machine.id);
+        validateMachineGeofence(lockedMachine, visit.location);
+      }
+    }
     const beforePhotos = photoRows.filter((photo) => photo.phase === 'before');
     const afterPhotos = photoRows.filter((photo) => photo.phase === 'after');
     const beforePath = beforePhotos[0].storedPath;
@@ -542,10 +618,13 @@ export async function syncRepVisit(rep, input, files, database = db) {
   }
 
   const card = findRepVisitCard(rep, visit, database);
+  const workDay = getLocalDateParts(new Date(visit.capturedAt), getTimeZone(database));
+  const workDate = `${workDay.year}-${String(workDay.month).padStart(2, '0')}-${String(workDay.day).padStart(2, '0')}`;
+  const machineArea = safeStorageSegment(card.area_name || card.machine_area);
+  const machineFolder = safeStorageSegment(`${card.machine_code}_${card.machine_name_ar}`);
+  const orderFolder = safeStorageSegment(`${workDate}_${card.order_code}`);
   const stagingPath = storageDirectory('.madar-recovery', 'rep-visits', visit.visitUuid);
-  const finalPath = storageDirectory(
-    'clients', card.client_code, 'maintenance', card.order_code, card.machine_code, 'visits', visit.visitUuid,
-  );
+  const finalPath = storageDirectory('Areas', machineArea, machineFolder, orderFolder, visit.visitUuid);
   const reservation = createVisitReservation(rep, visit, payloadHash, card, stagingPath, finalPath, database);
   if (reservation.kind === 'completed') return visitResult(reservation.row, database, { idempotent: true });
   if (reservation.kind === 'processing') return visitResult(reservation.row, database, { processing: true });
@@ -561,13 +640,13 @@ export async function syncRepVisit(rep, input, files, database = db) {
       for (const [ordinal, file] of phaseFiles.entries()) {
         const buffer = await prepareVisitImage(file, `${phase} ${ordinal + 1}`);
         const filename = `${visit.visitUuid}-${phase}-${String(ordinal + 1).padStart(4, '0')}.jpg`;
-        const stagedPath = storageDirectory(stagingPath, filename);
-        const storedPath = storageDirectory(finalPath, filename);
+        const stagedPath = storageDirectory(stagingPath, phase, filename);
+        const storedPath = storageDirectory(finalPath, phase, filename);
         await writeStorageFile(stagedPath, buffer);
         photoRows.push({ phase, ordinal, stagedPath, storedPath, capturedAt: capturedAtList[ordinal] });
       }
     }
-    await ensureStorageDirectory('clients', card.client_code, 'maintenance', card.order_code, card.machine_code, 'visits');
+    await ensureStorageDirectory('Areas', machineArea, machineFolder, orderFolder);
     await moveStorageDirectory(stagingPath, finalPath);
     finalDirectoryMoved = true;
 
@@ -601,17 +680,19 @@ export async function syncRepVisit(rep, input, files, database = db) {
 /** Roll back interrupted file/DB handoffs before the API starts accepting requests. */
 function normalizeTrackPoint(value, label = 'location') {
   const point = requireObject(value, label);
-  allowOnlyKeys(point, ['latitude', 'longitude', 'accuracy', 'updatedAt', 'timestamp', 'mocked', 'is_mock']);
+  allowOnlyKeys(point, ['latitude', 'longitude', 'accuracy', 'speed', 'updatedAt', 'timestamp', 'mocked', 'is_mock']);
   for (const flag of ['mocked', 'is_mock']) {
     if (point[flag] !== undefined && typeof point[flag] !== 'boolean') {
       throw new HttpError(400, `${label}.${flag} must be a boolean.`);
     }
   }
   const { latitude, longitude, accuracy } = point;
+  const speed = point.speed === undefined || point.speed === null ? 0 : point.speed;
   const rawTimestamp = point.updatedAt ?? (Number.isFinite(point.timestamp) ? new Date(point.timestamp).toISOString() : null);
   if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90
       || !Number.isFinite(longitude) || longitude < -180 || longitude > 180
-      || !Number.isFinite(accuracy) || accuracy < 0 || accuracy > 100000) {
+      || !Number.isFinite(accuracy) || accuracy < 0 || accuracy > 100000
+      || !Number.isFinite(speed) || speed < 0 || speed > 200) {
     throw new HttpError(400, `${label} must contain valid latitude, longitude, and accuracy values.`);
   }
   const updatedAt = requireText(rawTimestamp, `${label}.updatedAt`, { maxLength: 64 });
@@ -620,7 +701,56 @@ function normalizeTrackPoint(value, label = 'location') {
   if (point.mocked === true || point.is_mock === true) {
     throw new HttpError(400, 'Mock GPS locations cannot be synchronized.');
   }
-  return { latitude, longitude, accuracy, updatedAt: timestamp.toISOString() };
+  return { latitude, longitude, accuracy, speed, updatedAt: timestamp.toISOString() };
+}
+
+function businessDate(timestamp, database) {
+  const parts = getLocalDateParts(new Date(timestamp), getTimeZone(database));
+  return `${parts.year}-${String(parts.month).padStart(2, '0')}-${String(parts.day).padStart(2, '0')}`;
+}
+
+function refreshRepStops(userId, workDate, database) {
+  const points = database.prepare(`SELECT id, latitude, longitude, accuracy, recorded_at
+    FROM rep_location_breadcrumbs WHERE user_id = ? AND work_date = ?
+    ORDER BY datetime(recorded_at), id`).all(userId, workDate);
+  database.prepare(`UPDATE rep_location_breadcrumbs SET is_stop = 0, stop_duration_minutes = 0,
+    stop_arrived_at = NULL, stop_departed_at = NULL WHERE user_id = ? AND work_date = ?`)
+    .run(userId, workDate);
+
+  const segments = [];
+  let segment = [];
+  const finishSegment = () => {
+    if (segment.length < 2) return;
+    const first = segment[0];
+    const last = segment.at(-1);
+    const durationMinutes = Math.floor((Date.parse(last.recorded_at) - Date.parse(first.recorded_at)) / 60000);
+    if (durationMinutes >= 5) segments.push({ ids: segment.map((point) => point.id), first, last, durationMinutes });
+  };
+
+  for (const point of points) {
+    const anchor = segment[0];
+    const previous = segment.at(-1);
+    const gap = previous ? Date.parse(point.recorded_at) - Date.parse(previous.recorded_at) : 0;
+    const distance = anchor ? calculateDistanceMeters(
+      anchor.latitude, anchor.longitude, point.latitude, point.longitude,
+    ) : 0;
+    const accuracyMargin = Math.max(Number(anchor?.accuracy ?? 0), Number(point.accuracy ?? 0));
+    if (segment.length && (gap > 10 * 60 * 1000 || Math.max(0, distance - accuracyMargin) > 50)) {
+      finishSegment();
+      segment = [];
+    }
+    segment.push(point);
+  }
+  finishSegment();
+
+  const markStop = database.prepare(`UPDATE rep_location_breadcrumbs SET is_stop = 1,
+    stop_duration_minutes = ?, stop_arrived_at = ?, stop_departed_at = ? WHERE id = ?`);
+  for (const stop of segments) {
+    for (const id of stop.ids) {
+      markStop.run(stop.durationMinutes, stop.first.recorded_at, stop.last.recorded_at, id);
+    }
+  }
+  return segments.length;
 }
 
 /** Persist duty state and idempotent GPS breadcrumbs reported by a representative device. */
@@ -666,19 +796,29 @@ export function syncRepTracking(rep, input, database = db) {
     }
 
     const points = [...trail, ...(location ? [location] : [])];
-    const insertPoint = database.prepare(`
+  const insertPoint = database.prepare(`
       INSERT OR IGNORE INTO rep_location_points
         (rep_user_id, duty_session_id, latitude, longitude, accuracy, captured_at)
       VALUES (?, ?, ?, ?, ?, ?)
-    `);
+  `);
+    const insertBreadcrumb = database.prepare(`INSERT OR IGNORE INTO rep_location_breadcrumbs
+      (user_id, duty_session_id, work_date, latitude, longitude, accuracy, speed, recorded_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
     let acceptedPoints = 0;
+    const changedDates = new Set();
     for (const point of points) {
       const ageMs = Date.now() - new Date(point.updatedAt).valueOf();
       if (ageMs > 24 * 60 * 60 * 1000 || ageMs < -5 * 60 * 1000) continue;
       if (pointSessionId !== null) {
-        acceptedPoints += insertPoint.run(rep.id, pointSessionId, point.latitude, point.longitude, point.accuracy, point.updatedAt).changes;
+        const pointDate = businessDate(point.updatedAt, database);
+        const legacyInsert = insertPoint.run(rep.id, pointSessionId, point.latitude, point.longitude, point.accuracy, point.updatedAt);
+        const breadcrumbInsert = insertBreadcrumb.run(rep.id, pointSessionId, pointDate,
+          point.latitude, point.longitude, point.accuracy, point.speed, point.updatedAt);
+        acceptedPoints += Math.max(legacyInsert.changes, breadcrumbInsert.changes);
+        if (legacyInsert.changes || breadcrumbInsert.changes) changedDates.add(pointDate);
       }
     }
+    for (const workDate of changedDates) refreshRepStops(rep.id, workDate, database);
     if (location) {
       database.prepare(`
         UPDATE users SET is_online = 1,
@@ -691,6 +831,15 @@ export function syncRepTracking(rep, input, database = db) {
     return { onDuty: Boolean(session), acceptedPoints, sessionId: session ? Number(session.id) : null };
   });
   return create.immediate();
+}
+
+/** Compatibility endpoint for a live location or a locally buffered trail batch. */
+export function syncRepLocationPing(rep, input, database = db) {
+  const body = requireObject(input);
+  allowOnlyKeys(body, ['onDuty', 'location', 'trail', 'is_mock']);
+  const session = database.prepare(`SELECT 1 FROM rep_duty_sessions
+    WHERE rep_user_id = ? AND ended_at IS NULL`).get(rep?.id);
+  return syncRepTracking(rep, { ...body, onDuty: body.onDuty ?? Boolean(session) }, database);
 }
 
 export async function recoverRepVisitUploads(database = db) {

@@ -71,6 +71,15 @@ function formatTime(value) {
   }
 }
 
+function attendanceHours(record) {
+  if (!record?.clock_in_time) return 0;
+  const start = Date.parse(record.clock_in_time);
+  const end = record.clock_out_time ? Date.parse(record.clock_out_time) : Date.now();
+  return Number.isFinite(start) && Number.isFinite(end) && end >= start
+    ? Math.round((end - start) / 36000) / 100
+    : 0;
+}
+
 function formatGps(location) {
   if (!location) return 'الموقع غير متاح';
   return `${location.latitude.toFixed(5)}, ${location.longitude.toFixed(5)} · دقة ±${Math.round(location.accuracy)}م`;
@@ -144,6 +153,8 @@ function Tutorial({ onFinish, nativeApp }) {
 
 export default function RepApp({ user, offlineOnly = false, onLogout }) {
   const [route, setRoute] = useState(null);
+  const [attendance, setAttendance] = useState(null);
+  const [attendanceSaving, setAttendanceSaving] = useState(false);
   const [reasons, setReasons] = useState([]);
   const [pendingVisits, setPendingVisits] = useState([]);
   const [query, setQuery] = useState('');
@@ -185,6 +196,7 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
         latitude: state.lastLocation.latitude,
         longitude: state.lastLocation.longitude,
         accuracy: state.lastLocation.accuracy,
+        speed: state.lastLocation.speed ?? 0,
         updatedAt: new Date(state.lastLocation.timestamp).toISOString(),
       } : null;
       const location = mocked
@@ -197,13 +209,14 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
           latitude: point.latitude,
           longitude: point.longitude,
           accuracy: point.accuracy,
+          speed: point.speed ?? 0,
           updatedAt: point.updatedAt ?? new Date(point.timestamp).toISOString(),
         }));
       const chunks = [];
       for (let index = 0; index < trail.length; index += 450) chunks.push(trail.slice(index, index + 450));
       const closeAfterFlush = !duty || options.stop === true;
       for (const [index, chunk] of chunks.entries()) {
-        const response = await api.post('/api/rep/tracking', {
+        const response = await api.post('/api/rep/location-ping', {
           onDuty: true,
           location: !closeAfterFlush && index === chunks.length - 1 ? location : null,
           trail: chunk,
@@ -217,7 +230,7 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
         }
       }
       if (closeAfterFlush || !chunks.length) {
-        const response = await api.post('/api/rep/tracking', {
+        const response = await api.post('/api/rep/location-ping', {
           onDuty: closeAfterFlush ? false : Boolean(duty) && !mocked,
           location,
           trail: [],
@@ -267,13 +280,15 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
   const loadLocalSnapshots = useCallback(async () => {
     try {
       const recoveredCount = await restoreNativePendingBackups(userId);
-      const [savedRoute, savedReasons, visits] = await Promise.all([
+      const [savedRoute, savedReasons, visits, savedAttendance] = await Promise.all([
         getSnapshot('route_snapshots', userId),
         getSnapshot('reason_snapshots', userId),
         listPendingVisits(userId),
+        getSnapshot('attendance_snapshots', userId),
       ]);
       if (savedRoute?.route) setRoute({ ...savedRoute.route, cachedAt: savedRoute.cachedAt });
       if (savedReasons?.reasons) setReasons(savedReasons.reasons);
+      if (savedAttendance) setAttendance(savedAttendance.attendance ?? null);
       setPendingVisits(visits);
       if (recoveredCount) setToast(`استُعيدت ${recoveredCount} زيارة من نسخة الهاتف الاحتياطية.`);
       setStorageError('');
@@ -323,6 +338,58 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
     setRouteLoading(false);
   }, [loadLocalSnapshots, offlineOnly, user.username, userId]);
 
+  const refreshAttendance = useCallback(async () => {
+    if (offlineOnly || !navigator.onLine) return null;
+    try {
+      const result = await api.get('/api/rep/attendance/today');
+      if (result?.success) {
+        setAttendance(result.attendance ?? null);
+        try {
+          await saveSnapshot('attendance_snapshots', userId, {
+            date: result.date,
+            attendance: result.attendance ?? null,
+            cachedAt: new Date().toISOString(),
+          });
+        } catch {
+          // The live attendance response remains available for this session.
+        }
+      }
+      return result;
+    } catch (error) {
+      if (error.status === 401) window.dispatchEvent(new Event('madar-auth-expired'));
+      return null;
+    }
+  }, [offlineOnly, userId]);
+
+  const clockAttendance = useCallback(async (action) => {
+    if (offlineOnly || !navigator.onLine || serverState !== 'online') {
+      setToast('يلزم الاتصال بالخادم لتسجيل الحضور أو الانصراف.');
+      return;
+    }
+    setAttendanceSaving(true);
+    try {
+      const location = await captureVisitLocation();
+      if (!location) throw new Error('يلزم تفعيل GPS لتسجيل الحضور أو الانصراف.');
+      const result = await api.post(`/api/rep/attendance/clock-${action}`, { location });
+      setAttendance(result.attendance ?? null);
+      try {
+        await saveSnapshot('attendance_snapshots', userId, {
+          date: result.attendance?.work_date,
+          attendance: result.attendance ?? null,
+          cachedAt: new Date().toISOString(),
+        });
+      } catch {
+        // The server has already committed the attendance event.
+      }
+      setToast(action === 'in' ? 'تم تسجيل الحضور.' : 'تم تسجيل الانصراف.');
+      void refreshAttendance();
+    } catch (error) {
+      setToast(error.message || 'تعذر تسجيل الحضور. حاول مرة أخرى.');
+    } finally {
+      setAttendanceSaving(false);
+    }
+  }, [captureVisitLocation, offlineOnly, refreshAttendance, serverState, userId]);
+
   const checkServer = useCallback(async () => {
     const online = navigator.onLine;
     setNetworkOnline(online);
@@ -344,8 +411,9 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
   useEffect(() => {
     void loadLocalSnapshots();
     void refreshData();
+    void refreshAttendance();
     void requestPersistentStorage().then(setStoragePersistent);
-  }, [loadLocalSnapshots, refreshData]);
+  }, [loadLocalSnapshots, refreshAttendance, refreshData]);
 
   useEffect(() => {
     let active = true;
@@ -353,6 +421,7 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
       const reachable = await checkServer();
       if (!active || !reachable) return;
       await refreshData();
+      await refreshAttendance();
       void syncTracking();
     };
     const onOnline = () => { setNetworkOnline(true); void check(); };
@@ -367,7 +436,7 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
       window.removeEventListener('online', onOnline);
       window.removeEventListener('offline', onOffline);
     };
-  }, [checkServer, refreshData, syncTracking]);
+  }, [checkServer, refreshAttendance, refreshData, syncTracking]);
 
   useEffect(() => {
     if (!nativeApp) return undefined;
@@ -384,7 +453,7 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
             return;
           }
           void checkServer().then((reachable) => {
-            if (reachable) { void refreshData(); void syncTracking(); }
+            if (reachable) { void refreshData(); void refreshAttendance(); void syncTracking(); }
           });
         });
         if (!active) await networkHandle?.remove();
@@ -397,7 +466,7 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
       active = false;
       void networkHandle?.remove();
     };
-  }, [checkServer, nativeApp, refreshData, syncTracking]);
+  }, [checkServer, nativeApp, refreshAttendance, refreshData, syncTracking]);
 
   useEffect(() => {
     if (!nativeApp) return undefined;
@@ -643,6 +712,7 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
       void checkServer().then((reachable) => {
         if (reachable) {
           void refreshData();
+          void refreshAttendance();
           void drainQueue();
         }
       });
@@ -654,7 +724,7 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
       active = false;
       void appStateHandle?.remove();
     };
-  }, [checkServer, drainQueue, nativeApp, refreshData, syncTracking]);
+  }, [checkServer, drainQueue, nativeApp, refreshAttendance, refreshData, syncTracking]);
 
   useEffect(() => {
     if (pendingVisits.length && serverState === 'online' && !offlineOnly) void drainQueue();
@@ -819,7 +889,7 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
           <button className="rep-queue-count" type="button" onClick={() => setShowQueue((value) => !value)} aria-expanded={showQueue}>
             <span>⏳</span><b>{pendingVisits.length}</b><small>معلق</small>
           </button>
-          <button className="rep-icon-button rep-refresh-button" type="button" onClick={() => { void checkServer(); void refreshData(); }} disabled={routeLoading} aria-label="تحديث مسار اليوم" title="تحديث المسار">
+          <button className="rep-icon-button rep-refresh-button" type="button" onClick={() => { void checkServer(); void refreshData(); void refreshAttendance(); }} disabled={routeLoading} aria-label="تحديث مسار اليوم" title="تحديث المسار">
             <span className={routeLoading ? 'rep-spinning' : ''}>↻</span>
           </button>
           <button className="rep-logout-button" type="button" onClick={() => void logout()}>خروج</button>
@@ -827,6 +897,24 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
       </header>
 
       {offlineOnly && <div className="rep-offline-banner" role="status">أنت في وضع العمل المحلي. لا تُرسل أي بيانات حتى تتم إعادة التحقق من الجلسة مع الخادم.</div>}
+
+      <section className="rep-attendance-card" aria-label="الحضور والانصراف">
+        <div className="rep-attendance-summary">
+          <span className="rep-eyebrow">الحضور والانصراف · {new Intl.DateTimeFormat('ar-EG', { dateStyle: 'full' }).format(new Date())}</span>
+          <strong>{attendance?.clock_in_time ? `${attendanceHours(attendance).toFixed(2)} ساعة` : 'لم يسجل الحضور بعد'}</strong>
+          <small>{attendance?.clock_in_time
+            ? `حضور ${formatTime(attendance.clock_in_time)}${attendance.clock_out_time ? ` · انصراف ${formatTime(attendance.clock_out_time)}` : ' · الدوام مستمر'}`
+            : 'يسجل النظام الوقت من الخادم وموقع GPS عند الحضور.'}</small>
+        </div>
+        <div className="rep-attendance-actions">
+          <button className="rep-attendance-clock-in" type="button" disabled={attendanceSaving || offlineOnly || serverState !== 'online' || Boolean(attendance?.clock_in_time)} onClick={() => void clockAttendance('in')}>
+            {attendanceSaving && !attendance?.clock_in_time ? 'جارٍ التسجيل…' : 'تسجيل حضور'}
+          </button>
+          <button className="rep-attendance-clock-out" type="button" disabled={attendanceSaving || offlineOnly || serverState !== 'online' || !attendance?.clock_in_time || Boolean(attendance?.clock_out_time)} onClick={() => void clockAttendance('out')}>
+            {attendanceSaving && attendance?.clock_in_time && !attendance?.clock_out_time ? 'جارٍ التسجيل…' : 'تسجيل انصراف'}
+          </button>
+        </div>
+      </section>
 
       <section className="rep-welcome-row">
         <div>
@@ -912,7 +1000,7 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
         ) : route?.regions?.length ? (
           <div className="rep-empty-state"><span className="rep-empty-icon">⌕</span><h3>لا توجد نتائج لهذا البحث</h3><p>جرّب كتابة كود الماكينة أو جزء من اسمها.</p></div>
         ) : (
-          <div className="rep-empty-state"><span className="rep-empty-icon">▤</span><h3>{networkOnline ? 'لا توجد ماكينات مسندة اليوم' : 'لا توجد نسخة محلية للمسار بعد'}</h3><p>{networkOnline ? 'اسحب للأسفل أو استخدم زر التحديث إذا أضاف المشرف تكليفاً جديداً.' : 'اتصل بالخادم مرة واحدة لتنزيل مسارك، وبعدها يمكنك متابعة العمل أوفلاين.'}</p><button type="button" className="rep-button rep-button-light" onClick={() => { void checkServer(); void refreshData(); }}>إعادة المحاولة</button></div>
+          <div className="rep-empty-state"><span className="rep-empty-icon">▤</span><h3>{networkOnline ? 'لا توجد ماكينات مسندة اليوم' : 'لا توجد نسخة محلية للمسار بعد'}</h3><p>{networkOnline ? 'اسحب للأسفل أو استخدم زر التحديث إذا أضاف المشرف تكليفاً جديداً.' : 'اتصل بالخادم مرة واحدة لتنزيل مسارك، وبعدها يمكنك متابعة العمل أوفلاين.'}</p><button type="button" className="rep-button rep-button-light" onClick={() => { void checkServer(); void refreshData(); void refreshAttendance(); }}>إعادة المحاولة</button></div>
         )}
       </section>
 

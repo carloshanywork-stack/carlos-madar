@@ -16,7 +16,13 @@ process.env.COOKIE_SECURE = 'false';
 const [
   { app },
   { createConnection, db },
-  { initializeDatabase, migrateRepSupervisorRadar, migrateRepUserProfiles, migrateRepVisitMachineCondition },
+  {
+    initializeDatabase,
+    migrateMachineGeofenceAndBreadcrumbs,
+    migrateRepSupervisorRadar,
+    migrateRepUserProfiles,
+    migrateRepVisitMachineCondition,
+  },
   { default: sharp },
   { ensureStorageDirectory, resolveStorageFile, storageDirectory, writeStorageFile },
   { recoverRepVisitUploads },
@@ -143,6 +149,21 @@ test('rep role migration preserves users and their existing foreign-key referenc
   assert.equal(legacyDatabase.pragma('foreign_key_check').length, 0);
 });
 
+test('geofence and breadcrumb migrations are additive and idempotent', () => {
+  migrateMachineGeofenceAndBreadcrumbs(db);
+  const machineColumns = new Set(db.pragma('table_info(machines)').map((column) => column.name));
+  for (const column of ['latitude', 'longitude', 'is_location_locked', 'geofence_radius_meters', 'area_name']) {
+    assert.ok(machineColumns.has(column), `missing machines.${column}`);
+  }
+  const breadcrumbColumns = new Set(db.pragma('table_info(rep_location_breadcrumbs)').map((column) => column.name));
+  for (const column of [
+    'user_id', 'work_date', 'latitude', 'longitude', 'accuracy', 'speed', 'recorded_at',
+    'is_stop', 'stop_duration_minutes', 'stop_name', 'stop_arrived_at', 'stop_departed_at',
+  ]) assert.ok(breadcrumbColumns.has(column), `missing rep_location_breadcrumbs.${column}`);
+  assert.ok(db.prepare(`SELECT 1 FROM schema_migrations WHERE version = '20261103-machine-geofence-route-stops'`).get());
+  assert.deepEqual(db.pragma('foreign_key_check'), []);
+});
+
 test('rep login, assigned-region route sync, active fault reasons, and strict API isolation', async () => {
   const anonymousApk = await request('/download/apk');
   assert.equal(anonymousApk.response.status, 401);
@@ -195,6 +216,7 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
     INSERT INTO maintenance_orders (order_code, client_id, area, status)
     VALUES ('REP-ROUTE-1', ?, 'التجمع، الرياض', 'in_progress')
   `).run(clientId).lastInsertRowid);
+  db.prepare('INSERT INTO maintenance_order_reps (order_id, user_id) VALUES (?, ?)').run(orderId, repId);
 
   function addMachineCard(code, area, beforePhotos, afterPhotos) {
     const machineId = Number(db.prepare(`
@@ -269,7 +291,7 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   const repApkDownload = await fetch(`${baseUrl}/download/apk`, { headers: { cookie: login.cookie } });
   assert.equal(repApkDownload.status, 200);
   assert.equal(Buffer.from(await repApkDownload.arrayBuffer()).toString(), 'synthetic-debug-apk');
-  db.prepare(`INSERT INTO employees (name, department, phone, user_id) VALUES ('Nour Rep', 'Maintenance', '+966500000001', ?)`)
+  db.prepare(`UPDATE employees SET phone = '+966500000001' WHERE user_id = ?`)
     .run(repId);
 
   const route = await request('/api/rep/today-route?username=rep-nour', {}, login.cookie);
@@ -348,6 +370,33 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   assert.ok(existsSync(afterPath));
   assert.ok(readFileSync(beforePath).length > 0);
   assert.ok(readFileSync(afterPath).length > 0);
+  const pinnedMachine = db.prepare(`SELECT latitude, longitude, is_location_locked, geofence_radius_meters, area_name
+    FROM machines WHERE id = ?`).get(storedVisit.machine_id);
+  assert.deepEqual(pinnedMachine, {
+    latitude: visitPayload.location.latitude,
+    longitude: visitPayload.location.longitude,
+    is_location_locked: 1,
+    geofence_radius_meters: 50,
+    area_name: 'التجمع',
+  });
+  assert.match(storedVisit.before_path, /^Areas\/التجمع\/1434_.*\/\d{4}-\d{2}-\d{2}_REP-ROUTE-1\/[0-9a-f-]{36}\/before\//i);
+
+  const outsideFence = await request('/api/rep/sync-visit', {
+    method: 'POST',
+    body: buildVisitForm({
+      ...visitPayload,
+      visitUuid: randomUUID(),
+      capturedAt: new Date().toISOString(),
+      location: {
+        latitude: visitPayload.location.latitude + 0.001,
+        longitude: visitPayload.location.longitude,
+        accuracy: 5,
+        updatedAt: new Date().toISOString(),
+      },
+    }),
+  }, login.cookie);
+  assert.equal(outsideFence.response.status, 403);
+  assert.match(outsideFence.body.error, /خارج نطاق الماكينة/);
   db.prepare("UPDATE rep_visits SET created_at = datetime('now', '-1 day') WHERE visit_uuid = ?").run(visitUuid);
 
   const pendingRoute = await request('/api/rep/today-route?username=rep-nour', {}, login.cookie);
@@ -453,6 +502,26 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   }), login.cookie);
   assert.equal(duplicateTracking.response.status, 200);
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM rep_location_points WHERE rep_user_id = ?').get(repId).count, 3);
+  const stopBase = Date.now();
+  const stopTrail = [-7, -5, -3, -1].map((minutes) => ({
+    latitude: 24.8020,
+    longitude: 46.7020,
+    accuracy: 8,
+    speed: 0,
+    updatedAt: new Date(stopBase + minutes * 60 * 1000).toISOString(),
+  }));
+  const locationPing = await request('/api/rep/location-ping', jsonOptions('POST', {
+    trail: stopTrail,
+  }), login.cookie);
+  assert.equal(locationPing.response.status, 200, JSON.stringify(locationPing.body));
+  assert.equal(locationPing.body.acceptedPoints, 4);
+  assert.equal(db.prepare(`SELECT COUNT(*) AS count FROM rep_location_breadcrumbs
+    WHERE user_id = ? AND is_stop = 1`).get(repId).count, 4);
+  const stopRow = db.prepare(`SELECT stop_duration_minutes, stop_arrived_at, stop_departed_at
+    FROM rep_location_breadcrumbs WHERE user_id = ? AND is_stop = 1 ORDER BY recorded_at LIMIT 1`).get(repId);
+  assert.equal(stopRow.stop_duration_minutes, 6);
+  assert.ok(stopRow.stop_arrived_at);
+  assert.ok(stopRow.stop_departed_at);
   const fakeGps = await request('/api/rep/tracking', jsonOptions('POST', {
     onDuty: true,
     location: { latitude: 24.8, longitude: 46.7, accuracy: 5, updatedAt: new Date().toISOString(), is_mock: true },
@@ -465,6 +534,16 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   assert.equal(nourOnRadar.completedToday, 1);
   assert.equal(nourOnRadar.phone, '+966500000001');
   assert.ok(nourOnRadar.distanceKm > 0);
+  const localDate = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Riyadh', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(new Date()).filter((part) => part.type !== 'literal').map(({ type, value }) => [type, value]));
+  const routeDate = `${localDate.year}-${localDate.month}-${localDate.day}`;
+  const repRoute = await request(`/api/supervisor/reps/${repId}/route?date=${routeDate}`, {}, adminCookie);
+  assert.equal(repRoute.response.status, 200, JSON.stringify(repRoute.body));
+  assert.equal(repRoute.body.date, routeDate);
+  assert.ok(repRoute.body.polyline.length >= 7);
+  assert.equal(repRoute.body.stops.length, 1);
+  assert.equal(repRoute.body.stops[0].durationMinutes, 6);
 
   const activeSession = db.prepare('SELECT id FROM rep_duty_sessions WHERE rep_user_id = ? AND ended_at IS NULL').get(repId);
   const finalTrailPoint = {
@@ -478,7 +557,7 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   assert.equal(stopTracking.body.onDuty, false);
   assert.equal(stopTracking.body.acceptedPoints, 1);
   assert.ok(db.prepare('SELECT ended_at FROM rep_duty_sessions WHERE id = ?').get(activeSession.id).ended_at);
-  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM rep_location_points WHERE duty_session_id = ?').get(activeSession.id).count, 4);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM rep_location_points WHERE duty_session_id = ?').get(activeSession.id).count, 8);
 
   const approvedWorkbook = await fetch(`${baseUrl}/api/supervisor/reports/approved-visits.xlsx`, { headers: { cookie: adminCookie } });
   assert.equal(approvedWorkbook.status, 200);

@@ -188,10 +188,10 @@ export default function SettingsPage() {
         <form onSubmit={saveUser}><div className="madar-form-stack">
           <Input key={`username-${editingUser?.id ?? 'new'}`} label="اسم المستخدم *" name="username" defaultValue={editingUser?.username ?? ''} required minLength={3} maxLength={64} />
           <Input key={`fullname-${editingUser?.id ?? 'new'}`} label="الاسم الكامل *" name="full_name" defaultValue={editingUser?.full_name ?? ''} required minLength={2} maxLength={120} />
-          {!editingUser && <Input label="كلمة المرور المؤقتة *" name="password" type="password" required minLength={12} maxLength={72} autoComplete="new-password" />}
+          {!editingUser && <Input label="كلمة المرور المؤقتة *" name="password" type="password" required minLength={4} maxLength={72} autoComplete="new-password" />}
           <Select key={`role-${editingUser?.id ?? 'new'}`} label="الدور" name="role" defaultValue={editingUser?.role ?? 'operations'}><option value="operations">عمليات</option><option value="sales">مبيعات</option><option value="purchasing">مشتريات</option><option value="rep">مندوب ميداني</option><option value="admin">مدير</option></Select>
           <Input key={`regions-${editingUser?.id ?? 'new'}`} label="مناطق المسار (للمندوب)" name="assignedRegions" defaultValue={editingUser?.assignedRegions?.join('، ') ?? ''} hint="اكتب كل منطقة مفصولة بفاصلة. تُستخدم لتحديد مسار المندوب." />
-          {editingUser && <><Select key={`active-${editingUser.id}`} label="حالة الحساب" name="active" defaultValue={String(Boolean(editingUser.active))}><option value="true">نشط</option><option value="false">موقوف</option></Select><Input label="كلمة مرور جديدة (اختياري)" name="password" type="password" minLength={12} maxLength={72} autoComplete="new-password" /></>}
+          {editingUser && <><Select key={`active-${editingUser.id}`} label="حالة الحساب" name="active" defaultValue={String(Boolean(editingUser.active))}><option value="true">نشط</option><option value="false">موقوف</option></Select><Input label="كلمة مرور جديدة (اختياري)" name="password" type="password" minLength={4} maxLength={72} autoComplete="new-password" /></>}
         </div>{actionError && <div className="madar-form-error"><Alert tone="error">{actionError}</Alert></div>}<div className="madar-form-actions"><Button variant="secondary" onClick={() => setUserModal(false)}>إلغاء</Button><Button type="submit" disabled={saving}>{saving ? 'جارٍ الحفظ…' : 'حفظ المستخدم'}</Button></div></form>
       </Modal>
 

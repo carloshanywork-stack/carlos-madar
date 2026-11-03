@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../../lib/api.js';
 import { egpToCents, errorMessage, formatDate, formatMoney } from '../../lib/format.js';
 import { useApi } from '../../lib/useApi.js';
@@ -23,14 +23,22 @@ const attendanceStatus = [
 
 function currentMonth() { return new Date().toISOString().slice(0, 7); }
 function currentDate() { return new Date().toISOString().slice(0, 10); }
+function formatClock(value) {
+  if (!value) return '—';
+  const date = new Date(value);
+  return Number.isNaN(date.valueOf()) ? value : new Intl.DateTimeFormat('ar-EG', { dateStyle: 'short', timeStyle: 'short' }).format(date);
+}
 
-export default function AccountingPage() {
+export default function AccountingPage({ isAdmin = false }) {
   const [tab, setTab] = useState('staff');
   const [attendanceView, setAttendanceView] = useState('monthly');
   const [date, setDate] = useState(currentDate());
+  const manuallySelectedDate = useRef(false);
   const [month, setMonth] = useState(currentMonth());
   const { data: employees, loading: employeesLoading, error: employeesError, reload: reloadEmployees } = useApi('/api/employees?all=1');
   const { data: attendance, loading: attendanceLoading, error: attendanceError, reload: reloadAttendance } = useApi(`/api/employees/attendance?date=${date}`, { enabled: tab === 'attendance' && attendanceView === 'daily' });
+  const { data: pendingOvertime, error: overtimeError, reload: reloadPendingOvertime } = useApi('/api/attendance/pending-overtime', { enabled: tab === 'attendance' && isAdmin });
+  const { data: attendanceToday } = useApi('/api/attendance/today', { enabled: tab === 'attendance' });
   const { data: payroll, loading: payrollLoading, error: payrollError, reload: reloadPayroll } = useApi(`/api/employees/payroll?month=${month}`, { enabled: tab === 'payroll' });
   const { data: treasury, loading: treasuryLoading, error: treasuryError } = useApi('/api/finance/treasury', { enabled: tab === 'treasury' });
   const [selectedEmployeeId, setSelectedEmployeeId] = useState('');
@@ -42,6 +50,8 @@ export default function AccountingPage() {
   const [saving, setSaving] = useState(false);
   const [errorMessageText, setErrorMessageText] = useState('');
   const [savingAttendance, setSavingAttendance] = useState(false);
+  const [attendanceActionId, setAttendanceActionId] = useState(null);
+  const [reviewingOvertimeId, setReviewingOvertimeId] = useState(null);
   const { notice, showToast, clearToast } = useToast();
   const activeEmployees = (employees ?? []).filter((employee) => employee.active && !employee.deleted_at);
 
@@ -53,6 +63,10 @@ export default function AccountingPage() {
       notes: row.notes ?? '',
     })));
   }, [attendance]);
+
+  useEffect(() => {
+    if (attendanceToday?.date && !manuallySelectedDate.current) setDate(attendanceToday.date);
+  }, [attendanceToday]);
 
   async function saveEmployee(event) {
     event.preventDefault();
@@ -94,6 +108,28 @@ export default function AccountingPage() {
       showToast('تم حفظ سجل الحضور اليومي.');
     } catch (caught) { setErrorMessageText(errorMessage(caught)); }
     finally { setSavingAttendance(false); }
+  }
+
+  async function clockEmployee(employee, action) {
+    setAttendanceActionId(employee.employee_id);
+    setErrorMessageText('');
+    try {
+      await api.post(action === 'in' ? '/api/attendance/mark' : '/api/attendance/clock-out', { employeeId: employee.employee_id });
+      await Promise.all([reloadAttendance(), reloadPendingOvertime()]);
+      showToast(action === 'in' ? `تم تسجيل حضور ${employee.name}.` : `تم تسجيل انصراف ${employee.name}.`);
+    } catch (caught) { setErrorMessageText(errorMessage(caught)); }
+    finally { setAttendanceActionId(null); }
+  }
+
+  async function reviewOvertime(record, decision) {
+    setReviewingOvertimeId(record.id);
+    setErrorMessageText('');
+    try {
+      await api.post(`/api/attendance/${record.id}/${decision}-overtime`, {});
+      await Promise.all([reloadPendingOvertime(), reloadAttendance(), reloadPayroll()]);
+      showToast(decision === 'approve' ? 'تم اعتماد الساعات الإضافية.' : 'تم رفض الساعات الإضافية.');
+    } catch (caught) { setErrorMessageText(errorMessage(caught)); }
+    finally { setReviewingOvertimeId(null); }
   }
 
   function changeAttendance(employeeId, key, value) {
@@ -156,6 +192,13 @@ export default function AccountingPage() {
       </>}
 
       {tab === 'attendance' && <>
+        {overtimeError && <div className="madar-section"><Alert tone="error">{overtimeError}</Alert></div>}
+        {pendingOvertime?.records?.length > 0 && <section className="madar-panel madar-section" aria-label="ساعات إضافية بانتظار الاعتماد">
+          <div className="madar-panel-header"><div><h2>ساعات عمل إضافية بانتظار الاعتماد</h2><p>لن تدخل ساعات الحضور المسجلة بالتطبيق في مسير الرواتب حتى اعتمادها.</p></div><Badge tone="warning">{pendingOvertime.records.length}</Badge></div>
+          <div className="madar-table-wrap"><table className="madar-table"><thead><tr><th>الموظف</th><th>التاريخ</th><th>إجمالي الدوام</th><th>ساعات عادية</th><th>ساعات إضافية</th><th>إجراء</th></tr></thead><tbody>
+            {pendingOvertime.records.map((record) => <tr key={record.id}><td>{record.name}</td><td>{record.work_date}</td><td>{record.total_hours} س</td><td>{record.regular_hours} س</td><td><strong>{record.overtime_hours} س</strong></td><td>{isAdmin ? <div className="madar-inline-wrap"><Button size="small" disabled={reviewingOvertimeId === record.id} onClick={() => void reviewOvertime(record, 'approve')}>اعتماد</Button><Button size="small" variant="danger" disabled={reviewingOvertimeId === record.id} onClick={() => void reviewOvertime(record, 'reject')}>رفض</Button></div> : <Badge tone="warning">بانتظار الإدارة</Badge>}</td></tr>)}
+          </tbody></table></div>
+        </section>}
         <div className="madar-list-toolbar madar-section madar-attendance-view-toggle">
           <div><strong>إدارة سجل الحضور</strong><span className="madar-small madar-muted">اختر عرض الشهر الكامل أو تفاصيل يوم واحد.</span></div>
           <div className="madar-inline-wrap">
@@ -164,14 +207,30 @@ export default function AccountingPage() {
           </div>
         </div>
         {attendanceView === 'monthly' ? <MonthlyAttendanceMatrix /> : <>
-        <div className="madar-list-toolbar madar-section"><Input label="تاريخ الحضور" type="date" value={date} onChange={(event) => setDate(event.target.value)} /><Button icon="check" disabled={savingAttendance || !attendanceRows.length} onClick={saveAttendance}>{savingAttendance ? 'جارٍ الحفظ…' : 'حفظ الحضور'}</Button></div>
+        <div className="madar-list-toolbar madar-section"><Input label="تاريخ الحضور" type="date" value={date} onChange={(event) => { manuallySelectedDate.current = true; setDate(event.target.value); }} /><Button icon="check" disabled={savingAttendance || !attendanceRows.length} onClick={saveAttendance}>{savingAttendance ? 'جارٍ الحفظ…' : 'حفظ الحضور'}</Button></div>
         {attendanceError && <Alert tone="error">{attendanceError}</Alert>}
-        <section className="madar-panel madar-section">{attendanceLoading ? <LoadingState /> : attendance?.employees?.length ? <div className="madar-table-wrap"><table className="madar-table"><thead><tr><th>الموظف</th><th>القسم</th><th>الحالة</th><th>ساعات إضافية</th><th>ملاحظات</th></tr></thead><tbody>{attendance.employees.map((employee, index) => <tr key={employee.employee_id}><td>{employee.name}</td><td>{employee.department}</td><td><Select aria-label={`حالة ${employee.name}`} value={attendanceRows[index]?.status ?? 'present'} onChange={(event) => changeAttendance(employee.employee_id, 'status', event.target.value)}>{attendanceStatus.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</Select></td><td><Input type="number" min="0" max="24" step="0.25" aria-label={`الساعات الإضافية لـ ${employee.name}`} value={attendanceRows[index]?.overtimeHours ?? 0} onChange={(event) => changeAttendance(employee.employee_id, 'overtimeHours', Number(event.target.value))} /></td><td><Input aria-label={`ملاحظات ${employee.name}`} value={attendanceRows[index]?.notes ?? ''} maxLength={1000} onChange={(event) => changeAttendance(employee.employee_id, 'notes', event.target.value)} /></td></tr>)}</tbody></table></div> : <EmptyState icon="calendar" title="لا يوجد موظفون نشطون" />}</section>
+        <section className="madar-panel madar-section">{attendanceLoading ? <LoadingState /> : attendance?.employees?.length ? <div className="madar-table-wrap"><table className="madar-table"><thead><tr><th>الموظف</th><th>القسم</th><th>الحالة</th><th>تسجيل الحضور</th><th>تسجيل الانصراف</th><th>الساعات</th><th>الإضافي</th><th>ملاحظات</th><th>إجراء</th></tr></thead><tbody>{attendance.employees.map((employee, index) => {
+          const hasClockIn = Boolean(employee.clock_in_time);
+          const hasClockOut = Boolean(employee.clock_out_time);
+          const isClockedToday = date === attendanceToday?.date;
+          return <tr key={employee.employee_id}>
+            <td><strong>{employee.name}</strong>{employee.user_role && <small className="madar-small madar-muted"> · {employee.user_role}</small>}</td>
+            <td>{employee.department}</td>
+            <td><Select aria-label={`حالة ${employee.name}`} value={attendanceRows[index]?.status ?? 'present'} onChange={(event) => changeAttendance(employee.employee_id, 'status', event.target.value)}>{attendanceStatus.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</Select></td>
+            <td>{hasClockIn ? <span title={employee.clock_in_source}>{formatClock(employee.clock_in_time)}</span> : '—'}</td>
+            <td>{hasClockOut ? <span title={employee.clock_out_source}>{formatClock(employee.clock_out_time)}</span> : '—'}</td>
+            <td>{employee.total_hours ?? 0} / {employee.regular_hours ?? 0} س</td>
+            <td>{employee.overtime_hours ?? 0} س{employee.overtime_status === 'pending' ? <Badge tone="warning">بانتظار الاعتماد</Badge> : employee.overtime_status === 'approved' ? <Badge tone="success">معتمد</Badge> : employee.overtime_status === 'rejected' ? <Badge tone="danger">مرفوض</Badge> : null}<br /><Input type="number" min="0" max="24" step="0.25" aria-label={`الساعات الإضافية لـ ${employee.name}`} disabled={hasClockIn || hasClockOut} value={attendanceRows[index]?.overtimeHours ?? 0} onChange={(event) => changeAttendance(employee.employee_id, 'overtimeHours', Number(event.target.value))} /></td>
+            <td><Input aria-label={`ملاحظات ${employee.name}`} value={attendanceRows[index]?.notes ?? ''} maxLength={1000} onChange={(event) => changeAttendance(employee.employee_id, 'notes', event.target.value)} /></td>
+            <td>{!isAdmin ? '—' : !isClockedToday ? <span className="madar-small madar-muted">إجراءات اليوم فقط</span> : !hasClockIn ? <Button size="small" disabled={attendanceActionId === employee.employee_id} onClick={() => void clockEmployee(employee, 'in')}>تسجيل حضور</Button> : !hasClockOut ? <Button size="small" variant="secondary" disabled={attendanceActionId === employee.employee_id} onClick={() => void clockEmployee(employee, 'out')}>تسجيل انصراف</Button> : <Badge tone="success">اكتمل</Badge>}</td>
+          </tr>;
+        })}</tbody></table></div> : <EmptyState icon="calendar" title="لا يوجد موظفون نشطون" />}</section>
         </>}
       </>}
 
       {tab === 'payroll' && <>
-        <div className="madar-list-toolbar madar-section"><Input label="الشهر" type="month" value={month} onChange={(event) => setMonth(event.target.value)} />{payroll?.finalized && <Badge tone="success">معتمد ومصروف</Badge>}<Button icon="check" disabled={saving || payroll?.finalized || !payroll?.lines?.length} onClick={finalizePayroll}>اعتماد وصرف الرواتب</Button></div>
+        <div className="madar-list-toolbar madar-section"><Input label="الشهر" type="month" value={month} onChange={(event) => setMonth(event.target.value)} />{payroll?.finalized && <Badge tone="success">معتمد ومصروف</Badge>}<Button icon="check" disabled={saving || payroll?.finalized || payroll?.pending_overtime_count > 0 || !payroll?.lines?.length} onClick={finalizePayroll}>اعتماد وصرف الرواتب</Button></div>
+        {payroll?.pending_overtime_count > 0 && <div className="madar-section"><Alert tone="warning">توجد {payroll.pending_overtime_count} سجلات إضافي معلقة لهذا الشهر. راجعها من سجل الحضور واعتمدها أو ارفضها قبل إقفال مسير الرواتب.</Alert></div>}
         {payrollError && <Alert tone="error">{payrollError}</Alert>}
         <section className="madar-panel madar-section">{payrollLoading ? <LoadingState /> : payroll?.lines?.length ? <><div className="madar-table-wrap"><table className="madar-table"><thead><tr><th>الموظف</th><th>القسم</th><th>الأجر الأساسي</th><th>أيام الحضور</th><th>أيام الغياب</th><th>الإضافي</th><th>الخصومات</th><th>صافي الراتب</th></tr></thead><tbody>{payroll.lines.map((line) => <tr key={line.employee_id}><td>{line.name}</td><td>{line.department}</td><td>{formatMoney(line.base_salary_cents)}</td><td>{line.present_days}</td><td>{line.absent_days}</td><td>{formatMoney(line.overtime_amount_cents)} <small>({line.overtime_hours} س)</small></td><td>{formatMoney(line.deductions_cents)}</td><td className="madar-money"><strong>{formatMoney(line.net_salary_cents)}</strong></td></tr>)}</tbody></table></div><div className="madar-panel-pad"><strong>إجمالي الصافي: {formatMoney(payroll.totals?.net_total_cents ?? payroll.run?.net_total_cents)}</strong><p className="madar-small madar-muted">الحساب: الراتب الشهري + العمل الإضافي − خصم الغياب. تُحتسب الساعة الإضافية بمعدل 1.5×.</p></div></> : <EmptyState icon="wallet" title="لا توجد رواتب لهذا الشهر" description="أضف موظفين نشطين أو اختر شهراً آخر." />}</section>
       </>}

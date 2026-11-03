@@ -4,6 +4,7 @@ import { db } from '../../database/connection.js';
 import { recordAudit } from '../audit.js';
 import { requestActorId } from '../actor.js';
 import { asyncHandler, allowOnlyKeys, HttpError, requireObject, requireText } from '../http.js';
+import { syncEmployeeForUser } from '../employees/user-sync.js';
 
 const router = Router();
 const USER_ROLES = ['admin', 'sales', 'operations', 'purchasing', 'rep'];
@@ -109,8 +110,8 @@ router.post('/', asyncHandler(async (req, res) => {
     ? 1
     : normalizeActive(body.isActive ?? body.active);
   if (role !== 'rep' && assignedRegions.length) throw new HttpError(400, 'assignedRegions can only be set for rep users.');
-  if (typeof body.password !== 'string' || body.password.length < 12 || Buffer.byteLength(body.password, 'utf8') > 72) {
-    throw new HttpError(400, 'Password must contain at least 12 characters and no more than 72 UTF-8 bytes.');
+  if (typeof body.password !== 'string' || body.password.length < 4 || Buffer.byteLength(body.password, 'utf8') > 72) {
+    throw new HttpError(400, 'يجب أن تتكون كلمة المرور من 4 خانات على الأقل وألا تتجاوز 72 بايتاً.');
   }
   const passwordHash = await bcrypt.hash(body.password, 12);
   try {
@@ -120,6 +121,8 @@ router.post('/', asyncHandler(async (req, res) => {
         VALUES (?, ?, ?, ?, ?, ?)`)
         .run(username, passwordHash, fullName, role, active, JSON.stringify(assignedRegions));
       const id = Number(result.lastInsertRowid);
+      const user = db.prepare(`SELECT id, full_name, role, active, deleted_at, created_at FROM users WHERE id = ?`).get(id);
+      syncEmployeeForUser(db, user, { actorId: requestActorId(req), audit: true });
       recordAudit({ database: db, actorId: requestActorId(req), action: 'create', entityType: 'user', entityId: id,
         newValues: { username, full_name: fullName, role, active, assigned_regions: assignedRegions } });
       return db.prepare(`SELECT id, username, full_name, role, active, created_at,
@@ -150,8 +153,8 @@ const updateUser = asyncHandler(async (req, res) => {
   const nextFullName = suppliedName === undefined
     ? current.full_name
     : requireText(suppliedName, 'full_name', { minLength: 2, maxLength: 120 });
-  if (body.password !== undefined && (typeof body.password !== 'string' || body.password.length < 12 || Buffer.byteLength(body.password, 'utf8') > 72)) {
-    throw new HttpError(400, 'Password must contain at least 12 characters and no more than 72 UTF-8 bytes.');
+  if (body.password !== undefined && (typeof body.password !== 'string' || body.password.length < 4 || Buffer.byteLength(body.password, 'utf8') > 72)) {
+    throw new HttpError(400, 'يجب أن تتكون كلمة المرور من 4 خانات على الأقل وألا تتجاوز 72 بايتاً.');
   }
   const nextRole = body.role ?? current.role;
   const nextActive = requestedActive === undefined ? current.active : normalizeActive(requestedActive, body.isActive !== undefined ? 'isActive' : 'active');
@@ -175,6 +178,8 @@ const updateUser = asyncHandler(async (req, res) => {
     db.prepare(`UPDATE users SET username = ?, full_name = ?, role = ?, active = ?, password_hash = COALESCE(?, password_hash),
       assigned_regions_json = ?, is_online = ? WHERE id = ?`)
       .run(nextUsername, nextFullName, nextRole, nextActive, passwordHash, JSON.stringify(nextRegions), nextOnline, id);
+    const updatedUser = db.prepare(`SELECT id, full_name, role, active, deleted_at, created_at FROM users WHERE id = ?`).get(id);
+    syncEmployeeForUser(db, updatedUser, { actorId: requestActorId(req), audit: true });
     if (nextActive === 0 || identityChanged) {
       db.prepare('UPDATE sessions SET revoked_at = CURRENT_TIMESTAMP WHERE user_id = ? AND revoked_at IS NULL').run(id);
     }
@@ -197,12 +202,14 @@ router.delete('/:id', (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isSafeInteger(id) || id < 1) throw new HttpError(400, 'id must be a positive integer.');
   if (id === requestActorId(req)) throw new HttpError(409, 'You cannot deactivate your own account.');
-  const current = db.prepare('SELECT id, username, role, active FROM users WHERE id = ? AND deleted_at IS NULL').get(id);
+  const current = db.prepare('SELECT id, username, full_name, role, active, deleted_at, created_at FROM users WHERE id = ? AND deleted_at IS NULL').get(id);
   if (!current) throw new HttpError(404, 'User was not found.');
   const remainingAdmin = db.prepare(`SELECT COUNT(*) AS count FROM users WHERE role = 'admin' AND active = 1 AND deleted_at IS NULL AND id != ?`).get(id).count;
   if (current.role === 'admin' && current.active === 1 && remainingAdmin === 0) throw new HttpError(409, 'At least one active administrator must remain.');
   db.transaction(() => {
     db.prepare('UPDATE users SET active = 0, is_online = 0, deleted_at = CURRENT_TIMESTAMP WHERE id = ?').run(id);
+    const deletedUser = db.prepare('SELECT id, full_name, role, active, deleted_at, created_at FROM users WHERE id = ?').get(id);
+    syncEmployeeForUser(db, deletedUser, { actorId: requestActorId(req), audit: true });
     db.prepare('UPDATE sessions SET revoked_at = CURRENT_TIMESTAMP WHERE user_id = ? AND revoked_at IS NULL').run(id);
     db.prepare(`UPDATE rep_duty_sessions SET ended_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
       WHERE rep_user_id = ? AND ended_at IS NULL`).run(id);

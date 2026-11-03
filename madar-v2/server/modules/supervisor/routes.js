@@ -6,6 +6,7 @@ import {
   buildApprovedVisitsWorkbook,
   getPendingVisitReviews,
   getSupervisorRadar,
+  getSupervisorRepRoute,
   getSupervisorVisitPhoto,
   reviewRepVisit,
 } from './service.js';
@@ -23,6 +24,15 @@ router.use((req, res, next) => {
 router.get('/radar', (_req, res) => {
   res.set({ 'Cache-Control': 'private, no-store', Pragma: 'no-cache' });
   res.json(getSupervisorRadar());
+});
+
+router.get('/reps/:id/route', (req, res, next) => {
+  try {
+    res.set({ 'Cache-Control': 'private, no-store', Pragma: 'no-cache' });
+    res.json(getSupervisorRepRoute(req.params.id, req.query.date));
+  } catch (error) {
+    next(error);
+  }
 });
 
 router.get('/qa/queue', (_req, res) => {

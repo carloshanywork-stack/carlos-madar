@@ -67,6 +67,16 @@
 #madar-app .rep-refresh-button span { display: block; font-size: 26px; line-height: 1; }
 #madar-app .rep-logout-button { min-height: 38px; padding: 0 12px; border: 1px solid #d9c4c3; border-radius: 10px; color: #7b3435 !important; background: #fff; cursor: pointer; font-size: 11px; font-weight: 800; }
 #madar-app .rep-offline-banner { max-width: 1460px; margin: 14px auto -2px; padding: 11px 14px; border: 1px solid #e5c879; border-radius: 12px; color: #654809; background: #fff8df; font-size: 12px; font-weight: 750; }
+#madar-app .rep-attendance-card { display: flex; max-width: 1460px; min-height: 105px; align-items: center; justify-content: space-between; gap: 18px; margin: 18px auto 0; padding: 18px 21px; border: 1px solid #b8d4c7; border-radius: 16px; background: linear-gradient(120deg, #fff 0%, #edf7f1 100%); box-shadow: 0 8px 22px rgba(27, 72, 54, .07); }
+#madar-app .rep-attendance-summary { display: grid; gap: 5px; min-width: 0; }
+#madar-app .rep-attendance-summary > strong { color: #124d3e; font-size: 22px; font-weight: 950; }
+#madar-app .rep-attendance-summary > small { color: #4d625a; font-size: 11px; line-height: 1.6; }
+#madar-app .rep-attendance-actions { display: flex; flex: 0 0 auto; gap: 9px; }
+#madar-app .rep-attendance-actions button { min-height: 43px; padding: 0 17px; border: 1px solid transparent; border-radius: 11px; color: #fff; cursor: pointer; font-size: 12px; font-weight: 900; transition: filter .16s ease, transform .16s ease; }
+#madar-app .rep-attendance-actions button:hover:not(:disabled) { filter: brightness(.96); transform: translateY(-1px); }
+#madar-app .rep-attendance-actions button:disabled { cursor: not-allowed; opacity: .48; }
+#madar-app .rep-attendance-clock-in { background: #14805d; box-shadow: 0 5px 12px rgba(20, 128, 93, .16); }
+#madar-app .rep-attendance-clock-out { background: #b43b43; box-shadow: 0 5px 12px rgba(180, 59, 67, .13); }
 
 #madar-app .rep-welcome-row { display: flex; max-width: 1460px; min-height: 190px; align-items: center; justify-content: space-between; gap: 30px; margin: 0 auto; padding: 32px 4px 24px; }
 #madar-app .rep-welcome-row h1 { margin: 8px 0 5px; color: #15283d; font-size: clamp(26px, 3.5vw, 39px); font-weight: 900; letter-spacing: -.045em; line-height: 1.2; }
@@ -189,6 +199,9 @@
 #madar-app .rep-gps-strip small { color: #425660; font-size: 10px; }
 #madar-app .rep-gps-pulse { width: 10px; height: 10px; flex: 0 0 auto; border: 2px solid currentColor; border-radius: 50%; box-shadow: 0 0 0 4px rgba(20,90,71,.09); }
 #madar-app .rep-gps-label { padding: 5px 8px; border: 1px solid currentColor; border-radius: 7px; font-size: 9px; font-weight: 900; }
+#madar-app .rep-geofence-status { margin-top: 8px; padding: 10px 12px; border: 1px solid #abd2c0; border-radius: 10px; color: #145a47; background: #edf7f1; font-size: 11px; font-weight: 850; line-height: 1.6; }
+#madar-app .rep-geofence-status.outside { border-color: #e4b8b9; color: #8a3338; background: #fff0f0; }
+#madar-app .rep-camera-button:disabled { filter: grayscale(.25); opacity: .48; }
 #madar-app .rep-form-section { margin-top: 22px; }
 #madar-app .rep-condition-options { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 8px; }
 #madar-app .rep-condition-option { display: flex; min-height: 54px; align-items: center; justify-content: center; gap: 7px; padding: 7px; border: 1px solid #c8d3d9; border-radius: 11px; color: #2d4354 !important; background: #fff; cursor: pointer; font-size: 11px; font-weight: 800; }
@@ -291,6 +304,10 @@
   #madar-app .rep-icon-button, #madar-app .rep-logout-button { width: 35px; min-height: 35px; height: 35px; padding: 0; }
   #madar-app .rep-logout-button { width: auto; padding-inline: 8px; font-size: 9px; }
   #madar-app .rep-welcome-row { min-height: 154px; gap: 10px; padding: 23px 1px 18px; }
+  #madar-app .rep-attendance-card { align-items: stretch; flex-direction: column; gap: 13px; margin-top: 12px; padding: 14px; }
+  #madar-app .rep-attendance-summary > strong { font-size: 19px; }
+  #madar-app .rep-attendance-actions { display: grid; grid-template-columns: 1fr 1fr; }
+  #madar-app .rep-attendance-actions button { min-height: 42px; padding-inline: 8px; font-size: 11px; }
   #madar-app .rep-welcome-row h1 { font-size: 27px; }
   #madar-app .rep-welcome-row p { max-width: 315px; font-size: 11px; line-height: 1.7; }
   #madar-app .rep-welcome-mark { width: 71px; height: 71px; border-radius: 23px; font-size: 30px; }

@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import { env } from '../../config/env.js';
 import { db } from '../../database/connection.js';
 import { HttpError, allowOnlyKeys, requireObject, requireText } from '../http.js';
+import { syncEmployeeForUser } from '../employees/user-sync.js';
 
 const sessionLifetimeSeconds = 7 * 24 * 60 * 60;
 const dummyPasswordHash = bcrypt.hashSync('MADAR-invalid-login-timing-only', 12);
@@ -55,13 +56,13 @@ function hashToken(token) {
 }
 
 function readPassword(value, { setup = false } = {}) {
-  if (typeof value !== 'string' || value.length < (setup ? 12 : 1) || value.length > 1024) {
+  if (typeof value !== 'string' || value.length < (setup ? 4 : 1) || value.length > 1024) {
     throw new HttpError(400, setup
-      ? 'Password must contain at least 12 characters.'
+      ? 'يجب أن تتكون كلمة المرور من 4 خانات على الأقل (أرقام أو حروف).'
       : 'Username and password are required.');
   }
   if (Buffer.byteLength(value, 'utf8') > 72) {
-    throw new HttpError(400, 'Password must be no more than 72 UTF-8 bytes.');
+    throw new HttpError(400, 'يجب ألا تتجاوز كلمة المرور 72 بايتاً بترميز UTF-8.');
   }
   return value;
 }
@@ -94,9 +95,13 @@ export async function createFirstAdmin(input, database = db) {
         INSERT INTO users (username, password_hash, full_name, role)
         VALUES (?, ?, ?, 'admin')
       `).run(username, passwordHash, fullName);
+      const userId = Number(result.lastInsertRowid);
+      syncEmployeeForUser(database, database.prepare(`
+        SELECT id, full_name, role, active, deleted_at, created_at FROM users WHERE id = ?
+      `).get(userId), { audit: true });
       return publicUser(database.prepare(`
         SELECT id, username, full_name, role FROM users WHERE id = ?
-      `).get(result.lastInsertRowid));
+      `).get(userId));
     });
     return create.immediate();
   } catch (error) {

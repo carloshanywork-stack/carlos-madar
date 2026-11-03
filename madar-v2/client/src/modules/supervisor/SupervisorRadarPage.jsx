@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../lib/api.js';
 import './supervisor-radar.css';
 
@@ -22,8 +22,19 @@ function formatDuration(seconds) {
   return `${Math.floor(minutes / 60) ? `${Math.floor(minutes / 60)} س ` : ''}${minutes % 60} د`;
 }
 
-function TrackMap({ representatives, selectedId, onSelect }) {
-  const positions = representatives.flatMap((rep) => rep.trail?.length ? rep.trail : rep.lastLocation ? [rep.lastLocation] : []);
+function currentLocalDate() {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Riyadh', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(new Date()).filter((part) => part.type !== 'literal').map(({ type, value }) => [type, value]));
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
+function TrackMap({ representatives, selectedId, onSelect, selectedRoute }) {
+  const positions = [
+    ...representatives.flatMap((rep) => rep.trail?.length ? rep.trail : rep.lastLocation ? [rep.lastLocation] : []),
+    ...(selectedRoute?.polyline ?? []),
+    ...(selectedRoute?.stops ?? []),
+  ];
   const bounds = useMemo(() => {
     if (!positions.length) return { minLat: 24, maxLat: 26, minLon: 45, maxLon: 48 };
     const lats = positions.map((point) => point.latitude);
@@ -61,6 +72,24 @@ function TrackMap({ representatives, selectedId, onSelect }) {
         <path d="M90 0 C130 145 210 231 190 500 M570 0 C520 151 630 324 590 500 M0 130 C230 165 420 120 900 183" fill="none" stroke="#e2e9e5" strokeWidth="1.2" />
         <text x="18" y="481" className="radar-map-caption">مخطط إحداثي محلي · لا تُرسل بيانات الموقع إلى مزوّد خرائط خارجي</text>
         {!positions.length && <text x="450" y="250" textAnchor="middle" className="radar-map-empty">بانتظار أول إشارة GPS</text>}
+        {selectedRoute?.polyline?.length > 1 && <polyline
+          points={selectedRoute.polyline.map((location) => {
+            const xy = point(location);
+            return `${xy.x},${xy.y}`;
+          }).join(' ')}
+          fill="none" stroke="#1769e0" strokeWidth="5" strokeLinecap="round" strokeLinejoin="round"
+          strokeDasharray="1 0" opacity=".9"
+        />}
+        {(selectedRoute?.stops ?? []).map((stop, index) => {
+          const xy = point(stop);
+          return <g key={`${stop.arrivedAt}-${index}`} className="radar-stop-pin">
+            <circle cx={xy.x} cy={xy.y} r="11" fill="#fff" stroke="#ce5a31" strokeWidth="4" />
+            <circle cx={xy.x} cy={xy.y} r="3" fill="#ce5a31" />
+            <title>{`${stop.name || 'توقف'} · ${stop.durationMinutes} دقيقة`}</title>
+            <rect x={xy.x + 11} y={xy.y - 23} width="48" height="17" rx="7" fill="#7d351e" />
+            <text x={xy.x + 35} y={xy.y - 11} textAnchor="middle" className="radar-stop-label">{stop.durationMinutes} د</text>
+          </g>;
+        })}
         {representatives.map((rep) => {
           const points = rep.trail?.length ? rep.trail : rep.lastLocation ? [rep.lastLocation] : [];
           const status = STATUS[rep.status] ?? STATUS.offline;
@@ -92,6 +121,11 @@ export default function SupervisorRadarPage() {
   const [radar, setRadar] = useState(null);
   const [visits, setVisits] = useState([]);
   const [selectedRep, setSelectedRep] = useState(null);
+  const [routeDate, setRouteDate] = useState(currentLocalDate);
+  const manuallySelectedRouteDate = useRef(false);
+  const [selectedRoute, setSelectedRoute] = useState(null);
+  const [routeLoading, setRouteLoading] = useState(false);
+  const [routeRevision, setRouteRevision] = useState(0);
   const [selectedVisit, setSelectedVisit] = useState(null);
   const [reviewNotes, setReviewNotes] = useState({});
   const [loading, setLoading] = useState(true);
@@ -107,6 +141,7 @@ export default function SupervisorRadarPage() {
       ]);
       setRadar(radarData);
       setVisits(queueData.visits ?? []);
+      setRouteRevision((revision) => revision + 1);
       setError('');
     } catch (requestError) {
       setError(requestError.message || 'تعذر تحميل بيانات الرادار والمراجعة.');
@@ -123,6 +158,28 @@ export default function SupervisorRadarPage() {
 
   const representatives = radar?.representatives ?? [];
   const focusedRep = representatives.find((rep) => rep.id === selectedRep) ?? null;
+
+  useEffect(() => {
+    if (selectedRep === null && representatives.length) setSelectedRep(representatives[0].id);
+  }, [representatives, selectedRep]);
+
+  useEffect(() => {
+    if (radar?.businessDate && !manuallySelectedRouteDate.current) setRouteDate(radar.businessDate);
+  }, [radar?.businessDate]);
+
+  useEffect(() => {
+    if (!selectedRep) {
+      setSelectedRoute(null);
+      return undefined;
+    }
+    let active = true;
+    setRouteLoading(true);
+    api.get(`/api/supervisor/reps/${selectedRep}/route?date=${encodeURIComponent(routeDate)}`)
+      .then((result) => { if (active) setSelectedRoute(result); })
+      .catch((requestError) => { if (active) setError(requestError.message || 'تعذر تحميل خط سير المندوب.'); })
+      .finally(() => { if (active) setRouteLoading(false); });
+    return () => { active = false; };
+  }, [routeDate, routeRevision, selectedRep]);
 
   const review = async (visit, action) => {
     const reviewNote = reviewNotes[visit.id] ?? '';
@@ -178,7 +235,22 @@ export default function SupervisorRadarPage() {
             <div><span className="supervisor-eyebrow">GPS · LAST SIGNAL</span><h2>الخريطة ومسارات اليوم</h2></div>
             <span className="live-pill"><i /> يتحدث كل 15 ثانية</span>
           </div>
-          <TrackMap representatives={representatives} selectedId={selectedRep} onSelect={setSelectedRep} />
+          <div className="radar-route-controls">
+            <label>المندوب<select value={selectedRep ?? ''} onChange={(event) => setSelectedRep(event.target.value ? Number(event.target.value) : null)}>
+              <option value="">اختر المندوب</option>
+              {representatives.map((rep) => <option key={rep.id} value={rep.id}>{rep.fullName}</option>)}
+            </select></label>
+            <label>التاريخ<input type="date" value={routeDate} onChange={(event) => { manuallySelectedRouteDate.current = true; setRouteDate(event.target.value); }} /></label>
+            <span>{routeLoading ? 'جارٍ تحميل نقاط المسار…' : `${selectedRoute?.polyline?.length ?? 0} نقطة · ${selectedRoute?.stops?.length ?? 0} توقف`}</span>
+          </div>
+          <TrackMap representatives={representatives} selectedId={selectedRep} onSelect={setSelectedRep} selectedRoute={selectedRoute} />
+          {selectedRoute && <div className="radar-stops-list" aria-label="توقفات المندوب المحدد">
+            <strong>التوقفات · {selectedRoute.date}</strong>
+            {selectedRoute.stops.length ? selectedRoute.stops.map((stop, index) => <span key={`${stop.arrivedAt}-${index}`}>
+              <b>{stop.name || `توقف ${index + 1}`}</b>
+              <small>وصول {formatTime(stop.arrivedAt)} · مغادرة {formatTime(stop.departedAt)} · {stop.durationMinutes} دقيقة</small>
+            </span>) : <small>لم تُسجّل توقفات متصلة لأكثر من 5 دقائق في هذا اليوم.</small>}
+          </div>}
           <div className="radar-below">
             <div className="radar-rep-list">
               {representatives.map((rep) => {

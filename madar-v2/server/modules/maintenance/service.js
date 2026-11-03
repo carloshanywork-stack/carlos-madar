@@ -42,6 +42,7 @@ const MAX_TRIP_FOLDER_BYTES = 20 * 1024 * 1024 * 1024;
 const MAX_TRIP_PHOTO_BYTES = 200 * 1024 * 1024;
 const MAX_TRIP_FOLDER_FILES = 50000;
 const MAX_CARD_PHOTOS = 10000;
+const MAX_MANUAL_CARD_PHASE_PHOTOS = 4;
 const maintenanceTripProgress = new Map();
 const TRIP_PROGRESS_RETENTION_MS = 30 * 60 * 1000;
 
@@ -3341,7 +3342,13 @@ export async function uploadMaintenancePhoto(orderId, cardId, phase, file, actor
   const savedFile = await writeStorageFile(storedPath, file.buffer);
   try {
     const update = database.transaction(() => {
-      const oldPaths = parsePhotoJson(phase === 'before' ? metadata.before_photos_json : metadata.after_photos_json);
+      const current = database.prepare(`SELECT before_photos_json, after_photos_json FROM maintenance_cards
+        WHERE id = ? AND order_id = ? AND deleted_at IS NULL`).get(targetCardId, id);
+      if (!current) throw new HttpError(404, 'Active inspection card was not found on this order.');
+      const oldPaths = parsePhotoJson(phase === 'before' ? current.before_photos_json : current.after_photos_json);
+      if (oldPaths.length >= MAX_MANUAL_CARD_PHASE_PHOTOS) {
+        throw new HttpError(400, `A maintenance card may contain at most ${MAX_MANUAL_CARD_PHASE_PHOTOS} manually uploaded photos in each phase.`);
+      }
       const nextPaths = [...oldPaths, storedPath];
       const column = phase === 'before' ? 'before_photos_json' : 'after_photos_json';
       const result = database.prepare(`UPDATE maintenance_cards SET ${column} = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND deleted_at IS NULL`)
@@ -3472,6 +3479,9 @@ export async function moveCardPhoto(orderId, cardId, input, actorId = null, data
     const sourceIndex = sourceList.findIndex((photoPath) => photoPath.split('/').at(-1) === name);
     if (sourceIndex === -1) throw new HttpError(404, 'Photo was not found in source phase.');
     if (fromPhase === toPhase) return { ok: true, cardId: targetCardId, status: card.status };
+    if (destinationList.length >= MAX_MANUAL_CARD_PHASE_PHOTOS) {
+      throw new HttpError(400, `A maintenance card may contain at most ${MAX_MANUAL_CARD_PHASE_PHOTOS} manually uploaded photos in each phase.`);
+    }
     const [sourceStoredPath] = sourceList.splice(sourceIndex, 1);
     const pathSegments = sourceStoredPath.replace(/\\/g, '/').split('/');
     const phaseDirectoryIndex = pathSegments.length - 2;

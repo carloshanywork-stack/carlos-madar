@@ -4,6 +4,7 @@ import bcrypt from 'bcryptjs';
 import { env } from '../config/env.js';
 import { schemaPath } from '../config/paths.js';
 import { db } from './connection.js';
+import { syncEmployeeForUser } from '../modules/employees/user-sync.js';
 
 const defaultSettings = [
   ['app_name', 'MADAR V2'],
@@ -32,6 +33,10 @@ const repSupervisorRadarMigration = '20261102-rep-supervisor-radar-qa';
 const repVisitConditionMigration = '20261103-rep-visit-machine-condition';
 const maintenanceOrderRepsMigration = '20261103-maintenance-order-representatives';
 const repVisitPhotosMigration = '20261103-rep-visit-photo-collections';
+const nativeAttendanceMigration = '20261103-native-attendance-clock-fields';
+const userEmployeeSyncMigration = '20261103-user-employee-links';
+const userEmployeeProfileSyncMigration = '20261103-user-employee-profile-reconciliation';
+const machineGeofenceBreadcrumbsMigration = '20261103-machine-geofence-route-stops';
 
 const repUsersTableSql = `
   CREATE TABLE users_rep_migration_v1 (
@@ -539,6 +544,164 @@ export function migrateV2FeatureParity(database) {
   database.prepare('INSERT INTO schema_migrations (version) VALUES (?)').run(v2FeatureParityMigration);
 }
 
+export function migrateNativeAttendance(database) {
+  const migrate = database.transaction(() => {
+    const applied = database.prepare('SELECT 1 FROM schema_migrations WHERE version = ?')
+      .get(nativeAttendanceMigration);
+    if (applied) return;
+
+    const columns = new Set(database.pragma('table_info(employee_daily_attendance)').map((column) => column.name));
+    const additions = [
+      ['clock_in_time', 'TEXT'],
+      ['clock_in_source', "TEXT CHECK (clock_in_source IN ('app', 'admin'))"],
+      ['clock_in_lat', 'REAL'],
+      ['clock_in_lng', 'REAL'],
+      ['clock_out_time', 'TEXT'],
+      ['clock_out_source', "TEXT CHECK (clock_out_source IN ('app', 'admin'))"],
+      ['total_hours', 'REAL DEFAULT 0'],
+      ['regular_hours', 'REAL DEFAULT 0'],
+      ['overtime_status', "TEXT DEFAULT 'none' CHECK (overtime_status IN ('none', 'pending', 'approved', 'rejected'))"],
+      ['overtime_approved_by', 'INTEGER REFERENCES users(id)'],
+    ];
+    for (const [column, declaration] of additions) {
+      if (!columns.has(column)) {
+        database.exec(`ALTER TABLE employee_daily_attendance ADD COLUMN ${column} ${declaration}`);
+      }
+    }
+    database.exec(`
+      CREATE INDEX IF NOT EXISTS idx_employee_attendance_overtime
+        ON employee_daily_attendance(overtime_status, work_date, employee_id);
+    `);
+    database.prepare('INSERT INTO schema_migrations (version) VALUES (?)').run(nativeAttendanceMigration);
+  });
+  migrate.immediate();
+}
+
+export function migrateUserEmployeeLinks(database) {
+  const migrate = database.transaction(() => {
+    const applied = database.prepare('SELECT 1 FROM schema_migrations WHERE version = ?')
+      .get(userEmployeeSyncMigration);
+    if (applied) return;
+
+    const employeeColumns = new Set(database.pragma('table_info(employees)').map((column) => column.name));
+    if (!employeeColumns.has('user_id')) {
+      database.exec('ALTER TABLE employees ADD COLUMN user_id INTEGER REFERENCES users(id)');
+    }
+    if (!employeeColumns.has('can_login')) {
+      database.exec('ALTER TABLE employees ADD COLUMN can_login INTEGER NOT NULL DEFAULT 0 CHECK (can_login IN (0, 1))');
+    }
+    if (!employeeColumns.has('department_label')) {
+      database.exec("ALTER TABLE employees ADD COLUMN department_label TEXT CHECK (department_label IS NULL OR department_label IN ('Management', 'Sales'))");
+    }
+
+    const duplicate = database.prepare(`
+      SELECT user_id, GROUP_CONCAT(id) AS employee_ids
+      FROM employees WHERE user_id IS NOT NULL
+      GROUP BY user_id HAVING COUNT(*) > 1 LIMIT 1
+    `).get();
+    if (duplicate) {
+      throw new Error(`Cannot enforce one employee per user: user ${duplicate.user_id} is linked to employee rows ${duplicate.employee_ids}.`);
+    }
+    database.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_employees_user_id ON employees(user_id) WHERE user_id IS NOT NULL');
+
+    const users = database.prepare(`SELECT user.id, user.full_name, user.role, user.active, user.deleted_at, user.created_at
+      FROM users AS user
+      WHERE NOT EXISTS (SELECT 1 FROM employees AS employee WHERE employee.user_id = user.id)
+      ORDER BY user.id`).all();
+    for (const user of users) syncEmployeeForUser(database, user);
+
+    database.prepare('INSERT INTO schema_migrations (version) VALUES (?)').run(userEmployeeSyncMigration);
+  });
+  migrate.immediate();
+}
+
+/** Reconcile pre-existing user links as well as accounts added by the link migration. */
+export function migrateUserEmployeeProfileSync(database) {
+  const migrate = database.transaction(() => {
+    const applied = database.prepare('SELECT 1 FROM schema_migrations WHERE version = ?')
+      .get(userEmployeeProfileSyncMigration);
+    if (applied) return;
+
+    const users = database.prepare(`SELECT id, full_name, role, active, deleted_at, created_at
+      FROM users WHERE role IN ('admin', 'sales', 'operations', 'purchasing', 'rep') ORDER BY id`).all();
+    for (const user of users) syncEmployeeForUser(database, user);
+
+    database.prepare('INSERT INTO schema_migrations (version) VALUES (?)')
+      .run(userEmployeeProfileSyncMigration);
+  });
+  migrate.immediate();
+}
+
+export function migrateMachineGeofenceAndBreadcrumbs(database) {
+  const migrate = database.transaction(() => {
+    const applied = database.prepare('SELECT 1 FROM schema_migrations WHERE version = ?')
+      .get(machineGeofenceBreadcrumbsMigration);
+    if (applied) return;
+
+    const machineColumns = new Set(database.pragma('table_info(machines)').map((column) => column.name));
+    const machineAdditions = [
+      ['latitude', 'REAL'],
+      ['longitude', 'REAL'],
+      ['is_location_locked', 'INTEGER NOT NULL DEFAULT 0 CHECK (is_location_locked IN (0, 1))'],
+      ['geofence_radius_meters', 'INTEGER NOT NULL DEFAULT 50 CHECK (geofence_radius_meters BETWEEN 1 AND 10000)'],
+      ['area_name', 'TEXT'],
+    ];
+    for (const [column, declaration] of machineAdditions) {
+      if (!machineColumns.has(column)) database.exec(`ALTER TABLE machines ADD COLUMN ${column} ${declaration}`);
+    }
+    database.exec(`
+      UPDATE machines SET area_name = area WHERE area_name IS NULL OR trim(area_name) = '';
+
+      CREATE TABLE IF NOT EXISTS rep_location_breadcrumbs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL REFERENCES users(id),
+        duty_session_id INTEGER REFERENCES rep_duty_sessions(id),
+        work_date TEXT NOT NULL,
+        latitude REAL NOT NULL CHECK (latitude BETWEEN -90 AND 90),
+        longitude REAL NOT NULL CHECK (longitude BETWEEN -180 AND 180),
+        accuracy REAL NOT NULL DEFAULT 0 CHECK (accuracy >= 0 AND accuracy <= 100000),
+        speed REAL NOT NULL DEFAULT 0 CHECK (speed >= 0),
+        recorded_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        is_stop INTEGER NOT NULL DEFAULT 0 CHECK (is_stop IN (0, 1)),
+        stop_duration_minutes INTEGER NOT NULL DEFAULT 0 CHECK (stop_duration_minutes >= 0),
+        stop_name TEXT,
+        stop_arrived_at TEXT,
+        stop_departed_at TEXT,
+        UNIQUE (user_id, recorded_at)
+      );
+      CREATE INDEX IF NOT EXISTS idx_rep_breadcrumbs_user_date
+        ON rep_location_breadcrumbs(user_id, work_date, recorded_at, id);
+    `);
+
+    // Retain route history already collected before this migration.
+    const historicalPoints = database.prepare(`SELECT point.id, point.rep_user_id, point.duty_session_id,
+      point.latitude, point.longitude, point.accuracy, point.captured_at
+      FROM rep_location_points point
+      WHERE NOT EXISTS (
+        SELECT 1 FROM rep_location_breadcrumbs breadcrumb
+        WHERE breadcrumb.user_id = point.rep_user_id AND breadcrumb.recorded_at = point.captured_at
+      ) ORDER BY point.id`).all();
+    const timeZone = database.prepare("SELECT value FROM settings WHERE key = 'timezone'").get()?.value || 'Asia/Riyadh';
+    const localDateFormatter = (() => {
+      try { return new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }); }
+      catch { return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Riyadh', year: 'numeric', month: '2-digit', day: '2-digit' }); }
+    })();
+    const insertBreadcrumb = database.prepare(`INSERT OR IGNORE INTO rep_location_breadcrumbs
+      (user_id, duty_session_id, work_date, latitude, longitude, accuracy, speed, recorded_at)
+      VALUES (?, ?, ?, ?, ?, ?, 0, ?)`);
+    for (const point of historicalPoints) {
+      const parts = Object.fromEntries(localDateFormatter.formatToParts(new Date(point.captured_at))
+        .filter((part) => part.type !== 'literal').map(({ type, value }) => [type, value]));
+      insertBreadcrumb.run(point.rep_user_id, point.duty_session_id,
+        `${parts.year}-${parts.month}-${parts.day}`, point.latitude, point.longitude, point.accuracy, point.captured_at);
+    }
+
+    database.prepare('INSERT INTO schema_migrations (version) VALUES (?)')
+      .run(machineGeofenceBreadcrumbsMigration);
+  });
+  migrate.immediate();
+}
+
 export function migrateClientMachineDeployments(database) {
   const applied = database.prepare('SELECT 1 FROM schema_migrations WHERE version = ?')
     .get(clientMachineDeploymentMigration);
@@ -736,9 +899,13 @@ export function initializeDatabase({ database = db, initialAdminPassword = env.i
     migrateV2FeatureParity(database);
     migrateRepVisitIngestion(database);
     migrateRepSupervisorRadar(database);
+    migrateMachineGeofenceAndBreadcrumbs(database);
     migrateRepVisitMachineCondition(database);
     migrateMaintenanceOrderRepresentatives(database);
     migrateRepVisitPhotoCollections(database);
+    migrateNativeAttendance(database);
+    migrateUserEmployeeLinks(database);
+    migrateUserEmployeeProfileSync(database);
     migrateMaintenanceTripFolders(database);
     migrateMaintenanceOrderDeletion(database);
     migrateMaintenanceCardDeletion(database);
@@ -752,13 +919,16 @@ export function initializeDatabase({ database = db, initialAdminPassword = env.i
     // Keep explicit unattended bootstrap available, but leave a fresh install empty by default
     // so the first administrator is created through the one-time setup screen.
     if (!hasUsers && initialAdminPassword) {
-      if (initialAdminPassword.length < 12) {
-        throw new Error('MADAR_INITIAL_ADMIN_PASSWORD must contain at least 12 characters.');
+      if (typeof initialAdminPassword !== 'string' || initialAdminPassword.length < 4
+          || Buffer.byteLength(initialAdminPassword, 'utf8') > 72) {
+        throw new Error('MADAR_INITIAL_ADMIN_PASSWORD must contain at least 4 characters and no more than 72 UTF-8 bytes.');
       }
       database.prepare(`
         INSERT INTO users (username, password_hash, full_name, role)
         VALUES (?, ?, ?, ?)
       `).run('admin', bcrypt.hashSync(initialAdminPassword, 12), 'System Administrator', 'admin');
+      const admin = database.prepare("SELECT id, full_name, role, active, deleted_at, created_at FROM users WHERE username = 'admin'").get();
+      syncEmployeeForUser(database, admin);
       adminCreated = true;
     }
 

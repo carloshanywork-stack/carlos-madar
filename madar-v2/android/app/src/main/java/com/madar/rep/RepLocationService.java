@@ -199,10 +199,10 @@ public class RepLocationService extends Service implements LocationListener {
         }
         String content = mocked
             ? "تم رصد موقع مزيف. أوقفنا تتبع الوردية."
-            : "يُسجّل MADAR موقع GPS أثناء الوردية.";
+            : "مدار: نظام تسجيل خط السير يعمل في الخلفية.";
         NotificationCompat.Builder builder = new NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_menu_mylocation)
-            .setContentTitle(mocked ? "تحذير أمان الموقع" : "MADAR · الوردية نشطة")
+            .setContentTitle(mocked ? "تحذير أمان الموقع" : "مدار · تسجيل خط السير نشط")
             .setContentText(content)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setOngoing(!mocked)
