@@ -1,0 +1,15 @@
+---
+description: Safety and implementation requirements for MADAR ERP code changes
+globs: system/src/**/*.{js,jsx,ts,tsx}
+alwaysApply: false
+---
+
+# MADAR ERP Engineering
+
+- Preserve local-only data processing and configured `storage/` / backup roots. Never copy customer data, secrets, SQLite files, or backups into code bundles.
+- Use the current SQLite drivers and conventions (`better-sqlite3` migrations/SQL and Sequelize integration). Migrations must be additive, transactional, versioned, registered in `schema_migrations`, and preserve existing IDs, relations, and history. Never recreate production schema or run destructive synchronization.
+- Keep cash, inventory, invoice, payroll, and staff mutations transactionally consistent. Invoice creation is distinct from receipts/payments; main stock is whole units and reusable fractions belong to the secondary warehouse.
+- Keep role checks and audit sensitive changes with actor, action, entity, before/after values, and timestamp. Deactivation must revoke login sessions and must not bypass outstanding tool-custody clearance.
+- Keep archived originals byte-for-byte unchanged. Compress only derived image buffers; retain EXIF timestamp behavior and local file-root/symlink protections.
+- Add focused tests using temporary SQLite databases and storage directories. Run relevant tests, `npm run check`, and `npm run build`; do not test against `system/data/madar.sqlite` or real `storage/`.
+- Report implemented behavior separately from incomplete workflows, business-policy decisions, and unverified production readiness.

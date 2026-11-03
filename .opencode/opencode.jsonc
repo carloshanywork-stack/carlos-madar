@@ -1,0 +1,20 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": [
+    ".opencode/skills/madar-erp-core-guidelines/SKILL.md"
+  ],
+  "mcp": {
+    "servers": {
+      "madar-filesystem": {
+        "type": "local",
+        "command": [
+          "npx",
+          "-y",
+          "@modelcontextprotocol/server-filesystem@2.0.1",
+          "C:\\Users\\Carlos.wok\\Desktop\\MADAR"
+        ],
+        "cwd": "C:\\Users\\Carlos.wok\\Desktop\\MADAR"
+      }
+    }
+  }
+}

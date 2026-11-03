@@ -1,0 +1,56 @@
+.madar-attendance-matrix { overflow: visible; }
+.madar-attendance-toolbar { align-items: flex-start; flex-wrap: wrap; gap: 14px; }
+.madar-attendance-toolbar h2 { margin: 0 0 5px; font-size: 17px; }
+.madar-attendance-toolbar p { margin: 0; color: var(--madar-muted); font-size: 11px; }
+.madar-attendance-toolbar-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.madar-attendance-month-nav { display: flex; align-items: center; gap: 6px; }
+.madar-attendance-month-nav input { min-height: 34px; padding: 5px 9px; border: 1px solid var(--madar-border); border-radius: 7px; background: var(--madar-surface); color: var(--madar-text); font: inherit; }
+.madar-attendance-grid-scroll { max-height: min(72vh, 780px); overflow: auto; border-top: 1px solid var(--madar-border); }
+.madar-attendance-grid { width: max-content; min-width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: 0; text-align: center; font-size: 11px; }
+.madar-attendance-grid th, .madar-attendance-grid td { min-width: 48px; height: 43px; padding: 3px; border-inline-start: 1px solid var(--madar-border); border-bottom: 1px solid var(--madar-border); background: var(--madar-surface); }
+.madar-attendance-grid thead th { position: sticky; z-index: 4; top: 0; min-width: 48px; height: 58px; color: var(--madar-muted); background: var(--madar-surface-raised, var(--madar-surface)); box-shadow: 0 1px 0 var(--madar-border); }
+.madar-attendance-grid .madar-attendance-sticky { position: sticky; z-index: 3; background: var(--madar-surface); text-align: right; }
+.madar-attendance-grid thead .madar-attendance-sticky { z-index: 6; background: var(--madar-surface-raised, var(--madar-surface)); }
+.madar-attendance-grid .madar-attendance-employee { right: 0; width: 180px; min-width: 180px; max-width: 180px; font-weight: 750; }
+.madar-attendance-grid .madar-attendance-department { right: 180px; width: 112px; min-width: 112px; max-width: 112px; color: var(--madar-muted); }
+.madar-attendance-grid .madar-attendance-summary-head, .madar-attendance-grid .madar-attendance-summary-value { min-width: 64px; font-weight: 800; }
+.madar-attendance-grid .madar-attendance-summary-head { background: #e7eef7; color: #334155; }
+.madar-attendance-grid .madar-attendance-summary-value { color: var(--madar-text); font-variant-numeric: tabular-nums; }
+.madar-attendance-grid .madar-day-weekend { background: #fff1e8; }
+.madar-attendance-grid thead .madar-day-weekend { background: #ffdfc9; color: #9a3412; }
+.madar-attendance-grid .madar-attendance-weekday { display: block; font-size: 9px; }
+.madar-attendance-grid thead th > strong { display: block; color: var(--madar-text); font-size: 12px; }
+.madar-attendance-grid .madar-attendance-bulk { border: 0; padding: 1px 3px; border-radius: 4px; background: #d1fae5; color: #047857; font-size: 8px; cursor: pointer; }
+.madar-attendance-grid .madar-attendance-bulk:disabled { opacity: .45; cursor: not-allowed; }
+.madar-attendance-grid .madar-attendance-cell { position: relative; min-width: 48px; padding: 2px 1px; }
+.madar-attendance-grid .madar-attendance-cell.is-dirty { box-shadow: inset 0 0 0 2px #f59e0b; }
+.madar-attendance-cell-status { width: 27px; height: 27px; border: 0; border-radius: 7px; font-size: 13px; font-weight: 800; cursor: pointer; }
+.madar-attendance-cell-status:disabled { cursor: wait; opacity: .55; }
+.madar-attendance-cell-status.badge-present { background: #dcfce7; color: #166534; }
+.madar-attendance-cell-status.badge-absent { background: #fee2e2; color: #991b1b; }
+.madar-attendance-cell-status.badge-leave { background: #dbeafe; color: #1d4ed8; }
+.madar-attendance-cell-status.badge-late { background: #fef3c7; color: #92400e; }
+.madar-attendance-cell-status.badge-empty { background: transparent; color: #94a3b8; }
+.madar-attendance-cell-edit { position: absolute; top: 1px; left: 0; width: 14px; height: 15px; border: 0; border-radius: 0 0 5px 0; background: #dbeafe; color: #1d4ed8; opacity: 0; font-size: 11px; line-height: 12px; cursor: pointer; }
+.madar-attendance-cell:hover .madar-attendance-cell-edit, .madar-attendance-cell-edit:focus-visible { opacity: 1; }
+.madar-attendance-department-row th { position: sticky; z-index: 2; right: 0; height: 30px; padding: 4px 12px; background: #dce7f2; color: #334155; text-align: right; font-size: 10px; }
+.madar-attendance-cell-editor { position: fixed; z-index: 1200; display: grid; width: min(340px, calc(100vw - 24px)); gap: 9px; padding: 13px; border: 1px solid var(--madar-border); border-radius: 11px; background: var(--madar-surface); color: var(--madar-text); box-shadow: 0 16px 48px rgba(0, 0, 0, .28); }
+.madar-attendance-editor-header { display: flex; justify-content: space-between; gap: 10px; align-items: center; }
+.madar-attendance-editor-header button { border: 0; background: transparent; color: var(--madar-muted); font-size: 20px; cursor: pointer; }
+.madar-attendance-cell-editor label { display: grid; gap: 4px; color: var(--madar-muted); font-size: 10px; }
+.madar-attendance-cell-editor input, .madar-attendance-cell-editor select { min-width: 0; padding: 7px 8px; border: 1px solid var(--madar-border); border-radius: 6px; background: var(--madar-bg, var(--madar-surface)); color: var(--madar-text); font: inherit; }
+
+#madar-app[data-theme="dark"] .madar-attendance-grid th,
+#madar-app[data-theme="dark"] .madar-attendance-grid td { background: #111b2b; }
+#madar-app[data-theme="dark"] .madar-attendance-grid thead th,
+#madar-app[data-theme="dark"] .madar-attendance-grid thead .madar-attendance-sticky { background: #1a2638; }
+#madar-app[data-theme="dark"] .madar-attendance-grid .madar-day-weekend { background: #3a2922; }
+#madar-app[data-theme="dark"] .madar-attendance-grid thead .madar-day-weekend { background: #583322; color: #fed7aa; }
+#madar-app[data-theme="dark"] .madar-attendance-grid .madar-attendance-summary-head { background: #263449; color: #e2e8f0; }
+#madar-app[data-theme="dark"] .madar-attendance-grid .madar-attendance-department-row th { background: #263449; color: #e2e8f0; }
+
+@media (max-width: 800px) {
+  .madar-attendance-toolbar-actions { justify-content: flex-start; }
+  .madar-attendance-grid .madar-attendance-employee { width: 135px; min-width: 135px; max-width: 135px; }
+  .madar-attendance-grid .madar-attendance-department { right: 135px; width: 90px; min-width: 90px; max-width: 90px; }
+}

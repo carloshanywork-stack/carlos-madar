@@ -1,0 +1,46 @@
+{
+  "name": "madar-v2",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Clean local-first foundation for MADAR V2",
+  "engines": {
+    "node": ">=22"
+  },
+  "type": "module",
+  "scripts": {
+    "start": "node --max-old-space-size=4096 server/index.js",
+    "test": "node --test test/*.test.js",
+    "android:add": "npx cap add android",
+    "android:sync": "node scripts/build-android.js --sync-only",
+    "android:debug": "node scripts/build-android.js",
+    "db:init": "node server/database/init.js",
+    "db:migrate-v1": "node scripts/migrate-from-v1.js"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.6.0",
+    "@capacitor/app": "^8.1.2",
+    "@capacitor/camera": "^8.2.6",
+    "@capacitor/cli": "^8.6.0",
+    "@capacitor/core": "^8.6.0",
+    "@capacitor/filesystem": "^8.1.5",
+    "@capacitor/geolocation": "^8.2.4",
+    "@capacitor/network": "^8.0.1",
+    "archiver": "^8.0.0",
+    "bcryptjs": "^2.4.3",
+    "better-sqlite3": "^13.0.0",
+    "cors": "^2.8.5",
+    "docx": "^9.15.0",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.0",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^2.5.0",
+    "pptxgenjs": "^4.0.1",
+    "sharp": "^0.35.5",
+    "xlsx": "^0.18.5",
+    "xlsx-js-style": "^1.2.0",
+    "yauzl": "^3.4.0"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2"
+  }
+}

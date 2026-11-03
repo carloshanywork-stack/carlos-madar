@@ -1,0 +1,12 @@
+.env
+system/.env
+system/node_modules/
+system/dist/
+system/data/*.sqlite*
+system/data/thumbnails/
+storage/*
+!storage/.gitkeep
+Backups/
+*.log
+Thumbs.db
+.DS_Store
