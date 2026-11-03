@@ -1026,7 +1026,12 @@ test('area maintenance notes show the latest eligible note, export styled area g
   const sheetXml = (await readZipEntry(allExport.body, 'xl/worksheets/sheet1.xml')).toString('utf8');
   assert.match(styleXml, /174F63/, 'area banner fill color should be written into the workbook styles');
   assert.match(styleXml, /DCEBF0/, 'table header fill color should be written into the workbook styles');
+  assert.match(styleXml, /<sz val="15"\s*\/>/, 'area banner font should be enlarged');
+  assert.match(styleXml, /<sz val="13"\s*\/>/, 'column header font should be enlarged');
+  assert.match(styleXml, /<sz val="12"\s*\/>/, 'machine and note fonts should be readable');
+  assert.match(styleXml, /readingOrder="2"/, 'cell styles should force right-to-left reading order');
   assert.match(sheetXml, /mergeCell ref="A\d+:D\d+"/);
+  assert.match(sheetXml, /<sheetView\b[^>]*\brightToLeft="1"/, 'the worksheet view should open right-to-left');
   assert.match(sheetXml, /r="A1" s="\d+"/, 'the merged area banner cell should have a style');
 
   const filteredExport = await request(`/api/maintenance/area-notes/export.xlsx?area=${encodeURIComponent('Area Notes East')}`);
@@ -1046,6 +1051,12 @@ test('area maintenance notes show the latest eligible note, export styled area g
   assert.match(filteredSheetXml, /<pageSetup[^>]*paperSize="9"[^>]*orientation="portrait"/,
     'the async export route should return an A4 portrait workbook');
   assert.match(filteredSheetXml, /<pageMargins[^>]*left="0.5"[^>]*right="0.5"/);
+  for (let row = 9; row <= 24; row += 1) {
+    for (const column of ['A', 'B', 'C', 'D']) {
+      assert.match(filteredSheetXml, new RegExp(`<c\\b[^>]*\\br="${column}${row}"[^>]*\\bs="\\d+"`),
+        `padded A4 cell ${column}${row} should retain its table border style`);
+    }
+  }
   assert.equal((await request('/api/maintenance/area-notes/export.xlsx?area=%20')).response.status, 400);
 
   const cleared = await request(`/api/maintenance/machines/${machine.id}/maintenance-note`, { method: 'DELETE' });
@@ -1108,9 +1119,16 @@ test('area maintenance workbook paginates A4 pages and repeats banners and heade
     'the exported worksheet should be configured for A4 portrait paper');
   assert.match(worksheetXml, /fitToWidth="1"/);
   assert.match(worksheetXml, /fitToHeight="0"/);
+  assert.match(worksheetXml, /<sheetView\b[^>]*\brightToLeft="1"/, 'every exported worksheet should open right-to-left');
   assert.match(worksheetXml, /<rowBreaks count="2" manualBreakCount="2"><brk id="24" max="16383" man="1"\/><brk id="48" max="16383" man="1"\/><\/rowBreaks>/,
     'each 24-row page block should have an explicit manual page break');
   assert.match(worksheetXml, /<autoFilter ref="A2:D72"\/>/);
+  for (let row = 28; row <= 48; row += 1) {
+    for (const column of ['A', 'B', 'C', 'D']) {
+      assert.match(worksheetXml, new RegExp(`<c\\b[^>]*\\br="${column}${row}"[^>]*\\bs="\\d+"`),
+        `overflow-page padding cell ${column}${row} should retain its table border style`);
+    }
+  }
 });
 
 test('maintenance PPTX and Excel exports sort Arabic areas and machine codes naturally', async () => {

@@ -12,6 +12,18 @@ const ROWS_PER_A4_PAGE = MACHINES_PER_A4_PAGE + 2;
 function addWorksheetPrintSetup(sheetXml, totalRows) {
   const sheetProperties = '<sheetPr><pageSetUpPr fitToPage="1" autoPageBreaks="0"/></sheetPr>';
   let xml = sheetXml.replace(/(<worksheet\b[^>]*>)/, `$1${sheetProperties}`);
+  if (/<sheetViews\b[^>]*>/.test(xml)) {
+    if (/<sheetView\b/.test(xml)) {
+      xml = xml.replace(/<sheetView\b([^>]*?)(\/?)>/g, (_match, attributes, selfClosing) => {
+        const withoutRightToLeft = attributes.replace(/\s+rightToLeft=(?:"[^"]*"|'[^']*'|[^\s/>]+)/, '');
+        return `<sheetView${withoutRightToLeft} rightToLeft="1"${selfClosing}>`;
+      });
+    } else {
+      xml = xml.replace(/<sheetViews\b[^>]*>/, '$&<sheetView workbookViewId="0" rightToLeft="1"/>');
+    }
+  } else {
+    xml = xml.replace(/(<sheetPr\b[^>]*>.*?<\/sheetPr>)/s, '$1<sheetViews><sheetView workbookViewId="0" rightToLeft="1"/></sheetViews>');
+  }
   const pageSetup = '<pageSetup paperSize="9" orientation="portrait" scale="100" fitToWidth="1" fitToHeight="0"/>';
   const rowBreaks = [];
   for (let row = ROWS_PER_A4_PAGE; row < totalRows; row += ROWS_PER_A4_PAGE) {
@@ -181,6 +193,7 @@ export async function buildAreaMaintenanceNotesWorkbook(input = {}, database = d
 
       const remainingSlots = MACHINES_PER_A4_PAGE - pageMachines.length;
       for (let index = 0; index < remainingSlots; index += 1) {
+        contentRows.push(rows.length);
         rows.push(['', '', '', '']);
       }
 
@@ -221,13 +234,13 @@ export async function buildAreaMaintenanceNotesWorkbook(input = {}, database = d
 
   const bannerStyle = {
     fill: { patternType: 'solid', fgColor: { rgb: '174F63' } },
-    font: { bold: true, color: { rgb: 'FFFFFF' }, sz: 14 },
-    alignment: { horizontal: 'right', vertical: 'center' },
+    font: { bold: true, color: { rgb: 'FFFFFF' }, sz: 15 },
+    alignment: { horizontal: 'right', vertical: 'center', readingOrder: 2 },
   };
   const headerStyle = {
     fill: { patternType: 'solid', fgColor: { rgb: 'DCEBF0' } },
-    font: { bold: true, color: { rgb: '17394A' } },
-    alignment: { horizontal: 'right', vertical: 'center' },
+    font: { bold: true, color: { rgb: '17394A' }, sz: 13 },
+    alignment: { horizontal: 'right', vertical: 'center', readingOrder: 2 },
     border: {
       bottom: { style: 'thin', color: { rgb: '9BB9C4' } },
       top: { style: 'thin', color: { rgb: '9BB9C4' } },
@@ -236,17 +249,19 @@ export async function buildAreaMaintenanceNotesWorkbook(input = {}, database = d
     },
   };
   const cellBorder = {
-    top: { style: 'thin', color: { rgb: 'E2E8F0' } },
-    bottom: { style: 'thin', color: { rgb: 'E2E8F0' } },
-    left: { style: 'thin', color: { rgb: 'E2E8F0' } },
-    right: { style: 'thin', color: { rgb: 'E2E8F0' } },
+    top: { style: 'thin', color: { rgb: 'CBD5E1' } },
+    bottom: { style: 'thin', color: { rgb: 'CBD5E1' } },
+    left: { style: 'thin', color: { rgb: 'CBD5E1' } },
+    right: { style: 'thin', color: { rgb: 'CBD5E1' } },
   };
   const contentStyle = {
-    alignment: { horizontal: 'right', vertical: 'center' },
+    font: { sz: 12, bold: false, color: { rgb: '0F172A' } },
+    alignment: { horizontal: 'right', vertical: 'center', readingOrder: 2 },
     border: cellBorder,
   };
   const noteStyle = {
-    alignment: { horizontal: 'right', vertical: 'top', wrapText: true },
+    font: { sz: 12, bold: false, color: { rgb: '0F172A' } },
+    alignment: { horizontal: 'right', vertical: 'top', wrapText: true, readingOrder: 2 },
     border: cellBorder,
   };
 
@@ -264,10 +279,12 @@ export async function buildAreaMaintenanceNotesWorkbook(input = {}, database = d
   for (const row of contentRows) {
     for (let column = 0; column < 3; column += 1) {
       const address = XLSX.utils.encode_cell({ r: row, c: column });
-      if (worksheet[address]) worksheet[address].s = contentStyle;
+      worksheet[address] ??= { t: 's', v: '' };
+      worksheet[address].s = contentStyle;
     }
     const noteAddress = XLSX.utils.encode_cell({ r: row, c: 3 });
-    if (worksheet[noteAddress]) worksheet[noteAddress].s = noteStyle;
+    worksheet[noteAddress] ??= { t: 's', v: '' };
+    worksheet[noteAddress].s = noteStyle;
   }
 
   const workbook = XLSX.utils.book_new();
