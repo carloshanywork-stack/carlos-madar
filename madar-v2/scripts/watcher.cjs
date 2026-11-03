@@ -10,7 +10,7 @@ let running = false;
 function check() {
   if (running) return;
   running = true;
-  execFile(script, { timeout: 120_000 }, (error, stdout, stderr) => {
+  execFile(script, { timeout: 600_000 }, (error, stdout, stderr) => {
     running = false;
     const out = String(stdout).trim();
     const err = String(stderr).trim();
