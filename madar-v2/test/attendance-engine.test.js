@@ -132,21 +132,26 @@ test('4-character passwords, new user employee sync, and first-admin employee sy
   assert.equal(db.prepare('SELECT name FROM employees WHERE user_id = ?').get(rep.body.id).name, 'Omar A.');
 });
 
-test('shift engine counts regular windows and the whole Friday shift as overtime', () => {
-  assert.deepEqual(calculateShiftHours('2026-02-05T06:00:00.000Z', '2026-02-05T16:30:00.000Z', 'Asia/Riyadh'), {
+test('shift engine uses Cairo winter/summer offsets and counts Friday as overtime', () => {
+  assert.deepEqual(calculateShiftHours('2026-02-05T06:00:00.000Z', '2026-02-05T16:30:00.000Z', 'Africa/Cairo'), {
     totalHours: 10.5,
     regularHours: 9,
-    overtimeHours: 1.5,
+    overtimeHours: 0.5,
   });
-  assert.deepEqual(calculateShiftHours('2026-02-06T06:00:00.000Z', '2026-02-06T14:30:00.000Z', 'Asia/Riyadh'), {
+  assert.deepEqual(calculateShiftHours('2026-02-06T06:00:00.000Z', '2026-02-06T14:30:00.000Z', 'Africa/Cairo'), {
     totalHours: 8.5,
     regularHours: 0,
     overtimeHours: 8.5,
   });
-  assert.deepEqual(calculateShiftHours('2026-02-05T05:00:00.000Z', '2026-02-05T15:00:00.000Z', 'Asia/Riyadh'), {
+  assert.deepEqual(calculateShiftHours('2026-02-05T05:00:00.000Z', '2026-02-05T15:00:00.000Z', 'Africa/Cairo'), {
+    totalHours: 10,
+    regularHours: 8,
+    overtimeHours: 0,
+  });
+  assert.deepEqual(calculateShiftHours('2026-07-30T06:00:00.000Z', '2026-07-30T16:00:00.000Z', 'Africa/Cairo'), {
     totalHours: 10,
     regularHours: 9,
-    overtimeHours: 0,
+    overtimeHours: 1,
   });
 });
 

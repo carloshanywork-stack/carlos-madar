@@ -4,6 +4,7 @@ import { extname } from 'node:path';
 import { asyncHandler, HttpError } from '../http.js';
 import { diskUpload, memoryUpload } from '../upload.js';
 import { requestActorId } from '../actor.js';
+import { publishOperationsEvent } from '../operations-events.js';
 import { getMaintenanceThumbnail } from './thumbnails.js';
 import { ensureStorageDirectory, listStorageDirectories, removeStorageFile } from '../storage.js';
 import { exportMaintenancePptx, exportMaintenanceReport, getExportProgress } from './export.js';
@@ -239,7 +240,16 @@ router.post('/orders', (req, res, next) => {
     if (req.body?.repUserIds !== undefined && req.user?.role !== 'admin') {
       throw new HttpError(403, 'Only administrators may assign field representatives to an order.');
     }
-    res.status(201).json(createMaintenanceOrder(req.body, requestActorId(req)));
+    const order = createMaintenanceOrder(req.body, requestActorId(req));
+    if (order.representatives?.length) {
+      publishOperationsEvent('maintenance.order.assigned', {
+        orderId: order.id,
+        orderCode: order.order_code,
+        areas: order.areas ?? [order.area].filter(Boolean),
+        recipientUserIds: order.representatives.map((representative) => Number(representative.id)),
+      });
+    }
+    res.status(201).json(order);
   } catch (error) {
     next(error);
   }
@@ -247,7 +257,19 @@ router.post('/orders', (req, res, next) => {
 
 router.put('/orders/:id/representatives', requireRole('admin'), (req, res, next) => {
   try {
-    res.json(replaceMaintenanceOrderRepresentatives(req.params.id, req.body, requestActorId(req)));
+    const result = replaceMaintenanceOrderRepresentatives(req.params.id, req.body, requestActorId(req));
+    const order = getMaintenanceOrder(req.params.id);
+    if (result.notifyRepUserIds.length) {
+      publishOperationsEvent('maintenance.order.assigned', {
+        orderId: order.id,
+        orderCode: order.order_code,
+        areas: order.areas ?? [order.area].filter(Boolean),
+        assignedUserIds: result.assignedRepUserIds,
+        previousUserIds: result.previousRepUserIds,
+        recipientUserIds: result.notifyRepUserIds,
+      });
+    }
+    res.json({ representatives: result.representatives });
   } catch (error) {
     next(error);
   }

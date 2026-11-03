@@ -4,7 +4,8 @@ import { db } from '../../database/connection.js';
 import { asyncHandler, allowOnlyKeys, HttpError, requireObject, requireText } from '../http.js';
 import { diskUploadMany } from '../upload.js';
 import { ensureStorageDirectory, removeStorageFile } from '../storage.js';
-import { publishOperationsEvent } from '../operations-events.js';
+import { publishOperationsEvent, subscribeOperationsEvents } from '../operations-events.js';
+import { loginRateLimiter } from '../auth/login-rate-limit.js';
 import { clockInForRep, clockOutForRep, getTodayAttendanceForRep } from '../employees/attendance.js';
 import {
   authenticateRepUser,
@@ -35,7 +36,7 @@ function setSessionCookie(res, token) {
   });
 }
 
-router.post('/login', asyncHandler(async (req, res) => {
+router.post('/login', loginRateLimiter, asyncHandler(async (req, res) => {
   const body = requireObject(req.body);
   allowOnlyKeys(body, ['username', 'password']);
   const username = requireText(body.username, 'Username', { minLength: 1, maxLength: 64 });
@@ -60,6 +61,37 @@ router.post('/login', asyncHandler(async (req, res) => {
 
 router.use(requireActiveRep);
 
+router.get('/events', (req, res) => {
+  const repId = Number(req.user.id);
+  res.status(200).set({
+    'Cache-Control': 'private, no-cache, no-transform',
+    Connection: 'keep-alive',
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'X-Accel-Buffering': 'no',
+  });
+  res.flushHeaders?.();
+  res.write('retry: 3000\n\n');
+  const unsubscribe = subscribeOperationsEvents((event) => {
+    if (event.type === 'system.shutdown') {
+      res.write(`id: ${event.id}\nevent: operations\ndata: ${JSON.stringify(event)}\n\n`);
+      res.end();
+      return;
+    }
+    const recipients = Array.isArray(event.recipientUserIds) ? event.recipientUserIds.map(Number) : [];
+    const isDirectRecipient = Number(event.userId) === repId;
+    if (!recipients.includes(repId) && !isDirectRecipient) return;
+    res.write(`id: ${event.id}\nevent: operations\ndata: ${JSON.stringify(event)}\n\n`);
+  });
+  const heartbeat = setInterval(() => res.write(': keepalive\n\n'), 25_000);
+  heartbeat.unref?.();
+  const close = () => {
+    clearInterval(heartbeat);
+    unsubscribe();
+  };
+  res.once('close', close);
+  res.once('error', close);
+});
+
 router.get('/attendance/today', (req, res) => {
   res.set({ 'Cache-Control': 'private, no-store', Pragma: 'no-cache' });
   res.json({ success: true, ...getTodayAttendanceForRep(req.user.id) });
@@ -82,6 +114,15 @@ router.post('/attendance/clock-out', (req, res) => {
     employeeId: attendance.employee_id,
     workDate: attendance.work_date,
   });
+  if (attendance.overtime_status === 'pending' && Number(attendance.overtime_hours) > 0) {
+    publishOperationsEvent('overtime.pending', {
+      userId: req.user.id,
+      employeeId: attendance.employee_id,
+      employeeName: attendance.name,
+      workDate: attendance.work_date,
+      overtimeHours: Number(attendance.overtime_hours),
+    });
+  }
   res.json({ success: true, attendance });
 });
 

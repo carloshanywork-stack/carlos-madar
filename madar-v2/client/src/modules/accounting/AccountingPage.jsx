@@ -70,23 +70,18 @@ export default function AccountingPage({ isAdmin = false }) {
 
   useEffect(() => {
     if (!isAdmin || !['attendance', 'payroll'].includes(tab)) return undefined;
-    const events = new EventSource('/api/supervisor/events', { withCredentials: true });
     const onOperationsEvent = (message) => {
-      try {
-        const event = JSON.parse(message.data);
-        if (!['attendance.changed', 'overtime.reviewed'].includes(event.type)) return;
-        void Promise.all([reloadAttendance(), reloadPendingOvertime(), reloadPayroll()]);
-        window.dispatchEvent(new CustomEvent('madar:attendance-updated', { detail: event }));
-      } catch {
-        // Ignore malformed event frames; users can still refresh through the UI.
-      }
+      const event = message.detail;
+      if (!['attendance.changed', 'overtime.reviewed', 'overtime.pending'].includes(event?.type)) return;
+      void Promise.all([reloadAttendance(), reloadPendingOvertime(), reloadPayroll()]);
+      window.dispatchEvent(new CustomEvent('madar:attendance-updated', { detail: event }));
+      if (event.type === 'overtime.pending') showToast('يوجد أوفر تايم جديد بانتظار الاعتماد.');
     };
-    events.addEventListener('operations', onOperationsEvent);
+    window.addEventListener('madar:operations-event', onOperationsEvent);
     return () => {
-      events.removeEventListener('operations', onOperationsEvent);
-      events.close();
+      window.removeEventListener('madar:operations-event', onOperationsEvent);
     };
-  }, [isAdmin, tab, reloadAttendance, reloadPendingOvertime, reloadPayroll]);
+  }, [isAdmin, tab, reloadAttendance, reloadPendingOvertime, reloadPayroll, showToast]);
 
   async function saveEmployee(event) {
     event.preventDefault();

@@ -4,7 +4,7 @@ import { HttpError, allowOnlyKeys, optionalText, positiveId, requireObject, requ
 import { resolveStorageFile } from '../storage.js';
 import { recordAudit } from '../audit.js';
 
-const DEFAULT_TIME_ZONE = 'Asia/Riyadh';
+const DEFAULT_TIME_ZONE = 'Africa/Cairo';
 
 function getTimeZone(database) {
   const configured = database.prepare("SELECT value FROM settings WHERE key = 'timezone'").get()?.value;
@@ -320,7 +320,7 @@ export function reviewRepVisit(visitIdInput, input, actorId, database = defaultD
       `).run(note, actorId, visitId);
       recordAudit({ database, actorId, action: 'request_reshoot', entityType: 'rep_visit', entityId: visitId,
         oldValues: { status: 'pending' }, newValues: { status: 'reshoot', note } });
-      return { success: true, status: 'reshoot_requested', visitId };
+      return { success: true, status: 'reshoot_requested', visitId, repUserId: Number(visit.rep_user_id) };
     }
 
     if (!visit.card_id || !visit.before_photos_json || !visit.after_photos_json || visit.order_deleted_at
@@ -368,7 +368,7 @@ export function reviewRepVisit(visitIdInput, input, actorId, database = defaultD
     recordAudit({ database, actorId, action: 'approve', entityType: 'rep_visit', entityId: visitId,
       oldValues: { status: 'pending', card_status: visit.card_status, reason_ids: oldReasonIds },
       newValues: { status: 'approved', card_status: 'completed', reason_ids: reasonIds, note } });
-    return { success: true, status: 'approved', visitId, cardId: Number(visit.card_id) };
+    return { success: true, status: 'approved', visitId, cardId: Number(visit.card_id), repUserId: Number(visit.rep_user_id) };
   }).immediate();
 }
 

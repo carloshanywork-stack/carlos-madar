@@ -79,6 +79,26 @@ function jsonOptions(method, body) {
   };
 }
 
+async function readOperationsEvent(response, expectedType) {
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) throw new Error(`Operations stream closed before ${expectedType} arrived.`);
+    buffer += decoder.decode(value, { stream: true });
+    while (buffer.includes('\n\n')) {
+      const separator = buffer.indexOf('\n\n');
+      const frame = buffer.slice(0, separator);
+      buffer = buffer.slice(separator + 2);
+      const dataLine = frame.split('\n').find((line) => line.startsWith('data: '));
+      if (!dataLine) continue;
+      const event = JSON.parse(dataLine.slice(6));
+      if (event.type === expectedType) return event;
+    }
+  }
+}
+
 test('rep role migration preserves users and their existing foreign-key references', () => {
   legacyDatabase = createConnection(join(temporaryDirectory, 'legacy-users.sqlite'));
   legacyDatabase.exec(`
@@ -316,6 +336,8 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   assert.equal(repCannotReadSupervisorRadar.response.status, 403);
   const repCannotReadSupervisorEvents = await request('/api/supervisor/events', {}, login.cookie);
   assert.equal(repCannotReadSupervisorEvents.response.status, 403);
+  const adminCannotReadRepEvents = await request('/api/rep/events', {}, adminCookie);
+  assert.equal(adminCannotReadRepEvents.response.status, 403);
 
   const faultReasons = await request('/api/rep/fault-reasons', {}, login.cookie);
   assert.equal(faultReasons.response.status, 200);
@@ -381,7 +403,11 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
     geofence_radius_meters: 50,
     area_name: 'التجمع',
   });
-  assert.match(storedVisit.before_path, /^Areas\/التجمع\/1434_.*\/\d{4}-\d{2}-\d{2}_REP-ROUTE-1\/[0-9a-f-]{36}\/before\//i);
+  assert.match(storedVisit.before_path, /^Areas\/التجمع\/1434_.*\/\d{4}-\d{2}-\d{2}_\d+\/before\/[0-9a-f-]{36}-before-0001\.jpg$/i);
+  const compressedBeforeMetadata = await sharp(readFileSync(beforePath)).metadata();
+  assert.equal(compressedBeforeMetadata.format, 'jpeg');
+  assert.ok(compressedBeforeMetadata.width <= 1920 && compressedBeforeMetadata.height <= 1080);
+  assert.equal(compressedBeforeMetadata.exif, undefined);
 
   const outsideFence = await request('/api/rep/sync-visit', {
     method: 'POST',
@@ -407,6 +433,32 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   assert.equal(pendingMachine.isCompleted, false);
   assert.equal(pendingMachine.isSubmitted, true);
   assert.equal(pendingMachine.canVisit, false);
+
+  const repEventController = new AbortController();
+  db.prepare('DELETE FROM maintenance_order_reps WHERE order_id = ? AND user_id = ?').run(orderId, repId);
+  const repEventResponse = await fetch(`${baseUrl}/api/rep/events`, {
+    headers: { cookie: login.cookie },
+    signal: repEventController.signal,
+  });
+  assert.equal(repEventResponse.status, 200);
+  const assignmentEventPromise = readOperationsEvent(repEventResponse, 'maintenance.order.assigned');
+  const reassigned = await request(`/api/maintenance/orders/${orderId}/representatives`, jsonOptions('PUT', {
+    repUserIds: [repId],
+  }), adminCookie);
+  assert.equal(reassigned.response.status, 200);
+  let assignmentEvent;
+  let assignmentTimeout;
+  try {
+    assignmentEvent = await Promise.race([
+      assignmentEventPromise,
+      new Promise((_, reject) => { assignmentTimeout = setTimeout(() => reject(new Error('Timed out waiting for rep assignment event.')), 2000); }),
+    ]);
+  } finally {
+    clearTimeout(assignmentTimeout);
+    repEventController.abort();
+  }
+  assert.equal(assignmentEvent.orderId, orderId);
+  assert.ok(assignmentEvent.recipientUserIds.includes(repId));
 
   const firstQa = await request('/api/supervisor/qa/queue', {}, adminCookie);
   assert.equal(firstQa.response.status, 200);
@@ -576,7 +628,7 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   assert.equal(nourOnRadar.phone, '+966500000001');
   assert.ok(nourOnRadar.distanceKm > 0);
   const localDate = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Riyadh', year: 'numeric', month: '2-digit', day: '2-digit',
+    timeZone: 'Africa/Cairo', year: 'numeric', month: '2-digit', day: '2-digit',
   }).formatToParts(new Date()).filter((part) => part.type !== 'literal').map(({ type, value }) => [type, value]));
   const routeDate = `${localDate.year}-${localDate.month}-${localDate.day}`;
   const repRoute = await request(`/api/supervisor/reps/${repId}/route?date=${routeDate}`, {}, adminCookie);

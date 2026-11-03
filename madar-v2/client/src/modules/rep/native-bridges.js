@@ -50,6 +50,7 @@ export async function getNativeGpsLocation() {
     latitude: result.latitude,
     longitude: result.longitude,
     accuracy: result.accuracy,
+    speed: result.speed ?? 0,
     updatedAt: new Date(result.timestamp).toISOString(),
   };
 }

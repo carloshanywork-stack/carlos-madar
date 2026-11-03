@@ -78,6 +78,7 @@ function AuthenticatedApplication() {
   const [loading, setLoading] = useState(true);
   const [authError, setAuthError] = useState('');
   const [offlineOnly, setOfflineOnly] = useState(false);
+  const [operationsAlert, setOperationsAlert] = useState('');
 
   const fetchAuthStatus = useCallback(async () => {
     setLoading(true);
@@ -158,6 +159,29 @@ function AuthenticatedApplication() {
   }, [fetchAuthStatus, offlineOnly]);
 
   useEffect(() => {
+    if (offlineOnly || user?.role !== 'admin') return undefined;
+    const events = new EventSource('/api/supervisor/events', { withCredentials: true });
+    const onOperationsEvent = (message) => {
+      try {
+        const event = JSON.parse(message.data);
+        window.dispatchEvent(new CustomEvent('madar:operations-event', { detail: event }));
+        if (event.type === 'overtime.pending') {
+          const hours = Number(event.overtimeHours);
+          const hoursLabel = Number.isFinite(hours) ? ` (${hours} ساعة)` : '';
+          setOperationsAlert(`أوفر تايم جديد بانتظار الاعتماد${hoursLabel}${event.employeeName ? ` · ${event.employeeName}` : ''}.`);
+        }
+      } catch {
+        // Ignore malformed event frames; the regular API refresh remains available.
+      }
+    };
+    events.addEventListener('operations', onOperationsEvent);
+    return () => {
+      events.removeEventListener('operations', onOperationsEvent);
+      events.close();
+    };
+  }, [offlineOnly, user?.role]);
+
+  useEffect(() => {
     try {
       window.localStorage.setItem('madar-v2-theme', theme);
     } catch {
@@ -205,6 +229,13 @@ function AuthenticatedApplication() {
 
   return (
     <div id="madar-app" dir="rtl" data-theme={theme}>
+      {user?.role === 'admin' && operationsAlert && (
+        <aside className="madar-operations-alert" role="status">
+          <span>{operationsAlert}</span>
+          <a href="/accounting">مراجعة شيت الحضور</a>
+          <button type="button" onClick={() => setOperationsAlert('')} aria-label="إغلاق التنبيه">×</button>
+        </aside>
+      )}
       {loading ? <LoadingState label="جارٍ التحقق من تسجيل الدخول..." /> : !user ? (
           <SignInPage
             setupRequired={setupRequired}

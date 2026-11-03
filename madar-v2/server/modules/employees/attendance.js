@@ -2,7 +2,7 @@ import { db } from '../../database/connection.js';
 import { recordAudit } from '../audit.js';
 import { HttpError, allowOnlyKeys, positiveId, requireObject, requireText } from '../http.js';
 
-const DEFAULT_TIME_ZONE = 'Asia/Riyadh';
+const DEFAULT_TIME_ZONE = 'Africa/Cairo';
 const hourMs = 60 * 60 * 1000;
 
 function getTimeZone(database) {

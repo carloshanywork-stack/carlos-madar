@@ -255,6 +255,16 @@ View alerts with `sudo journalctl -t madar-storage-alert`. If the host has a con
 - The app listens only on `127.0.0.1:3000`; Cloudflare Tunnel connects to that loopback address. Never open Node's port 3000 to the network.
 - Keep `.env`, SQLite files, customer storage, PM2 logs, and backups private. The deployment script intentionally does not recursively chmod the source tree.
 - MADAR's scheduled ZIP backups default to `/mnt/storage/Backups`. Set a separate, protected backup destination/retention policy and periodically test restores on an isolated copy; a backup on the same disk is not disaster recovery.
+- `scripts/cloud-backup.sh` creates an **encrypted local** ZIP bundle; it does not upload data. Install `python3`, Info-ZIP (`zip`), GnuPG (`gpg`), and GNU `realpath`/coreutils. Store a passphrase of at least 16 characters in a mode-`0600` key file readable only by the account running the script, outside the repository. The script reads path/passphrase settings from its process environment (it does not source `.env`); with the storage mount exported, default bundle paths follow `/mnt/storage/data`, `/mnt/storage/uploads`, and `/mnt/storage/Backups`.
+- Example manual invocation (set the actual protected key-file path first):
+
+  ```bash
+  STORAGE_MOUNT_PATH=/mnt/storage \
+  MADAR_BACKUP_PASSPHRASE_FILE=/etc/madar/backup-passphrase \
+    /usr/bin/bash /var/www/madar-v2/scripts/cloud-backup.sh
+  ```
+
+  The output reports its creation time and size. It contains the SQLite online snapshot, configured storage tree (excluding root `.incoming` and `.madar-recovery` stages), and selected configuration/dependency files. It can include encrypted copies of `.env`; protect the passphrase separately. The script copies storage outside the API's maintenance lock, so pause external storage writers and retain MADAR's own backup/restore procedure as the primary consistency-aware workflow. No retention or automatic deletion policy is configured.
 - Before redeploying an existing production database, create a fresh backup through MADAR and confirm it completed. The initializer applies schema migrations; do not delete or recreate the database during deployment.
 - Inspect `pm2 logs madar-v2`, `sudo journalctl -u cloudflared`, and (only for the optional Nginx setup) Nginx logs after errors or restarts.
 
@@ -265,6 +275,7 @@ From `madar-v2/` on the development machine:
 ```bash
 npm test
 npm --prefix client run build
+npm run android:sync
 ```
 
-The Ubuntu deploy script should also pass `bash -n deploy-ubuntu.sh` on the server before running. Validate Nginx syntax with `sudo nginx -t` after installing the site.
+The Ubuntu deploy and backup scripts should also pass `bash -n deploy-ubuntu.sh` and `bash -n scripts/cloud-backup.sh` on the server before running. The encrypted backup command itself still requires a disposable test database/storage tree and locally installed `zip`/`gpg` utilities to verify end to end. Validate Nginx syntax with `sudo nginx -t` after installing the site.

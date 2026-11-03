@@ -15,6 +15,14 @@ function readPort(value) {
   return port;
 }
 
+function readTrustProxyHops(value) {
+  const hops = Number(value ?? 0);
+  if (!Number.isInteger(hops) || hops < 0 || hops > 5) {
+    throw new Error('TRUST_PROXY_HOPS must be an integer between 0 and 5. Configure only the trusted proxy chain.');
+  }
+  return hops;
+}
+
 const nodeEnv = process.env.NODE_ENV ?? 'development';
 if (!['development', 'test', 'production'].includes(nodeEnv)) {
   throw new Error('NODE_ENV must be development, test, or production.');
@@ -35,6 +43,7 @@ export const env = Object.freeze({
   nodeEnv,
   host: process.env.HOST ?? '127.0.0.1',
   port: readPort(process.env.PORT),
+  trustProxyHops: readTrustProxyHops(process.env.TRUST_PROXY_HOPS),
   storageMountPath: process.env.STORAGE_MOUNT_PATH?.trim() || undefined,
   dataDirectory: process.env.MADAR_V2_DATA_DIR?.trim() || undefined,
   databasePath: process.env.MADAR_V2_DATABASE_PATH?.trim() || undefined,

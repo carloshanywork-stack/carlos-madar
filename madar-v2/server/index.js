@@ -2,6 +2,7 @@ import { app } from './app.js';
 import { env } from './config/env.js';
 import { db } from './database/connection.js';
 import { initializeDatabase } from './database/init.js';
+import { startDatabaseMaintenanceScheduler, stopDatabaseMaintenanceScheduler } from './database/maintenance.js';
 import { startSystemBackupScheduler, stopSystemBackupScheduler } from './modules/system/backup.js';
 import {
   recoverMaintenanceCardDeletions,
@@ -52,6 +53,7 @@ if (initialization.adminCreated) {
 const server = app.listen(env.port, env.host, () => {
   console.log(`MADAR V2 API listening at http://${env.host}:${env.port}`);
   startSystemBackupScheduler();
+  startDatabaseMaintenanceScheduler();
 });
 
 let shuttingDown = false;
@@ -59,6 +61,7 @@ function shutdown(signal) {
   if (shuttingDown) return;
   shuttingDown = true;
   const scheduledBackup = stopSystemBackupScheduler();
+  stopDatabaseMaintenanceScheduler();
   console.log(`${signal} received; shutting down MADAR V2.`);
   publishOperationsEvent('system.shutdown');
   server.close((error) => {

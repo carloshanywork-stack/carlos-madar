@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { readFile } from 'node:fs/promises';
 import { asyncHandler, HttpError } from '../http.js';
 import { requestActorId } from '../actor.js';
-import { subscribeOperationsEvents } from '../operations-events.js';
+import { publishOperationsEvent, subscribeOperationsEvents } from '../operations-events.js';
 import {
   buildApprovedVisitsWorkbook,
   getPendingVisitReviews,
@@ -77,7 +77,13 @@ router.get('/visits/:id/photos/:phase/:ordinal', sendVisitPhoto);
 router.post('/visits/:id/review', (req, res, next) => {
   try {
     res.set({ 'Cache-Control': 'private, no-store' });
-    res.json(reviewRepVisit(req.params.id, req.body, requestActorId(req)));
+    const result = reviewRepVisit(req.params.id, req.body, requestActorId(req));
+    publishOperationsEvent('rep.visit.reviewed', {
+      userId: result.repUserId,
+      visitId: result.visitId,
+      status: result.status,
+    });
+    res.json(result);
   } catch (error) {
     next(error);
   }

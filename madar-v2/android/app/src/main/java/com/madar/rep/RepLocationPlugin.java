@@ -226,6 +226,7 @@ public class RepLocationPlugin extends Plugin {
         result.put("latitude", location.getLatitude());
         result.put("longitude", location.getLongitude());
         result.put("accuracy", (double) location.getAccuracy());
+        result.put("speed", location.hasSpeed() ? (double) location.getSpeed() : 0.0);
         result.put("timestamp", location.getTime());
         result.put("mocked", mocked || isMockLocation(location));
         return result;

@@ -15,6 +15,7 @@ import {
 } from './service.js';
 import { env } from '../../config/env.js';
 import { syncRepTracking } from '../rep/service.js';
+import { loginRateLimiter } from './login-rate-limit.js';
 
 const router = Router();
 
@@ -43,7 +44,7 @@ router.post('/setup', asyncHandler(async (req, res) => {
   res.status(201).json({ authenticated: true, user, setupRequired: false });
 }));
 
-router.post('/login', asyncHandler(async (req, res) => {
+router.post('/login', loginRateLimiter, asyncHandler(async (req, res) => {
   const body = requireObject(req.body);
   allowOnlyKeys(body, ['username', 'password']);
   const username = requireText(body.username, 'Username', { minLength: 1, maxLength: 64 });

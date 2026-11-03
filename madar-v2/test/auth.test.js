@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import bcrypt from 'bcryptjs';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -11,7 +12,7 @@ process.env.MADAR_V2_STORAGE_ROOT = join(temporaryDirectory, 'storage');
 process.env.NODE_ENV = 'test';
 process.env.COOKIE_SECURE = 'false';
 
-const [{ app }, { db }, { initializeDatabase }, { verifyToken }] = await Promise.all([
+const [{ app }, { db }, { initializeDatabase }, { verifyToken, authenticateUser }] = await Promise.all([
   import('../server/app.js'),
   import('../server/database/connection.js'),
   import('../server/database/init.js'),
@@ -163,4 +164,45 @@ test('auth status, one-time setup, protected APIs, login and revocable sessions'
   assert.equal(disabledSession.body.authenticated, false);
   assert.equal(disabledSession.body.setupRequired, false);
   assert.equal((await request('/api/clients', {}, reloginCookie)).response.status, 401);
+});
+
+test('five consecutive account failures lock for 15 minutes and a later valid login resets the counter', () => {
+  const passwordHash = bcrypt.hashSync('Lockout-Password-2026!', 12);
+  const userId = Number(db.prepare(`INSERT INTO users (username, password_hash, full_name, role)
+    VALUES ('lockout-user', ?, 'Lockout User', 'admin')`).run(passwordHash).lastInsertRowid);
+
+  for (let attempt = 1; attempt <= 5; attempt += 1) {
+    assert.equal(authenticateUser('lockout-user', `wrong-${attempt}`), null);
+  }
+  const locked = db.prepare('SELECT failed_login_attempts, locked_until FROM users WHERE id = ?').get(userId);
+  assert.equal(locked.failed_login_attempts, 5);
+  assert.ok(Date.parse(locked.locked_until) > Date.now() + 14 * 60 * 1000);
+  assert.equal(authenticateUser('lockout-user', 'Lockout-Password-2026!'), null, 'a correct password is rejected during the lockout window');
+  assert.equal(db.prepare('SELECT failed_login_attempts FROM users WHERE id = ?').get(userId).failed_login_attempts, 5);
+
+  db.prepare('UPDATE users SET locked_until = ? WHERE id = ?').run(new Date(Date.now() - 1000).toISOString(), userId);
+  const successful = authenticateUser('lockout-user', 'Lockout-Password-2026!');
+  assert.equal(successful.user.username, 'lockout-user');
+  assert.deepEqual(db.prepare('SELECT failed_login_attempts, locked_until FROM users WHERE id = ?').get(userId), {
+    failed_login_attempts: 0,
+    locked_until: null,
+  });
+});
+
+test('both login endpoints share a five-failure-per-IP limiter with the requested Arabic message', async () => {
+  const failures = [
+    ['/api/auth/login', 'unknown-user-a'],
+    ['/api/auth/login', 'unknown-user-b'],
+    ['/api/auth/login', 'unknown-user-c'],
+    ['/api/rep/login', 'unknown-user-d'],
+  ];
+  for (const [path, username] of failures) {
+    const failed = await request(path, jsonOptions('POST', { username, password: 'wrong-password' }));
+    assert.equal(failed.response.status, 401);
+  }
+  const blocked = await request('/api/auth/login', jsonOptions('POST', {
+    username: 'unknown-user-e', password: 'wrong-password',
+  }));
+  assert.equal(blocked.response.status, 429);
+  assert.equal(blocked.body.error, 'تم تجاوز الحد المسموح من محاولات الدخول. يرجى الانتظار لمدة دقيقة.');
 });

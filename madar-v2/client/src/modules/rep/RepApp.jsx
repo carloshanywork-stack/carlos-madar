@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../lib/api.js';
 import MachineVisitSheet from './MachineVisitSheet.jsx';
+import { distanceBetweenGpsPointsMeters, getAdaptiveGpsInterval, GPS_POLLING } from './gps-adaptive.js';
 import {
   addPendingVisit,
   deletePendingVisit,
@@ -65,7 +66,7 @@ function normalize(value) {
 function formatTime(value) {
   if (!value) return 'غير معروف';
   try {
-    return new Intl.DateTimeFormat('ar-EG', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value));
+    return new Intl.DateTimeFormat('ar-EG', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Africa/Cairo' }).format(new Date(value));
   } catch {
     return value;
   }
@@ -167,6 +168,7 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
   const [gpsError, setGpsError] = useState('');
   const [onDuty, setOnDuty] = useState(false);
   const [showQueue, setShowQueue] = useState(false);
+  const [assignmentNotice, setAssignmentNotice] = useState(null);
   const [toast, setToast] = useState('');
   const [tutorialOpen, setTutorialOpen] = useState(false);
   const [storagePersistent, setStoragePersistent] = useState(null);
@@ -259,6 +261,7 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
           latitude: position.coords.latitude,
           longitude: position.coords.longitude,
           accuracy: position.coords.accuracy,
+          speed: position.coords.speed ?? 0,
           updatedAt: new Date(position.timestamp).toISOString(),
         };
       } else {
@@ -439,6 +442,41 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
   }, [checkServer, refreshAttendance, refreshData, syncTracking]);
 
   useEffect(() => {
+    if (offlineOnly || serverState !== 'online') return undefined;
+    const events = new EventSource('/api/rep/events', { withCredentials: true });
+    const onOperationsEvent = (message) => {
+      try {
+        const event = JSON.parse(message.data);
+        if (event.type === 'maintenance.order.assigned') {
+          const areas = Array.isArray(event.areas) ? event.areas.filter(Boolean) : [];
+          const assigned = !Array.isArray(event.assignedUserIds) || event.assignedUserIds.map(Number).includes(userId);
+          const previouslyAssigned = Array.isArray(event.previousUserIds)
+            && event.previousUserIds.map(Number).includes(userId);
+          setAssignmentNotice({ orderCode: event.orderCode, areas, assigned, previouslyAssigned });
+          setToast(!assigned
+            ? `لم يعد أمر التشغيل ${event.orderCode} مسنداً إليك.`
+            : previouslyAssigned
+              ? `تم تحديث تكليف أمر التشغيل ${event.orderCode}.`
+              : `أُسند إليك أمر تشغيل ${event.orderCode}${areas.length ? ` لمنطقة ${areas.join('، ')}` : ''}.`);
+          void refreshData();
+        } else if (event.type === 'rep.visit.reviewed') {
+          setToast(event.status === 'approved' ? 'اعتمد المشرف آخر زيارة ميدانية.' : 'طلب المشرف إعادة تصوير الزيارة.');
+          void refreshData();
+        } else if (event.type === 'attendance.changed') {
+          void refreshAttendance();
+        }
+      } catch {
+        // Ignore malformed frames; the regular route refresh remains a fallback.
+      }
+    };
+    events.addEventListener('operations', onOperationsEvent);
+    return () => {
+      events.removeEventListener('operations', onOperationsEvent);
+      events.close();
+    };
+  }, [offlineOnly, refreshAttendance, refreshData, serverState]);
+
+  useEffect(() => {
     if (!nativeApp) return undefined;
     let active = true;
     let networkHandle;
@@ -548,28 +586,60 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
     }
     if (nativeApp) {
       let active = true;
+      let timer;
+      let stationarySince = null;
+      let previousLocation = null;
+      let nextIntervalMs = GPS_POLLING.movingIntervalMs;
       const readNativePosition = async () => {
         try {
-          const location = await getNativeGpsLocation();
+          let location;
+          if (onDuty) {
+            const state = await getNativeDutyTrackingState();
+            if (state.mocked) throw new Error('تم رصد تطبيق لتزييف الموقع، يرجى إغلاقه للمتابعة.');
+            const lastLocation = state.lastLocation;
+            if (lastLocation) {
+              const timestamp = Number(lastLocation.timestamp);
+              location = {
+                latitude: lastLocation.latitude,
+                longitude: lastLocation.longitude,
+                accuracy: lastLocation.accuracy,
+                speed: lastLocation.speed ?? 0,
+                updatedAt: new Date(Number.isFinite(timestamp) ? timestamp : Date.now()).toISOString(),
+              };
+            }
+          }
+          location ??= await getNativeGpsLocation();
           if (!active) return;
+          const displacementMeters = distanceBetweenGpsPointsMeters(previousLocation, location);
+          const speedMetersPerSecond = Number(location.speed) || 0;
+          const moving = speedMetersPerSecond >= GPS_POLLING.movementSpeedMetersPerSecond
+            || displacementMeters > GPS_POLLING.movementDistanceMeters;
+          if (moving) stationarySince = null;
+          else if (stationarySince === null) stationarySince = Date.now();
+          const stationaryDurationMs = stationarySince === null ? 0 : Date.now() - stationarySince;
+          nextIntervalMs = getAdaptiveGpsInterval({ speedMetersPerSecond, displacementMeters, stationaryDurationMs });
+          previousLocation = location;
           setGps(location);
           setGpsError('');
           if (onDuty) void syncTracking({ duty: true, location });
         } catch (error) {
           if (!active) return;
+          stationarySince = null;
           setGpsError(error.message || 'إشارة GPS غير متاحة حالياً.');
           if (/تزييف الموقع/.test(error.message ?? '')) {
             setGps(null);
             setOnDuty(false);
             void syncTracking({ duty: false, location: null });
           }
+          nextIntervalMs = GPS_POLLING.movingIntervalMs;
+        } finally {
+          if (active) timer = window.setTimeout(readNativePosition, nextIntervalMs);
         }
       };
       void readNativePosition();
-      const timer = window.setInterval(() => void readNativePosition(), 12000);
       return () => {
         active = false;
-        window.clearInterval(timer);
+        window.clearTimeout(timer);
       };
     }
     if (!navigator.geolocation) {
@@ -577,25 +647,60 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
       return undefined;
     }
     setGpsError('جارٍ طلب إشارة GPS...');
-    const watchId = navigator.geolocation.watchPosition((position) => {
-      const location = {
-        latitude: position.coords.latitude,
-        longitude: position.coords.longitude,
-        accuracy: position.coords.accuracy,
-        updatedAt: new Date(position.timestamp).toISOString(),
-      };
-      setGps(location);
-      setGpsError('');
-      if (onDuty) void syncTracking({ duty: true, location });
-    }, (error) => {
-      const messages = {
-        1: 'اسمح للتطبيق باستخدام الموقع من إعدادات الهاتف.',
-        2: 'تعذر تحديد الموقع حالياً؛ يمكنك حفظ الزيارة بدونه.',
-        3: 'انتهت مهلة تحديد الموقع؛ سنحاول مجدداً.',
-      };
-      setGpsError(messages[error.code] || 'إشارة GPS غير متاحة حالياً.');
-    }, { enableHighAccuracy: true, maximumAge: 10000, timeout: 15000 });
-    return () => navigator.geolocation.clearWatch(watchId);
+    let active = true;
+    let timer;
+    let stationarySince = null;
+    let previousLocation = null;
+    let nextIntervalMs = GPS_POLLING.movingIntervalMs;
+    const readPosition = () => new Promise((resolve, reject) => {
+      navigator.geolocation.getCurrentPosition(resolve, reject, {
+        enableHighAccuracy: true,
+        maximumAge: 5000,
+        timeout: 15000,
+      });
+    });
+    const pollPosition = async () => {
+      try {
+        const position = await readPosition();
+        if (!active) return;
+        const location = {
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+          accuracy: position.coords.accuracy,
+          speed: position.coords.speed ?? 0,
+          updatedAt: new Date(position.timestamp).toISOString(),
+        };
+        const displacementMeters = distanceBetweenGpsPointsMeters(previousLocation, location);
+        const speedMetersPerSecond = Number(location.speed) || 0;
+        const moving = speedMetersPerSecond >= GPS_POLLING.movementSpeedMetersPerSecond
+          || displacementMeters > GPS_POLLING.movementDistanceMeters;
+        if (moving) stationarySince = null;
+        else if (stationarySince === null) stationarySince = Date.now();
+        const stationaryDurationMs = stationarySince === null ? 0 : Date.now() - stationarySince;
+        nextIntervalMs = getAdaptiveGpsInterval({ speedMetersPerSecond, displacementMeters, stationaryDurationMs });
+        previousLocation = location;
+        setGps(location);
+        setGpsError('');
+        if (onDuty) void syncTracking({ duty: true, location });
+      } catch (error) {
+        if (!active) return;
+        stationarySince = null;
+        const messages = {
+          1: 'اسمح للتطبيق باستخدام الموقع من إعدادات الهاتف.',
+          2: 'تعذر تحديد الموقع حالياً؛ يمكنك حفظ الزيارة بدونه.',
+          3: 'انتهت مهلة تحديد الموقع؛ سنحاول مجدداً.',
+        };
+        setGpsError(messages[error.code] || 'إشارة GPS غير متاحة حالياً.');
+        nextIntervalMs = GPS_POLLING.movingIntervalMs;
+      } finally {
+        if (active) timer = window.setTimeout(pollPosition, nextIntervalMs);
+      }
+    };
+    void pollPosition();
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
   }, [nativeApp, onDuty, selectedMachine, syncTracking]);
 
   const drainQueue = useCallback(async () => {
@@ -896,11 +1001,18 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
         </div>
       </header>
 
+      {assignmentNotice && (
+        <div className="rep-assignment-notice" role="status">
+          <span><b>{!assignmentNotice.assigned ? 'إلغاء التكليف' : assignmentNotice.previouslyAssigned ? 'تحديث التكليف' : 'تكليف جديد'}</b> · {assignmentNotice.orderCode}{assignmentNotice.areas.length ? ` · ${assignmentNotice.areas.join('، ')}` : ''}</span>
+          <button type="button" onClick={() => setAssignmentNotice(null)} aria-label="إغلاق تنبيه التكليف">×</button>
+        </div>
+      )}
+
       {offlineOnly && <div className="rep-offline-banner" role="status">أنت في وضع العمل المحلي. لا تُرسل أي بيانات حتى تتم إعادة التحقق من الجلسة مع الخادم.</div>}
 
       <section className="rep-attendance-card" aria-label="الحضور والانصراف">
         <div className="rep-attendance-summary">
-          <span className="rep-eyebrow">الحضور والانصراف · {new Intl.DateTimeFormat('ar-EG', { dateStyle: 'full' }).format(new Date())}</span>
+          <span className="rep-eyebrow">الحضور والانصراف · {new Intl.DateTimeFormat('ar-EG', { dateStyle: 'full', timeZone: 'Africa/Cairo' }).format(new Date())}</span>
           <strong>{attendance?.clock_in_time ? `${attendanceHours(attendance).toFixed(2)} ساعة` : 'لم يسجل الحضور بعد'}</strong>
           <small>{attendance?.clock_in_time
             ? `حضور ${formatTime(attendance.clock_in_time)}${attendance.clock_out_time ? ` · انصراف ${formatTime(attendance.clock_out_time)}` : ' · الدوام مستمر'}`
@@ -918,7 +1030,7 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
 
       <section className="rep-welcome-row">
         <div>
-          <span className="rep-eyebrow">{new Intl.DateTimeFormat('ar-EG', { dateStyle: 'full' }).format(new Date())}</span>
+          <span className="rep-eyebrow">{new Intl.DateTimeFormat('ar-EG', { dateStyle: 'full', timeZone: 'Africa/Cairo' }).format(new Date())}</span>
           <h1>مسار اليوم <span>جاهز لخطوتك التالية.</span></h1>
           <p>ابحث عن ماكينة، وثّق الزيارة، ثم يتولى المشرف اعتمادها قبل دخولها التقارير.</p>
         </div>

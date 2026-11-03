@@ -399,7 +399,9 @@ test('maintenance card photos can be moved or deleted without losing files on DB
   const card = orderResponse.body.cards.find((item) => item.machine_id === machineResponse.body.id);
   assert.ok(card);
 
-  const photoBytes = Buffer.from('photo phase test bytes');
+  const photoBytes = await sharp({
+    create: { width: 32, height: 24, channels: 3, background: '#496b52' },
+  }).png().toBuffer();
   async function uploadPhoto(phase, index) {
     const form = new FormData();
     form.append('photo', new Blob([photoBytes], { type: 'image/png' }), `${phase}-${index}.png`);
@@ -452,7 +454,10 @@ test('maintenance card photos can be moved or deleted without losing files on DB
   assert.ok(moved.body.path.includes('/after/'), 'the stored path should reflect the destination phase');
   const movedDownload = await request(`/api/maintenance/orders/${orderResponse.body.id}/cards/${card.id}/photos/after/${encodeURIComponent(movedFilename)}`);
   assert.equal(movedDownload.response.status, 200);
-  assert.deepEqual(movedDownload.body, photoBytes);
+  const movedMetadata = await sharp(movedDownload.body).metadata();
+  assert.equal(movedMetadata.format, 'jpeg');
+  assert.equal(movedMetadata.width, 32);
+  assert.equal(movedMetadata.height, 24);
 
   const deletedMovedPhoto = await request(`/api/maintenance/orders/${orderResponse.body.id}/cards/${card.id}/photos/after/${encodeURIComponent(movedFilename)}`, {
     method: 'DELETE',

@@ -1,9 +1,9 @@
 # MADAR V2 — Complete System Report
 # تقرير نظام MADAR V2 الكامل
 
-**Verification date / تاريخ التحقق:** 31 October 2026  
-**Scope / النطاق:** MADAR V2 source, configured SQLite initialization, isolated automated tests, client production build, and local startup smoke test. This is an evidence-based implementation report, not a certification or external security audit.  
-**النطاق:** مراجعة كود MADAR V2، وتهيئة قاعدة SQLite المضبوطة، والاختبارات المعزولة، وبناء الواجهة، واختبار التشغيل المحلي. هذا تقرير تنفيذ مبني على أدلة، وليس شهادة جاهزية أو تدقيقاً أمنياً خارجياً.
+**Verification date / تاريخ التحقق:** 3 November 2026
+**Scope / النطاق:** MADAR V2 source, historical configured SQLite initialization, isolated automated tests, client production build, local startup smoke test, and current authentication/photo/GPS/event/database-maintenance changes. Current test runs use temporary SQLite and storage roots; they do not inspect or modify the configured business database or customer files. This is an evidence-based implementation report, not a certification or external security audit.
+**النطاق:** مراجعة كود MADAR V2 وتهيئة SQLite التاريخية والاختبارات المعزولة وبناء العميل وتشغيله محلياً وتغييرات الحماية والصور وGPS والأحداث وصيانة قاعدة البيانات الحالية. استخدمت الاختبارات الحالية قواعد SQLite ومجلدات تخزين مؤقتة ولم تفحص أو تعدل قاعدة الأعمال أو ملفات العملاء المضبوطة. هذا تقرير تنفيذ مبني على الأدلة، وليس شهادة جاهزية أو تدقيقاً أمنياً خارجياً.
 
 ## 1. Executive overview | الملخص التنفيذي
 
@@ -82,6 +82,8 @@ The comparison excluded `schema_migrations`, where the expected new version was 
   يعتمد التصنيف على مجلدات قبل/بعد، ثم بادئات أسماء الملفات، ثم الوقت (EXIF ثم تاريخ مدعوم في الاسم ثم وقت الملف). تُقسّم الصور غير المحددة زمنياً، وتوضع التعادلات الزمنية في «قبل» للمراجعة.
 - Unmatched folders and their photos are persisted; a user can bind a reviewed folder to a remaining machine in one action. This final migration now enables that persistent table on the configured database.  
   تُحفظ المجلدات غير المطابقة وصورها، ويمكن للمستخدم ربط المجلد بعد مراجعته بماكينة متبقية بخطوة واحدة. أصبح الجدول الدائم مفعلاً في قاعدة البيانات بعد الترحيل.
+- New field photos are decoded and stored as JPEG derivatives (quality 80, maximum 1920×1080, no carried EXIF) under the configured `Areas/{area}/{machine}/{date}_{order}/{before|after}/{uuid}.jpg` layout. Archived source images are not rewritten. Legacy visits with an interrupted UUID-directory layout remain recoverable.
+- Cairo (`Africa/Cairo`) is the default timezone. The additive timezone migration changes only a legacy `Asia/Riyadh` value; an explicitly configured different timezone is preserved.
 
 ### Machines directory and imports | دليل الماكينات والاستيراد
 
@@ -112,6 +114,15 @@ This is a limited payroll model: policies for holidays, leave treatment, bonuses
 
 هذا نموذج رواتب محدود؛ سياسات العطلات والإجازات والمكافآت والمزايا واعتماد الإضافي والسلف وكشوف الرواتب والتسويات تحتاج إلى اعتماد المالك/المحاسب قبل اعتبار الحساب نهائياً.
 
+### Field representative tracking and live operations | تتبع المندوبين والتحديثات المباشرة
+
+- Browser GPS polling uses a fast interval while moving (12 seconds) and slows to 60 seconds after three stationary minutes; the Android foreground service switches from 5 to 60 seconds on the same rule. Detected movement restores the fast interval. The existing server-side 50 m stop/geofence accuracy margin remains in place. Background GPS remains subject to OS, browser, and OEM limits.
+- Assignment and visit-review notifications, attendance/overtime refreshes, and supervisor field events use role-scoped in-process SSE. The UI also refreshes periodically to reconcile disconnects; these events are not durable or replayable.
+- Weekly SQLite maintenance optimizes the database, checkpoints/truncates the WAL, and prunes GPS breadcrumbs older than 90 days. It runs in the single application process.
+- Rep visit photos use UUID filenames directly in the `Areas/{area}/{machine}/{date}_{order}/{before|after}/` folders; interrupted uploads stage under `.madar-recovery/`. The recovery logic also handles legacy UUID-directory uploads.
+
+يستخدم المتصفح استطلاعاً سريعاً كل 12 ثانية أثناء الحركة، بينما تستخدم خدمة Android الأمامية كل 5 ثوانٍ؛ وبعد ثلاث دقائق من السكون يتحول كلاهما إلى 60 ثانية، ويعودان إلى الفترة الأسرع عند اكتشاف الحركة. تظل مهلة دقة الـ50 متراً الحالية في تحليل التوقفات، مع بقاء GPS بالخلفية خاضعاً لقيود النظام والشركة المصنعة. تُرسل إشعارات الإسناد ومراجعة الزيارة وتحديثات الحضور/الإضافي وأحداث المشرف عبر SSE داخل العملية وبحسب الدور، مع تحديث دوري للمصالحة؛ وليست طابوراً دائماً أو قابلاً لإعادة التشغيل. تنفّذ صيانة SQLite الأسبوعية تحسيناً وفحصاً/تقليصاً لسجل WAL وحذف نقاط GPS الأقدم من 90 يوماً. تحفظ صور الزيارات بأسماء UUID داخل مجلدات المنطقة/الماكينة/التاريخ/المرحلة، مع دعم استعادة مجلدات UUID القديمة.
+
 ### Workshop and warehouse | الورشة والمستودع
 
 Workshop orders have their own `MFG-` lifecycle, product/machine type, assigned Workshop staff, approved design-file types, ready/delivery transitions, and invoice linkage. Warehouse features include material catalog/stock, movements, issues to in-production workshop orders, tracked fractional offcuts, stock-count reconciliation, and scrap-sale income entries. Scrap sale and stock movement are committed transactionally. The service validates that workshop issues target a workshop order in production.
@@ -126,11 +137,15 @@ Money is represented as integer cents. Treasury exposes a calculated live cash b
 
 ### Security, users, and backups | الأمان والمستخدمون والنسخ الاحتياطية
 
-Authentication uses bcrypt password hashes, signed HS256 JWTs in HttpOnly/SameSite=Strict cookies, database-backed session hashes, expiry/revocation, and a configurable Secure cookie flag. The user model supports `admin`, `sales`, `operations`, and `purchasing`; user administration and backup/restore are protected workflows. Local ZIP backups contain the database and storage; restore validates ZIP paths and SQLite integrity before staged replacement. Backup/restore round-trip coverage passed on synthetic isolated data only.
+Authentication uses bcrypt password hashes, signed HS256 JWTs in HttpOnly/SameSite=Strict cookies, database-backed session hashes, expiry/revocation, and a configurable Secure cookie flag. Both login forms share a process-local limit of five failed attempts per IP per minute and return an Arabic 429 response when exceeded; accounts lock for 15 minutes after five consecutive password failures and reset after a successful login. The user model supports `admin`, `sales`, `operations`, `rep`, and `purchasing`; user administration and backup/restore are protected workflows. MADAR's application ZIP backups contain the database and storage; restore validates ZIP paths and SQLite integrity before staged replacement. A separate `scripts/cloud-backup.sh` produces a local GPG AES-256-encrypted ZIP and never uploads data. Application backup/restore round-trip coverage passed on synthetic isolated data; the shell script has passed Bash syntax validation only, not an end-to-end encryption test. The IP limiter is process-local and assumes the configured trusted-proxy chain is correct.
 
-يستخدم الدخول تجزئة كلمات المرور بـ bcrypt، ورموز JWT موقعة HS256 داخل ملفات تعريف ارتباط HttpOnly وSameSite=Strict، وجلسات مرتبطة ببصمات مخزنة في قاعدة البيانات مع انتهاء وإلغاء، وخيار Secure قابل للضبط. تدعم الأدوار `admin` و`sales` و`operations` و`purchasing`؛ وإدارة المستخدمين والنسخ والاستعادة مسارات محمية. تحتوي النسخة المحلية ZIP على قاعدة البيانات والتخزين، وتتحقق الاستعادة من المسارات وسلامة SQLite قبل الاستبدال المرحلي. اجتازت دورة النسخ/الاستعادة على بيانات اصطناعية معزولة فقط.
+يستخدم الدخول تجزئة كلمات المرور بـ bcrypt، ورموز JWT موقعة HS256 داخل ملفات تعريف ارتباط HttpOnly وSameSite=Strict، وجلسات مرتبطة ببصمات مخزنة في قاعدة البيانات مع انتهاء وإلغاء، وخيار Secure قابل للضبط. تشترك واجهتا الدخول في حد محلي قدره خمس محاولات فاشلة لكل IP في الدقيقة، مع استجابة عربية 429؛ ويُقفل الحساب 15 دقيقة بعد خمس إخفاقات متتالية ويُصفّر العداد عند نجاح الدخول. تشمل الأدوار `admin` و`sales` و`operations` و`rep` و`purchasing`. تحتوي نسخ MADAR التطبيقية على قاعدة البيانات والتخزين، وتتحقق الاستعادة من مسارات ZIP وسلامة SQLite قبل الاستبدال المرحلي. ينشئ `scripts/cloud-backup.sh` نسخة ZIP مشفرة محلياً بـGPG AES-256 ولا يرفع البيانات. اجتاز النسخ/الاستعادة التطبيقي اختباراً على بيانات اصطناعية معزولة؛ أما السكربت الجديد فاجتاز فحص Bash النحوي فقط ولم يُختبر تشفيره كاملاً. محدد IP يعمل داخل العملية ويفترض ضبط سلسلة الوكلاء الموثوقة بشكل صحيح.
 
 ## 4. Verification and measured performance | التحقق ومؤشرات الأداء المقاسة
+
+**Current Windows verification (3 November 2026):** `npm test` passed **69/69** with isolated SQLite/storage fixtures; `npm --prefix client run build` passed (109 modules); `npm run android:sync` passed (client build plus Capacitor asset/plugin synchronization); `bash -n scripts/cloud-backup.sh` passed using Git Bash; and `git diff --check` passed. MADAR V2 has no `npm run check` script. No Android APK/Gradle build or PM2 restart was performed: JDK/Java, Android SDK configuration/tooling, and PM2 are unavailable here. The encrypted backup script was not executed end-to-end because `zip`, `gpg`, and `realpath` are not available on PATH. `npm audit --omit=dev` reports **8 unresolved advisories (5 moderate, 3 high)**: high-severity `image-size` advisories inherited through `pptxgenjs`, moderate `minimatch`/`glob` advisories inherited through `archiver`/related packages, two high `xlsx` advisories without an npm fix, and moderate `glob`/`rimraf` advisories. No automatic or breaking dependency upgrade was applied. These results do not verify APK compilation, deployment-host behavior, or live-data integrity.
+
+**التحقق الحالي على Windows (3 نوفمبر 2026):** نجحت `npm test` بعدد **69/69** باستخدام قواعد SQLite ومجلدات تخزين معزولة؛ ونجح بناء العميل (109 وحدات) ومزامنة Android عبر `npm run android:sync`؛ كما اجتاز سكربت النسخ فحص Bash النحوي واجتاز التغيير `git diff --check`. لا يوجد سكربت `npm run check` في MADAR V2. لم يُبنَ APK ولم يُعَد تشغيل PM2 بسبب غياب Java/JDK وتهيئة وأدوات Android SDK وPM2. لم يُشغّل النسخ المشفر كاملاً لغياب `zip` و`gpg` و`realpath` من PATH. أظهر `npm audit --omit=dev` **8 تنبيهات غير معالجة (5 متوسطة و3 عالية)**، من ضمنها تنبيهات عالية لـ`image-size` عبر `pptxgenjs`، ومتوسطة لـ`minimatch`/`glob` عبر `archiver` واعتماديات مرتبطة، وتنبيهان عاليان لـ`xlsx` دون إصلاح متاح عبر npm. لم يُطبق أي تحديث تلقائي أو كاسر للتوافق. لا تثبت هذه النتائج بناء APK أو سلوك خادم النشر أو سلامة بيانات التشغيل الحية.
 
 - `npm run db:init`: **passed** on the configured production database; no existing table-row changes detected across 28 pre-migration tables (common columns).  
   `npm run db:init`: **نجح** على قاعدة البيانات المضبوطة؛ ولم تُكتشف تغييرات في صفوف الجداول الـ28 السابقة عند مقارنة الأعمدة المشتركة.
@@ -164,7 +179,7 @@ Authentication uses bcrypt password hashes, signed HS256 JWTs in HttpOnly/SameSi
 
 **Initialization, automated tests, client build, and local API/client startup are verified. The system is suitable for a controlled internal pilot after the network binding and report-note handling are addressed. This evidence is not sufficient to certify MADAR V2 as fully production-ready for unrestricted daily use.** A production-like restore drill, approved finance/payroll policy, dependency/security review, and actual operational workload testing remain outstanding. Ubuntu deployment is not verified by this Windows run.
 
-**تم التحقق من التهيئة والاختبارات الآلية وبناء الواجهة وتشغيل API والعميل محلياً. النظام مناسب لتجربة تشغيل داخلية مضبوطة بعد معالجة عنوان الاستماع وملاحظات التقارير. لكن الأدلة الحالية لا تكفي لاعتماد MADAR V2 كجاهز بالكامل للاستخدام الإنتاجي اليومي دون قيود.** لا تزال تجربة استعادة شبيهة بالإنتاج، واعتماد قواعد المالية والرواتب، ومراجعة الاعتماديات والأمان، واختبار حمل تشغيلي فعلي مطلوبة. كما لم يتم التحقق من النشر على Ubuntu ضمن هذا التشغيل على Windows.
+**تم التحقق من الاختبارات المعزولة وبناء الواجهة ومزامنة Capacitor، لكن ذلك لا يثبت بناء APK أو تشغيل النشر. النظام غير معتمد كجاهز بالكامل للاستخدام الإنتاجي اليومي دون قيود.** لا تزال تجربة استعادة شبيهة بالإنتاج، واعتماد قواعد المالية والرواتب، ومعالجة ومراجعة تنبيهات الاعتماديات، ومراجعة الأمان، واختبار حمل تشغيلي فعلي مطلوبة. كما لم يتم التحقق من النشر على Ubuntu أو اختبار النسخ المشفر كاملاً ضمن هذا التشغيل على Windows.
 
 ---
 

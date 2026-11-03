@@ -5,6 +5,8 @@ CREATE TABLE IF NOT EXISTS users (
   full_name TEXT NOT NULL,
   role TEXT NOT NULL CHECK (role IN ('admin', 'sales', 'operations', 'purchasing', 'rep')),
   active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
+  failed_login_attempts INTEGER NOT NULL DEFAULT 0 CHECK (failed_login_attempts >= 0),
+  locked_until TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   deleted_at TEXT,
   assigned_regions_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(assigned_regions_json)),

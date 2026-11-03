@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import sharp from 'sharp';
 import test, { after } from 'node:test';
 
 const temporaryDirectory = mkdtempSync(join(tmpdir(), 'madar-v2-phase2-'));
@@ -150,7 +151,9 @@ test('Phase 2 client, maintenance, and workshop flows remain isolated and transa
   assert.equal(cardCreated.response.status, 201);
   const card = cardCreated.body;
 
-  const jpegBytes = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x01, 0x02]);
+  const jpegBytes = await sharp({
+    create: { width: 24, height: 16, channels: 3, background: '#315a74' },
+  }).jpeg({ quality: 95 }).toBuffer();
   async function uploadPhoto(phase) {
     const form = new FormData();
     form.append('photo', new Blob([jpegBytes], { type: 'image/jpeg' }), `${phase}.jpg`);
@@ -163,13 +166,16 @@ test('Phase 2 client, maintenance, and workshop flows remain isolated and transa
   const afterPhoto = await uploadPhoto('after');
   assert.equal(beforePhoto.response.status, 201);
   assert.equal(afterPhoto.response.status, 201);
-  assert.match(beforePhoto.body.path, /^clients\/C-1001\/maintenance\/MN-\d+\/MACHINE-ACRYLIC-01\/before\//);
-  assert.match(afterPhoto.body.path, /^clients\/C-1001\/maintenance\/MN-\d+\/MACHINE-ACRYLIC-01\/after\//);
+  assert.match(beforePhoto.body.path, /^Areas\/[^/]+\/[^/]+\/\d{4}-\d{2}-\d{2}_\d+\/before\/[0-9a-f-]+\.jpg$/i);
+  assert.match(afterPhoto.body.path, /^Areas\/[^/]+\/[^/]+\/\d{4}-\d{2}-\d{2}_\d+\/after\/[0-9a-f-]+\.jpg$/i);
   assert.equal(existsSync(join(storageDirectory, ...beforePhoto.body.path.split('/'))), true);
   assert.equal(existsSync(join(storageDirectory, ...afterPhoto.body.path.split('/'))), true);
   const beforeDownload = await request(beforePhoto.body.url);
   assert.equal(beforeDownload.response.status, 200);
-  assert.deepEqual(beforeDownload.body, jpegBytes);
+  const uploadedMetadata = await sharp(beforeDownload.body).metadata();
+  assert.equal(uploadedMetadata.format, 'jpeg');
+  assert.equal(uploadedMetadata.width, 24);
+  assert.equal(uploadedMetadata.height, 16);
 
   const updatedCard = await request(
     `/api/maintenance/orders/${maintenanceOrder.id}/cards/${card.id}`,

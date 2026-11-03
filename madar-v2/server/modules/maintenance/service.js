@@ -33,6 +33,7 @@ import {
   writeStorageFile,
 } from '../storage.js';
 import { withMaintenanceOrderStorageLock } from './deletion-lock.js';
+import { compressFieldImage } from '../upload.js';
 
 const MAINTENANCE_STATUSES = ['in_progress', 'review', 'archived'];
 const PHOTO_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.heic', '.heif']);
@@ -77,6 +78,27 @@ function updateMaintenanceTripProgress(orderId, { totalFiles, processedFiles, pe
   };
   maintenanceTripProgress.set(id, progress);
   return progress;
+}
+
+function safeMachineStorageSegment(value, fallback) {
+  const cleaned = String(value ?? '').normalize('NFKC').trim()
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_')
+    .replace(/[. ]+$/g, '')
+    .slice(0, 120);
+  return cleaned || fallback;
+}
+
+function getTimeZone(database) {
+  const configured = database.prepare("SELECT value FROM settings WHERE key = 'timezone'").get()?.value;
+  if (typeof configured === 'string' && configured.trim()) {
+    try {
+      new Intl.DateTimeFormat('en-US', { timeZone: configured }).format(new Date());
+      return configured;
+    } catch {
+      // Fall back to the established business-zone default if a setting is damaged.
+    }
+  }
+  return 'Africa/Cairo';
 }
 
 export function beginMaintenanceTripProgress(orderId, database = db) {
@@ -2008,11 +2030,21 @@ export function replaceMaintenanceOrderRepresentatives(orderId, input, actorId =
       oldValues: { representative_user_ids: previous },
       newValues: { representative_user_ids: repUserIds },
     });
-    return repUserIds;
+    const sortedPrevious = [...previous].sort((left, right) => left - right);
+    const sortedRequested = [...repUserIds].sort((left, right) => left - right);
+    const changed = sortedPrevious.length !== sortedRequested.length
+      || sortedPrevious.some((userId, index) => userId !== sortedRequested[index]);
+    return { previous, repUserIds, changed };
   }).immediate();
-  return { representatives: result.map((userId) => database.prepare(`
+  return {
+    representatives: result.repUserIds.map((userId) => database.prepare(`
     SELECT id, username, full_name FROM users WHERE id = ?
-  `).get(userId)) };
+    `).get(userId)),
+    changed: result.changed,
+    assignedRepUserIds: result.repUserIds,
+    previousRepUserIds: result.previous,
+    notifyRepUserIds: result.changed ? [...new Set([...result.previous, ...result.repUserIds])] : [],
+  };
 }
 
 export function disburseMaintenanceCustody(orderId, input, actorId = null, database = db) {
@@ -3203,12 +3235,14 @@ export async function updateMaintenanceCard(orderId, cardId, input, actorId = nu
     ? parsePhotoJson(card.after_photos_json)
     : validateStoredPhotoList(body.afterPhotos, 'afterPhotos');
   const isValidCardPhoto = (photoPath) => {
-    const segments = String(photoPath).replace(/\\/g, '/').split('/').map((part) => part.toLocaleLowerCase('en'));
+    const normalizedPath = String(photoPath).replace(/\\/g, '/');
+    const segments = normalizedPath.split('/').map((part) => part.toLocaleLowerCase('en'));
     const expectedPrefixes = [
       ['clients', order.client_code, 'maintenance', order.order_code, card.machine_code],
       ['clients', order.client_code, 'archived_orders', order.order_code, card.machine_code],
     ].map((prefix) => prefix.map((part) => String(part).toLocaleLowerCase('en')));
-    return expectedPrefixes.some((prefix) => prefix.every((part, index) => segments[index] === part));
+    return expectedPrefixes.some((prefix) => prefix.every((part, index) => segments[index] === part))
+      || isMaintenanceCardAreaPath(normalizedPath, order, card, database);
   };
   const submittedPhotoLists = [];
   if (body.beforePhotos !== undefined) submittedPhotoLists.push(['before', beforePhotos]);
@@ -3324,22 +3358,39 @@ export async function uploadMaintenancePhoto(orderId, cardId, phase, file, actor
   const extension = extname(file.originalname).toLowerCase();
   if (!PHOTO_EXTENSIONS.has(extension)) throw new HttpError(400, 'Unsupported maintenance photo extension.');
 
+  let compressed;
+  try {
+    compressed = await compressFieldImage(file.buffer);
+  } catch {
+    throw new HttpError(400, 'Maintenance photo is not a supported, decodable image.');
+  }
+
   const metadata = database.prepare(`
-    SELECT order_record.order_code, client.code AS client_code, machine.code AS machine_code,
-      card.id AS card_id, card.order_id, card.before_photos_json, card.after_photos_json
+    SELECT order_record.id AS order_id,
+      machine.code AS machine_code, machine.name_ar AS machine_name_ar, machine.area, machine.area_name,
+      card.id AS card_id, card.before_photos_json, card.after_photos_json
     FROM maintenance_cards card
     JOIN maintenance_orders order_record ON order_record.id = card.order_id
-    JOIN clients client ON client.id = order_record.client_id
     JOIN machines machine ON machine.id = card.machine_id
     WHERE order_record.id = ? AND card.id = ? AND order_record.deleted_at IS NULL
       AND order_record.status != 'archived' AND card.deleted_at IS NULL
   `).get(id, targetCardId);
   if (!metadata) throw new HttpError(404, 'Active inspection card was not found on this order.');
 
-  const storedPath = `${storageDirectory(
-    'clients', metadata.client_code, 'maintenance', metadata.order_code, metadata.machine_code, phase,
-  )}/${randomUUID()}${extension}`;
-  const savedFile = await writeStorageFile(storedPath, file.buffer);
+  const now = new Date();
+  const dateParts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
+    timeZone: getTimeZone(database), year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(now).filter((part) => part.type !== 'literal').map(({ type, value }) => [type, value]));
+  const workDate = `${dateParts.year}-${dateParts.month}-${dateParts.day}`;
+  const areaSegment = safeMachineStorageSegment(metadata.area_name || metadata.area, 'Unassigned Area');
+  const machineSegment = safeMachineStorageSegment(
+    `${metadata.machine_code}_${metadata.machine_name_ar || ''}`, metadata.machine_code,
+  );
+  const orderSegment = `${workDate}_${metadata.order_id}`;
+  const storedPath = storageDirectory(
+    'Areas', areaSegment, machineSegment, orderSegment, phase, `${randomUUID()}.jpg`,
+  );
+  const savedFile = await writeStorageFile(storedPath, compressed.buffer);
   try {
     const update = database.transaction(() => {
       const current = database.prepare(`SELECT before_photos_json, after_photos_json FROM maintenance_cards

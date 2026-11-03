@@ -2,6 +2,8 @@
 
 **Review basis:** source implementation, isolated stabilization/audit, work-order COGS/historical issue conversion, v7 purchase-revision/employee-history/journal-navigation/overview work, v8 payroll attendance arithmetic, and v9 maintenance/manufacturing/warehouse schema on 2026-10-30. Results of the latest test/check/build run are recorded below; no live database, customer storage, existing backups, or uploaded workbooks were opened. This describes source-observed behavior, not a target design. Capability “phases” below are implementation-derived groupings; the repository does not provide enough release history to claim a dated rollout sequence.
 
+This document's architecture walkthrough covers the legacy `system/` application. MADAR V2 is a separate project under `madar-v2/`; its latest hardening and verification are recorded in §8 of `SYSTEM_AUDIT_AND_STATUS.md` and in `MADAR_V2_COMPLETE_SYSTEM_REPORT.md`.
+
 ## 1. System at a glance
 
 Madar is a locally hosted, single-instance web ERP for clients, operation and maintenance orders, machine/photo records, inventory, invoices, treasury, and reporting. The React application communicates with an Express API. Business records are stored in a local SQLite database; customer files, photos, imports, and backups remain on local disk. LAN or Tailscale access is a way to reach the host, not an application-level Tailscale or cloud integration.

@@ -19,6 +19,10 @@
   -webkit-tap-highlight-color: transparent;
 }
 
+#madar-app .rep-assignment-notice { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 12px 0 0; padding: 11px 15px; border: 1px solid #f0d58e; border-radius: 12px; color: #61490d; background: #fff5d9; font-size: 12px; font-weight: 700; }
+#madar-app .rep-assignment-notice b { color: #8a650a; }
+#madar-app .rep-assignment-notice button { width: 28px; height: 28px; border-radius: 8px; color: inherit; background: rgba(97,73,13,.08); cursor: pointer; font-size: 18px; }
+
 #madar-app .rep-app button { color: inherit; font-family: inherit; }
 #madar-app .rep-app button:focus-visible,
 #madar-app .rep-app input:focus-visible,

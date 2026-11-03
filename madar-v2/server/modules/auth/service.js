@@ -7,6 +7,8 @@ import { HttpError, allowOnlyKeys, requireObject, requireText } from '../http.js
 import { syncEmployeeForUser } from '../employees/user-sync.js';
 
 const sessionLifetimeSeconds = 7 * 24 * 60 * 60;
+const failedLoginLimit = 5;
+const accountLockoutMs = 15 * 60 * 1000;
 const dummyPasswordHash = bcrypt.hashSync('MADAR-invalid-login-timing-only', 12);
 export const REP_ACCOUNT_DISABLED_MESSAGE = 'تم تعطيل حسابك من قبل الإدارة';
 
@@ -120,20 +122,16 @@ export function authenticateUser(username, password, database = db, { allowedRol
   const roleClause = roles === null ? '' : `AND role IN (${roles.map(() => '?').join(', ')})`;
   const row = database.prepare(`
     SELECT id, username, password_hash, full_name, role,
-      assigned_regions_json, is_online, last_location_json
+      assigned_regions_json, is_online, last_location_json, failed_login_attempts, locked_until
     FROM users
     WHERE username = ? COLLATE NOCASE AND active = 1 AND deleted_at IS NULL
       ${roleClause}
     LIMIT 1
   `).get(username.trim(), ...(roles ?? []));
-  const passwordMatches = bcrypt.compareSync(password, row?.password_hash ?? dummyPasswordHash);
-  if (!row || !passwordMatches) return null;
-  const token = createSession(row, database);
-  const refreshedRow = row.role === 'rep'
-    ? database.prepare(`SELECT id, username, full_name, role, assigned_regions_json, is_online, last_location_json
-      FROM users WHERE id = ?`).get(row.id)
-    : row;
-  return { user: publicUser(refreshedRow), token };
+  const locked = row?.locked_until && Date.parse(row.locked_until) > Date.now();
+  const passwordMatches = bcrypt.compareSync(password, row && !locked ? row.password_hash : dummyPasswordHash);
+  if (!row) return null;
+  return finishAuthentication(row.id, passwordMatches, database, roles);
 }
 
 /** Authenticate a representative while preserving a distinct response for a valid but disabled account. */
@@ -143,20 +141,68 @@ export function authenticateRepUser(username, password, database = db) {
       || Buffer.byteLength(password, 'utf8') > 72) return null;
   const row = database.prepare(`
     SELECT id, username, password_hash, full_name, role, active,
-      assigned_regions_json, is_online, last_location_json
+      assigned_regions_json, is_online, last_location_json, failed_login_attempts, locked_until
     FROM users
     WHERE username = ? COLLATE NOCASE AND role = 'rep' AND deleted_at IS NULL
     LIMIT 1
   `).get(username.trim());
-  const passwordMatches = bcrypt.compareSync(password, row?.password_hash ?? dummyPasswordHash);
-  if (!row || !passwordMatches) return null;
-  if (Number(row.active) !== 1) return { disabled: true };
-  const token = createSession(row, database);
-  const refreshedRow = database.prepare(`
-    SELECT id, username, full_name, role, assigned_regions_json, is_online, last_location_json
-    FROM users WHERE id = ?
-  `).get(row.id);
-  return { user: publicUser(refreshedRow), token };
+  const locked = row?.locked_until && Date.parse(row.locked_until) > Date.now();
+  const passwordMatches = bcrypt.compareSync(password, row && !locked ? row.password_hash : dummyPasswordHash);
+  if (!row) return null;
+  return finishAuthentication(row.id, passwordMatches, database, ['rep']);
+}
+
+function finishAuthentication(userId, passwordMatches, database, allowedRoles) {
+  const finish = database.transaction(() => {
+    const account = database.prepare(`SELECT id, username, password_hash, full_name, role, active, deleted_at,
+      failed_login_attempts, locked_until, assigned_regions_json, is_online, last_location_json
+      FROM users WHERE id = ?`).get(userId);
+    if (!account) return null;
+
+    const now = Date.now();
+    const lockUntil = account.locked_until ? Date.parse(account.locked_until) : NaN;
+    if (Number.isFinite(lockUntil) && lockUntil > now) return null;
+
+    let failedAttempts = Number(account.failed_login_attempts) || 0;
+    if (account.locked_until && (!Number.isFinite(lockUntil) || lockUntil <= now)) {
+      failedAttempts = 0;
+      database.prepare('UPDATE users SET failed_login_attempts = 0, locked_until = NULL WHERE id = ?').run(userId);
+    }
+
+    if (!passwordMatches) {
+      failedAttempts += 1;
+      const lockedUntil = failedAttempts >= failedLoginLimit ? new Date(now + accountLockoutMs).toISOString() : null;
+      database.prepare('UPDATE users SET failed_login_attempts = ?, locked_until = ? WHERE id = ?')
+        .run(failedAttempts, lockedUntil, userId);
+      return null;
+    }
+
+    database.prepare('UPDATE users SET failed_login_attempts = 0, locked_until = NULL WHERE id = ?').run(userId);
+    const roleAllowed = allowedRoles === null || allowedRoles.includes(account.role);
+    if (Number(account.active) !== 1 || account.deleted_at || !roleAllowed) {
+      return account.role === 'rep' && (Number(account.active) !== 1 || account.deleted_at)
+        ? { disabled: true }
+        : null;
+    }
+
+    const user = {
+      id: Number(account.id),
+      username: account.username,
+      password_hash: account.password_hash,
+      full_name: account.full_name,
+      role: account.role,
+      assigned_regions_json: account.assigned_regions_json,
+      is_online: account.is_online,
+      last_location_json: account.last_location_json,
+    };
+    const token = createSession(user, database);
+    const refreshed = account.role === 'rep'
+      ? database.prepare(`SELECT id, username, full_name, role, assigned_regions_json, is_online, last_location_json
+        FROM users WHERE id = ?`).get(userId)
+      : user;
+    return { user: publicUser(refreshed), token };
+  });
+  return finish.immediate();
 }
 
 export function createSession(user, database = db) {

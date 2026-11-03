@@ -86,6 +86,10 @@
 #madar-app .madar-mobile-menu { display: none; }
 #madar-app .madar-main { width: min(100%, 1520px); margin: 0 auto; padding: 30px clamp(18px, 3vw, 42px) 56px; }
 #madar-app .madar-footer { display: flex; justify-content: space-between; gap: 10px; padding: 0 clamp(18px, 3vw, 42px) 20px; color: #8995a6; font-size: 9px; }
+#madar-app .madar-operations-alert { position: sticky; z-index: 70; top: 0; display: flex; align-items: center; gap: 14px; padding: 10px clamp(18px, 3vw, 42px); color: #66480f; border-bottom: 1px solid #ead39c; background: #fff4d8; font-size: 12px; font-weight: 750; }
+#madar-app .madar-operations-alert span { flex: 1; }
+#madar-app .madar-operations-alert a { color: #72500c; text-decoration: underline; white-space: nowrap; }
+#madar-app .madar-operations-alert button { width: 28px; height: 28px; border-radius: 8px; color: #66480f; background: rgba(102,72,15,.08); cursor: pointer; font-size: 20px; }
 #madar-app .madar-page-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 18px; margin-bottom: 24px; }
 #madar-app .madar-page-heading { margin: 0; color: var(--madar-text); font-size: clamp(21px, 2.3vw, 27px); font-weight: 850; letter-spacing: -.025em; }
 #madar-app .madar-page-description { max-width: 720px; margin: 7px 0 0; color: var(--madar-muted); font-size: 12px; }

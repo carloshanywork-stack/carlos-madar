@@ -117,6 +117,36 @@ export async function moveStorageDirectory(sourceRelativePath, destinationRelati
   return { sourcePath: sourceRelativePath, destinationPath: destinationSegments.join('/') };
 }
 
+/** Atomically publish one staged file under the configured storage root. */
+export async function moveStorageFile(sourceRelativePath, destinationRelativePath) {
+  const sourceSegments = parseRelativePath(sourceRelativePath);
+  const destinationSegments = parseRelativePath(destinationRelativePath);
+  const root = await getStorageRoot();
+  let source = root;
+  for (const [index, segment] of sourceSegments.entries()) {
+    source = join(source, segment);
+    const metadata = await lstat(source);
+    if (metadata.isSymbolicLink() || (index < sourceSegments.length - 1 && !metadata.isDirectory())
+        || (index === sourceSegments.length - 1 && !metadata.isFile())) {
+      throw new HttpError(400, 'Staged storage file is not a safe regular file.');
+    }
+  }
+  source = await realpath(source);
+  assertInsideRoot(root, source);
+
+  const destinationDirectory = await ensureDirectorySegments(root, destinationSegments.slice(0, -1));
+  const destination = join(destinationDirectory, destinationSegments.at(-1));
+  assertInsideRoot(root, destination);
+  try {
+    await lstat(destination);
+    throw new HttpError(409, 'The destination storage file already exists.');
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
+  await rename(source, destination);
+  return { sourcePath: sourceRelativePath, destinationPath: destinationSegments.join('/') };
+}
+
 export async function removeStorageDirectory(relativePath) {
   const segments = parseRelativePath(relativePath);
   const root = await getStorageRoot();

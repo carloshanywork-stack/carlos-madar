@@ -10,7 +10,7 @@ const defaultSettings = [
   ['app_name', 'MADAR V2'],
   ['locale', 'ar'],
   ['currency', 'SAR'],
-  ['timezone', 'Asia/Riyadh'],
+  ['timezone', 'Africa/Cairo'],
   ['default_warranty_period_months', '3'],
 ];
 
@@ -37,6 +37,9 @@ const nativeAttendanceMigration = '20261103-native-attendance-clock-fields';
 const userEmployeeSyncMigration = '20261103-user-employee-links';
 const userEmployeeProfileSyncMigration = '20261103-user-employee-profile-reconciliation';
 const machineGeofenceBreadcrumbsMigration = '20261103-machine-geofence-route-stops';
+const accountLoginProtectionMigration = '20261103-account-login-protection';
+const cairoTimezoneMigration = '20261103-africa-cairo-timezone';
+const gpsRetentionIndexMigration = '20261103-gps-retention-index';
 
 const repUsersTableSql = `
   CREATE TABLE users_rep_migration_v1 (
@@ -681,10 +684,10 @@ export function migrateMachineGeofenceAndBreadcrumbs(database) {
         SELECT 1 FROM rep_location_breadcrumbs breadcrumb
         WHERE breadcrumb.user_id = point.rep_user_id AND breadcrumb.recorded_at = point.captured_at
       ) ORDER BY point.id`).all();
-    const timeZone = database.prepare("SELECT value FROM settings WHERE key = 'timezone'").get()?.value || 'Asia/Riyadh';
+    const timeZone = database.prepare("SELECT value FROM settings WHERE key = 'timezone'").get()?.value || 'Africa/Cairo';
     const localDateFormatter = (() => {
       try { return new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }); }
-      catch { return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Riyadh', year: 'numeric', month: '2-digit', day: '2-digit' }); }
+      catch { return new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Cairo', year: 'numeric', month: '2-digit', day: '2-digit' }); }
     })();
     const insertBreadcrumb = database.prepare(`INSERT OR IGNORE INTO rep_location_breadcrumbs
       (user_id, duty_session_id, work_date, latitude, longitude, accuracy, speed, recorded_at)
@@ -698,6 +701,50 @@ export function migrateMachineGeofenceAndBreadcrumbs(database) {
 
     database.prepare('INSERT INTO schema_migrations (version) VALUES (?)')
       .run(machineGeofenceBreadcrumbsMigration);
+  });
+  migrate.immediate();
+}
+
+/** Add persistent per-account lockout fields without rebuilding users or changing IDs. */
+export function migrateAccountLoginProtection(database) {
+  const migrate = database.transaction(() => {
+    const applied = database.prepare('SELECT 1 FROM schema_migrations WHERE version = ?')
+      .get(accountLoginProtectionMigration);
+    const columns = new Set(database.pragma('table_info(users)').map((column) => column.name));
+    if (!columns.has('failed_login_attempts')) {
+      database.exec('ALTER TABLE users ADD COLUMN failed_login_attempts INTEGER NOT NULL DEFAULT 0 CHECK (failed_login_attempts >= 0)');
+    }
+    if (!columns.has('locked_until')) database.exec('ALTER TABLE users ADD COLUMN locked_until TEXT');
+    if (!applied) {
+      database.prepare('INSERT INTO schema_migrations (version) VALUES (?)').run(accountLoginProtectionMigration);
+    }
+  });
+  migrate.immediate();
+}
+
+/** Default legacy Riyadh installs to Cairo, while preserving any other explicit timezone choice. */
+export function migrateCairoTimezone(database) {
+  const migrate = database.transaction(() => {
+    const applied = database.prepare('SELECT 1 FROM schema_migrations WHERE version = ?')
+      .get(cairoTimezoneMigration);
+    database.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES ('timezone', 'Africa/Cairo')").run();
+    if (!applied) {
+      database.prepare(`UPDATE settings SET value = 'Africa/Cairo', updated_at = CURRENT_TIMESTAMP
+        WHERE key = 'timezone' AND value = 'Asia/Riyadh'`).run();
+      database.prepare('INSERT INTO schema_migrations (version) VALUES (?)').run(cairoTimezoneMigration);
+    }
+  });
+  migrate.immediate();
+}
+
+/** Index the pruning predicate without rebuilding the breadcrumb table. */
+export function migrateGpsRetentionIndex(database) {
+  const migrate = database.transaction(() => {
+    const applied = database.prepare('SELECT 1 FROM schema_migrations WHERE version = ?')
+      .get(gpsRetentionIndexMigration);
+    database.exec(`CREATE INDEX IF NOT EXISTS idx_rep_breadcrumbs_recorded_at
+      ON rep_location_breadcrumbs(julianday(recorded_at))`);
+    if (!applied) database.prepare('INSERT INTO schema_migrations (version) VALUES (?)').run(gpsRetentionIndexMigration);
   });
   migrate.immediate();
 }
@@ -891,6 +938,7 @@ export function initializeDatabase({ database = db, initialAdminPassword = env.i
   const initialize = database.transaction(() => {
     database.exec(schema);
     migrateRepUserProfiles(database);
+    migrateAccountLoginProtection(database);
     migrateAuthenticationSessions(database);
     migrateOptionalOffcutMaterial(database);
     migrateClientMachineDeployments(database);
@@ -899,7 +947,9 @@ export function initializeDatabase({ database = db, initialAdminPassword = env.i
     migrateV2FeatureParity(database);
     migrateRepVisitIngestion(database);
     migrateRepSupervisorRadar(database);
+    migrateCairoTimezone(database);
     migrateMachineGeofenceAndBreadcrumbs(database);
+    migrateGpsRetentionIndex(database);
     migrateRepVisitMachineCondition(database);
     migrateMaintenanceOrderRepresentatives(database);
     migrateRepVisitPhotoCollections(database);

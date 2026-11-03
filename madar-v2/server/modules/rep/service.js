@@ -1,19 +1,22 @@
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { readFile } from 'node:fs/promises';
-import sharp from 'sharp';
 import { db } from '../../database/connection.js';
 import { recordAudit } from '../audit.js';
 import { allowOnlyKeys, HttpError, optionalText, positiveId, requireObject, requireText } from '../http.js';
+import { compressFieldImage } from '../upload.js';
 import {
   ensureStorageDirectory,
-  moveStorageDirectory,
+  listStorageFiles,
+  moveStorageFile,
+  removeStorageFile,
   removeStorageDirectory,
+  resolveStorageFile,
   storageDirectory,
   writeStorageFile,
 } from '../storage.js';
 
-const DEFAULT_TIME_ZONE = 'Asia/Riyadh';
+const DEFAULT_TIME_ZONE = 'Africa/Cairo';
 
 function regionKey(value) {
   return String(value ?? '').normalize('NFKC').trim().toLocaleLowerCase('ar');
@@ -325,15 +328,11 @@ async function prepareVisitImage(file, label) {
     : typeof file?.path === 'string' ? await readFile(file.path) : null;
   if (!imageBuffer?.length) throw new HttpError(400, `A ${label} photo is required.`);
   try {
-    const metadata = await sharp(imageBuffer, { limitInputPixels: 40000000 }).metadata();
-    if (!['jpeg', 'webp'].includes(metadata.format) || !metadata.width || !metadata.height) {
+    const compressed = await compressFieldImage(imageBuffer);
+    if (!['jpeg', 'webp'].includes(compressed.format)) {
       throw new HttpError(400, `${label} photo must be a valid JPEG or WebP image.`);
     }
-    return await sharp(imageBuffer, { limitInputPixels: 40000000 })
-      .rotate()
-      .resize({ width: 1600, height: 1600, fit: 'inside', withoutEnlargement: true })
-      .jpeg({ quality: 82, mozjpeg: true })
-      .toBuffer();
+    return compressed.buffer;
   } catch (error) {
     if (error instanceof HttpError) throw error;
     throw new HttpError(400, `${label} photo could not be decoded.`);
@@ -453,7 +452,27 @@ function findRepVisitCard(rep, visit, database) {
 
 async function cleanupVisitFiles(row) {
   await removeStorageDirectory(row.staging_path);
-  await removeStorageDirectory(row.final_path);
+  // Receiving rows created by the previous layout own a UUID-named directory.
+  // Remove that isolated legacy directory, but never remove a shared order folder.
+  if (row.final_path.split('/').at(-1)?.toLowerCase() === String(row.visit_uuid).toLowerCase()) {
+    await removeStorageDirectory(row.final_path);
+    return;
+  }
+  for (const phase of ['before', 'after']) {
+    const phasePath = storageDirectory(row.final_path, phase);
+    let storedFiles = [];
+    try {
+      storedFiles = await listStorageFiles(phasePath, { maxFiles: 10000 });
+    } catch (error) {
+      if (error.status !== 404) throw error;
+    }
+    const expectedName = new RegExp(`^${row.visit_uuid}-${phase}-\\d{4}\\.jpg$`, 'i');
+    for (const storedPath of storedFiles) {
+      if (!expectedName.test(storedPath.split('/').at(-1))) continue;
+      const absolutePath = await resolveStorageFile(storedPath);
+      await removeStorageFile(absolutePath);
+    }
+  }
 }
 
 function createVisitReservation(rep, visit, payloadHash, card, stagingPath, finalPath, database) {
@@ -622,14 +641,13 @@ export async function syncRepVisit(rep, input, files, database = db) {
   const workDate = `${workDay.year}-${String(workDay.month).padStart(2, '0')}-${String(workDay.day).padStart(2, '0')}`;
   const machineArea = safeStorageSegment(card.area_name || card.machine_area);
   const machineFolder = safeStorageSegment(`${card.machine_code}_${card.machine_name_ar}`);
-  const orderFolder = safeStorageSegment(`${workDate}_${card.order_code}`);
+  const orderFolder = safeStorageSegment(`${workDate}_${card.order_id}`);
   const stagingPath = storageDirectory('.madar-recovery', 'rep-visits', visit.visitUuid);
-  const finalPath = storageDirectory('Areas', machineArea, machineFolder, orderFolder, visit.visitUuid);
+  const finalPath = storageDirectory('Areas', machineArea, machineFolder, orderFolder);
   const reservation = createVisitReservation(rep, visit, payloadHash, card, stagingPath, finalPath, database);
   if (reservation.kind === 'completed') return visitResult(reservation.row, database, { idempotent: true });
   if (reservation.kind === 'processing') return visitResult(reservation.row, database, { processing: true });
 
-  let finalDirectoryMoved = false;
   try {
     await ensureStorageDirectory('.madar-recovery', 'rep-visits', visit.visitUuid);
     const photoRows = [];
@@ -647,8 +665,8 @@ export async function syncRepVisit(rep, input, files, database = db) {
       }
     }
     await ensureStorageDirectory('Areas', machineArea, machineFolder, orderFolder);
-    await moveStorageDirectory(stagingPath, finalPath);
-    finalDirectoryMoved = true;
+    for (const photo of photoRows) await moveStorageFile(photo.stagedPath, photo.storedPath);
+    await removeStorageDirectory(stagingPath);
 
     const completedVisit = recordReceivedVisit(rep, visit, reservation.row.id, photoRows, database);
     return visitResult(completedVisit, database);
@@ -664,16 +682,6 @@ export async function syncRepVisit(rep, input, files, database = db) {
       console.error(`Rep visit ${visit.visitUuid} cleanup is pending: ${cleanupError.message}`);
     }
     throw error;
-  } finally {
-    if (finalDirectoryMoved) {
-      // The final directory is retained only after the completion transaction succeeds.
-      const completed = database.prepare('SELECT status FROM rep_visits WHERE id = ?').get(reservation.row.id);
-      if (completed?.status !== 'completed') {
-        try { await removeStorageDirectory(finalPath); } catch (error) {
-          console.error(`Rep visit ${visit.visitUuid} final-file cleanup is pending: ${error.message}`);
-        }
-      }
-    }
   }
 }
 

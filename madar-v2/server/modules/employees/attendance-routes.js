@@ -51,6 +51,14 @@ router.post('/clock-out', requireAdmin, (req, res) => {
     workDate: attendance.work_date,
     actorId: requestActorId(req),
   });
+  if (attendance.overtime_status === 'pending' && Number(attendance.overtime_hours) > 0) {
+    publishOperationsEvent('overtime.pending', {
+      employeeId: attendance.employee_id,
+      employeeName: attendance.name,
+      workDate: attendance.work_date,
+      overtimeHours: Number(attendance.overtime_hours),
+    });
+  }
   res.json({ success: true, attendance });
 });
 

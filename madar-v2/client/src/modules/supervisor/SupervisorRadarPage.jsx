@@ -24,7 +24,7 @@ function formatDuration(seconds) {
 
 function currentLocalDate() {
   const parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Riyadh', year: 'numeric', month: '2-digit', day: '2-digit',
+    timeZone: 'Africa/Cairo', year: 'numeric', month: '2-digit', day: '2-digit',
   }).formatToParts(new Date()).filter((part) => part.type !== 'literal').map(({ type, value }) => [type, value]));
   return `${parts.year}-${parts.month}-${parts.day}`;
 }
@@ -152,25 +152,18 @@ export default function SupervisorRadarPage() {
 
   useEffect(() => {
     void refresh();
-    // SSE delivers committed field changes immediately; this slower refresh is
-    // a reconciliation fallback for reconnect gaps and reverse-proxy outages.
+    // The authenticated app shell owns one SSE connection; this refresh reconciles reconnect gaps.
     const timer = window.setInterval(refresh, 60_000);
-    const events = new EventSource('/api/supervisor/events', { withCredentials: true });
     const onOperationsEvent = (message) => {
-      try {
-        const event = JSON.parse(message.data);
-        if (['rep.tracking.updated', 'rep.visit.submitted', 'attendance.changed'].includes(event.type)) {
-          void refresh();
-        }
-      } catch {
-        // Ignore malformed event frames; the periodic reconciliation remains active.
+      const event = message.detail;
+      if (['rep.tracking.updated', 'rep.visit.submitted', 'rep.visit.reviewed', 'attendance.changed', 'overtime.pending'].includes(event?.type)) {
+        void refresh();
       }
     };
-    events.addEventListener('operations', onOperationsEvent);
+    window.addEventListener('madar:operations-event', onOperationsEvent);
     return () => {
       window.clearInterval(timer);
-      events.removeEventListener('operations', onOperationsEvent);
-      events.close();
+      window.removeEventListener('madar:operations-event', onOperationsEvent);
     };
   }, [refresh]);
 

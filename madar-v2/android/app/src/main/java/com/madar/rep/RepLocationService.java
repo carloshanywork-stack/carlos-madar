@@ -16,6 +16,7 @@ import android.location.LocationManager;
 import android.os.Build;
 import android.os.IBinder;
 import android.os.Looper;
+import android.os.SystemClock;
 
 import androidx.core.app.NotificationCompat;
 import androidx.core.content.ContextCompat;
@@ -33,9 +34,18 @@ public class RepLocationService extends Service implements LocationListener {
     private static final String CHANNEL_ID = "madar-rep-duty-location";
     private static final int NOTIFICATION_ID = 43102;
     private static final int MAX_TRACK_POINTS = 2000;
+    private static final long MOVING_INTERVAL_MS = 5000L;
+    private static final long STATIONARY_INTERVAL_MS = 60000L;
+    private static final long STATIONARY_AFTER_MS = 3 * 60 * 1000L;
+    private static final float MOVING_SPEED_METERS_PER_SECOND = 2f / 3.6f;
+    private static final float MOVING_DISTANCE_METERS = 15f;
     private static volatile boolean running;
 
     private LocationManager locationManager;
+    private Location stationaryAnchor;
+    private long stationarySinceMs;
+    private boolean lowPowerUpdates;
+    private boolean updatesRegistered;
 
     public static boolean isRunning() {
         return running;
@@ -88,13 +98,7 @@ public class RepLocationService extends Service implements LocationListener {
                 getPreferences().edit().putBoolean("gps_provider_enabled", false).apply();
             } else {
                 getPreferences().edit().putBoolean("gps_provider_enabled", true).apply();
-                locationManager.requestLocationUpdates(
-                    LocationManager.GPS_PROVIDER,
-                    5000L,
-                    10f,
-                    this,
-                    Looper.getMainLooper()
-                );
+                requestGpsUpdates(false);
             }
         } catch (SecurityException error) {
             getPreferences().edit().putBoolean("duty_active", false).apply();
@@ -122,7 +126,57 @@ public class RepLocationService extends Service implements LocationListener {
             stopSelf();
             return;
         }
+        updateAdaptiveGpsMode(location);
         appendTrackPoint(json);
+    }
+
+    private void requestGpsUpdates(boolean lowPower) {
+        if (locationManager == null || !hasRequiredPermissions()) return;
+        try {
+            if (updatesRegistered && lowPowerUpdates == lowPower) return;
+            locationManager.removeUpdates(this);
+            locationManager.requestLocationUpdates(
+                LocationManager.GPS_PROVIDER,
+                lowPower ? STATIONARY_INTERVAL_MS : MOVING_INTERVAL_MS,
+                0f,
+                this,
+                Looper.getMainLooper()
+            );
+            lowPowerUpdates = lowPower;
+            updatesRegistered = true;
+            getPreferences().edit().putString("gps_polling_mode", lowPower ? "stationary" : "moving").apply();
+        } catch (SecurityException error) {
+            getPreferences().edit().putBoolean("duty_active", false).apply();
+            stopSelf();
+        } catch (IllegalArgumentException error) {
+            updatesRegistered = false;
+            getPreferences().edit().putBoolean("gps_provider_enabled", false).apply();
+        }
+    }
+
+    private void updateAdaptiveGpsMode(Location location) {
+        long observedAt = SystemClock.elapsedRealtime();
+        boolean moving = location.hasSpeed() && location.getSpeed() >= MOVING_SPEED_METERS_PER_SECOND;
+        if (!moving && stationaryAnchor != null && stationaryAnchor.distanceTo(location) > MOVING_DISTANCE_METERS) {
+            moving = true;
+        }
+
+        if (moving) {
+            stationaryAnchor = new Location(location);
+            stationarySinceMs = 0L;
+            if (lowPowerUpdates) requestGpsUpdates(false);
+            return;
+        }
+
+        if (stationaryAnchor == null) {
+            stationaryAnchor = new Location(location);
+            stationarySinceMs = observedAt;
+            return;
+        }
+        if (stationarySinceMs <= 0L) stationarySinceMs = observedAt;
+        if (!lowPowerUpdates && observedAt - stationarySinceMs >= STATIONARY_AFTER_MS) {
+            requestGpsUpdates(true);
+        }
     }
 
     private void appendTrackPoint(JSObject point) {
@@ -157,6 +211,10 @@ public class RepLocationService extends Service implements LocationListener {
     private void stopTracking() {
         getPreferences().edit().putBoolean("duty_active", false).apply();
         if (locationManager != null) locationManager.removeUpdates(this);
+        updatesRegistered = false;
+        lowPowerUpdates = false;
+        stationaryAnchor = null;
+        stationarySinceMs = 0L;
         stopForeground(STOP_FOREGROUND_REMOVE);
         stopSelf();
     }
@@ -220,6 +278,7 @@ public class RepLocationService extends Service implements LocationListener {
     @Override
     public void onDestroy() {
         if (locationManager != null && hasForegroundPermission()) locationManager.removeUpdates(this);
+        updatesRegistered = false;
         running = false;
         super.onDestroy();
     }
