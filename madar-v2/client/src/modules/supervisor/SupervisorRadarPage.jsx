@@ -226,6 +226,7 @@ export default function SupervisorRadarPage() {
                 </div>
                 <div className="qa-visit-meta">
                   <span>المندوب <b>{visit.repName}</b></span>
+                  <span>حالة الماكينة <b>{visit.machineCondition === 'faulty' ? 'عطلانة' : visit.machineCondition === 'preventive_maintenance' ? 'صيانة وقائية' : 'تعمل'}</b></span>
                   <span>المدة بين الصورتين <b>{formatDuration(visit.siteDurationSeconds)}</b></span>
                   <span>الرفع <b>{formatTime(visit.capturedAt)}</b></span>
                 </div>

@@ -3,7 +3,12 @@ import multer from 'multer';
 import { env } from '../../config/env.js';
 import { db } from '../../database/connection.js';
 import { asyncHandler, allowOnlyKeys, HttpError, requireObject, requireText } from '../http.js';
-import { authenticateUser, authCookieOptions, requireAuthentication } from '../auth/service.js';
+import {
+  authenticateRepUser,
+  authCookieOptions,
+  REP_ACCOUNT_DISABLED_MESSAGE,
+  requireActiveRep,
+} from '../auth/service.js';
 import { getRepFaultReasons, getRepTodayRoute, requireRepUsername, syncRepTracking, syncRepVisit } from './service.js';
 
 const router = Router();
@@ -37,7 +42,12 @@ router.post('/login', asyncHandler(async (req, res) => {
     throw new HttpError(400, 'Username and password are required.');
   }
 
-  const result = authenticateUser(username, body.password, db, { allowedRoles: ['rep'] });
+  const result = authenticateRepUser(username, body.password, db);
+  if (result?.disabled) {
+    res.clearCookie(env.authCookieName, authCookieOptions());
+    res.status(403).json({ success: false, message: REP_ACCOUNT_DISABLED_MESSAGE });
+    return;
+  }
   if (!result) {
     res.status(401).json({ error: 'اسم المستخدم أو كلمة المرور غير صحيحة' });
     return;
@@ -47,14 +57,7 @@ router.post('/login', asyncHandler(async (req, res) => {
   res.json({ success: true, rep: result.user });
 }));
 
-router.use(requireAuthentication);
-router.use((req, res, next) => {
-  if (req.user?.role !== 'rep') {
-    res.status(403).json({ error: 'Field representative access is required.' });
-    return;
-  }
-  next();
-});
+router.use(requireActiveRep);
 
 router.get('/today-route', (req, res, next) => {
   try {

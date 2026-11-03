@@ -124,6 +124,8 @@ CREATE TABLE IF NOT EXISTS rep_visits (
   region_name TEXT NOT NULL,
   payload_sha256 TEXT NOT NULL CHECK (length(payload_sha256) = 64),
   status TEXT NOT NULL CHECK (status IN ('receiving', 'completed', 'failed')),
+  machine_condition TEXT NOT NULL DEFAULT 'working'
+    CHECK (machine_condition IN ('working', 'faulty', 'preventive_maintenance')),
   reason_ids_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(reason_ids_json)),
   notes TEXT,
   captured_at TEXT NOT NULL,

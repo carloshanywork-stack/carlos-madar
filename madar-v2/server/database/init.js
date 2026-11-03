@@ -29,6 +29,7 @@ const maintenanceUnmatchedFolderDuplicateMigration = '20261101-maintenance-unmat
 const repUserProfileMigration = '20261102-rep-user-profile';
 const repVisitIngestionMigration = '20261102-rep-offline-visit-ingestion';
 const repSupervisorRadarMigration = '20261102-rep-supervisor-radar-qa';
+const repVisitConditionMigration = '20261103-rep-visit-machine-condition';
 
 const repUsersTableSql = `
   CREATE TABLE users_rep_migration_v1 (
@@ -213,6 +214,21 @@ export function migrateRepSupervisorRadar(database) {
       database.exec('ALTER TABLE rep_location_points ADD COLUMN duty_session_id INTEGER REFERENCES rep_duty_sessions(id)');
     }
     database.prepare('INSERT INTO schema_migrations (version) VALUES (?)').run(repSupervisorRadarMigration);
+  });
+  migrate.immediate();
+}
+
+export function migrateRepVisitMachineCondition(database) {
+  const migrate = database.transaction(() => {
+    const applied = database.prepare('SELECT 1 FROM schema_migrations WHERE version = ?')
+      .get(repVisitConditionMigration);
+    if (applied) return;
+    const columns = new Set(database.pragma('table_info(rep_visits)').map((column) => column.name));
+    if (!columns.has('machine_condition')) {
+      database.exec(`ALTER TABLE rep_visits ADD COLUMN machine_condition TEXT NOT NULL DEFAULT 'working'
+        CHECK (machine_condition IN ('working', 'faulty', 'preventive_maintenance'))`);
+    }
+    database.prepare('INSERT INTO schema_migrations (version) VALUES (?)').run(repVisitConditionMigration);
   });
   migrate.immediate();
 }
@@ -662,6 +678,7 @@ export function initializeDatabase({ database = db, initialAdminPassword = env.i
     migrateV2FeatureParity(database);
     migrateRepVisitIngestion(database);
     migrateRepSupervisorRadar(database);
+    migrateRepVisitMachineCondition(database);
     migrateMaintenanceTripFolders(database);
     migrateMaintenanceOrderDeletion(database);
     migrateMaintenanceCardDeletion(database);

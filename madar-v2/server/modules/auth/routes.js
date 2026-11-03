@@ -5,11 +5,13 @@ import {
   createFirstAdmin,
   createSession,
   getSessionUserFromRequest,
+  isDisabledRepSessionFromRequest,
   getTokenFromRequest,
   isSetupRequired,
   refreshRepPresence,
   revokeSession,
   authenticateUser,
+  REP_ACCOUNT_DISABLED_MESSAGE,
 } from './service.js';
 import { env } from '../../config/env.js';
 import { syncRepTracking } from '../rep/service.js';
@@ -25,11 +27,13 @@ function setSessionCookie(res, token) {
 
 router.get('/status', (req, res) => {
   const user = getSessionUserFromRequest(req);
-  res.json({
+  const status = {
     authenticated: Boolean(user),
     user,
     setupRequired: isSetupRequired(),
-  });
+  };
+  if (!user && isDisabledRepSessionFromRequest(req)) status.message = REP_ACCOUNT_DISABLED_MESSAGE;
+  res.json(status);
 });
 
 router.post('/setup', asyncHandler(async (req, res) => {

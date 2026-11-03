@@ -101,6 +101,11 @@
 #madar-app .rep-search input { width: 100%; min-width: 0; border: 0; outline: 0; color: #182e43; background: transparent; font-size: 12px; }
 #madar-app .rep-search input::placeholder { color: #586876; opacity: 1; }
 #madar-app .rep-search button { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 7px; color: #3e5262; background: #edf1f2; cursor: pointer; font-size: 19px; }
+#madar-app .rep-route-filters { display: flex; gap: 7px; margin: 0 0 13px; overflow-x: auto; }
+#madar-app .rep-route-filters button { display: inline-flex; min-height: 37px; flex: 0 0 auto; align-items: center; gap: 8px; padding: 0 12px; border: 1px solid #c6d2d8; border-radius: 999px; color: #405565; background: #fff; cursor: pointer; font-size: 10px; font-weight: 800; }
+#madar-app .rep-route-filters button.active { border-color: #438e76; color: #0d5d47; background: #e8f4ee; }
+#madar-app .rep-route-filters b { display: grid; min-width: 20px; height: 20px; place-items: center; border-radius: 50%; color: #3d5360; background: #edf1f2; font-size: 9px; }
+#madar-app .rep-route-filters button.active b { color: #fff; background: #197258; }
 #madar-app .rep-storage-hint, #madar-app .rep-storage-error { padding: 10px 12px; border: 1px solid #e6d196; border-radius: 10px; color: #60480f; background: #fff9e6; font-size: 11px; }
 #madar-app .rep-storage-error { border-color: #e5bbbb; color: #793535; background: #fff0f0; }
 #madar-app .rep-region-list { display: grid; gap: 14px; }
@@ -116,7 +121,9 @@
 #madar-app .rep-region-folder[open] > summary { border-bottom: 1px solid #e0e5e8; }
 #madar-app .rep-region-folder[open] > summary .rep-folder-chevron { transform: rotate(180deg); }
 #madar-app .rep-machine-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12px; padding: 14px; background: #f7f9f9; }
+#madar-app .rep-machine-card-wrap { display: flex; min-width: 0; flex-direction: column; gap: 6px; }
 #madar-app .rep-machine-card { display: flex; min-width: 0; min-height: 180px; flex-direction: column; align-items: stretch; padding: 15px; border: 1px solid #cbd5db; border-radius: 13px; color: #192d41 !important; background: #fff; cursor: pointer; text-align: right; transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease; }
+#madar-app .rep-machine-card-wrap .rep-machine-card { width: 100%; flex: 1; }
 #madar-app .rep-machine-card:not(:disabled):hover { border-color: #5b9c86; box-shadow: 0 8px 18px rgba(24,85,66,.09); transform: translateY(-1px); }
 #madar-app .rep-machine-card.is-complete { border-color: #8fc5b1; background: #fbfefc; }
 #madar-app .rep-machine-card.is-locked { opacity: .72; background: #f4f5f5; }
@@ -125,11 +132,15 @@
 #madar-app .rep-machine-status { color: #50606c; font-size: 10px; font-weight: 800; white-space: nowrap; }
 #madar-app .rep-machine-card.is-complete .rep-machine-status { color: #075d49; }
 #madar-app .rep-machine-name { display: -webkit-box; margin-top: 13px; overflow: hidden; color: #172b3f; font-size: 14px; font-weight: 850; line-height: 1.5; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+#madar-app .rep-machine-branch { display: block; margin-top: 10px; color: #145d4b; font-size: 12px; font-weight: 900; line-height: 1.5; }
+#madar-app .rep-machine-branch + .rep-machine-name { margin-top: 3px; }
 #madar-app .rep-machine-address { display: flex; align-items: flex-start; gap: 5px; margin-top: 7px; color: #50606c; font-size: 10px; line-height: 1.45; }
 #madar-app .rep-machine-address i { flex: 0 0 auto; color: #206b57; font-size: 15px; font-style: normal; }
 #madar-app .rep-review-note { margin-top: 7px; padding: 7px 8px; border: 1px solid #e8c6a0; border-radius: 8px; color: #704215; background: #fff7ed; font-size: 10px; line-height: 1.5; }
 #madar-app .rep-machine-open { display: flex; align-items: center; justify-content: space-between; margin-top: auto; padding-top: 10px; color: #11644f; font-size: 10px; font-weight: 900; }
 #madar-app .rep-machine-open b { font-size: 16px; }
+#madar-app .rep-map-link { display: inline-flex; min-height: 34px; align-items: center; justify-content: center; border: 1px solid #b8d2c7; border-radius: 9px; color: #0c604a; background: #edf7f1; font-size: 10px; font-weight: 850; text-decoration: none; }
+#madar-app .rep-map-link:hover { background: #e0f0e8; }
 #madar-app .rep-empty-state { display: grid; min-height: 220px; justify-items: center; align-content: center; padding: 28px 20px; border: 1px dashed #b9c8d0; border-radius: 15px; color: #485968; background: #fff; text-align: center; }
 #madar-app .rep-empty-icon { display: grid; width: 51px; height: 51px; place-items: center; margin-bottom: 11px; border-radius: 16px; color: #145d4d; background: #e8f3ee; font-size: 27px; }
 #madar-app .rep-empty-state h3 { margin: 0 0 5px; color: #20364b; font-size: 15px; }
@@ -179,6 +190,11 @@
 #madar-app .rep-gps-pulse { width: 10px; height: 10px; flex: 0 0 auto; border: 2px solid currentColor; border-radius: 50%; box-shadow: 0 0 0 4px rgba(20,90,71,.09); }
 #madar-app .rep-gps-label { padding: 5px 8px; border: 1px solid currentColor; border-radius: 7px; font-size: 9px; font-weight: 900; }
 #madar-app .rep-form-section { margin-top: 22px; }
+#madar-app .rep-condition-options { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 8px; }
+#madar-app .rep-condition-option { display: flex; min-height: 54px; align-items: center; justify-content: center; gap: 7px; padding: 7px; border: 1px solid #c8d3d9; border-radius: 11px; color: #2d4354 !important; background: #fff; cursor: pointer; font-size: 11px; font-weight: 800; }
+#madar-app .rep-condition-option > span { display: grid; width: 23px; height: 23px; place-items: center; border-radius: 7px; color: #41596a; background: #f0f3f4; font-weight: 950; }
+#madar-app .rep-condition-option.selected { border-color: #3d9579; color: #0b5c46 !important; background: #e8f4ee; }
+#madar-app .rep-condition-option.selected > span { color: #fff; background: #197258; }
 #madar-app .rep-section-title { display: flex; align-items: end; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
 #madar-app .rep-section-title h3 { margin: 3px 0 0; color: #1c3145; font-size: 15px; }
 #madar-app .rep-section-title > small { color: #53616c; font-size: 9px; text-align: left; }
@@ -289,6 +305,7 @@
   #madar-app .rep-route-heading { align-items: stretch; flex-direction: column; gap: 12px; }
   #madar-app .rep-route-heading h2 { font-size: 19px; }
   #madar-app .rep-search { width: 100%; min-height: 45px; }
+  #madar-app .rep-route-filters { margin-bottom: 11px; }
   #madar-app .rep-region-folder > summary { min-height: 61px; padding-inline: 11px; gap: 8px; }
   #madar-app .rep-folder-icon { width: 34px; height: 34px; }
   #madar-app .rep-folder-name strong { font-size: 12px; }
@@ -297,6 +314,7 @@
   #madar-app .rep-machine-grid { grid-template-columns: 1fr; gap: 9px; padding: 10px; }
   #madar-app .rep-machine-card { min-height: 150px; padding: 13px; }
   #madar-app .rep-machine-name { margin-top: 9px; }
+  #madar-app .rep-machine-branch { margin-top: 8px; }
   #madar-app .rep-app-footer { flex-direction: column; margin-top: 25px; font-size: 9px; }
   #madar-app .rep-sheet-backdrop { padding: 0; }
   #madar-app .rep-visit-sheet { width: 100%; max-height: 96dvh; border-radius: 18px 18px 0 0; }
@@ -306,6 +324,8 @@
   #madar-app .rep-form-section { margin-top: 18px; }
   #madar-app .rep-section-title { align-items: flex-start; }
   #madar-app .rep-section-title > small { max-width: 120px; }
+  #madar-app .rep-condition-options { grid-template-columns: 1fr; }
+  #madar-app .rep-condition-option { justify-content: flex-start; min-height: 45px; padding-inline: 12px; }
   #madar-app .rep-photo-grid { gap: 8px; }
   #madar-app .rep-photo-card { padding: 9px; }
   #madar-app .rep-photo-card-head { align-items: flex-start; flex-direction: column; }

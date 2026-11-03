@@ -7,12 +7,14 @@ function showLocation(location) {
   return `${location.latitude.toFixed(5)}, ${location.longitude.toFixed(5)} · دقة ±${Math.round(location.accuracy)}م`;
 }
 
-export default function MachineVisitSheet({ machine, reasons, gps, gpsError, onClose, onSave }) {
+export default function MachineVisitSheet({ machine, reasons, gps, gpsError, captureLocation, onClose, onSave }) {
+  const [machineCondition, setMachineCondition] = useState('');
   const [reasonIds, setReasonIds] = useState([]);
   const [notes, setNotes] = useState('');
   const [beforePhoto, setBeforePhoto] = useState(null);
   const [afterPhoto, setAfterPhoto] = useState(null);
   const [processingPhase, setProcessingPhase] = useState('');
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const beforeInput = useRef(null);
   const afterInput = useRef(null);
@@ -95,9 +97,16 @@ export default function MachineVisitSheet({ machine, reasons, gps, gpsError, onC
       setError('يلزم التقاط صورة واحدة على الأقل قبل الصيانة وبعدها.');
       return;
     }
+    if (!machineCondition) {
+      setError('اختر حالة الماكينة قبل حفظ الزيارة.');
+      return;
+    }
     setError('');
+    setSaving(true);
     try {
+      const capturedLocation = await captureLocation?.();
       await onSave({
+        machineCondition,
         reasonIds,
         notes: notes.trim(),
         beforePhoto: beforePhoto.blob,
@@ -105,10 +114,12 @@ export default function MachineVisitSheet({ machine, reasons, gps, gpsError, onC
         beforeCapturedAt: beforePhoto.capturedAt,
         afterCapturedAt: afterPhoto.capturedAt,
         capturedAt: new Date().toISOString(),
-        location: locationPayload(gps),
+        location: locationPayload(capturedLocation) ?? locationPayload(gps),
       });
     } catch (saveError) {
       setError(saveError.message || 'تعذر حفظ الزيارة محلياً. لم تُحذف الصور؛ حاول مرة أخرى.');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -187,6 +198,26 @@ export default function MachineVisitSheet({ machine, reasons, gps, gpsError, onC
 
           <section className="rep-form-section">
             <div className="rep-section-title">
+              <div><span className="rep-eyebrow">MACHINE CHECK</span><h3>حالة الماكينة</h3></div>
+              <small>اختر الحالة الحالية</small>
+            </div>
+            <div className="rep-condition-options" role="radiogroup" aria-label="حالة الماكينة">
+              {[
+                ['working', 'تعمل', '✓'],
+                ['faulty', 'عطلانة', '!'],
+                ['preventive_maintenance', 'صيانة وقائية', '⌁'],
+              ].map(([value, label, icon]) => (
+                <button key={value} type="button" role="radio" aria-checked={machineCondition === value}
+                  className={`rep-condition-option ${machineCondition === value ? 'selected' : ''}`}
+                  onClick={() => setMachineCondition(value)}>
+                  <span aria-hidden="true">{icon}</span>{label}
+                </button>
+              ))}
+            </div>
+          </section>
+
+          <section className="rep-form-section">
+            <div className="rep-section-title">
               <div><span className="rep-eyebrow">MAINTENANCE</span><h3>ما الذي تم إصلاحه؟</h3></div>
               <small>اختياري · يمكنك اختيار أكثر من سبب</small>
             </div>
@@ -231,8 +262,8 @@ export default function MachineVisitSheet({ machine, reasons, gps, gpsError, onC
 
         <footer className="rep-sheet-footer">
           <button type="button" className="rep-button rep-button-light" onClick={onClose}>إلغاء</button>
-          <button type="button" className="rep-button rep-button-primary rep-save-visit" onClick={save} disabled={!beforePhoto || !afterPhoto || Boolean(processingPhase) || (nativeApp && /تزييف الموقع/.test(gpsError ?? ''))}>
-            💾 حفظ الزيارة على الهاتف
+          <button type="button" className="rep-button rep-button-primary rep-save-visit" onClick={save} disabled={saving || !machineCondition || !beforePhoto || !afterPhoto || Boolean(processingPhase) || (nativeApp && /تزييف الموقع/.test(gpsError ?? ''))}>
+            {saving ? 'جارٍ تحديد الموقع وحفظ الزيارة…' : '💾 حفظ الزيارة على الهاتف'}
           </button>
         </footer>
       </section>

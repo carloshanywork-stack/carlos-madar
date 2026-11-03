@@ -76,6 +76,14 @@ function formatGps(location) {
   return `${location.latitude.toFixed(5)}, ${location.longitude.toFixed(5)} · دقة ±${Math.round(location.accuracy)}م`;
 }
 
+function mapsUrl(address) {
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`;
+}
+
+function visitSubmitted(machine) {
+  return Boolean(machine.isCompleted || machine.isSubmitted);
+}
+
 function createVisitUuid() {
   if (crypto.randomUUID) return crypto.randomUUID();
   const bytes = new Uint8Array(16);
@@ -132,6 +140,7 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
   const [reasons, setReasons] = useState([]);
   const [pendingVisits, setPendingVisits] = useState([]);
   const [query, setQuery] = useState('');
+  const [routeFilter, setRouteFilter] = useState('all');
   const [selectedMachine, setSelectedMachine] = useState(null);
   const [networkOnline, setNetworkOnline] = useState(navigator.onLine);
   const [serverState, setServerState] = useState('checking');
@@ -214,6 +223,35 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
       return false;
     }
   }, [nativeApp, offlineOnly, onDuty]);
+
+  const captureVisitLocation = useCallback(async () => {
+    try {
+      let location;
+      if (nativeApp) {
+        location = await getNativeGpsLocation();
+      } else if (navigator.geolocation) {
+        const position = await new Promise((resolve, reject) => navigator.geolocation.getCurrentPosition(resolve, reject, {
+          enableHighAccuracy: true,
+          maximumAge: 5000,
+          timeout: 12000,
+        }));
+        location = {
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+          accuracy: position.coords.accuracy,
+          updatedAt: new Date(position.timestamp).toISOString(),
+        };
+      } else {
+        return gpsRef.current;
+      }
+      setGps(location);
+      setGpsError('');
+      return location;
+    } catch (error) {
+      setGpsError(error.message || 'تعذر تحديث GPS عند حفظ الزيارة.');
+      return gpsRef.current;
+    }
+  }, [nativeApp]);
 
   useEffect(() => {
     gpsRef.current = gps;
@@ -626,12 +664,26 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
     const term = normalize(query);
     return (route?.regions ?? []).map((region) => ({
       ...region,
-      machines: region.machines.filter((machine) => !term
-        || normalize(machine.machineCode).includes(term)
-        || normalize(machine.arabicName).includes(term)
-        || normalize(machine.address).includes(term)),
+      machines: region.machines.filter((machine) => {
+        const matchesTerm = !term
+          || normalize(machine.machineCode).includes(term)
+          || normalize(machine.arabicName).includes(term)
+          || normalize(machine.clientName).includes(term)
+          || normalize(machine.address).includes(term);
+        const matchesFilter = routeFilter === 'all'
+          || (routeFilter === 'remaining' && !visitSubmitted(machine))
+          || (routeFilter === 'completed' && visitSubmitted(machine));
+        return matchesTerm && matchesFilter;
+      }),
     })).filter((region) => region.machines.length > 0);
-  }, [query, route]);
+  }, [query, route, routeFilter]);
+
+  const routeMachines = (route?.regions ?? []).flatMap((region) => region.machines ?? []);
+  const routeFilterCounts = {
+    all: routeMachines.length,
+    remaining: routeMachines.filter((machine) => !visitSubmitted(machine)).length,
+    completed: routeMachines.filter(visitSubmitted).length,
+  };
 
   const finishTutorial = () => {
     try { window.localStorage.setItem(`tutorial_seen:${userId}`, '1'); } catch { /* Tutorial is dismissed for this session. */ }
@@ -680,13 +732,14 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
     await onLogout();
   };
 
-  const saveVisit = async ({ reasonIds, notes, beforePhoto, afterPhoto, beforeCapturedAt, afterCapturedAt, capturedAt, location }) => {
+  const saveVisit = async ({ machineCondition, reasonIds, notes, beforePhoto, afterPhoto, beforeCapturedAt, afterCapturedAt, capturedAt, location }) => {
     const visitUuid = createVisitUuid();
     const payload = {
       visitUuid,
       cardId: Number(selectedMachine.cardId),
       machineCode: selectedMachine.machineCode,
       regionName: selectedMachine.regionName,
+      machineCondition,
       reasonIds,
       notes,
       capturedAt,
@@ -791,6 +844,15 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
           </label>
         </div>
 
+        <div className="rep-route-filters" role="group" aria-label="تصفية مسار اليوم">
+          {[['all', 'الكل'], ['remaining', 'المتبقية'], ['completed', 'المكتملة']].map(([value, label]) => (
+            <button key={value} type="button" className={routeFilter === value ? 'active' : ''}
+              aria-pressed={routeFilter === value} onClick={() => setRouteFilter(value)}>
+              {label}<b>{routeFilterCounts[value]}</b>
+            </button>
+          ))}
+        </div>
+
         {storagePersistent === false && <p className="rep-storage-hint">قد يقوم المتصفح بإخلاء بعض البيانات المحلية عند امتلاء الهاتف. اترك مساحة كافية ولا تمسح بيانات التطبيق قبل المزامنة.</p>}
         {storageError && <p className="rep-storage-error" role="alert">{storageError}</p>}
 
@@ -808,19 +870,22 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
                   </summary>
                   <div className="rep-machine-grid">
                     {region.machines.map((machine) => (
-                      <button
-                        type="button"
-                        className={`rep-machine-card ${machine.isCompleted ? 'is-complete' : ''} ${machine.canVisit === false ? 'is-locked' : ''}`}
-                        key={`${machine.cardId}-${machine.machineCode}`}
-                        onClick={() => setSelectedMachine({ ...machine, regionName: region.regionName })}
-                        disabled={machine.canVisit === false}
-                      >
-                        <div className="rep-machine-card-top"><span className="rep-machine-code" dir="ltr">{machine.machineCode}</span><span className="rep-machine-status">{machine.isCompleted ? '✅ معتمدة' : machine.reviewStatus === 'pending' ? '🟡 بانتظار الاعتماد' : machine.reviewStatus === 'reshoot' ? '🔁 إعادة تصوير' : machine.canVisit === false ? 'مغلقة' : '⏳ متبقية'}</span></div>
-                        <strong className="rep-machine-name">{machine.arabicName || `ماكينة ${machine.machineCode}`}</strong>
-                        <span className="rep-machine-address"><i aria-hidden="true">⌖</i>{machine.address || 'عنوان العميل غير مسجل'}</span>
-                        {machine.reviewNote && <small className="rep-review-note">ملاحظة المشرف: {machine.reviewNote}</small>}
-                        <span className="rep-machine-open">{machine.isCompleted ? 'تم اعتماد الزيارة' : machine.reviewStatus === 'pending' ? 'بانتظار قرار المشرف' : machine.reviewStatus === 'reshoot' ? 'افتح لإعادة التصوير' : machine.canVisit === false ? 'للعرض فقط' : 'ابدأ الزيارة'} <b aria-hidden="true">←</b></span>
-                      </button>
+                      <article className="rep-machine-card-wrap" key={`${machine.cardId}-${machine.machineCode}`}>
+                        <button
+                          type="button"
+                          className={`rep-machine-card ${machine.isCompleted ? 'is-complete' : ''} ${machine.canVisit === false ? 'is-locked' : ''}`}
+                          onClick={() => setSelectedMachine({ ...machine, regionName: region.regionName })}
+                          disabled={machine.canVisit === false}
+                        >
+                          <div className="rep-machine-card-top"><span className="rep-machine-code" dir="ltr">{machine.machineCode}</span><span className="rep-machine-status">{machine.isCompleted ? '✅ معتمدة' : machine.reviewStatus === 'pending' ? '🟡 بانتظار الاعتماد' : machine.reviewStatus === 'reshoot' ? '🔁 إعادة تصوير' : machine.canVisit === false ? 'مغلقة' : '⏳ متبقية'}</span></div>
+                          {machine.clientName && <strong className="rep-machine-branch">{machine.clientName}</strong>}
+                          <span className="rep-machine-name">{machine.arabicName || `ماكينة ${machine.machineCode}`}</span>
+                          <span className="rep-machine-address"><i aria-hidden="true">⌖</i>{machine.address || 'عنوان العميل غير مسجل'}</span>
+                          {machine.reviewNote && <small className="rep-review-note">ملاحظة المشرف: {machine.reviewNote}</small>}
+                          <span className="rep-machine-open">{machine.isCompleted ? 'تم اعتماد الزيارة' : machine.reviewStatus === 'pending' ? 'بانتظار قرار المشرف' : machine.reviewStatus === 'reshoot' ? 'افتح لإعادة التصوير' : machine.canVisit === false ? 'للعرض فقط' : 'ابدأ الزيارة'} <b aria-hidden="true">←</b></span>
+                        </button>
+                        {machine.address && <a className="rep-map-link" href={mapsUrl(machine.address)} target="_blank" rel="noopener noreferrer">⌖ فتح الموقع في Google Maps</a>}
+                      </article>
                     ))}
                   </div>
                 </details>
@@ -850,7 +915,7 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
 
       <footer className="rep-app-footer"><span>مَــدَارْ · تطبيق المندوب الميداني</span><span>{gps ? `آخر GPS: ${formatGps(gps)}` : onDuty ? gpsError : nativeApp ? 'فعّل أون ديوتي لتسجيل GPS بالخلفية' : 'GPS يعمل أثناء فتح التطبيق فقط'}</span></footer>
 
-      {selectedMachine && <MachineVisitSheet machine={selectedMachine} reasons={reasons} gps={gps} gpsError={gpsError} onClose={() => setSelectedMachine(null)} onSave={saveVisit} />}
+      {selectedMachine && <MachineVisitSheet machine={selectedMachine} reasons={reasons} gps={gps} gpsError={gpsError} captureLocation={captureVisitLocation} onClose={() => setSelectedMachine(null)} onSave={saveVisit} />}
       {tutorialOpen && <Tutorial nativeApp={nativeApp} onFinish={finishTutorial} />}
       {toast && <div className="rep-toast" role="status">✓ {toast}</div>}
     </main>

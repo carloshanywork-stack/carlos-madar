@@ -44,6 +44,10 @@ function cacheRepProfile(user) {
   try { window.localStorage.setItem('madar-rep-profile', JSON.stringify(user)); } catch { /* Offline queue is still separated by its IndexedDB rep ID. */ }
 }
 
+function clearCachedRepProfile() {
+  try { window.localStorage.removeItem('madar-rep-profile'); } catch { /* Lockout still clears the in-memory session. */ }
+}
+
 function BusinessRoutes({ user }) {
   return (
     <Suspense fallback={<LoadingState label="جارٍ تحميل الصفحة" />}>
@@ -84,7 +88,12 @@ function AuthenticatedApplication() {
       cacheRepProfile(authenticatedUser);
       setOfflineOnly(false);
       setSetupRequired(Boolean(status.setupRequired));
-      setAuthError('');
+      if (status.message === 'تم تعطيل حسابك من قبل الإدارة') {
+        clearCachedRepProfile();
+        setAuthError(status.message);
+      } else {
+        setAuthError('');
+      }
     } catch (error) {
       const cachedRep = readCachedRep();
       setUser(cachedRep);
@@ -112,7 +121,8 @@ function AuthenticatedApplication() {
         setUser(authenticatedUser);
         cacheRepProfile(authenticatedUser);
         setOfflineOnly(false);
-        setAuthError(status.authenticated ? '' : 'انتهت الجلسة. سجّل الدخول مجدداً لمزامنة الزيارات.');
+        if (status.message === 'تم تعطيل حسابك من قبل الإدارة') clearCachedRepProfile();
+        setAuthError(status.message || (status.authenticated ? '' : 'انتهت الجلسة. سجّل الدخول مجدداً لمزامنة الزيارات.'));
       } catch {
         // The offline cached profile is only a local workspace, never an API credential.
       } finally {
@@ -127,6 +137,18 @@ function AuthenticatedApplication() {
       window.removeEventListener('online', onOnline);
     };
   }, [offlineOnly]);
+
+  useEffect(() => {
+    const handleDisabledRep = (event) => {
+      clearCachedRepProfile();
+      setUser(null);
+      setOfflineOnly(false);
+      setSetupRequired(false);
+      setAuthError(event.detail?.message || 'تم تعطيل حسابك من قبل الإدارة');
+    };
+    window.addEventListener('madar-rep-account-disabled', handleDisabledRep);
+    return () => window.removeEventListener('madar-rep-account-disabled', handleDisabledRep);
+  }, []);
 
   useEffect(() => {
     if (offlineOnly) return undefined;

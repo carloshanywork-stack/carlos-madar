@@ -112,7 +112,7 @@ export function getRepTodayRoute(rep, database = db) {
       card.id AS card_id, card.before_photos_json, card.after_photos_json,
       machine.id AS machine_id, machine.code AS machine_code,
       machine.name_ar AS machine_name_ar, machine.area AS region_name,
-      client.address AS client_address
+      client.name AS client_name, client.address AS client_address
     FROM maintenance_orders order_record
     JOIN clients client ON client.id = order_record.client_id
     JOIN maintenance_cards card ON card.order_id = order_record.id
@@ -171,6 +171,7 @@ export function getRepTodayRoute(rep, database = db) {
     regionsByKey.get(key).machines.push({
       machineCode: row.machine_code,
       arabicName: row.machine_name_ar,
+      clientName: row.client_name,
       address: row.client_address ?? '',
       isCompleted,
       isSubmitted,
@@ -208,7 +209,7 @@ export function getRepTodayRoute(rep, database = db) {
 function normalizeVisitInput(input) {
   const body = requireObject(input, 'visit');
   allowOnlyKeys(body, [
-    'visitUuid', 'cardId', 'machineCode', 'regionName', 'reasonIds', 'notes',
+    'visitUuid', 'cardId', 'machineCode', 'regionName', 'machineCondition', 'reasonIds', 'notes',
     'capturedAt', 'beforeCapturedAt', 'afterCapturedAt', 'location',
   ]);
   const visitUuid = requireText(body.visitUuid, 'visitUuid', { maxLength: 36 });
@@ -221,6 +222,10 @@ function normalizeVisitInput(input) {
     throw new HttpError(400, 'machineCode contains unsupported characters.');
   }
   const regionName = requireText(body.regionName, 'regionName', { maxLength: 160 });
+  const machineCondition = body.machineCondition ?? 'working';
+  if (!['working', 'faulty', 'preventive_maintenance'].includes(machineCondition)) {
+    throw new HttpError(400, 'machineCondition must be working, faulty, or preventive_maintenance.');
+  }
   if (!Array.isArray(body.reasonIds) || body.reasonIds.length > 50) {
     throw new HttpError(400, 'reasonIds must be an array containing at most 50 reason IDs.');
   }
@@ -250,6 +255,7 @@ function normalizeVisitInput(input) {
     cardId,
     machineCode,
     regionName,
+    machineCondition,
     reasonIds,
     notes,
     capturedAt: capturedDate.toISOString(),
@@ -380,12 +386,12 @@ function createVisitReservation(rep, visit, payloadHash, card, stagingPath, fina
     const result = database.prepare(`
       INSERT INTO rep_visits (
         visit_uuid, rep_user_id, order_id, card_id, machine_id, order_code, machine_code,
-        region_name, payload_sha256, status, reason_ids_json, notes, captured_at,
+        region_name, payload_sha256, status, machine_condition, reason_ids_json, notes, captured_at,
         before_captured_at, after_captured_at, location_json, staging_path, final_path
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'receiving', ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'receiving', ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       visit.visitUuid, rep.id, card.order_id, card.card_id, card.machine_id, card.order_code,
-      card.machine_code, card.machine_area, payloadHash, JSON.stringify(visit.reasonIds),
+      card.machine_code, card.machine_area, payloadHash, visit.machineCondition, JSON.stringify(visit.reasonIds),
       visit.notes, visit.capturedAt, visit.beforeCapturedAt, visit.afterCapturedAt,
       visit.location ? JSON.stringify(visit.location) : null,
       stagingPath, finalPath,
@@ -417,6 +423,7 @@ function recordReceivedVisit(rep, visit, visitId, beforePath, afterPath, databas
         visit_uuid: visit.visitUuid,
         machine_code: visit.machineCode,
         region_name: visit.regionName,
+        machine_condition: visit.machineCondition,
         card_id: visit.cardId,
         reason_ids: visit.reasonIds,
         captured_at: visit.capturedAt,

@@ -7,6 +7,7 @@ import { HttpError, allowOnlyKeys, requireObject, requireText } from '../http.js
 
 const sessionLifetimeSeconds = 7 * 24 * 60 * 60;
 const dummyPasswordHash = bcrypt.hashSync('MADAR-invalid-login-timing-only', 12);
+export const REP_ACCOUNT_DISABLED_MESSAGE = 'تم تعطيل حسابك من قبل الإدارة';
 
 function publicUser(row) {
   const user = {
@@ -130,6 +131,29 @@ export function authenticateUser(username, password, database = db, { allowedRol
   return { user: publicUser(refreshedRow), token };
 }
 
+/** Authenticate a representative while preserving a distinct response for a valid but disabled account. */
+export function authenticateRepUser(username, password, database = db) {
+  if (typeof username !== 'string' || !username.trim() || username.length > 64) return null;
+  if (typeof password !== 'string' || !password || password.length > 1024
+      || Buffer.byteLength(password, 'utf8') > 72) return null;
+  const row = database.prepare(`
+    SELECT id, username, password_hash, full_name, role, active,
+      assigned_regions_json, is_online, last_location_json
+    FROM users
+    WHERE username = ? COLLATE NOCASE AND role = 'rep' AND deleted_at IS NULL
+    LIMIT 1
+  `).get(username.trim());
+  const passwordMatches = bcrypt.compareSync(password, row?.password_hash ?? dummyPasswordHash);
+  if (!row || !passwordMatches) return null;
+  if (Number(row.active) !== 1) return { disabled: true };
+  const token = createSession(row, database);
+  const refreshedRow = database.prepare(`
+    SELECT id, username, full_name, role, assigned_regions_json, is_online, last_location_json
+    FROM users WHERE id = ?
+  `).get(row.id);
+  return { user: publicUser(refreshedRow), token };
+}
+
 export function createSession(user, database = db) {
   const token = jwt.sign(
     { sub: String(user.id) },
@@ -200,6 +224,69 @@ export const getSessionUser = verifyToken;
 
 export function getSessionUserFromRequest(req, database = db) {
   return getSessionUser(getTokenFromRequest(req), database);
+}
+
+function getRepSessionState(token, database = db) {
+  if (!token || typeof token !== 'string' || token.length > 8192) return null;
+  let claims;
+  try {
+    claims = jwt.verify(token, env.jwtSecret, { algorithms: ['HS256'] });
+  } catch {
+    return null;
+  }
+  const userId = Number(claims.sub);
+  if (!Number.isSafeInteger(userId) || userId < 1) return null;
+  const row = database.prepare(`
+    SELECT user.id, user.username, user.full_name, user.role, user.active, user.deleted_at,
+      user.assigned_regions_json, user.is_online, user.last_location_json,
+      session.revoked_at
+    FROM sessions session
+    JOIN users user ON user.id = session.user_id
+    WHERE session.token_hash = ? AND session.user_id = ?
+      AND datetime(session.expires_at) > datetime('now')
+    LIMIT 1
+  `).get(hashToken(token), userId);
+  if (!row) return null;
+  return {
+    user: publicUser(row),
+    role: row.role,
+    active: Number(row.active),
+    deletedAt: row.deleted_at,
+    revokedAt: row.revoked_at,
+  };
+}
+
+export function getRepSessionStateFromRequest(req, database = db) {
+  return getRepSessionState(getTokenFromRequest(req), database);
+}
+
+/** Check role and current account state from SQLite on every representative API request. */
+export function requireActiveRep(req, res, next) {
+  const session = getRepSessionStateFromRequest(req);
+  if (!session) {
+    res.status(401).json({ error: 'Authentication required.' });
+    return;
+  }
+  if (session.role !== 'rep') {
+    res.status(403).json({ error: 'Field representative access is required.' });
+    return;
+  }
+  if (session.active !== 1 || session.deletedAt) {
+    res.clearCookie(env.authCookieName, authCookieOptions());
+    res.status(403).json({ success: false, message: REP_ACCOUNT_DISABLED_MESSAGE });
+    return;
+  }
+  if (session.revokedAt) {
+    res.status(401).json({ error: 'Authentication required.' });
+    return;
+  }
+  req.user = session.user;
+  next();
+}
+
+export function isDisabledRepSessionFromRequest(req, database = db) {
+  const session = getRepSessionStateFromRequest(req, database);
+  return Boolean(session?.role === 'rep' && (session.active !== 1 || session.deletedAt));
 }
 
 export function revokeSession(token, database = db) {

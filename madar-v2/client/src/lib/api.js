@@ -7,6 +7,15 @@ export class ApiError extends Error {
   }
 }
 
+const REP_ACCOUNT_DISABLED_MESSAGE = 'تم تعطيل حسابك من قبل الإدارة';
+
+function notifyDisabledRep(payload) {
+  if (payload?.message !== REP_ACCOUNT_DISABLED_MESSAGE || typeof window === 'undefined') return;
+  window.dispatchEvent(new CustomEvent('madar-rep-account-disabled', {
+    detail: { message: REP_ACCOUNT_DISABLED_MESSAGE },
+  }));
+}
+
 async function request(path, options = {}) {
   const headers = new Headers(options.headers ?? {});
   headers.set('Cache-Control', 'no-cache, no-store, must-revalidate');
@@ -23,8 +32,9 @@ async function request(path, options = {}) {
     ? await response.json()
     : await response.text();
   if (!response.ok) {
-    const message = typeof payload === 'object' && payload?.error
-      ? payload.error
+    notifyDisabledRep(payload);
+    const message = typeof payload === 'object' && (payload?.message || payload?.error)
+      ? payload.message || payload.error
       : `تعذر تنفيذ الطلب (${response.status})`;
     throw new ApiError(message, response.status, payload);
   }
@@ -46,7 +56,8 @@ function uploadWithProgress(path, formData, onProgress) {
       try { payload = contentType.includes('application/json') ? JSON.parse(xhr.responseText) : xhr.responseText; }
       catch { payload = {}; }
       if (xhr.status < 200 || xhr.status >= 300) {
-        reject(new ApiError(payload?.error || `تعذر تنفيذ الطلب (${xhr.status})`, xhr.status, payload));
+        notifyDisabledRep(payload);
+        reject(new ApiError(payload?.message || payload?.error || `تعذر تنفيذ الطلب (${xhr.status})`, xhr.status, payload));
       } else resolve(payload);
     });
     xhr.send(formData);
@@ -64,6 +75,12 @@ export const api = {
   patch: (path, body, options = {}) => request(path, {
     ...options,
     method: 'PATCH',
+    headers: { 'content-type': 'application/json', ...options.headers },
+    body: JSON.stringify(body ?? {}),
+  }),
+  put: (path, body, options = {}) => request(path, {
+    ...options,
+    method: 'PUT',
     headers: { 'content-type': 'application/json', ...options.headers },
     body: JSON.stringify(body ?? {}),
   }),

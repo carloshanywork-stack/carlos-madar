@@ -16,7 +16,7 @@ process.env.COOKIE_SECURE = 'false';
 const [
   { app },
   { createConnection, db },
-  { initializeDatabase, migrateRepSupervisorRadar, migrateRepUserProfiles },
+  { initializeDatabase, migrateRepSupervisorRadar, migrateRepUserProfiles, migrateRepVisitMachineCondition },
   { default: sharp },
   { ensureStorageDirectory, resolveStorageFile, storageDirectory, writeStorageFile },
   { recoverRepVisitUploads },
@@ -135,8 +135,10 @@ test('rep role migration preserves users and their existing foreign-key referenc
   legacyDatabase.exec('CREATE TABLE rep_visits (id INTEGER PRIMARY KEY, visit_uuid TEXT NOT NULL UNIQUE)');
   migrateRepSupervisorRadar(legacyDatabase);
   migrateRepSupervisorRadar(legacyDatabase);
+  migrateRepVisitMachineCondition(legacyDatabase);
+  migrateRepVisitMachineCondition(legacyDatabase);
   assert.deepEqual(new Set(legacyDatabase.pragma('table_info(rep_visits)').map((column) => column.name)),
-    new Set(['id', 'visit_uuid', 'before_captured_at', 'after_captured_at']));
+    new Set(['id', 'visit_uuid', 'before_captured_at', 'after_captured_at', 'machine_condition']));
   assert.ok(legacyDatabase.prepare("SELECT 1 FROM schema_migrations WHERE version = '20261102-rep-supervisor-radar-qa'").get());
   assert.equal(legacyDatabase.pragma('foreign_key_check').length, 0);
 });
@@ -159,7 +161,7 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   assert.match(adminApkDownload.headers.get('content-disposition'), /madar-rep\.apk/);
   assert.equal(Buffer.from(await adminApkDownload.arrayBuffer()).toString(), 'synthetic-debug-apk');
 
-  const createRep = await request('/api/auth/users', jsonOptions('POST', {
+  const createRep = await request('/api/users', jsonOptions('POST', {
     username: 'rep-nour',
     full_name: 'Nour Field Rep',
     role: 'rep',
@@ -167,6 +169,8 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
     password: 'Rep-Nour-Password-2026!',
   }), adminCookie);
   assert.equal(createRep.response.status, 201);
+  assert.equal(createRep.body.active, 1);
+  assert.equal(createRep.body.isActive, 1, 'new rep accounts default to active');
   assert.deepEqual(createRep.body.assignedRegions, ['التجمع']);
   assert.equal(createRep.body.isOnline, false);
   assert.equal(createRep.body.lastLocation, null);
@@ -304,6 +308,7 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
     cardId: missingAfterCardId,
     machineCode: '1434',
     regionName: 'التجمع',
+    machineCondition: 'faulty',
     reasonIds: [faultReasons.body.reasons[0].id],
     notes: 'تم تنظيف الواجهة وفحص الإضاءة',
     capturedAt: new Date(currentTime).toISOString(),
@@ -335,6 +340,7 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   assert.equal(savedCard.notes, null);
   const storedVisit = db.prepare('SELECT * FROM rep_visits WHERE visit_uuid = ?').get(visitUuid);
   assert.equal(storedVisit.status, 'completed');
+  assert.equal(storedVisit.machine_condition, 'faulty');
   assert.equal(storedVisit.rep_user_id, repId);
   const beforePath = await resolveStorageFile(storedVisit.before_path);
   const afterPath = await resolveStorageFile(storedVisit.after_path);
@@ -355,6 +361,7 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   assert.equal(firstQa.response.status, 200);
   assert.equal(firstQa.body.visits.length, 1);
   assert.equal(firstQa.body.visits[0].machineCode, '1434');
+  assert.equal(firstQa.body.visits[0].machineCondition, 'faulty');
   assert.equal(firstQa.body.visits[0].siteDurationSeconds, 300);
   const beforePhotoResponse = await fetch(`${baseUrl}${firstQa.body.visits[0].beforePhotoUrl}`, { headers: { cookie: adminCookie } });
   assert.equal(beforePhotoResponse.status, 200);
@@ -502,6 +509,32 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   assert.equal(db.prepare('SELECT status FROM rep_visits WHERE visit_uuid = ?').get(interruptedUuid).status, 'failed');
   assert.equal(existsSync(join(temporaryDirectory, 'storage', ...interruptedStage.split('/'))), false);
   assert.equal(existsSync(join(temporaryDirectory, 'storage', ...interruptedFinal.split('/'))), false);
+
+  const disabledRep = await request(`/api/users/${repId}`, jsonOptions('PUT', { isActive: 0 }), adminCookie);
+  assert.equal(disabledRep.response.status, 200);
+  assert.equal(disabledRep.body.isActive, 0);
+  assert.equal(disabledRep.body.active, 0);
+  assert.ok(db.prepare('SELECT revoked_at FROM sessions WHERE user_id = ?').get(repId).revoked_at,
+    'disabling a rep revokes existing sessions immediately');
+
+  const disabledRepCalls = await Promise.all([
+    request('/api/rep/today-route?username=rep-nour', {}, login.cookie),
+    request('/api/rep/fault-reasons', {}, login.cookie),
+    request('/api/rep/tracking', jsonOptions('POST', { onDuty: false, location: null, trail: [] }), login.cookie),
+    request('/api/rep/sync-visit', { method: 'POST' }, login.cookie),
+  ]);
+  for (const result of disabledRepCalls) {
+    assert.equal(result.response.status, 403);
+    assert.deepEqual(result.body, { success: false, message: 'تم تعطيل حسابك من قبل الإدارة' });
+  }
+  const disabledRepLogin = await request('/api/rep/login', jsonOptions('POST', {
+    username: 'rep-nour', password: 'Rep-Nour-Password-2026!',
+  }));
+  assert.equal(disabledRepLogin.response.status, 403);
+  assert.deepEqual(disabledRepLogin.body, { success: false, message: 'تم تعطيل حسابك من قبل الإدارة' });
+  const disabledStatus = await request('/api/auth/status', {}, login.cookie);
+  assert.equal(disabledStatus.body.authenticated, false);
+  assert.equal(disabledStatus.body.message, 'تم تعطيل حسابك من قبل الإدارة');
 
   const logout = await request('/api/auth/logout', { method: 'POST' }, login.cookie);
   assert.equal(logout.response.status, 200);

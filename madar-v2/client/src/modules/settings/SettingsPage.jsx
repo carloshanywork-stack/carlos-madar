@@ -35,12 +35,26 @@ function uptimeLabel(value) {
   return `${days} يوم · ${hours} ساعة · ${minutes} دقيقة`;
 }
 
+function parseAssignedRegions(value) {
+  return [...new Set(String(value ?? '').split(/[\n,،]+/).map((region) => region.trim()).filter(Boolean))];
+}
+
+function roleLabel(role) {
+  return ({
+    admin: 'مدير',
+    sales: 'مبيعات',
+    operations: 'عمليات',
+    purchasing: 'مشتريات',
+    rep: 'مندوب ميداني',
+  })[role] ?? role;
+}
+
 export default function SettingsPage() {
   const { data: health, loading, error, reload } = useApi('/api/health');
   const { data: authStatus } = useApi('/api/auth/status');
   const isAdmin = authStatus?.user?.role === 'admin';
   const { data: systemHealth, loading: systemHealthLoading, error: systemHealthError, reload: reloadSystemHealth } = useApi('/api/system/health', { enabled: isAdmin });
-  const { data: users, loading: usersLoading, error: usersError, reload: reloadUsers } = useApi('/api/auth/users', { enabled: isAdmin });
+  const { data: users, loading: usersLoading, error: usersError, reload: reloadUsers } = useApi('/api/users', { enabled: isAdmin });
   const { data: backups, loading: backupsLoading, error: backupsError, reload: reloadBackups } = useApi('/api/system/backups', { enabled: isAdmin });
   const [userModal, setUserModal] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
@@ -58,28 +72,49 @@ export default function SettingsPage() {
     const form = new FormData(event.currentTarget);
     try {
       if (editingUser) {
-        const payload = { role: form.get('role'), active: form.get('active') === 'true' };
+        const role = form.get('role');
+        const payload = {
+          username: form.get('username'),
+          full_name: form.get('full_name'),
+          role,
+          active: form.get('active') === 'true',
+          assignedRegions: role === 'rep' ? parseAssignedRegions(form.get('assignedRegions')) : [],
+        };
         if (form.get('password')) payload.password = form.get('password');
-        await api.patch(`/api/auth/users/${editingUser.id}`, payload);
+        await api.put(`/api/users/${editingUser.id}`, payload);
       } else {
-        await api.post('/api/auth/users', {
-          username: form.get('username'), full_name: form.get('full_name'), role: form.get('role'), password: form.get('password'),
+        const role = form.get('role');
+        await api.post('/api/users', {
+          username: form.get('username'),
+          full_name: form.get('full_name'),
+          role,
+          password: form.get('password'),
+          assignedRegions: role === 'rep' ? parseAssignedRegions(form.get('assignedRegions')) : [],
         });
       }
       setUserModal(false);
       setEditingUser(null);
       await reloadUsers();
-      showToast(editingUser ? 'تم تحديث صلاحيات المستخدم.' : 'تم إنشاء حساب المستخدم.');
+      showToast(editingUser ? 'تم تحديث حساب المستخدم.' : 'تم إنشاء حساب المستخدم.');
     } catch (caught) { setActionError(errorMessage(caught)); }
     finally { setSaving(false); }
   }
 
   async function deactivateUser(user) {
-    if (!window.confirm(`سيتم تعطيل حساب ${user.username} وإلغاء جلساته. متابعة؟`)) return;
+    if (!window.confirm(`سيتم حذف حساب ${user.username} حذفاً منطقياً مع الاحتفاظ بسجل الزيارات وإلغاء جلساته. متابعة؟`)) return;
     try {
-      await api.delete(`/api/auth/users/${user.id}`);
+      await api.delete(`/api/users/${user.id}`);
       await reloadUsers();
-      showToast('تم تعطيل حساب المستخدم.');
+      showToast('تم حذف الحساب من قائمة المستخدمين وإلغاء جلساته.');
+    } catch (caught) { showToast(errorMessage(caught), 'error'); }
+  }
+
+  async function setRepActive(user, active) {
+    if (!active && !window.confirm(`سيُقفل حساب ${user.username} فوراً وتُلغى جميع جلساته. متابعة؟`)) return;
+    try {
+      await api.put(`/api/users/${user.id}`, { isActive: active ? 1 : 0 });
+      await reloadUsers();
+      showToast(active ? 'تم تفعيل حساب المندوب.' : 'تم قفل حساب المندوب وإلغاء جلساته فوراً.');
     } catch (caught) { showToast(errorMessage(caught), 'error'); }
   }
 
@@ -137,9 +172,9 @@ export default function SettingsPage() {
         </section>
 
         <section className="madar-panel madar-section">
-          <div className="madar-panel-header"><div><h2>إدارة المستخدمين والصلاحيات</h2><p>إدارة حسابات الدخول وأدوارها. بيانات الموظفين الميدانيين منفصلة عن حسابات الدخول.</p></div><Button icon="plus" onClick={() => { setEditingUser(null); setActionError(''); setUserModal(true); }}>إضافة مستخدم جديد</Button></div>
+          <div className="madar-panel-header"><div><h2>إدارة المستخدمين والمناديب</h2><p>أنشئ حسابات المندوبين، وأسند مناطقهم، واقفل الحساب فوراً مع إلغاء الجلسات. تبقى الزيارات السابقة محفوظة.</p></div><Button icon="plus" onClick={() => { setEditingUser(null); setActionError(''); setUserModal(true); }}>إضافة مستخدم / مندوب</Button></div>
           {usersError && <div className="madar-panel-body"><Alert tone="error">{usersError}</Alert></div>}
-          {usersLoading ? <LoadingState /> : users?.length ? <div className="madar-table-wrap"><table className="madar-table"><thead><tr><th>اسم المستخدم</th><th>الاسم الكامل</th><th>الدور</th><th>الحالة</th><th>تاريخ الإنشاء</th><th>إجراءات</th></tr></thead><tbody>{users.map((user) => <tr key={user.id}><td className="madar-code">{user.username}</td><td>{user.full_name}</td><td><Badge tone={user.role === 'admin' ? 'info' : 'neutral'}>{user.role}</Badge></td><td><Badge tone={user.active ? 'success' : 'warning'}>{user.active ? 'نشط' : 'موقوف'}</Badge></td><td>{String(user.created_at).slice(0, 10)}</td><td><div className="madar-inline-wrap"><Button variant="ghost" size="small" onClick={() => { setEditingUser(user); setActionError(''); setUserModal(true); }}>الصلاحيات / كلمة المرور</Button>{user.active && user.id !== authStatus?.user?.id && <Button variant="ghost" size="small" onClick={() => deactivateUser(user)}>تعطيل</Button>}</div></td></tr>)}</tbody></table></div> : <EmptyState icon="users" title="لا توجد حسابات مستخدمين" />}
+          {usersLoading ? <LoadingState /> : users?.length ? <div className="madar-table-wrap"><table className="madar-table"><thead><tr><th>اسم المستخدم</th><th>الاسم الكامل</th><th>الدور</th><th>مناطق المندوب</th><th>الحالة</th><th>تاريخ الإنشاء</th><th>إجراءات</th></tr></thead><tbody>{users.map((user) => <tr key={user.id}><td className="madar-code">{user.username}</td><td>{user.full_name}</td><td><Badge tone={user.role === 'admin' ? 'info' : user.role === 'rep' ? 'success' : 'neutral'}>{roleLabel(user.role)}</Badge></td><td>{user.role === 'rep' ? (user.assignedRegions?.join('، ') || 'لم تُسند مناطق') : '—'}</td><td><Badge tone={user.active ? 'success' : 'warning'}>{user.active ? 'نشط' : 'موقوف'}</Badge></td><td>{String(user.created_at).slice(0, 10)}</td><td><div className="madar-inline-wrap"><Button variant="ghost" size="small" onClick={() => { setEditingUser(user); setActionError(''); setUserModal(true); }}>تعديل الحساب</Button>{user.role === 'rep' && <Button variant="ghost" size="small" onClick={() => setRepActive(user, !user.active)}>{user.active ? 'قفل فوراً' : 'تفعيل'}</Button>}{user.id !== authStatus?.user?.id && <Button variant="ghost" size="small" onClick={() => deactivateUser(user)}>حذف</Button>}</div></td></tr>)}</tbody></table></div> : <EmptyState icon="users" title="لا توجد حسابات مستخدمين" />}
         </section>
 
         <section className="madar-panel madar-section">
@@ -149,12 +184,14 @@ export default function SettingsPage() {
         </section>
       </>}
 
-      <Modal open={userModal} onClose={() => setUserModal(false)} title={editingUser ? `تعديل حساب ${editingUser.username}` : 'إضافة مستخدم جديد'} description="تُخزن كلمات المرور كقيمة bcrypt، وتُلغى جلسات المستخدم عند تغيير كلمة المرور.">
+      <Modal open={userModal} onClose={() => setUserModal(false)} title={editingUser ? `تعديل حساب ${editingUser.username}` : 'إضافة مستخدم أو مندوب'} description="تُخزن كلمات المرور كقيمة bcrypt، ويؤدي قفل المندوب أو تغيير كلمة المرور إلى إلغاء جلساته.">
         <form onSubmit={saveUser}><div className="madar-form-stack">
-          {!editingUser && <><Input label="اسم المستخدم *" name="username" required minLength={3} maxLength={64} /><Input label="الاسم الكامل *" name="full_name" required minLength={2} maxLength={120} />
-            <Input label="كلمة المرور المؤقتة *" name="password" type="password" required minLength={12} maxLength={72} autoComplete="new-password" /></>}
-          <Select label="الدور" name="role" defaultValue={editingUser?.role ?? 'operations'}><option value="operations">عمليات</option><option value="admin">مدير</option></Select>
-          {editingUser && <><Select label="الحالة" name="active" defaultValue={String(Boolean(editingUser.active))}><option value="true">نشط</option><option value="false">موقوف</option></Select><Input label="كلمة مرور جديدة (اختياري)" name="password" type="password" minLength={12} maxLength={72} autoComplete="new-password" /></>}
+          <Input key={`username-${editingUser?.id ?? 'new'}`} label="اسم المستخدم *" name="username" defaultValue={editingUser?.username ?? ''} required minLength={3} maxLength={64} />
+          <Input key={`fullname-${editingUser?.id ?? 'new'}`} label="الاسم الكامل *" name="full_name" defaultValue={editingUser?.full_name ?? ''} required minLength={2} maxLength={120} />
+          {!editingUser && <Input label="كلمة المرور المؤقتة *" name="password" type="password" required minLength={12} maxLength={72} autoComplete="new-password" />}
+          <Select key={`role-${editingUser?.id ?? 'new'}`} label="الدور" name="role" defaultValue={editingUser?.role ?? 'operations'}><option value="operations">عمليات</option><option value="sales">مبيعات</option><option value="purchasing">مشتريات</option><option value="rep">مندوب ميداني</option><option value="admin">مدير</option></Select>
+          <Input key={`regions-${editingUser?.id ?? 'new'}`} label="مناطق المسار (للمندوب)" name="assignedRegions" defaultValue={editingUser?.assignedRegions?.join('، ') ?? ''} hint="اكتب كل منطقة مفصولة بفاصلة. تُستخدم لتحديد مسار المندوب." />
+          {editingUser && <><Select key={`active-${editingUser.id}`} label="حالة الحساب" name="active" defaultValue={String(Boolean(editingUser.active))}><option value="true">نشط</option><option value="false">موقوف</option></Select><Input label="كلمة مرور جديدة (اختياري)" name="password" type="password" minLength={12} maxLength={72} autoComplete="new-password" /></>}
         </div>{actionError && <div className="madar-form-error"><Alert tone="error">{actionError}</Alert></div>}<div className="madar-form-actions"><Button variant="secondary" onClick={() => setUserModal(false)}>إلغاء</Button><Button type="submit" disabled={saving}>{saving ? 'جارٍ الحفظ…' : 'حفظ المستخدم'}</Button></div></form>
       </Modal>
 

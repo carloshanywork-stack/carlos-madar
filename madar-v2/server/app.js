@@ -59,6 +59,7 @@ app.use('/api', (req, res, next) => {
   }
   next();
 });
+app.use('/api/users', usersRouter);
 app.use('/api/auth/users', usersRouter);
 app.use('/api/system', systemRouter);
 app.use('/api/clients', clientsRouter);

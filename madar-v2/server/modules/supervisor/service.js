@@ -158,7 +158,7 @@ export function getPendingVisitReviews(database = defaultDatabase) {
   const visits = database.prepare(`
     SELECT visit.id, visit.visit_uuid, visit.rep_user_id, user.full_name AS rep_name,
       visit.order_id, visit.card_id, visit.machine_id, visit.order_code, visit.machine_code,
-      visit.region_name, visit.reason_ids_json, visit.notes, visit.captured_at,
+      visit.region_name, visit.machine_condition, visit.reason_ids_json, visit.notes, visit.captured_at,
       visit.before_captured_at, visit.after_captured_at, visit.before_path, visit.after_path,
       machine.name_ar AS machine_name, client.address AS address,
       review.status, review.review_note, visit.created_at
@@ -180,7 +180,7 @@ export function getPendingVisitReviews(database = defaultDatabase) {
       id: Number(visit.id), visitUuid: visit.visit_uuid, repId: Number(visit.rep_user_id), repName: visit.rep_name,
       orderId: Number(visit.order_id), cardId: Number(visit.card_id), machineId: Number(visit.machine_id),
       orderCode: visit.order_code, machineCode: visit.machine_code, machineName: visit.machine_name ?? `ماكينة ${visit.machine_code}`,
-      regionName: visit.region_name, address: visit.address ?? '',
+      regionName: visit.region_name, address: visit.address ?? '', machineCondition: visit.machine_condition ?? 'working',
       reasonIds: parseJson(visit.reason_ids_json, []), reasonNames: parseJson(visit.reason_ids_json, []).map((id) => namesById.get(Number(id))).filter(Boolean),
       notes: visit.notes ?? '', capturedAt: visit.captured_at,
       beforeCapturedAt: visit.before_captured_at, afterCapturedAt: visit.after_captured_at,
