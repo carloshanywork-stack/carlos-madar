@@ -46,8 +46,8 @@ function nextCalendarDate({ year, month, day }) {
   return { year: next.getUTCFullYear(), month: next.getUTCMonth() + 1, day: next.getUTCDate() };
 }
 
-function zonedLocalEpoch({ year, month, day }, hour, timeZone) {
-  const desired = Date.UTC(year, month - 1, day, hour);
+function zonedLocalEpoch({ year, month, day }, hour, timeZone, minute = 0, second = 0) {
+  const desired = Date.UTC(year, month - 1, day, hour, minute, second);
   let guess = desired;
   const dateFormatter = formatter(timeZone);
   for (let attempt = 0; attempt < 4; attempt += 1) {
@@ -66,7 +66,7 @@ function roundHours(milliseconds) {
   return Math.round(milliseconds / hourMs * 100) / 100;
 }
 
-/** Calculates actual duration and the overlap with the configured local shift. */
+/** Calculates Cairo shift overlap and classifies all outside-shift work by weekday. */
 export function calculateShiftHours(clockInTime, clockOutTime, timeZone = DEFAULT_TIME_ZONE) {
   const start = Date.parse(clockInTime);
   const end = Date.parse(clockOutTime);
@@ -79,7 +79,8 @@ export function calculateShiftHours(clockInTime, clockOutTime, timeZone = DEFAUL
 
   const totalMilliseconds = end - start;
   let regularMilliseconds = 0;
-  let overtimeMilliseconds = 0;
+  let normalOvertimeMilliseconds = 0;
+  let holidayOvertimeMilliseconds = 0;
   const firstDay = localParts(start, timeZone);
   const finalDay = localParts(Math.max(start, end - 1), timeZone);
   let day = { year: firstDay.year, month: firstDay.month, day: firstDay.day };
@@ -97,22 +98,27 @@ export function calculateShiftHours(clockInTime, clockOutTime, timeZone = DEFAUL
     const weekday = new Date(Date.UTC(day.year, day.month - 1, day.day)).getUTCDay();
 
     if (weekday === 5) {
-      overtimeMilliseconds += overlap;
+      holidayOvertimeMilliseconds += overlap;
     } else {
       const shiftStart = zonedLocalEpoch(day, 9, timeZone);
       const shiftEnd = zonedLocalEpoch(day, 18, timeZone);
-      regularMilliseconds += Math.max(0, Math.min(end, shiftEnd) - Math.max(start, shiftStart));
-      overtimeMilliseconds += Math.max(0, Math.min(end, dayEnd) - Math.max(start, shiftEnd));
+      const regular = Math.max(0, Math.min(overlapEnd, shiftEnd) - Math.max(overlapStart, shiftStart));
+      regularMilliseconds += regular;
+      normalOvertimeMilliseconds += Math.max(0, overlap - regular);
     }
 
     if (key === lastKey) break;
     day = nextDay;
   }
 
+  const normalOvertimeHours = roundHours(normalOvertimeMilliseconds);
+  const holidayOvertimeHours = roundHours(holidayOvertimeMilliseconds);
   return {
     totalHours: roundHours(totalMilliseconds),
     regularHours: roundHours(regularMilliseconds),
-    overtimeHours: roundHours(overtimeMilliseconds),
+    overtimeHours: roundHours(normalOvertimeMilliseconds + holidayOvertimeMilliseconds),
+    normalOvertimeHours,
+    holidayOvertimeHours,
   };
 }
 
@@ -120,8 +126,63 @@ function localDate(now, timeZone) {
   return dateKey(localParts(now.valueOf(), timeZone));
 }
 
+function parseBusinessLocalDateTime(value, timeZone) {
+  const input = requireText(value, 'clockOutLocal', { maxLength: 19 });
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(input);
+  if (!match) throw new HttpError(400, 'clockOutLocal must use YYYY-MM-DDTHH:mm format.');
+  const [, yearText, monthText, dayText, hourText, minuteText, secondText = '00'] = match;
+  const parts = {
+    year: Number(yearText), month: Number(monthText), day: Number(dayText),
+    hour: Number(hourText), minute: Number(minuteText), second: Number(secondText),
+  };
+  const calendarCheck = new Date(Date.UTC(parts.year, parts.month - 1, parts.day));
+  if (calendarCheck.getUTCFullYear() !== parts.year || calendarCheck.getUTCMonth() + 1 !== parts.month
+      || calendarCheck.getUTCDate() !== parts.day || parts.hour > 23 || parts.minute > 59 || parts.second > 59) {
+    throw new HttpError(400, 'clockOutLocal is not a valid local date and time.');
+  }
+  const epoch = zonedLocalEpoch(parts, parts.hour, timeZone, parts.minute, parts.second);
+  const resolved = localParts(epoch, timeZone);
+  if (resolved.year !== parts.year || resolved.month !== parts.month || resolved.day !== parts.day
+      || resolved.hour !== parts.hour || resolved.minute !== parts.minute || resolved.second !== parts.second) {
+    throw new HttpError(400, 'clockOutLocal does not exist in the configured business time zone.');
+  }
+  return new Date(epoch);
+}
+
 export function getAttendanceBusinessDate(database = db, now = new Date()) {
-  return localDate(now, getTimeZone(database));
+  return localDate(now, getAttendanceBusinessTimeZone(database));
+}
+
+export function getAttendanceBusinessTimeZone(database = db) {
+  return getTimeZone(database);
+}
+
+export function getOverdueAttendance(database = db, now = new Date()) {
+  const timeZone = getAttendanceBusinessTimeZone(database);
+  const records = database.prepare(`SELECT attendance.id, attendance.employee_id, attendance.work_date,
+      attendance.clock_in_time, employee.name,
+      COALESCE(employee.department_label, employee.department) AS department
+    FROM employee_daily_attendance attendance
+    JOIN employees employee ON employee.id = attendance.employee_id
+    WHERE attendance.clock_in_time IS NOT NULL AND attendance.clock_out_time IS NULL
+      AND employee.active = 1 AND employee.deleted_at IS NULL
+    ORDER BY attendance.work_date, employee.name COLLATE NOCASE`).all();
+  return records.flatMap((record) => {
+    const [year, month, dayOfMonth] = record.work_date.split('-').map(Number);
+    const day = { year, month, day: dayOfMonth };
+    const endOfShift = zonedLocalEpoch(day, 18, timeZone);
+    const overdueMilliseconds = now.valueOf() - endOfShift;
+    return overdueMilliseconds > 0 ? [{
+      id: record.id,
+      employee_id: record.employee_id,
+      name: record.name,
+      department: record.department,
+      work_date: record.work_date,
+      clock_in_time: record.clock_in_time,
+      overdue_hours: roundHours(overdueMilliseconds),
+      overdue_minutes: Math.floor(overdueMilliseconds / 60_000),
+    }] : [];
+  });
 }
 
 function assertAttendanceMonthOpen(date, database) {
@@ -205,7 +266,8 @@ function clockIn(employeeIdValue, source, location, actorId, database = db, { no
          overtime_status, overtime_approved_by)
       VALUES (?, ?, ?, 0, ?, ?, ?, ?, ?, NULL, NULL, 0, 0, 'none', NULL)
       ON CONFLICT(employee_id, work_date) DO UPDATE SET
-        status = excluded.status, overtime_hours = 0, clock_in_time = excluded.clock_in_time,
+        status = excluded.status, overtime_hours = 0, normal_overtime_hours = 0, holiday_overtime_hours = 0,
+        clock_in_time = excluded.clock_in_time,
         clock_in_source = excluded.clock_in_source, clock_in_lat = excluded.clock_in_lat,
         clock_in_lng = excluded.clock_in_lng, clock_out_time = NULL, clock_out_source = NULL,
         total_hours = 0, regular_hours = 0, overtime_status = 'none', overtime_approved_by = NULL`)
@@ -232,7 +294,8 @@ function clockIn(employeeIdValue, source, location, actorId, database = db, { no
   return run.immediate();
 }
 
-function clockOut(employeeIdValue, source, location, actorId, database = db, { now = new Date() } = {}) {
+function clockOut(employeeIdValue, source, location, actorId, database = db,
+  { now = new Date(), adminNote = null, customTime = false } = {}) {
   const employeeId = positiveId(employeeIdValue, 'employeeId');
   const employee = activeEmployee(employeeId, database);
   const current = openAttendance(employee.id, database);
@@ -240,21 +303,33 @@ function clockOut(employeeIdValue, source, location, actorId, database = db, { n
   assertAttendanceMonthOpen(current.work_date, database);
   const clockOutTime = now.toISOString();
   const timeZone = getTimeZone(database);
+  if (customTime && localDate(now, timeZone).slice(0, 7) !== current.work_date.slice(0, 7)) {
+    throw new HttpError(409, 'Clock-out must remain in the same payroll month as the open attendance record.');
+  }
+  if (source === 'admin' && now.valueOf() > Date.now()) {
+    throw new HttpError(400, 'Administrative clock-out time cannot be in the future.');
+  }
   const hours = calculateShiftHours(current.clock_in_time, clockOutTime, timeZone);
   const overtimeStatus = hours.overtimeHours > 0 ? 'pending' : 'none';
   const run = database.transaction(() => {
     const result = database.prepare(`UPDATE employee_daily_attendance
       SET clock_out_time = ?, clock_out_source = ?, total_hours = ?, regular_hours = ?,
-        overtime_hours = ?, overtime_status = ?, overtime_approved_by = NULL
+        overtime_hours = ?, normal_overtime_hours = ?, holiday_overtime_hours = ?, clock_out_admin_note = ?,
+        overtime_status = ?, overtime_approved_by = NULL
       WHERE id = ? AND clock_out_time IS NULL`)
-      .run(clockOutTime, source, hours.totalHours, hours.regularHours, hours.overtimeHours, overtimeStatus, current.id);
+      .run(clockOutTime, source, hours.totalHours, hours.regularHours, hours.overtimeHours,
+        hours.normalOvertimeHours, hours.holidayOvertimeHours, source === 'admin' ? adminNote : null,
+        overtimeStatus, current.id);
     if (!result.changes) throw new HttpError(409, 'This attendance record has already been clocked out.');
     const updated = getAttendanceRecord(employee.id, current.work_date, database);
-    recordAudit({ database, actorId, action: 'clock_out', entityType: 'employee_attendance', entityId: current.id,
-      oldValues: { clock_out_time: null, overtime_hours: current.overtime_hours, overtime_status: current.overtime_status },
+    recordAudit({ database, actorId, action: source === 'admin' ? 'admin_clock_out' : 'clock_out',
+      entityType: 'employee_attendance', entityId: current.id,
+      oldValues: { clock_out_time: null, clock_out_admin_note: current.clock_out_admin_note ?? null,
+        overtime_hours: current.overtime_hours, overtime_status: current.overtime_status },
       newValues: {
         clock_out_time: clockOutTime,
         clock_out_source: source,
+        clock_out_admin_note: source === 'admin' ? adminNote : null,
         location: location ?? null,
         ...hours,
         overtime_status: overtimeStatus,
@@ -269,7 +344,17 @@ export function clockInForEmployee(employeeId, actorId, database = db, options =
 }
 
 export function clockOutForEmployee(employeeId, actorId, database = db, options = {}) {
-  return clockOut(employeeId, 'admin', null, actorId, database, options);
+  const timeZone = getAttendanceBusinessTimeZone(database);
+  const customTime = options.clockOutLocal !== undefined;
+  const now = !customTime
+    ? options.now ?? new Date()
+    : parseBusinessLocalDateTime(options.clockOutLocal, timeZone);
+  const adminNote = customTime || options.adminNote !== undefined
+    ? requireText(options.adminNote, 'adminNote', { maxLength: 1000 })
+    : 'تسجيل انصراف يدوي من الإدارة.';
+  return clockOut(employeeId, 'admin', null, actorId, database, {
+    now, adminNote, customTime,
+  });
 }
 
 export function clockInForRep(userId, input, database = db, options = {}) {
@@ -299,6 +384,8 @@ export function listPendingOvertime(database = db) {
       COALESCE(employee.department_label, employee.department) AS department,
       attendance.work_date, attendance.clock_in_time, attendance.clock_out_time,
       attendance.total_hours, attendance.regular_hours, attendance.overtime_hours,
+      COALESCE(attendance.normal_overtime_hours, 0) AS normal_overtime_hours,
+      COALESCE(attendance.holiday_overtime_hours, 0) AS holiday_overtime_hours,
       attendance.overtime_status
     FROM employee_daily_attendance attendance
     JOIN employees employee ON employee.id = attendance.employee_id

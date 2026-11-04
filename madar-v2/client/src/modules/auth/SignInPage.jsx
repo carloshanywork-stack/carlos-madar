@@ -17,7 +17,7 @@ export default function SignInPage({ setupRequired, initialError = '', onLoginSu
         return;
       }
       try {
-        await api.get('/api/health');
+        await api.get('/api/health', { timeoutMs: 4000 });
         if (active) setServerState('online');
       } catch {
         if (active) setServerState('offline');

@@ -152,6 +152,7 @@ export function getSupervisorRadar(database = defaultDatabase, now = new Date())
       completedToday: approvedByRep.get(Number(rep.id)) ?? 0,
       pendingReview: pendingByRep.get(Number(rep.id)) ?? 0,
       dutyStartedAt: rep.duty_started_at,
+      speedKmh: Number.isFinite(Number(location?.speed)) ? Math.round(Math.max(0, Number(location.speed) * 3.6) * 10) / 10 : null,
       distanceKm: estimateDistance(points),
       trail,
     };
@@ -180,6 +181,33 @@ export function getSupervisorRepRoute(repIdInput, dateInput, database = defaultD
     WHERE user_id = ? AND work_date = ? AND is_stop = 1 AND stop_arrived_at IS NOT NULL
     GROUP BY stop_arrived_at, stop_departed_at, stop_name
     ORDER BY datetime(stop_arrived_at)`).all(repId, day);
+  const visitedRows = database.prepare(`SELECT visit.visit_uuid, visit.machine_code, machine.name_ar AS machine_name,
+      visit.region_name, visit.captured_at, review.status AS review_status,
+      visit.location_json, machine.latitude AS machine_latitude, machine.longitude AS machine_longitude
+    FROM rep_visits visit
+    LEFT JOIN rep_visit_reviews review ON review.visit_id = visit.id
+    LEFT JOIN machines machine ON machine.id = visit.machine_id
+    WHERE visit.rep_user_id = ? AND datetime(visit.captured_at) >= datetime(?)
+      AND datetime(visit.captured_at) < datetime(?)
+    ORDER BY datetime(visit.captured_at), visit.id`).all(repId, start, end);
+  const speeds = points.map((point) => Number(point.speed)).filter((speed) => Number.isFinite(speed) && speed > 0);
+  const visitedMachines = visitedRows.map((visit) => {
+    const location = parseJson(visit.location_json, {});
+    const rawLatitude = location.latitude ?? visit.machine_latitude;
+    const rawLongitude = location.longitude ?? visit.machine_longitude;
+    const latitude = rawLatitude === null || rawLatitude === undefined ? null : Number(rawLatitude);
+    const longitude = rawLongitude === null || rawLongitude === undefined ? null : Number(rawLongitude);
+    return {
+      visitUuid: visit.visit_uuid,
+      machineCode: visit.machine_code,
+      machineName: visit.machine_name ?? '',
+      regionName: visit.region_name,
+      capturedAt: visit.captured_at,
+      reviewStatus: visit.review_status ?? 'pending',
+      latitude: Number.isFinite(latitude) ? latitude : null,
+      longitude: Number.isFinite(longitude) ? longitude : null,
+    };
+  });
 
   return {
     success: true,
@@ -192,6 +220,11 @@ export function getSupervisorRepRoute(repIdInput, dateInput, database = defaultD
       speed: Number(point.speed),
       recordedAt: point.recorded_at,
     })),
+    speedSummary: {
+      averageKmh: speeds.length ? Math.round(speeds.reduce((sum, speed) => sum + speed, 0) / speeds.length * 36) / 10 : 0,
+      maxKmh: speeds.length ? Math.round(Math.max(...speeds) * 36) / 10 : 0,
+    },
+    visitedMachines,
     stops: stopRows.map((stop) => ({
       latitude: Number(stop.latitude),
       longitude: Number(stop.longitude),

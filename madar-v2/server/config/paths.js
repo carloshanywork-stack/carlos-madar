@@ -19,9 +19,10 @@ export const thumbnailCacheDirectory = join(dataDirectory, 'thumbnail-cache');
 export const storageRoot = storageLayout.storageRoot;
 export const databasePath = storageLayout.databasePath;
 export const backupRoot = storageLayout.backupRoot;
+export const offlineMapPath = resolve(projectRoot, env.offlineMapPath ?? join(dataDirectory, 'offline-maps.mbtiles'));
 export const schemaPath = join(projectRoot, 'server', 'database', 'schema.sql');
 export const clientDistPath = join(projectRoot, 'client', 'dist');
-export const repApkPath = resolve(projectRoot, env.repApkPath ?? 'madar-rep.apk');
+export const repApkPath = resolve(projectRoot, env.repApkPath ?? 'madar-rep-release.apk');
 
 function assertExistingPathIsSafe(path, { mountDevice, type, label }) {
   const relativePath = relative(storageMountPath, path);
@@ -101,6 +102,7 @@ if (storageMountPath) {
     assertExistingPathIsSafe(path, { mountDevice, type: 'directory', label });
   }
   assertExistingPathIsSafe(databasePath, { mountDevice, type: 'file', label: 'MADAR_V2_DATABASE_PATH' });
+  assertExistingPathIsSafe(offlineMapPath, { mountDevice, type: 'file', label: 'MADAR_V2_OFFLINE_MAP_PATH' });
   assertExistingPathIsSafe(`${databasePath}-wal`, { mountDevice, type: 'file', label: 'SQLite WAL file' });
   assertExistingPathIsSafe(`${databasePath}-shm`, { mountDevice, type: 'file', label: 'SQLite shared-memory file' });
 

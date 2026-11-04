@@ -4,6 +4,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 
 const projectRoot = resolve(import.meta.dirname, '..');
 const syncOnly = process.argv.includes('--sync-only');
+const releaseBuild = process.argv.includes('--release');
 const isWindows = process.platform === 'win32';
 
 function run(command, args, options = {}) {
@@ -52,24 +53,29 @@ run(process.execPath, [viteEntrypoint, 'build', '--mode', 'capacitor'], { cwd: c
 run(process.execPath, [resolve(projectRoot, 'node_modules/@capacitor/cli/bin/capacitor'), 'sync', 'android']);
 
 if (!syncOnly) {
-  assertAndroidToolchain();
   const androidDirectory = resolve(projectRoot, 'android');
+  if (releaseBuild && !existsSync(resolve(androidDirectory, 'key.properties'))) {
+    throw new Error('Release signing is not configured. Create android/key.properties for the approved signing keystore; keep the keystore and credentials outside source control.');
+  }
+  assertAndroidToolchain();
   const gradleWrapperJar = resolve(androidDirectory, 'gradle/wrapper/gradle-wrapper.jar');
   if (!existsSync(gradleWrapperJar)) throw new Error(`Gradle wrapper is missing: ${gradleWrapperJar}`);
   const java = process.env.JAVA_HOME
     ? join(process.env.JAVA_HOME, 'bin', isWindows ? 'java.exe' : 'java')
     : 'java';
-  run(java, ['-classpath', gradleWrapperJar, 'org.gradle.wrapper.GradleWrapperMain', 'assembleDebug'], { cwd: androidDirectory });
-  const builtApk = resolve(projectRoot, 'android/app/build/outputs/apk/debug/app-debug.apk');
+  const buildType = releaseBuild ? 'release' : 'debug';
+  const task = `assemble${releaseBuild ? 'Release' : 'Debug'}`;
+  run(java, ['-classpath', gradleWrapperJar, 'org.gradle.wrapper.GradleWrapperMain', task], { cwd: androidDirectory });
+  const builtApk = resolve(projectRoot, `android/app/build/outputs/apk/${buildType}/app-${buildType}.apk`);
   if (!existsSync(builtApk)) throw new Error(`Gradle reported success but the APK is missing: ${builtApk}`);
-  const publishedApk = resolve(projectRoot, 'madar-rep.apk');
-  const temporaryApk = resolve(projectRoot, `.madar-rep-${process.pid}.apk.tmp`);
+  const publishedApk = resolve(projectRoot, releaseBuild ? 'madar-rep-release.apk' : 'madar-rep.apk');
+  const temporaryApk = resolve(projectRoot, `${releaseBuild ? '.madar-rep-release' : '.madar-rep'}-${process.pid}.apk.tmp`);
   try {
     copyFileSync(builtApk, temporaryApk);
     renameSync(temporaryApk, publishedApk);
   } finally {
     rmSync(temporaryApk, { force: true });
   }
-  console.log(`Debug APK: ${builtApk}`);
+  console.log(`${releaseBuild ? 'Release' : 'Debug'} APK: ${builtApk}`);
   console.log(`Published APK: ${publishedApk}`);
 }

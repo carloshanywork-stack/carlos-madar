@@ -6,6 +6,7 @@ android/local.properties
 android/build/
 android/app/build/
 madar-rep.apk
+madar-rep-release.apk
 .madar-rep-*.apk.tmp
 android/capacitor-cordova-android-plugins/build/
 android/.idea/

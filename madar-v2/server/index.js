@@ -6,6 +6,7 @@ import { startDatabaseMaintenanceScheduler, stopDatabaseMaintenanceScheduler } f
 import { startSystemBackupScheduler, stopSystemBackupScheduler } from './modules/system/backup.js';
 import {
   recoverMaintenanceCardDeletions,
+  recoverMachineCorrectionRenames,
   recoverMaintenanceMachineDecommissions,
   recoverMaintenanceOrderDeletions,
   recoverUnmatchedMaintenanceFolderDeletions,
@@ -26,6 +27,10 @@ try {
   const machineRecovery = await recoverMaintenanceMachineDecommissions();
   if (machineRecovery.recoveredCount) {
     console.log(`Recovered ${machineRecovery.recoveredCount} staged machine decommission(s).`);
+  }
+  const machineCorrectionRecovery = await recoverMachineCorrectionRenames();
+  if (machineCorrectionRecovery.recoveredCount) {
+    console.log(`Recovered ${machineCorrectionRecovery.recoveredCount} machine correction rename(s).`);
   }
   const unmatchedRecovery = await recoverUnmatchedMaintenanceFolderDeletions();
   if (unmatchedRecovery.recoveredCount) {

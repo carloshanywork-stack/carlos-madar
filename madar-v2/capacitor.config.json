@@ -1,5 +1,5 @@
 {
-  "appId": "com.madar.rep",
+  "appId": "com.madar.rep.app",
   "appName": "مدار - متابعة المناديب",
   "webDir": "public/rep",
   "server": {

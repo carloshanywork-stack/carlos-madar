@@ -16,6 +16,51 @@ function toJpegBlob(canvas, quality) {
   });
 }
 
+function localDateParts(value) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.valueOf())) throw new Error('وقت التقاط الصورة غير صالح.');
+  const dateParts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Africa/Cairo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date).filter((part) => part.type !== 'literal').map(({ type, value: partValue }) => [type, partValue]));
+  return {
+    date: `${dateParts.year}-${dateParts.month}-${dateParts.day}`,
+    weekday: new Intl.DateTimeFormat('ar-EG', { timeZone: 'Africa/Cairo', weekday: 'long' }).format(date),
+    time: new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Africa/Cairo', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true,
+    }).format(date),
+  };
+}
+
+export function buildWatermarkLines({ machineCode, machineName, regionName, areaName, phase, capturedAt, location }) {
+  const { date, weekday, time } = localDateParts(capturedAt);
+  const locationLabel = location
+    ? `${location.latitude.toFixed(5)}, ${location.longitude.toFixed(5)} · ±${Math.round(location.accuracy)}م`
+    : 'الموقع غير متاح';
+  return [
+    `مَــدَارْ · ${phase === 'before' ? 'قبل الصيانة' : 'بعد الصيانة'}`,
+    `التاريخ: ${date} · ${weekday}`,
+    `الوقت: ${time}`,
+    `GPS: ${locationLabel}`,
+    `المحافظة/المنطقة المسجلة: ${[regionName, areaName].filter((value, index, values) => value && values.indexOf(value) === index).join(' · ') || 'غير محددة'}`,
+    `الماكينة: ${machineCode} · ${machineName || `ماكينة ${machineCode}`}`,
+  ];
+}
+
+export function getWatermarkLayout(width, height) {
+  const fontSize = Math.max(15, Math.round(width * 0.022));
+  const lineHeight = Math.round(fontSize * 1.38);
+  const padding = Math.max(12, Math.round(fontSize * 0.65));
+  const panelWidth = Math.min(width, Math.max(Math.round(width * 0.58), 300));
+  const panelHeight = Math.min(height, padding * 2 + lineHeight * 6);
+  return {
+    fontSize, lineHeight, padding, panelWidth, panelHeight,
+    panelTop: Math.max(0, height - panelHeight),
+  };
+}
+
 async function decodeImage(file) {
   if ('createImageBitmap' in window) return createImageBitmap(file, { imageOrientation: 'from-image' });
   const sourceUrl = URL.createObjectURL(file);
@@ -30,8 +75,8 @@ async function decodeImage(file) {
   }
 }
 
-/** Compress a capture and burn a useful on-device label; this is not tamper-proof evidence. */
-export async function compressAndWatermark(file, { machineCode, regionName, phase, capturedAt, location }) {
+/** Compress a capture and permanently burn the visit label into the derived JPEG pixels. */
+export async function compressAndWatermark(file, { machineCode, machineName, regionName, areaName, phase, capturedAt, location }) {
   const image = await decodeImage(file);
   const naturalWidth = image.width || image.naturalWidth;
   const naturalHeight = image.height || image.naturalHeight;
@@ -48,37 +93,20 @@ export async function compressAndWatermark(file, { machineCode, regionName, phas
   context.drawImage(image, 0, 0, width, height);
   image.close?.();
 
-  const fontSize = Math.max(16, Math.round(width * 0.022));
-  const lineHeight = Math.round(fontSize * 1.42);
-  const padding = Math.max(14, Math.round(fontSize * 0.7));
-  const bannerHeight = padding * 2 + lineHeight * 3;
-  const bannerTop = Math.max(0, height - bannerHeight);
+  const { fontSize, lineHeight, padding, panelWidth, panelHeight, panelTop } = getWatermarkLayout(width, height);
   context.fillStyle = 'rgba(7, 19, 31, 0.82)';
-  context.fillRect(0, bannerTop, width, height - bannerTop);
+  context.fillRect(0, panelTop, panelWidth, panelHeight);
   context.direction = 'rtl';
   context.textAlign = 'right';
   context.textBaseline = 'middle';
-  context.font = `700 ${fontSize}px Arial, sans-serif`;
+  context.font = `800 ${fontSize}px Arial, sans-serif`;
   context.fillStyle = '#ffffff';
-
-  const dateLabel = new Intl.DateTimeFormat('ar-EG', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  }).format(capturedAt);
-  const locationLabel = location
-    ? `${location.latitude.toFixed(5)}, ${location.longitude.toFixed(5)} (±${Math.round(location.accuracy)}م)`
-    : 'الموقع غير متاح';
-  const phaseLabel = phase === 'before' ? 'قبل الصيانة' : 'بعد الصيانة';
-  const maxTextWidth = Math.max(40, width - padding * 2);
-  const lines = [
-    `مَــدَارْ · ${machineCode} · ${regionName}`,
-    dateLabel,
-    `GPS: ${locationLabel} · ${phaseLabel}`,
-  ];
+  const maxTextWidth = Math.max(40, panelWidth - padding * 2);
+  const lines = buildWatermarkLines({ machineCode, machineName, regionName, areaName, phase, capturedAt, location });
 
   lines.forEach((line, index) => {
-    const y = bannerTop + padding + lineHeight * index + lineHeight / 2;
-    context.fillText(fitText(context, line, maxTextWidth), width - padding, y, maxTextWidth);
+    const y = panelTop + padding + lineHeight * index + lineHeight / 2;
+    context.fillText(fitText(context, line, maxTextWidth), panelWidth - padding, y, maxTextWidth);
   });
 
   return toJpegBlob(canvas, 0.82);

@@ -30,6 +30,10 @@ import {
   failMaintenanceTripProgress,
   getMaintenanceOrder,
   getMaintenanceTripProgress,
+  getMachineCorrectionEvidence,
+  getMachineCorrectionCodeCandidates,
+  getMachineCorrectionRequests,
+  getMachineMap,
   getMaintenancePhoto,
   getUnmatchedMaintenancePhoto,
   importMachines,
@@ -42,6 +46,8 @@ import {
   moveCardPhoto,
   populateMaintenanceOrderArea,
   replaceMaintenanceOrderRepresentatives,
+  setMachineGeofenceLocation,
+  resolveMachineCorrection,
   processMaintenanceTripFolder,
   previewMachineImport,
   transitionMaintenanceToReview,
@@ -150,8 +156,56 @@ router.get('/storage-explorer', asyncHandler(async (req, res) => {
 }));
 
 router.get('/machines', (req, res) => {
-  res.json(listMachines({ area: req.query.area, search: req.query.search ?? req.query.q, page: req.query.page, limit: req.query.limit }));
+  if (req.query.locationStatus === 'pending_correction' && req.user?.role !== 'admin') {
+    res.status(403).json({ error: 'Administrator access is required.' });
+    return;
+  }
+  const directory = listMachines({
+    area: req.query.area,
+    search: req.query.search ?? req.query.q,
+    page: req.query.page,
+    limit: req.query.limit,
+    locationStatus: req.query.locationStatus ?? 'all',
+  });
+  if (req.user?.role !== 'admin') {
+    directory.machines = directory.machines.map(({ pending_correction_count: _pendingCount, ...machine }) => machine);
+  }
+  res.json(directory);
 });
+
+router.get('/machines/map', requireRole('admin'), (req, res) => {
+  res.set(NO_CACHE_HEADERS);
+  res.json(getMachineMap({
+    area: req.query.area,
+    search: req.query.search ?? req.query.q,
+    locationStatus: req.query.locationStatus ?? 'all',
+  }));
+});
+
+router.get('/machine-corrections', requireRole('admin'), (req, res) => {
+  res.set(NO_CACHE_HEADERS);
+  res.json({ success: true, corrections: getMachineCorrectionRequests({ status: req.query.status ?? 'pending' }) });
+});
+
+router.get('/machine-corrections/:id/candidates', requireRole('admin'), (req, res) => {
+  res.set(NO_CACHE_HEADERS);
+  res.json(getMachineCorrectionCodeCandidates(req.params.id, req.query.code));
+});
+
+router.get('/machine-corrections/:id/evidence', requireRole('admin'), (req, res, next) => {
+  try {
+    const evidence = getMachineCorrectionEvidence(req.params.id);
+    res.set({
+      'Cache-Control': 'private, no-store',
+      'X-Content-Type-Options': 'nosniff',
+      'Content-Type': evidence.contentType,
+    }).status(200).send(evidence.data);
+  } catch (error) { next(error); }
+});
+
+router.patch('/machine-corrections/:id/review', requireRole('admin'), asyncHandler(async (req, res) => {
+  res.json(await resolveMachineCorrection(req.params.id, req.body, requestActorId(req)));
+}));
 
 router.get('/representatives', requireRole('admin'), (_req, res) => {
   res.set(NO_CACHE_HEADERS);
@@ -174,6 +228,11 @@ router.post('/machines', asyncHandler(async (req, res) => {
 router.patch('/machines/:id', asyncHandler(async (req, res) => {
   res.json(await updateMachine(req.params.id, req.body, requestActorId(req)));
 }));
+
+router.patch('/machines/:id/geofence', requireRole('admin'), (req, res, next) => {
+  try { res.json(setMachineGeofenceLocation(req.params.id, req.body, requestActorId(req))); }
+  catch (error) { next(error); }
+});
 
 router.delete('/machines/:id', (req, res, next) => {
   try { res.json(deactivateMachine(req.params.id, requestActorId(req))); }

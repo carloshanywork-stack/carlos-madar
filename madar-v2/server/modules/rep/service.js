@@ -1,10 +1,12 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { readFile } from 'node:fs/promises';
+import sharp from 'sharp';
 import { db } from '../../database/connection.js';
 import { recordAudit } from '../audit.js';
 import { allowOnlyKeys, HttpError, optionalText, positiveId, requireObject, requireText } from '../http.js';
 import { compressFieldImage } from '../upload.js';
+import { withMachineStorageLock } from '../maintenance/deletion-lock.js';
 import {
   ensureStorageDirectory,
   listStorageFiles,
@@ -17,6 +19,8 @@ import {
 } from '../storage.js';
 
 const DEFAULT_TIME_ZONE = 'Africa/Cairo';
+const MAX_TRACK_POINT_AGE_MS = 90 * 24 * 60 * 60 * 1000;
+const MAX_FIELD_CONFIRMATION_ACCURACY_METERS = 100;
 
 function regionKey(value) {
   return String(value ?? '').normalize('NFKC').trim().toLocaleLowerCase('ar');
@@ -33,6 +37,29 @@ function parsePhotoList(value) {
 
 function compareArabic(left, right) {
   return left.localeCompare(right, 'ar', { numeric: true, sensitivity: 'base' });
+}
+
+function actionUuid(value, label = 'actionUuid') {
+  const uuid = requireText(value, label, { maxLength: 36 }).toLowerCase();
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(uuid)) {
+    throw new HttpError(400, `${label} must be a valid UUID.`);
+  }
+  return uuid;
+}
+
+function normalizeRepLocation(value, label = 'location') {
+  const point = requireObject(value, label);
+  allowOnlyKeys(point, ['latitude', 'longitude', 'accuracy', 'updatedAt']);
+  const { latitude, longitude, accuracy } = point;
+  if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90
+      || !Number.isFinite(longitude) || longitude < -180 || longitude > 180
+      || !Number.isFinite(accuracy) || accuracy < 0 || accuracy > 100000) {
+    throw new HttpError(400, `${label} must contain valid latitude, longitude, and accuracy values.`);
+  }
+  const updatedAt = requireText(point.updatedAt, `${label}.updatedAt`, { maxLength: 64 });
+  const captured = new Date(updatedAt);
+  if (Number.isNaN(captured.valueOf())) throw new HttpError(400, `${label}.updatedAt must be a valid date and time.`);
+  return { latitude, longitude, accuracy, updatedAt: captured.toISOString() };
 }
 
 function safeStorageSegment(value, fallback = 'unknown') {
@@ -56,16 +83,16 @@ export function calculateDistanceMeters(latitude1, longitude1, latitude2, longit
 function validateMachineGeofence(machine, location) {
   if (!location) throw new HttpError(400, 'يلزم تفعيل GPS وإرسال الموقع الحالي قبل رفع صور الزيارة.');
   const radius = Math.max(1, Number(machine.geofence_radius_meters) || 50);
-  if (Number(machine.is_location_locked) !== 1) return { pinned: true, radiusMeters: radius };
-  if (!Number.isFinite(machine.latitude) || !Number.isFinite(machine.longitude)) {
-    throw new HttpError(409, 'موقع الماكينة مقفل لكن إحداثياته غير مكتملة؛ يلزم تصحيحها من الإدارة.');
+  if (Number(machine.is_location_locked) !== 1
+      || !Number.isFinite(machine.latitude) || !Number.isFinite(machine.longitude)) {
+    throw new HttpError(409, 'يلزم تثبيت موقع الماكينة من الإدارة قبل التصوير؛ لا يمكن اعتماد أول زيارة كمرجع جغرافي.');
   }
   const distance = calculateDistanceMeters(location.latitude, location.longitude, machine.latitude, machine.longitude);
   const effectiveDistance = Math.max(0, distance - location.accuracy);
   if (effectiveDistance > radius) {
     throw new HttpError(403, `أنت خارج نطاق الماكينة (المسافة الفعالة: ${Math.round(effectiveDistance)} متر، المسموح: ${radius} متر).`);
   }
-  return { pinned: false, distanceMeters: distance, effectiveDistanceMeters: effectiveDistance, radiusMeters: radius };
+  return { distanceMeters: distance, effectiveDistanceMeters: effectiveDistance, radiusMeters: radius };
 }
 
 function getTimeZone(database) {
@@ -190,6 +217,9 @@ export function getRepTodayRoute(rep, database = db) {
     WHERE action = 'photo_upload' AND entity_type = 'maintenance_card'
       AND datetime(created_at) >= datetime(?) AND datetime(created_at) < datetime(?)
   `).all(dayStart, dayEnd).map((row) => Number(row.entity_id)));
+  const correctionPendingMachineIds = new Set(database.prepare(`
+    SELECT DISTINCT machine_id FROM machine_correction_requests WHERE status = 'pending'
+  `).all().map((row) => Number(row.machine_id)));
 
   const regionsByKey = new Map();
   let totalMachines = 0;
@@ -201,6 +231,7 @@ export function getRepTodayRoute(rep, database = db) {
     const beforePhotos = parsePhotoList(row.before_photos_json);
     const afterPhotos = parsePhotoList(row.after_photos_json);
     const latestVisit = reviewByCard.get(Number(row.card_id));
+    const correctionPending = correctionPendingMachineIds.has(Number(row.machine_id));
     const isCompleted = latestVisit
       ? latestVisit.review_status === 'approved'
       : uploadedToday.has(Number(row.card_id)) && beforePhotos.length > 0 && afterPhotos.length > 0;
@@ -209,17 +240,20 @@ export function getRepTodayRoute(rep, database = db) {
     if (!regionsByKey.has(key)) regionsByKey.set(key, { regionName, machines: [] });
     regionsByKey.get(key).machines.push({
       machineCode: row.machine_code,
+      machineId: Number(row.machine_id),
       arabicName: row.machine_name_ar,
       workOrderId: Number(row.order_id),
       workOrderCode: row.order_code,
       clientName: row.client_name,
       address: row.client_address ?? '',
+      areaName: row.area_name || row.region_name,
       isCompleted,
       isSubmitted,
       reviewStatus: latestVisit?.review_status ?? null,
       reviewNote: latestVisit?.review_status === 'reshoot' ? latestVisit.review_note : null,
+      correctionPending,
       cardId: Number(row.card_id),
-      canVisit: row.order_status !== 'archived' && !isCompleted && !isSubmitted,
+      canVisit: row.order_status !== 'archived' && !isCompleted && !isSubmitted && !correctionPending,
       latitude: row.latitude === null ? null : Number(row.latitude),
       longitude: row.longitude === null ? null : Number(row.longitude),
       isLocationLocked: Number(row.is_location_locked) === 1,
@@ -281,20 +315,9 @@ function normalizeVisitInput(input) {
   const capturedDate = new Date(capturedAt);
   if (Number.isNaN(capturedDate.valueOf())) throw new HttpError(400, 'capturedAt must be a valid date and time.');
 
-  let location = null;
-  if (body.location !== undefined && body.location !== null) {
-    const suppliedLocation = requireObject(body.location, 'location');
-    allowOnlyKeys(suppliedLocation, ['latitude', 'longitude', 'accuracy', 'updatedAt']);
-    const { latitude, longitude, accuracy } = suppliedLocation;
-    if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90
-        || !Number.isFinite(longitude) || longitude < -180 || longitude > 180
-        || !Number.isFinite(accuracy) || accuracy < 0 || accuracy > 100000) {
-      throw new HttpError(400, 'location must contain valid latitude, longitude, and accuracy values.');
-    }
-    const updatedAt = requireText(suppliedLocation.updatedAt, 'location.updatedAt', { maxLength: 64 });
-    if (Number.isNaN(new Date(updatedAt).valueOf())) throw new HttpError(400, 'location.updatedAt must be a valid date and time.');
-    location = { latitude, longitude, accuracy, updatedAt };
-  }
+  const location = body.location === undefined || body.location === null
+    ? null
+    : normalizeRepLocation(body.location);
 
   return {
     visitUuid: visitUuid.toLowerCase(),
@@ -398,6 +421,12 @@ function requireVisitOwner(existing, repId, payloadHash) {
   }
 }
 
+function assertNoPendingMachineCorrectionRename(database) {
+  if (database.prepare('SELECT 1 FROM machine_correction_rename_operations LIMIT 1').get()) {
+    throw new HttpError(409, 'A machine-folder recovery is pending. Restart the server before uploading field visits.');
+  }
+}
+
 function findRepVisitCard(rep, visit, database) {
   const card = database.prepare(`
     SELECT card.id AS card_id, card.order_id, card.machine_id, card.before_photos_json,
@@ -408,7 +437,9 @@ function findRepVisitCard(rep, visit, database) {
        machine.code AS machine_code, machine.name_ar AS machine_name_ar, machine.area AS machine_area,
        machine.area_name, machine.latitude, machine.longitude, machine.is_location_locked,
        machine.geofence_radius_meters, machine.active AS machine_active,
-      machine.deleted_at AS machine_deleted_at
+       machine.deleted_at AS machine_deleted_at,
+       EXISTS (SELECT 1 FROM machine_correction_requests correction
+         WHERE correction.machine_id = machine.id AND correction.status = 'pending') AS correction_pending
     FROM maintenance_cards card
     JOIN maintenance_orders order_record ON order_record.id = card.order_id
     JOIN clients client ON client.id = order_record.client_id
@@ -418,6 +449,9 @@ function findRepVisitCard(rep, visit, database) {
   if (!card || card.client_deleted_at || card.machine_deleted_at || !card.machine_active
       || card.card_status === 'excluded' || card.order_status === 'archived') {
     throw new HttpError(409, 'This machine visit is no longer available on the active route.');
+  }
+  if (card.correction_pending) {
+    throw new HttpError(409, 'A wrong-machine report is awaiting administrator review. Visits stay paused until it is resolved.');
   }
   if (!database.prepare(`
     SELECT 1 FROM maintenance_order_reps WHERE order_id = ? AND user_id = ?
@@ -448,6 +482,265 @@ function findRepVisitCard(rep, visit, database) {
   }
   validateMachineGeofence(card, visit.location);
   return card;
+}
+
+function findAssignedRepMachine(rep, machineId, cardId, database) {
+  const id = positiveId(machineId, 'machineId');
+  const selectedCardId = positiveId(cardId, 'cardId');
+  const machine = database.prepare(`
+    SELECT machine.id AS machine_id, machine.code AS machine_code, machine.name_ar AS machine_name_ar,
+      machine.area AS machine_area, machine.area_name, machine.latitude, machine.longitude,
+      machine.is_location_locked, machine.geofence_radius_meters, machine.active AS machine_active,
+      machine.deleted_at AS machine_deleted_at,
+      EXISTS (SELECT 1 FROM machine_correction_requests correction
+        WHERE correction.machine_id = machine.id AND correction.status = 'pending') AS correction_pending,
+      card.id AS card_id, card.order_id,
+      card.status AS card_status, card.deleted_at AS card_deleted_at,
+      order_record.order_code, order_record.area AS order_area, order_record.status AS order_status,
+      order_record.deleted_at AS order_deleted_at, client.deleted_at AS client_deleted_at
+    FROM machines machine
+    JOIN maintenance_cards card ON card.machine_id = machine.id
+    JOIN maintenance_orders order_record ON order_record.id = card.order_id
+    JOIN clients client ON client.id = order_record.client_id
+    WHERE machine.id = ? AND card.id = ?
+  `).get(id, selectedCardId);
+  if (!machine || machine.machine_active !== 1 || machine.machine_deleted_at !== null
+      || machine.card_deleted_at !== null || machine.card_status === 'excluded'
+      || machine.order_deleted_at !== null || machine.order_status === 'archived' || machine.client_deleted_at !== null) {
+    throw new HttpError(409, 'This machine is no longer available on the active route. Refresh the route and try again.');
+  }
+  if (machine.correction_pending) {
+    throw new HttpError(409, 'A wrong-machine report is awaiting administrator review. This machine is paused until the review is complete.');
+  }
+  if (!database.prepare('SELECT 1 FROM maintenance_order_reps WHERE order_id = ? AND user_id = ?')
+    .get(machine.order_id, rep.id)) {
+    throw new HttpError(403, 'This work order is not assigned to your account.');
+  }
+  const assigned = new Set((rep.assignedRegions ?? []).map(regionKey));
+  if (!assigned.has(regionKey(machine.machine_area))) {
+    throw new HttpError(403, 'This machine is outside your assigned regions.');
+  }
+  const orderAreas = String(machine.order_area ?? '').split(/[،,]/).map(regionKey).filter(Boolean);
+  if (orderAreas.length && !orderAreas.includes(regionKey(machine.machine_area))) {
+    throw new HttpError(403, 'This machine is outside the work order regions.');
+  }
+  return machine;
+}
+
+function actionPayloadHash(payload, evidenceBuffer = null) {
+  const hash = createHash('sha256').update(JSON.stringify(payload));
+  if (evidenceBuffer?.length) hash.update('\0evidence\0').update(evidenceBuffer);
+  return hash.digest('hex');
+}
+
+function requireSameAction(existing, repId, machineId, payloadHash) {
+  if (Number(existing.rep_user_id) !== Number(repId)
+      || Number(existing.machine_id) !== Number(machineId)
+      || existing.payload_sha256 !== payloadHash) {
+    throw new HttpError(409, 'This action UUID was already used with different content.');
+  }
+}
+
+function mapConfirmedMachine(row) {
+  return {
+    id: Number(row.id),
+    machine_id: Number(row.id),
+    code: row.code,
+    latitude: Number(row.latitude),
+    longitude: Number(row.longitude),
+    is_location_locked: Number(row.is_location_locked),
+    geofence_radius_meters: Number(row.geofence_radius_meters) || 50,
+    area_name: row.area_name,
+  };
+}
+
+/** First field confirmation pins an unlocated machine once and records immutable GPS evidence. */
+export function confirmRepMachineLocation(rep, machineId, input, database = db) {
+  if (rep?.role !== 'rep') throw new HttpError(403, 'Field representative access is required.');
+  const body = requireObject(input);
+  allowOnlyKeys(body, ['actionUuid', 'cardId', 'location']);
+  const uuid = actionUuid(body.actionUuid);
+  const cardId = positiveId(body.cardId, 'cardId');
+  const location = normalizeRepLocation(body.location);
+  if (location.accuracy > MAX_FIELD_CONFIRMATION_ACCURACY_METERS) {
+    throw new HttpError(400, `GPS accuracy must be ${MAX_FIELD_CONFIRMATION_ACCURACY_METERS} metres or better before confirming a machine location.`);
+  }
+  const id = positiveId(machineId, 'machineId');
+  const payloadHash = actionPayloadHash({ repId: Number(rep.id), machineId: id, cardId, location });
+  const existing = database.prepare(`SELECT action_uuid, rep_user_id, machine_id, payload_sha256
+    FROM rep_machine_location_verifications WHERE action_uuid = ?`).get(uuid);
+  if (existing) {
+    requireSameAction(existing, rep.id, id, payloadHash);
+    const machine = database.prepare('SELECT id, code, latitude, longitude, is_location_locked, geofence_radius_meters, area_name FROM machines WHERE id = ?').get(id);
+    if (!machine) throw new HttpError(404, 'Machine was not found.');
+    return { success: true, idempotent: true, verificationId: Number(database.prepare('SELECT id FROM rep_machine_location_verifications WHERE action_uuid = ?').get(uuid).id), machine: mapConfirmedMachine(machine) };
+  }
+
+  findAssignedRepMachine(rep, id, cardId, database);
+  return database.transaction(() => {
+    const current = database.prepare(`SELECT id, code, name_ar, area, area_name, latitude, longitude,
+      is_location_locked, geofence_radius_meters, active, deleted_at FROM machines WHERE id = ?`).get(id);
+    if (!current || current.active !== 1 || current.deleted_at !== null) throw new HttpError(404, 'Active machine was not found.');
+    if (Number(current.is_location_locked) === 1) {
+      throw new HttpError(409, 'This machine location has already been confirmed. Submit a correction for administrator review if it is wrong.');
+    }
+    const assigned = database.prepare(`SELECT 1 FROM maintenance_order_reps assignment
+      JOIN maintenance_cards card ON card.order_id = assignment.order_id
+      JOIN maintenance_orders order_record ON order_record.id = card.order_id
+      WHERE assignment.order_id = ? AND assignment.user_id = ? AND card.id = ?
+        AND card.machine_id = ? AND card.deleted_at IS NULL AND card.status != 'excluded'
+        AND order_record.deleted_at IS NULL AND order_record.status != 'archived'`).get(
+      (database.prepare('SELECT order_id FROM maintenance_cards WHERE id = ?').get(cardId) ?? {}).order_id,
+      rep.id, cardId, id,
+    );
+    if (!assigned) throw new HttpError(409, 'The machine assignment changed. Refresh the route and try again.');
+
+    const result = database.prepare(`INSERT INTO rep_machine_location_verifications
+      (action_uuid, payload_sha256, rep_user_id, machine_id, card_id, latitude, longitude, accuracy, captured_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+      uuid, payloadHash, rep.id, id, cardId, location.latitude, location.longitude, location.accuracy, location.updatedAt,
+    );
+    const changed = database.prepare(`UPDATE machines SET latitude = ?, longitude = ?, is_location_locked = 1,
+      geofence_radius_meters = 50, area_name = COALESCE(NULLIF(trim(area_name), ''), area)
+      WHERE id = ? AND is_location_locked = 0 AND active = 1 AND deleted_at IS NULL`).run(
+      location.latitude, location.longitude, id,
+    );
+    if (changed.changes !== 1) throw new HttpError(409, 'Another administrator or representative confirmed this machine location first. Refresh the route.');
+    const updated = database.prepare(`SELECT id, code, latitude, longitude, is_location_locked,
+      geofence_radius_meters, area_name FROM machines WHERE id = ?`).get(id);
+    recordAudit({
+      database,
+      actorId: rep.id,
+      action: 'field_location_confirmed',
+      entityType: 'machine',
+      entityId: id,
+      oldValues: {
+        latitude: current.latitude,
+        longitude: current.longitude,
+        is_location_locked: current.is_location_locked,
+        geofence_radius_meters: current.geofence_radius_meters,
+      },
+      newValues: {
+        latitude: updated.latitude,
+        longitude: updated.longitude,
+        is_location_locked: updated.is_location_locked,
+        geofence_radius_meters: updated.geofence_radius_meters,
+        verification_id: Number(result.lastInsertRowid),
+        card_id: cardId,
+        captured_at: location.updatedAt,
+        accuracy: location.accuracy,
+      },
+    });
+    return {
+      success: true,
+      idempotent: false,
+      verificationId: Number(result.lastInsertRowid),
+      machine: mapConfirmedMachine(updated),
+    };
+  }).immediate();
+}
+
+/** Store a wrong-machine claim and optional original evidence without changing machine/card history. */
+export async function submitRepMachineCorrection(rep, machineId, input, evidenceFile, database = db) {
+  if (rep?.role !== 'rep') throw new HttpError(403, 'Field representative access is required.');
+  const body = requireObject(input, 'correction');
+  allowOnlyKeys(body, ['actionUuid', 'cardId', 'reportedCode', 'reportedName', 'note', 'location', 'capturedAt']);
+  const uuid = actionUuid(body.actionUuid);
+  const cardId = positiveId(body.cardId, 'cardId');
+  const id = positiveId(machineId, 'machineId');
+  const reportedCode = requireText(body.reportedCode, 'reportedCode', { maxLength: 64 });
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(reportedCode)) {
+    throw new HttpError(400, 'reportedCode contains unsupported characters.');
+  }
+  const reportedName = requireText(body.reportedName, 'reportedName', { maxLength: 200 });
+  const note = optionalText(body.note, 'note', { maxLength: 2000 });
+  const location = normalizeRepLocation(body.location);
+  const capturedAtText = body.capturedAt === undefined ? location.updatedAt : requireText(body.capturedAt, 'capturedAt', { maxLength: 64 });
+  const capturedAt = new Date(capturedAtText);
+  if (Number.isNaN(capturedAt.valueOf())) throw new HttpError(400, 'capturedAt must be a valid date and time.');
+
+  let evidenceBuffer = null;
+  let evidenceContentType = null;
+  if (evidenceFile) {
+    if (!Buffer.isBuffer(evidenceFile.buffer) || !evidenceFile.buffer.length) {
+      throw new HttpError(400, 'The correction evidence photo is empty or invalid.');
+    }
+    let metadata;
+    try {
+      metadata = await sharp(evidenceFile.buffer, { failOn: 'error', limitInputPixels: 40_000_000 }).metadata();
+    } catch {
+      throw new HttpError(400, 'The correction evidence photo could not be decoded.');
+    }
+    const contentTypes = { jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp' };
+    evidenceContentType = contentTypes[metadata.format];
+    if (!evidenceContentType || !metadata.width || !metadata.height) {
+      throw new HttpError(400, 'Correction evidence must be a valid JPEG, PNG, or WebP image.');
+    }
+    evidenceBuffer = evidenceFile.buffer;
+  }
+
+  const payload = {
+    repId: Number(rep.id), machineId: id, cardId, reportedCode, reportedName, note,
+    location, capturedAt: capturedAt.toISOString(), evidenceContentType,
+  };
+  const payloadHash = actionPayloadHash(payload, evidenceBuffer);
+  const existing = database.prepare(`SELECT id, action_uuid, rep_user_id, machine_id, payload_sha256
+    FROM machine_correction_requests WHERE action_uuid = ?`).get(uuid);
+  if (existing) {
+    requireSameAction(existing, rep.id, id, payloadHash);
+    return { success: true, idempotent: true, correctionId: Number(existing.id), status: 'pending' };
+  }
+
+  const machine = findAssignedRepMachine(rep, id, cardId, database);
+  return database.transaction(() => {
+    const assignmentStillActive = database.prepare(`SELECT 1 FROM maintenance_order_reps assignment
+      JOIN maintenance_cards card ON card.order_id = assignment.order_id
+      JOIN maintenance_orders order_record ON order_record.id = card.order_id
+      WHERE assignment.order_id = ? AND assignment.user_id = ? AND card.id = ?
+        AND card.machine_id = ? AND card.deleted_at IS NULL AND card.status != 'excluded'
+        AND order_record.deleted_at IS NULL AND order_record.status != 'archived'`).get(
+      machine.order_id, rep.id, cardId, id,
+    );
+    if (!assignmentStillActive) throw new HttpError(409, 'The machine assignment changed. Refresh the route and try again.');
+    const result = database.prepare(`INSERT INTO machine_correction_requests
+      (action_uuid, payload_sha256, rep_user_id, machine_id, card_id, reported_code, reported_name,
+       note, evidence_data, evidence_content_type, location_json, captured_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+      uuid, payloadHash, rep.id, id, cardId, reportedCode, reportedName, note,
+      evidenceBuffer, evidenceContentType, JSON.stringify(location), capturedAt.toISOString(),
+    );
+    const correctionId = Number(result.lastInsertRowid);
+    recordAudit({
+      database,
+      actorId: rep.id,
+      action: 'create',
+      entityType: 'machine_correction_request',
+      entityId: correctionId,
+      newValues: {
+        machine_id: id,
+        machine_code: machine.machine_code,
+        card_id: cardId,
+        order_code: machine.order_code,
+        reported_code: reportedCode,
+        reported_name: reportedName,
+        note,
+        location,
+        captured_at: capturedAt.toISOString(),
+        evidence_content_type: evidenceContentType,
+        evidence_bytes: evidenceBuffer?.length ?? 0,
+        status: 'pending',
+      },
+    });
+    const candidates = database.prepare(`SELECT id FROM machines
+      WHERE code = ? COLLATE NOCASE AND active = 1 AND deleted_at IS NULL`).all(reportedCode);
+    return {
+      success: true,
+      idempotent: false,
+      correctionId,
+      status: 'pending',
+      codeConflict: candidates.some((candidate) => Number(candidate.id) !== id),
+    };
+  }).immediate();
 }
 
 async function cleanupVisitFiles(row) {
@@ -499,8 +792,8 @@ function createVisitReservation(rep, visit, payloadHash, card, stagingPath, fina
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'receiving', ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       visit.visitUuid, rep.id, card.order_id, card.card_id, card.machine_id, card.order_code,
-      card.machine_code, card.machine_area, payloadHash, visit.machineCondition, JSON.stringify(visit.reasonIds),
-      visit.notes, visit.capturedAt, visit.beforeCapturedAt, visit.afterCapturedAt,
+       card.machine_code, card.machine_area, payloadHash, visit.machineCondition, JSON.stringify(visit.reasonIds),
+       visit.notes, visit.capturedAt, visit.beforeCapturedAt[0], visit.afterCapturedAt[0],
       visit.location ? JSON.stringify(visit.location) : null,
       stagingPath, finalPath,
     );
@@ -515,35 +808,7 @@ function recordReceivedVisit(rep, visit, visitId, photoRows, database) {
       database.prepare('SELECT machine_id FROM rep_visits WHERE id = ?').get(visitId)?.machine_id,
     );
     if (!machine) throw new HttpError(409, 'The machine was removed while the visit was uploading.');
-    const geofence = validateMachineGeofence(machine, visit.location);
-    if (geofence.pinned) {
-      const pin = database.prepare(`UPDATE machines
-        SET latitude = ?, longitude = ?, area_name = COALESCE(NULLIF(trim(area_name), ''), area), is_location_locked = 1
-        WHERE id = ? AND is_location_locked = 0`).run(
-        visit.location.latitude, visit.location.longitude, machine.id,
-      );
-      if (pin.changes) {
-        recordAudit({
-          database,
-          actorId: rep.id,
-          action: 'pin_machine_location',
-          entityType: 'machine',
-          entityId: machine.id,
-          oldValues: { latitude: machine.latitude, longitude: machine.longitude, is_location_locked: machine.is_location_locked },
-          newValues: {
-            latitude: visit.location.latitude,
-            longitude: visit.location.longitude,
-            is_location_locked: 1,
-            geofence_radius_meters: machine.geofence_radius_meters,
-          },
-        });
-      } else {
-        // Another visit pinned this machine while the photos were being received.
-        const lockedMachine = database.prepare(`SELECT id, latitude, longitude, is_location_locked,
-          geofence_radius_meters FROM machines WHERE id = ?`).get(machine.id);
-        validateMachineGeofence(lockedMachine, visit.location);
-      }
-    }
+    validateMachineGeofence(machine, visit.location);
     const beforePhotos = photoRows.filter((photo) => photo.phase === 'before');
     const afterPhotos = photoRows.filter((photo) => photo.phase === 'after');
     const beforePath = beforePhotos[0].storedPath;
@@ -616,73 +881,89 @@ function recordReceivedVisit(rep, visit, visitId, photoRows, database) {
   }).immediate();
 }
 
-/** Receive an immutable visit bundle with any number of before/after photos; UUID + content hash makes retries safe. */
+/** Receive an immutable bundle of three before/after photos; UUID + content hash makes retries safe. */
 export async function syncRepVisit(rep, input, files, database = db) {
   if (rep?.role !== 'rep') throw new HttpError(403, 'Field representative access is required.');
   const visit = normalizeVisitInput(input);
   const beforeFiles = visitPhotoFiles(files, 'before');
   const afterFiles = visitPhotoFiles(files, 'after');
-  if (!beforeFiles.length || !afterFiles.length) throw new HttpError(400, 'At least one before and one after photo are required.');
+  if (beforeFiles.length !== 3 || afterFiles.length !== 3) {
+    throw new HttpError(400, 'A visit must contain exactly three before and three after photos.');
+  }
   if (visit.beforeCapturedAt.length !== beforeFiles.length || visit.afterCapturedAt.length !== afterFiles.length) {
     throw new HttpError(400, 'Each before and after photo must have a matching capture timestamp.');
   }
   const payloadHash = await visitPayloadHash(rep.id, visit, beforeFiles, afterFiles);
+  assertNoPendingMachineCorrectionRename(database);
 
   let existing = findVisit(visit.visitUuid, database);
   if (existing) {
     requireVisitOwner(existing, rep.id, payloadHash);
     if (existing.status === 'completed') return visitResult(existing, database, { idempotent: true });
     if (existing.status === 'receiving') return visitResult(existing, database, { processing: true });
-    await cleanupVisitFiles(existing);
   }
 
-  const card = findRepVisitCard(rep, visit, database);
-  const workDay = getLocalDateParts(new Date(visit.capturedAt), getTimeZone(database));
-  const workDate = `${workDay.year}-${String(workDay.month).padStart(2, '0')}-${String(workDay.day).padStart(2, '0')}`;
-  const machineArea = safeStorageSegment(card.area_name || card.machine_area);
-  const machineFolder = safeStorageSegment(`${card.machine_code}_${card.machine_name_ar}`);
-  const orderFolder = safeStorageSegment(`${workDate}_${card.order_id}`);
-  const stagingPath = storageDirectory('.madar-recovery', 'rep-visits', visit.visitUuid);
-  const finalPath = storageDirectory('Areas', machineArea, machineFolder, orderFolder);
-  const reservation = createVisitReservation(rep, visit, payloadHash, card, stagingPath, finalPath, database);
-  if (reservation.kind === 'completed') return visitResult(reservation.row, database, { idempotent: true });
-  if (reservation.kind === 'processing') return visitResult(reservation.row, database, { processing: true });
-
-  try {
-    await ensureStorageDirectory('.madar-recovery', 'rep-visits', visit.visitUuid);
-    const photoRows = [];
-    for (const [phase, phaseFiles, capturedAtList] of [
-      ['before', beforeFiles, visit.beforeCapturedAt],
-      ['after', afterFiles, visit.afterCapturedAt],
-    ]) {
-      for (const [ordinal, file] of phaseFiles.entries()) {
-        const buffer = await prepareVisitImage(file, `${phase} ${ordinal + 1}`);
-        const filename = `${visit.visitUuid}-${phase}-${String(ordinal + 1).padStart(4, '0')}.jpg`;
-        const stagedPath = storageDirectory(stagingPath, phase, filename);
-        const storedPath = storageDirectory(finalPath, phase, filename);
-        await writeStorageFile(stagedPath, buffer);
-        photoRows.push({ phase, ordinal, stagedPath, storedPath, capturedAt: capturedAtList[ordinal] });
-      }
+  const initialCard = findRepVisitCard(rep, visit, database);
+  return withMachineStorageLock(initialCard.machine_id, async () => {
+    assertNoPendingMachineCorrectionRename(database);
+    existing = findVisit(visit.visitUuid, database);
+    if (existing) {
+      requireVisitOwner(existing, rep.id, payloadHash);
+      if (existing.status === 'completed') return visitResult(existing, database, { idempotent: true });
+      if (existing.status === 'receiving') return visitResult(existing, database, { processing: true });
+      await cleanupVisitFiles(existing);
     }
-    await ensureStorageDirectory('Areas', machineArea, machineFolder, orderFolder);
-    for (const photo of photoRows) await moveStorageFile(photo.stagedPath, photo.storedPath);
-    await removeStorageDirectory(stagingPath);
 
-    const completedVisit = recordReceivedVisit(rep, visit, reservation.row.id, photoRows, database);
-    return visitResult(completedVisit, database);
-  } catch (error) {
+    const card = findRepVisitCard(rep, visit, database);
+    const workDay = getLocalDateParts(new Date(visit.capturedAt), getTimeZone(database));
+    const workDate = `${workDay.year}-${String(workDay.month).padStart(2, '0')}-${String(workDay.day).padStart(2, '0')}`;
+    const machineArea = safeStorageSegment(card.area_name || card.machine_area);
+    const machineFolder = safeStorageSegment(`${card.machine_code}_${card.machine_name_ar}`);
+    const orderFolder = safeStorageSegment(`${workDate}_${card.order_id}`);
+    const stagingPath = storageDirectory('.madar-recovery', 'rep-visits', visit.visitUuid);
+    // Keep the six standardized filenames inside a UUID directory so repeat visits never
+    // overwrite an earlier immutable evidence bundle for the same machine/order/day.
+    const finalPath = storageDirectory('Areas', machineArea, machineFolder, orderFolder, visit.visitUuid);
+    const reservation = createVisitReservation(rep, visit, payloadHash, card, stagingPath, finalPath, database);
+    if (reservation.kind === 'completed') return visitResult(reservation.row, database, { idempotent: true });
+    if (reservation.kind === 'processing') return visitResult(reservation.row, database, { processing: true });
+
     try {
-      await cleanupVisitFiles(reservation.row);
-      database.prepare(`
-        UPDATE rep_visits SET status = 'failed', failure_message = ?, updated_at = CURRENT_TIMESTAMP
-        WHERE id = ? AND status = 'receiving'
-      `).run(String(error.message ?? 'Visit ingestion failed').slice(0, 500), reservation.row.id);
-    } catch (cleanupError) {
-      // Keep the row in 'receiving'; startup recovery will finish cleanup before serving requests.
-      console.error(`Rep visit ${visit.visitUuid} cleanup is pending: ${cleanupError.message}`);
+      await ensureStorageDirectory('.madar-recovery', 'rep-visits', visit.visitUuid);
+      const photoRows = [];
+      for (const [phase, phaseFiles, capturedAtList] of [
+        ['before', beforeFiles, visit.beforeCapturedAt],
+        ['after', afterFiles, visit.afterCapturedAt],
+      ]) {
+        for (const [ordinal, file] of phaseFiles.entries()) {
+          const buffer = await prepareVisitImage(file, `${phase} ${ordinal + 1}`);
+          const filename = `${phase}_${ordinal}.jpg`;
+          const stagedPath = storageDirectory(stagingPath, phase, filename);
+          const storedPath = storageDirectory(finalPath, filename);
+          await writeStorageFile(stagedPath, buffer);
+          photoRows.push({ phase, ordinal, stagedPath, storedPath, capturedAt: capturedAtList[ordinal] });
+        }
+      }
+      await ensureStorageDirectory(finalPath);
+      for (const photo of photoRows) await moveStorageFile(photo.stagedPath, photo.storedPath);
+      await removeStorageDirectory(stagingPath);
+
+      const completedVisit = recordReceivedVisit(rep, visit, reservation.row.id, photoRows, database);
+      return visitResult(completedVisit, database);
+    } catch (error) {
+      try {
+        await cleanupVisitFiles(reservation.row);
+        database.prepare(`
+          UPDATE rep_visits SET status = 'failed', failure_message = ?, updated_at = CURRENT_TIMESTAMP
+          WHERE id = ? AND status = 'receiving'
+        `).run(String(error.message ?? 'Visit ingestion failed').slice(0, 500), reservation.row.id);
+      } catch (cleanupError) {
+        // Keep the row in 'receiving'; startup recovery will finish cleanup before serving requests.
+        console.error(`Rep visit ${visit.visitUuid} cleanup is pending: ${cleanupError.message}`);
+      }
+      throw error;
     }
-    throw error;
-  }
+  });
 }
 
 /** Roll back interrupted file/DB handoffs before the API starts accepting requests. */
@@ -816,7 +1097,7 @@ export function syncRepTracking(rep, input, database = db) {
     const changedDates = new Set();
     for (const point of points) {
       const ageMs = Date.now() - new Date(point.updatedAt).valueOf();
-      if (ageMs > 24 * 60 * 60 * 1000 || ageMs < -5 * 60 * 1000) continue;
+      if (ageMs > MAX_TRACK_POINT_AGE_MS || ageMs < -5 * 60 * 1000) continue;
       if (pointSessionId !== null) {
         const pointDate = businessDate(point.updatedAt, database);
         const legacyInsert = insertPoint.run(rep.id, pointSessionId, point.latitude, point.longitude, point.accuracy, point.updatedAt);

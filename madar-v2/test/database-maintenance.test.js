@@ -10,7 +10,7 @@ process.env.MADAR_V2_STORAGE_ROOT = join(temporaryDirectory, 'storage');
 process.env.NODE_ENV = 'test';
 process.env.COOKIE_SECURE = 'false';
 
-const [{ db, createConnection }, { initializeDatabase, migrateAccountLoginProtection, migrateCairoTimezone }, { runDatabaseMaintenance }] = await Promise.all([
+const [{ db, createConnection }, { initializeDatabase, migrateAccountLoginProtection, migrateAttendanceAdminClockOutNote, migrateCairoTimezone }, { runDatabaseMaintenance }] = await Promise.all([
   import('../server/database/connection.js'),
   import('../server/database/init.js'),
   import('../server/database/maintenance.js'),
@@ -32,6 +32,9 @@ test('database initialization sets Cairo and adds account lockout fields', () =>
     .failed_login_attempts, 0);
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE version = '20261103-account-login-protection'").get().count, 1);
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE version = '20261103-gps-retention-index'").get().count, 1);
+  assert.ok(db.pragma('table_info(employee_daily_attendance)').some((column) => column.name === 'clock_out_admin_note'));
+  migrateAttendanceAdminClockOutNote(db);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE version = '20261104-attendance-admin-clockout-note'").get().count, 1);
   assert.deepEqual(db.pragma('index_xinfo(idx_rep_breadcrumbs_recorded_at)').filter((column) => column.key)
     .map((column) => column.name), [null], 'retention pruning indexes the julianday expression');
 });

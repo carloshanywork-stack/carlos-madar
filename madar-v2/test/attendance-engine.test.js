@@ -14,9 +14,10 @@ process.env.COOKIE_SECURE = 'false';
 
 const [{ app }, { db }, {
   initializeDatabase,
+  migrateStaffPayrollRules,
   migrateUserEmployeeLinks,
   migrateUserEmployeeProfileSync,
-}, { calculateShiftHours }] = await Promise.all([
+}, { calculateShiftHours, getAttendanceBusinessDate, getOverdueAttendance }] = await Promise.all([
   import('../server/app.js'),
   import('../server/database/connection.js'),
   import('../server/database/init.js'),
@@ -72,7 +73,7 @@ test('4-character passwords, new user employee sync, and first-admin employee sy
   const attendanceColumns = new Set(db.pragma('table_info(employee_daily_attendance)').map((column) => column.name));
   for (const column of [
     'clock_in_time', 'clock_in_source', 'clock_in_lat', 'clock_in_lng', 'clock_out_time',
-    'clock_out_source', 'total_hours', 'regular_hours', 'overtime_status', 'overtime_approved_by',
+    'clock_out_source', 'clock_out_admin_note', 'total_hours', 'regular_hours', 'overtime_status', 'overtime_approved_by',
   ]) assert.ok(attendanceColumns.has(column), `missing attendance migration column ${column}`);
 
   const tooShort = await request('/api/users', jsonOptions('POST', {
@@ -132,27 +133,157 @@ test('4-character passwords, new user employee sync, and first-admin employee sy
   assert.equal(db.prepare('SELECT name FROM employees WHERE user_id = ?').get(rep.body.id).name, 'Omar A.');
 });
 
-test('shift engine uses Cairo winter/summer offsets and counts Friday as overtime', () => {
+test('shift engine classifies outside-shift work at 1.5x and all Friday work at 2x', () => {
   assert.deepEqual(calculateShiftHours('2026-02-05T06:00:00.000Z', '2026-02-05T16:30:00.000Z', 'Africa/Cairo'), {
     totalHours: 10.5,
     regularHours: 9,
-    overtimeHours: 0.5,
+    overtimeHours: 1.5,
+    normalOvertimeHours: 1.5,
+    holidayOvertimeHours: 0,
   });
   assert.deepEqual(calculateShiftHours('2026-02-06T06:00:00.000Z', '2026-02-06T14:30:00.000Z', 'Africa/Cairo'), {
     totalHours: 8.5,
     regularHours: 0,
     overtimeHours: 8.5,
+    normalOvertimeHours: 0,
+    holidayOvertimeHours: 8.5,
   });
   assert.deepEqual(calculateShiftHours('2026-02-05T05:00:00.000Z', '2026-02-05T15:00:00.000Z', 'Africa/Cairo'), {
     totalHours: 10,
     regularHours: 8,
-    overtimeHours: 0,
+    overtimeHours: 2,
+    normalOvertimeHours: 2,
+    holidayOvertimeHours: 0,
   });
   assert.deepEqual(calculateShiftHours('2026-07-30T06:00:00.000Z', '2026-07-30T16:00:00.000Z', 'Africa/Cairo'), {
     totalHours: 10,
     regularHours: 9,
     overtimeHours: 1,
+    normalOvertimeHours: 1,
+    holidayOvertimeHours: 0,
   });
+});
+
+test('unified staff directory, salary advances, adjustments, Friday pay, treasury settlement, and 4-character credentials', async () => {
+  const adminLogin = await request('/api/auth/login', jsonOptions('POST', { username: 'root', password: '1234' }));
+  assert.equal(adminLogin.response.status, 200);
+  const adminCookie = adminLogin.cookie;
+
+  const worker = await request('/api/staff', jsonOptions('POST', {
+    classification: 'worker', name: 'Payroll Worker', department: 'Workshop', job_title: 'Technician',
+    national_id: 'TEST-ID-104', hire_date: '2025-01-10', monthly_salary_cents: 234000,
+  }), adminCookie);
+  assert.equal(worker.response.status, 201, JSON.stringify(worker.body));
+  assert.equal(worker.body.can_login, 0);
+  assert.equal(worker.body.user_id, null);
+  assert.equal(worker.body.national_id, 'TEST-ID-104');
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM users WHERE username = 'worker-no-account'").get().count, 0);
+
+  const forbiddenWorkerCredentials = await request('/api/staff', jsonOptions('POST', {
+    classification: 'worker', name: 'Worker with Credentials', department: 'Workshop',
+    username: 'worker-no-account', password: 'worker4',
+  }), adminCookie);
+  assert.equal(forbiddenWorkerCredentials.response.status, 400);
+  const shortStaffPassword = await request('/api/staff', jsonOptions('POST', {
+    classification: 'representative', name: 'Short Staff Password', department: 'Maintenance',
+    username: 'rep-short-staff', password: '123', assignedRegions: ['التجمع'],
+  }), adminCookie);
+  assert.equal(shortStaffPassword.response.status, 400);
+
+  const representative = await request('/api/staff', jsonOptions('POST', {
+    classification: 'representative', name: 'Unified Representative', department: 'Maintenance',
+    username: 'unified-rep', password: 'rep4', assignedRegions: ['التجمع'],
+  }), adminCookie);
+  assert.equal(representative.response.status, 201, JSON.stringify(representative.body));
+  assert.equal(representative.body.role, 'rep');
+  assert.equal(representative.body.can_login, 1);
+  const repLogin = await request('/api/rep/login', jsonOptions('POST', { username: 'unified-rep', password: 'rep4' }));
+  assert.equal(repLogin.response.status, 200);
+  const repDenied = await request('/api/staff', {}, repLogin.cookie);
+  assert.equal(repDenied.response.status, 403);
+  const disabledLogin = await request(`/api/staff/${representative.body.id}`, jsonOptions('PATCH', {
+    classification: 'worker', enableLogin: false,
+  }), adminCookie);
+  assert.equal(disabledLogin.response.status, 200, JSON.stringify(disabledLogin.body));
+  assert.equal(disabledLogin.body.can_login, 0);
+  assert.equal(disabledLogin.body.user_id, representative.body.user_id, 'disabling login preserves the existing identity link');
+  assert.equal(db.prepare('SELECT active, deleted_at FROM users WHERE id = ?').get(representative.body.user_id).active, 0);
+  const revokedRepSession = await request('/api/rep/today-route', {}, repLogin.cookie);
+  assert.ok([401, 403].includes(revokedRepSession.response.status), 'existing sessions are revoked when staff login is disabled');
+  const reenabledLogin = await request(`/api/staff/${representative.body.id}`, jsonOptions('PATCH', {
+    classification: 'representative', enableLogin: true, username: 'unified-rep', password: 'rep5',
+    assignedRegions: ['التجمع'],
+  }), adminCookie);
+  assert.equal(reenabledLogin.response.status, 200, JSON.stringify(reenabledLogin.body));
+  assert.equal(reenabledLogin.body.can_login, 1);
+  assert.equal(reenabledLogin.body.user_id, representative.body.user_id, 'reenabling login restores the same user rather than duplicating it');
+  const reenabledRepLogin = await request('/api/rep/login', jsonOptions('POST', { username: 'unified-rep', password: 'rep5' }));
+  assert.equal(reenabledRepLogin.response.status, 200);
+  const inactiveStaff = await request(`/api/staff/${representative.body.id}`, jsonOptions('PATCH', { active: false }), adminCookie);
+  assert.equal(inactiveStaff.response.status, 200, JSON.stringify(inactiveStaff.body));
+  assert.equal(inactiveStaff.body.login_active, 0);
+  const inactiveSession = await request('/api/rep/today-route', {}, reenabledRepLogin.cookie);
+  assert.ok([401, 403].includes(inactiveSession.response.status), 'setting staff inactive revokes the current login session immediately');
+  const activeStaff = await request(`/api/staff/${representative.body.id}`, jsonOptions('PATCH', { active: true }), adminCookie);
+  assert.equal(activeStaff.response.status, 200, JSON.stringify(activeStaff.body));
+  const activeRepLogin = await request('/api/rep/login', jsonOptions('POST', { username: 'unified-rep', password: 'rep5' }));
+  assert.equal(activeRepLogin.response.status, 200, 'reactivating the profile restores login without creating a new user');
+
+  const deposit = await request('/api/finance/treasury/entries', jsonOptions('POST', {
+    kind: 'income', category: 'Payroll test funding', amountCents: 2000000,
+  }), adminCookie);
+  assert.equal(deposit.response.status, 201, JSON.stringify(deposit.body));
+  const attendance = await request('/api/employees/attendance/monthly', jsonOptions('POST', {
+    month: '2026-04', records: [
+      { employeeId: worker.body.id, date: '2026-04-03', status: 'present', overtimeHours: 2 },
+      { employeeId: worker.body.id, date: '2026-04-04', status: 'present', overtimeHours: 2 },
+      { employeeId: worker.body.id, date: '2026-04-05', status: 'absent', overtimeHours: 0 },
+    ],
+  }), adminCookie);
+  assert.equal(attendance.response.status, 200, JSON.stringify(attendance.body));
+  const advance = await request(`/api/employees/${worker.body.id}/advances`, jsonOptions('POST', {
+    month: '2026-04', amountCents: 5000, notes: 'Transport advance',
+  }), adminCookie);
+  assert.equal(advance.response.status, 201, JSON.stringify(advance.body));
+  const bonus = await request(`/api/employees/${worker.body.id}/payroll-adjustments`, jsonOptions('POST', {
+    month: '2026-04', kind: 'bonus', amountCents: 7000, description: 'Monthly quality award',
+  }), adminCookie);
+  assert.equal(bonus.response.status, 201, JSON.stringify(bonus.body));
+  const deduction = await request(`/api/employees/${worker.body.id}/payroll-adjustments`, jsonOptions('POST', {
+    month: '2026-04', kind: 'deduction', amountCents: 2500, description: 'Approved equipment deduction',
+  }), adminCookie);
+  assert.equal(deduction.response.status, 201, JSON.stringify(deduction.body));
+
+  const payroll = await request('/api/employees/payroll?month=2026-04', {}, adminCookie);
+  assert.equal(payroll.response.status, 200, JSON.stringify(payroll.body));
+  const workerLine = payroll.body.lines.find((line) => line.employee_id === worker.body.id);
+  assert.equal(workerLine.normal_overtime_hours, 2);
+  assert.equal(workerLine.holiday_overtime_hours, 2);
+  assert.equal(workerLine.normal_overtime_amount_cents, 3000);
+  assert.equal(workerLine.holiday_overtime_amount_cents, 4000);
+  assert.equal(workerLine.absence_deduction_cents, 9000);
+  assert.equal(workerLine.other_deductions_cents, 2500);
+  assert.equal(workerLine.advances_cents, 5000);
+  assert.equal(workerLine.bonus_cents, 7000);
+  assert.equal(workerLine.net_salary_cents, 231500);
+  assert.equal(workerLine.adjustments.length, 2);
+  assert.equal(workerLine.advance_details.length, 1);
+
+  const settled = await request('/api/employees/payroll/finalize', jsonOptions('POST', { month: '2026-04' }), adminCookie);
+  assert.equal(settled.response.status, 200, JSON.stringify(settled.body));
+  assert.equal(settled.body.finalized, true);
+  const settledWorker = settled.body.lines.find((line) => line.employee_id === worker.body.id);
+  assert.equal(settledWorker.net_salary_cents, 231500);
+  assert.equal(settledWorker.adjustments.length, 2);
+  const employeeTreasury = db.prepare(`SELECT category, amount_cents FROM treasury_entries
+    WHERE employee_id = ? ORDER BY id`).all(worker.body.id);
+  assert.deepEqual(employeeTreasury.map((entry) => entry.category), ['سلفة راتب', 'رواتب وأجور']);
+  assert.deepEqual(employeeTreasury.map((entry) => entry.amount_cents), [5000, 231500]);
+
+  const lateAdjustment = await request(`/api/employees/${worker.body.id}/payroll-adjustments`, jsonOptions('POST', {
+    month: '2026-04', kind: 'bonus', amountCents: 100, description: 'Too late',
+  }), adminCookie);
+  assert.equal(lateAdjustment.response.status, 409);
 });
 
 test('rep and admin clock actions persist source/GPS, guard duplicate punches, and review overtime', async () => {
@@ -197,7 +328,66 @@ test('rep and admin clock actions persist source/GPS, guard duplicate punches, a
 
   const employeeId = repCreated.body.id;
   const repEmployeeId = db.prepare('SELECT id FROM employees WHERE user_id = ?').get(employeeId).id;
+  const adminUserId = adminLogin.body.user.id;
   db.prepare('UPDATE employees SET base_salary_cents = 234000 WHERE id = ?').run(repEmployeeId);
+  const openAttendanceId = Number(db.prepare(`INSERT INTO employee_daily_attendance
+    (employee_id, work_date, status, overtime_hours, clock_in_time, clock_in_source, total_hours,
+     regular_hours, overtime_status)
+    VALUES (?, '2026-02-01', 'present', 0, '2026-02-01T07:00:00.000Z', 'app', 0, 0, 'none')`)
+    .run(repEmployeeId).lastInsertRowid);
+  const overdue = getOverdueAttendance(db, new Date('2026-02-01T17:00:00.000Z'));
+  assert.equal(overdue.length, 1);
+  assert.equal(overdue[0].employee_id, repEmployeeId);
+  assert.equal(overdue[0].overdue_hours, 1);
+  const invalidManualTime = await request('/api/attendance/clock-out', jsonOptions('POST', {
+    employeeId: repEmployeeId, clockOutLocal: '2026-02-31T19:30', adminNote: 'Invalid date',
+  }), adminCookie);
+  assert.equal(invalidManualTime.response.status, 400);
+  const missingManualNote = await request('/api/attendance/clock-out', jsonOptions('POST', {
+    employeeId: repEmployeeId, clockOutLocal: '2026-02-01T19:30',
+  }), adminCookie);
+  assert.equal(missingManualNote.response.status, 400);
+  const crossMonthClockOut = await request('/api/attendance/clock-out', jsonOptions('POST', {
+    employeeId: repEmployeeId, clockOutLocal: '2026-03-01T19:30', adminNote: 'Wrong payroll month',
+  }), adminCookie);
+  assert.equal(crossMonthClockOut.response.status, 409);
+  const customClockOut = await request('/api/attendance/clock-out', jsonOptions('POST', {
+    employeeId: repEmployeeId, clockOutLocal: '2026-02-01T19:30', adminNote: 'تم التأكيد مع المشرف',
+  }), adminCookie);
+  assert.equal(customClockOut.response.status, 200, JSON.stringify(customClockOut.body));
+  assert.equal(customClockOut.body.attendance.id, openAttendanceId);
+  assert.equal(customClockOut.body.attendance.clock_out_time, '2026-02-01T17:30:00.000Z');
+  assert.equal(customClockOut.body.attendance.clock_out_admin_note, 'تم التأكيد مع المشرف');
+  assert.equal(customClockOut.body.attendance.regular_hours, 9);
+  assert.equal(customClockOut.body.attendance.normal_overtime_hours, 1.5);
+  const clockOutAudit = db.prepare(`SELECT actor_id, action, new_values_json FROM audit_log
+    WHERE entity_type = 'employee_attendance' AND entity_id = ? ORDER BY id DESC LIMIT 1`).get(String(openAttendanceId));
+  assert.equal(clockOutAudit.actor_id, adminUserId);
+  assert.equal(clockOutAudit.action, 'admin_clock_out');
+  assert.equal(JSON.parse(clockOutAudit.new_values_json).clock_out_admin_note, 'تم التأكيد مع المشرف');
+
+  const futureTime = new Date(Date.now() + 10 * 60_000);
+  const timeZone = db.prepare("SELECT value FROM settings WHERE key = 'timezone'").get().value;
+  const futureParts = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
+    timeZone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  }).formatToParts(futureTime).filter((part) => part.type !== 'literal').map(({ type, value }) => [type, value]));
+  const futureWorkDate = getAttendanceBusinessDate(db, futureTime);
+  const futureEmployeeId = Number(db.prepare("INSERT INTO employees (name, department) VALUES ('Future Clockout Fixture', 'Maintenance')")
+    .run().lastInsertRowid);
+  const futureOpenId = Number(db.prepare(`INSERT INTO employee_daily_attendance
+    (employee_id, work_date, status, overtime_hours, clock_in_time, clock_in_source, total_hours,
+     regular_hours, overtime_status)
+    VALUES (?, ?, 'present', 0, ?, 'app', 0, 0, 'none')`)
+    .run(futureEmployeeId, futureWorkDate, new Date(Date.now() - 8 * 60 * 60_000).toISOString()).lastInsertRowid);
+  const futureManualClockOut = await request('/api/attendance/clock-out', jsonOptions('POST', {
+    employeeId: futureEmployeeId,
+    clockOutLocal: `${futureParts.year}-${futureParts.month}-${futureParts.day}T${futureParts.hour}:${futureParts.minute}`,
+    adminNote: 'Future time must be rejected',
+  }), adminCookie);
+  assert.equal(futureManualClockOut.response.status, 400);
+  assert.equal(db.prepare('SELECT clock_out_time FROM employee_daily_attendance WHERE id = ?').get(futureOpenId).clock_out_time, null);
+  db.prepare('DELETE FROM employee_daily_attendance WHERE id = ?').run(futureOpenId);
+
   const pendingId = Number(db.prepare(`INSERT INTO employee_daily_attendance
     (employee_id, work_date, status, overtime_hours, clock_in_time, clock_out_time, total_hours,
      regular_hours, overtime_status)
@@ -275,5 +465,31 @@ test('profile reconciliation repairs existing account links without losing payro
     can_login: 1,
     active: 0,
   });
+  assert.deepEqual(db.pragma('foreign_key_check'), []);
+});
+
+test('staff payroll migration backfills legacy Friday rates and finalized payroll identity snapshots idempotently', () => {
+  const employeeId = Number(db.prepare(`INSERT INTO employees
+    (name, department, job_title, base_salary_cents, active)
+    VALUES ('Snapshot Legacy', 'Workshop', 'Technician', 120000, 1)`).run().lastInsertRowid);
+  const runId = Number(db.prepare(`INSERT INTO payroll_runs (month_year, status, finalized_at)
+    VALUES ('2026-03', 'finalized', '2026-04-01T00:00:00.000Z')`).run().lastInsertRowid);
+  const lineId = Number(db.prepare(`INSERT INTO payroll_lines
+    (run_id, employee_id, base_salary_cents, net_salary_cents)
+    VALUES (?, ?, 120000, 120000)`).run(runId, employeeId).lastInsertRowid);
+  const attendanceId = Number(db.prepare(`INSERT INTO employee_daily_attendance
+    (employee_id, work_date, status, overtime_hours)
+    VALUES (?, '2026-03-06', 'present', 2.5)`).run(employeeId).lastInsertRowid);
+
+  db.prepare("DELETE FROM schema_migrations WHERE version = '20261103-staff-payroll-shift-and-settlement'").run();
+  migrateStaffPayrollRules(db);
+  migrateStaffPayrollRules(db);
+
+  assert.deepEqual(db.prepare(`SELECT normal_overtime_hours, holiday_overtime_hours
+    FROM employee_daily_attendance WHERE id = ?`).get(attendanceId), { normal_overtime_hours: 0, holiday_overtime_hours: 2.5 });
+  assert.deepEqual(db.prepare('SELECT employee_name, department FROM payroll_lines WHERE id = ?').get(lineId), {
+    employee_name: 'Snapshot Legacy', department: 'Workshop',
+  });
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE version = '20261103-staff-payroll-shift-and-settlement'").get().count, 1);
   assert.deepEqual(db.pragma('foreign_key_check'), []);
 });

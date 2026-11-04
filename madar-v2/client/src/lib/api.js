@@ -17,16 +17,39 @@ function notifyDisabledRep(payload) {
 }
 
 async function request(path, options = {}) {
+  const { timeoutMs = 0, signal: callerSignal, ...fetchOptions } = options;
   const headers = new Headers(options.headers ?? {});
   headers.set('Cache-Control', 'no-cache, no-store, must-revalidate');
   headers.set('Pragma', 'no-cache');
   headers.set('Expires', '0');
-  const response = await fetch(path, {
-    credentials: 'include',
-    ...options,
-    cache: 'no-store',
-    headers,
-  });
+  const controller = new AbortController();
+  let timedOut = false;
+  let timeout;
+  const abortFromCaller = () => controller.abort(callerSignal?.reason);
+  if (callerSignal?.aborted) abortFromCaller();
+  else callerSignal?.addEventListener('abort', abortFromCaller, { once: true });
+  if (Number.isFinite(timeoutMs) && timeoutMs > 0) {
+    timeout = window.setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, timeoutMs);
+  }
+  let response;
+  try {
+    response = await fetch(path, {
+      credentials: 'include',
+      ...fetchOptions,
+      cache: 'no-store',
+      headers,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (timedOut) throw new ApiError('انتهت مهلة الطلب؛ حاول مرة أخرى عند استقرار الاتصال.', 0);
+    throw error;
+  } finally {
+    if (timeout) window.clearTimeout(timeout);
+    callerSignal?.removeEventListener('abort', abortFromCaller);
+  }
   const contentType = response.headers.get('content-type') ?? '';
   const payload = contentType.includes('application/json')
     ? await response.json()

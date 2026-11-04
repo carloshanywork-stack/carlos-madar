@@ -6,6 +6,8 @@ import {
   clockInForEmployee,
   clockOutForEmployee,
   getAttendanceBusinessDate,
+  getAttendanceBusinessTimeZone,
+  getOverdueAttendance,
   listPendingOvertime,
   reviewOvertime,
 } from './attendance.js';
@@ -25,9 +27,15 @@ router.get('/pending-overtime', (_req, res) => {
   res.json({ records: listPendingOvertime() });
 });
 
-router.get('/today', (_req, res) => {
+router.get('/today', requireAdmin, (_req, res) => {
   res.set({ 'Cache-Control': 'private, no-store', Pragma: 'no-cache' });
-  res.json({ date: getAttendanceBusinessDate() });
+  const now = new Date();
+  res.json({
+    date: getAttendanceBusinessDate(undefined, now),
+    timeZone: getAttendanceBusinessTimeZone(),
+    asOf: now.toISOString(),
+    overdue: getOverdueAttendance(undefined, now),
+  });
 });
 
 router.post('/mark', requireAdmin, (req, res) => {
@@ -44,8 +52,11 @@ router.post('/mark', requireAdmin, (req, res) => {
 
 router.post('/clock-out', requireAdmin, (req, res) => {
   const body = requireObject(req.body);
-  allowOnlyKeys(body, ['employeeId']);
-  const attendance = clockOutForEmployee(positiveId(body.employeeId, 'employeeId'), requestActorId(req));
+  allowOnlyKeys(body, ['employeeId', 'clockOutLocal', 'adminNote']);
+  const attendance = clockOutForEmployee(positiveId(body.employeeId, 'employeeId'), requestActorId(req), undefined, {
+    clockOutLocal: body.clockOutLocal,
+    adminNote: body.adminNote,
+  });
   publishOperationsEvent('attendance.changed', {
     employeeId: attendance.employee_id,
     workDate: attendance.work_date,

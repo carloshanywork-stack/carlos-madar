@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useEffect, useMemo, useState } from 'react';
+import { Link, useLocation } from 'react-router-dom';
 import { api } from '../../lib/api.js';
 import { errorMessage, formatDate } from '../../lib/format.js';
 import { useApi } from '../../lib/useApi.js';
@@ -26,8 +26,11 @@ const statusItems = [
   { value: 'archived', label: 'الأرشيف' },
 ];
 
-export default function MaintenancePage() {
-  const [view, setView] = useState('orders');
+export default function MaintenancePage({ isAdmin = false }) {
+  const location = useLocation();
+  const requestedView = new URLSearchParams(location.search).get('view');
+  const initialCorrections = new URLSearchParams(location.search).get('review') === 'corrections';
+  const [view, setView] = useState(() => isAdmin && ['machines', 'corrections'].includes(requestedView) ? 'machines' : 'orders');
   const [status, setStatus] = useState('in_progress');
   const { data: orders, loading, error, reload } = useApi(`/api/maintenance/orders?status=${status}`);
   const { data: clients } = useApi('/api/clients');
@@ -50,6 +53,10 @@ export default function MaintenancePage() {
     `${order.order_code} ${order.client_name} ${order.client_code} ${order.area_summary || ''} ${order.area || ''}`
       .toLowerCase()
       .includes(search.toLowerCase())), [orders, search]);
+
+  useEffect(() => {
+    if (isAdmin && ['machines', 'corrections'].includes(requestedView)) setView('machines');
+  }, [isAdmin, requestedView]);
 
   async function createOrder(event) {
     event.preventDefault();
@@ -98,7 +105,7 @@ export default function MaintenancePage() {
         { value: 'reasons', label: 'أسباب الأعطال (Maintenance Reasons)' },
         { value: 'area_notes', label: 'صيانات المناطق (Area Maintenance)' },
       ]} value={view} onChange={setView} ariaLabel="مساحات الصيانة" /></div>
-      {view === 'area_notes' ? <AreaMaintenanceDirectory /> : view === 'machines' ? <MachinesDirectory /> : view === 'reasons' ? <MaintenanceReasonsDirectory /> : <>
+      {view === 'area_notes' ? <AreaMaintenanceDirectory /> : view === 'machines' ? <MachinesDirectory isAdmin={isAdmin} initialCorrections={initialCorrections} /> : view === 'reasons' ? <MaintenanceReasonsDirectory /> : <>
       <div className="madar-list-toolbar madar-section">
         <Tabs items={statusItems.map((item) => ({ ...item, count: status === item.value ? orders?.length : undefined }))} value={status} onChange={setStatus} ariaLabel="حالة أوامر الصيانة" />
         <label className="madar-field madar-search"><Icon name="search" size={15} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="بحث برقم الأمر، العميل، أو المنطقة..." aria-label="بحث أوامر الصيانة" /></label>

@@ -13,6 +13,7 @@
     "android:add": "npx cap add android",
     "android:sync": "node scripts/build-android.js --sync-only",
     "android:debug": "node scripts/build-android.js",
+    "android:release": "node scripts/build-android.js --release",
     "db:init": "node server/database/init.js",
     "db:migrate-v1": "node scripts/migrate-from-v1.js"
   },

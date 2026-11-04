@@ -40,6 +40,10 @@ const machineGeofenceBreadcrumbsMigration = '20261103-machine-geofence-route-sto
 const accountLoginProtectionMigration = '20261103-account-login-protection';
 const cairoTimezoneMigration = '20261103-africa-cairo-timezone';
 const gpsRetentionIndexMigration = '20261103-gps-retention-index';
+const staffPayrollRulesMigration = '20261103-staff-payroll-shift-and-settlement';
+const adminClockOutNoteMigration = '20261104-attendance-admin-clockout-note';
+const machineVerificationCorrectionsMigration = '20261104-machine-verification-corrections';
+const machineCorrectionRenameRecoveryMigration = '20261104-machine-correction-rename-recovery';
 
 const repUsersTableSql = `
   CREATE TABLE users_rep_migration_v1 (
@@ -580,6 +584,21 @@ export function migrateNativeAttendance(database) {
   migrate.immediate();
 }
 
+export function migrateAttendanceAdminClockOutNote(database) {
+  const migrate = database.transaction(() => {
+    const applied = database.prepare('SELECT 1 FROM schema_migrations WHERE version = ?')
+      .get(adminClockOutNoteMigration);
+    if (applied) return;
+
+    const columns = new Set(database.pragma('table_info(employee_daily_attendance)').map((column) => column.name));
+    if (!columns.has('clock_out_admin_note')) {
+      database.exec('ALTER TABLE employee_daily_attendance ADD COLUMN clock_out_admin_note TEXT');
+    }
+    database.prepare('INSERT INTO schema_migrations (version) VALUES (?)').run(adminClockOutNoteMigration);
+  });
+  migrate.immediate();
+}
+
 export function migrateUserEmployeeLinks(database) {
   const migrate = database.transaction(() => {
     const applied = database.prepare('SELECT 1 FROM schema_migrations WHERE version = ?')
@@ -705,6 +724,106 @@ export function migrateMachineGeofenceAndBreadcrumbs(database) {
   migrate.immediate();
 }
 
+/** Keep first-visit location confirmations and wrong-machine reports as durable evidence. */
+export function migrateMachineVerificationAndCorrections(database) {
+  const migrate = database.transaction(() => {
+    const applied = database.prepare('SELECT 1 FROM schema_migrations WHERE version = ?')
+      .get(machineVerificationCorrectionsMigration);
+    if (applied) return;
+
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS rep_machine_location_verifications (
+        id INTEGER PRIMARY KEY,
+        action_uuid TEXT NOT NULL UNIQUE,
+        payload_sha256 TEXT NOT NULL CHECK (length(payload_sha256) = 64),
+        rep_user_id INTEGER NOT NULL REFERENCES users(id),
+        machine_id INTEGER NOT NULL REFERENCES machines(id),
+        card_id INTEGER NOT NULL REFERENCES maintenance_cards(id),
+        latitude REAL NOT NULL CHECK (latitude BETWEEN -90 AND 90),
+        longitude REAL NOT NULL CHECK (longitude BETWEEN -180 AND 180),
+        accuracy REAL NOT NULL CHECK (accuracy >= 0 AND accuracy <= 100000),
+        captured_at TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_rep_machine_location_verifications_machine
+        ON rep_machine_location_verifications(machine_id, created_at, id);
+
+      CREATE TABLE IF NOT EXISTS machine_correction_requests (
+        id INTEGER PRIMARY KEY,
+        action_uuid TEXT NOT NULL UNIQUE,
+        payload_sha256 TEXT NOT NULL CHECK (length(payload_sha256) = 64),
+        rep_user_id INTEGER NOT NULL REFERENCES users(id),
+        machine_id INTEGER NOT NULL REFERENCES machines(id),
+        card_id INTEGER NOT NULL REFERENCES maintenance_cards(id),
+        reported_code TEXT NOT NULL,
+        reported_name TEXT NOT NULL,
+        note TEXT,
+        evidence_data BLOB,
+        evidence_content_type TEXT CHECK (evidence_content_type IS NULL OR evidence_content_type IN ('image/jpeg', 'image/png', 'image/webp')),
+        location_json TEXT NOT NULL CHECK (json_valid(location_json)),
+        captured_at TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+        resolved_machine_id INTEGER REFERENCES machines(id),
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_machine_correction_requests_status_created
+        ON machine_correction_requests(status, created_at, id);
+      CREATE INDEX IF NOT EXISTS idx_machine_correction_requests_machine_status
+        ON machine_correction_requests(machine_id, status, created_at, id);
+
+      CREATE TABLE IF NOT EXISTS machine_correction_reviews (
+        id INTEGER PRIMARY KEY,
+        correction_id INTEGER NOT NULL REFERENCES machine_correction_requests(id),
+        action TEXT NOT NULL CHECK (action IN ('approved', 'rejected')),
+        resolved_machine_id INTEGER REFERENCES machines(id),
+        review_note TEXT,
+        actor_user_id INTEGER NOT NULL REFERENCES users(id),
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_machine_correction_reviews_correction
+        ON machine_correction_reviews(correction_id, created_at, id);
+    `);
+
+    database.prepare('INSERT INTO schema_migrations (version) VALUES (?)')
+      .run(machineVerificationCorrectionsMigration);
+  });
+  migrate.immediate();
+}
+
+/** Journal unique-code machine renames so SQLite and local folder moves can recover together. */
+export function migrateMachineCorrectionRenameRecovery(database) {
+  const migrate = database.transaction(() => {
+    const applied = database.prepare('SELECT 1 FROM schema_migrations WHERE version = ?')
+      .get(machineCorrectionRenameRecoveryMigration);
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS machine_correction_rename_operations (
+        operation_id TEXT PRIMARY KEY,
+        correction_id INTEGER NOT NULL UNIQUE REFERENCES machine_correction_requests(id),
+        machine_id INTEGER NOT NULL REFERENCES machines(id),
+        old_code TEXT NOT NULL,
+        old_name_ar TEXT NOT NULL,
+        new_code TEXT NOT NULL,
+        new_name_ar TEXT NOT NULL,
+        targets_json TEXT NOT NULL CHECK (json_valid(targets_json)),
+        state TEXT NOT NULL CHECK (state IN ('prepared', 'committed')),
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_machine_correction_rename_operations_state
+        ON machine_correction_rename_operations(state, created_at, operation_id);
+    `);
+    const reviewColumns = new Set(database.pragma('table_info(machine_correction_reviews)').map((column) => column.name));
+    if (!reviewColumns.has('approved_code')) {
+      database.exec('ALTER TABLE machine_correction_reviews ADD COLUMN approved_code TEXT');
+    }
+    if (!applied) {
+      database.prepare('INSERT INTO schema_migrations (version) VALUES (?)')
+        .run(machineCorrectionRenameRecoveryMigration);
+    }
+  });
+  migrate.immediate();
+}
+
 /** Add persistent per-account lockout fields without rebuilding users or changing IDs. */
 export function migrateAccountLoginProtection(database) {
   const migrate = database.transaction(() => {
@@ -745,6 +864,78 @@ export function migrateGpsRetentionIndex(database) {
     database.exec(`CREATE INDEX IF NOT EXISTS idx_rep_breadcrumbs_recorded_at
       ON rep_location_breadcrumbs(julianday(recorded_at))`);
     if (!applied) database.prepare('INSERT INTO schema_migrations (version) VALUES (?)').run(gpsRetentionIndexMigration);
+  });
+  migrate.immediate();
+}
+
+/** Additive HR/payroll fields for Cairo weekday/Friday overtime and employee settlements. */
+export function migrateStaffPayrollRules(database) {
+  const migrate = database.transaction(() => {
+    const applied = database.prepare('SELECT 1 FROM schema_migrations WHERE version = ?')
+      .get(staffPayrollRulesMigration);
+    const addColumnIfMissing = (table, column, declaration) => {
+      const columns = new Set(database.pragma(`table_info(${table})`).map((item) => item.name));
+      if (!columns.has(column)) database.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${declaration}`);
+    };
+
+    addColumnIfMissing('employees', 'national_id', 'TEXT');
+    addColumnIfMissing('employees', 'hire_date', 'TEXT');
+    addColumnIfMissing('employee_daily_attendance', 'normal_overtime_hours', 'REAL NOT NULL DEFAULT 0 CHECK (normal_overtime_hours >= 0)');
+    addColumnIfMissing('employee_daily_attendance', 'holiday_overtime_hours', 'REAL NOT NULL DEFAULT 0 CHECK (holiday_overtime_hours >= 0)');
+    addColumnIfMissing('payroll_runs', 'total_bonus_cents', 'INTEGER NOT NULL DEFAULT 0 CHECK (total_bonus_cents >= 0)');
+    addColumnIfMissing('payroll_runs', 'total_advances_cents', 'INTEGER NOT NULL DEFAULT 0 CHECK (total_advances_cents >= 0)');
+    addColumnIfMissing('payroll_lines', 'normal_overtime_hours', 'REAL NOT NULL DEFAULT 0 CHECK (normal_overtime_hours >= 0)');
+    addColumnIfMissing('payroll_lines', 'holiday_overtime_hours', 'REAL NOT NULL DEFAULT 0 CHECK (holiday_overtime_hours >= 0)');
+    addColumnIfMissing('payroll_lines', 'normal_overtime_amount_cents', 'INTEGER NOT NULL DEFAULT 0 CHECK (normal_overtime_amount_cents >= 0)');
+    addColumnIfMissing('payroll_lines', 'holiday_overtime_amount_cents', 'INTEGER NOT NULL DEFAULT 0 CHECK (holiday_overtime_amount_cents >= 0)');
+    addColumnIfMissing('payroll_lines', 'bonus_cents', 'INTEGER NOT NULL DEFAULT 0 CHECK (bonus_cents >= 0)');
+    addColumnIfMissing('payroll_lines', 'advances_cents', 'INTEGER NOT NULL DEFAULT 0 CHECK (advances_cents >= 0)');
+    addColumnIfMissing('payroll_lines', 'absence_deduction_cents', 'INTEGER NOT NULL DEFAULT 0 CHECK (absence_deduction_cents >= 0)');
+    addColumnIfMissing('payroll_lines', 'other_deductions_cents', 'INTEGER NOT NULL DEFAULT 0 CHECK (other_deductions_cents >= 0)');
+    addColumnIfMissing('payroll_lines', 'employee_name', 'TEXT');
+    addColumnIfMissing('payroll_lines', 'department', 'TEXT');
+
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS employee_salary_advances (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        employee_id INTEGER NOT NULL REFERENCES employees(id),
+        month_year TEXT NOT NULL CHECK (month_year GLOB '[0-9][0-9][0-9][0-9]-[0-1][0-9]'),
+        amount_cents INTEGER NOT NULL CHECK (amount_cents > 0),
+        treasury_entry_id INTEGER NOT NULL UNIQUE REFERENCES treasury_entries(id),
+        notes TEXT,
+        created_by INTEGER REFERENCES users(id),
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_employee_advances_month_employee
+        ON employee_salary_advances(month_year, employee_id);
+      CREATE TABLE IF NOT EXISTS employee_payroll_adjustments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        employee_id INTEGER NOT NULL REFERENCES employees(id),
+        month_year TEXT NOT NULL CHECK (month_year GLOB '[0-9][0-9][0-9][0-9]-[0-1][0-9]'),
+        kind TEXT NOT NULL CHECK (kind IN ('bonus', 'deduction')),
+        amount_cents INTEGER NOT NULL CHECK (amount_cents > 0),
+        description TEXT NOT NULL,
+        created_by INTEGER REFERENCES users(id),
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        deleted_at TEXT,
+        deleted_by INTEGER REFERENCES users(id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_employee_adjustments_month_employee
+        ON employee_payroll_adjustments(month_year, employee_id, deleted_at);
+    `);
+
+    if (!applied) {
+      // Existing overtime has no stored class. Attribute it to Friday's holiday rate only
+      // when the attendance date was Friday; ordinary legacy overtime remains 1.5×.
+      database.exec(`UPDATE employee_daily_attendance
+        SET holiday_overtime_hours = CASE WHEN strftime('%w', work_date) = '5' THEN overtime_hours ELSE 0 END,
+            normal_overtime_hours = CASE WHEN strftime('%w', work_date) = '5' THEN 0 ELSE overtime_hours END`);
+      database.exec(`UPDATE payroll_lines SET
+        employee_name = (SELECT name FROM employees WHERE employees.id = payroll_lines.employee_id),
+        department = (SELECT COALESCE(department_label, department) FROM employees WHERE employees.id = payroll_lines.employee_id)
+        WHERE employee_name IS NULL OR department IS NULL`);
+      database.prepare('INSERT INTO schema_migrations (version) VALUES (?)').run(staffPayrollRulesMigration);
+    }
   });
   migrate.immediate();
 }
@@ -949,11 +1140,15 @@ export function initializeDatabase({ database = db, initialAdminPassword = env.i
     migrateRepSupervisorRadar(database);
     migrateCairoTimezone(database);
     migrateMachineGeofenceAndBreadcrumbs(database);
+    migrateMachineVerificationAndCorrections(database);
+    migrateMachineCorrectionRenameRecovery(database);
     migrateGpsRetentionIndex(database);
+    migrateStaffPayrollRules(database);
     migrateRepVisitMachineCondition(database);
     migrateMaintenanceOrderRepresentatives(database);
     migrateRepVisitPhotoCollections(database);
     migrateNativeAttendance(database);
+    migrateAttendanceAdminClockOutNote(database);
     migrateUserEmployeeLinks(database);
     migrateUserEmployeeProfileSync(database);
     migrateMaintenanceTripFolders(database);

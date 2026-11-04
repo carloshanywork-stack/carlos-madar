@@ -16,6 +16,7 @@ import workshopRouter from './modules/workshop/routes.js';
 import warehouseRouter from './modules/warehouse/routes.js';
 import financeRouter from './modules/finance/routes.js';
 import employeesRouter from './modules/employees/routes.js';
+import staffRouter from './modules/employees/staff-routes.js';
 import attendanceRouter from './modules/employees/attendance-routes.js';
 import repRouter from './modules/rep/routes.js';
 import supervisorRouter from './modules/supervisor/routes.js';
@@ -70,6 +71,7 @@ app.use('/api/workshop', workshopRouter);
 app.use('/api/warehouse', warehouseRouter);
 app.use('/api/finance', financeRouter);
 app.use('/api/employees', employeesRouter);
+app.use('/api/staff', staffRouter);
 app.use('/api/attendance', attendanceRouter);
 app.use('/api/supervisor', supervisorRouter);
 

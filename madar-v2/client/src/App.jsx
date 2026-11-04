@@ -17,6 +17,7 @@ const WorkshopOrderDetail = lazy(() => import('./modules/workshop/WorkshopOrderD
 const WarehousePage = lazy(() => import('./modules/warehouse/WarehousePage.jsx'));
 const FinancePage = lazy(() => import('./modules/finance/FinancePage.jsx'));
 const AccountingPage = lazy(() => import('./modules/accounting/AccountingPage.jsx'));
+const StaffDirectoryPage = lazy(() => import('./modules/employees/StaffDirectoryPage.jsx'));
 const ArchivePage = lazy(() => import('./modules/archive/ArchivePage.jsx'));
 const SettingsPage = lazy(() => import('./modules/settings/SettingsPage.jsx'));
 
@@ -54,7 +55,7 @@ function BusinessRoutes({ user }) {
       <Routes>
         <Route path="/" element={<DashboardPage />} />
         <Route path="/clients" element={<ClientsPage />} />
-        <Route path="/maintenance" element={<MaintenancePage />} />
+        <Route path="/maintenance" element={<MaintenancePage isAdmin={user?.role === 'admin'} />} />
         <Route path="/maintenance/:id" element={<MaintenanceOrderDetail />} />
         <Route path="/supervisor" element={user?.role === 'admin' ? <SupervisorRadarPage /> : <Navigate to="/" replace />} />
         <Route path="/workshop" element={<WorkshopPage />} />
@@ -62,6 +63,7 @@ function BusinessRoutes({ user }) {
         <Route path="/warehouse" element={<WarehousePage />} />
         <Route path="/finance" element={<FinancePage />} />
         <Route path="/accounting" element={<AccountingPage isAdmin={user?.role === 'admin'} />} />
+        <Route path="/staff" element={user?.role === 'admin' ? <StaffDirectoryPage /> : <Navigate to="/" replace />} />
         <Route path="/archive" element={<ArchivePage isAdmin={user?.role === 'admin'} />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
@@ -79,6 +81,7 @@ function AuthenticatedApplication() {
   const [authError, setAuthError] = useState('');
   const [offlineOnly, setOfflineOnly] = useState(false);
   const [operationsAlert, setOperationsAlert] = useState('');
+  const [operationsAlertLink, setOperationsAlertLink] = useState('/accounting');
 
   const fetchAuthStatus = useCallback(async () => {
     setLoading(true);
@@ -169,6 +172,10 @@ function AuthenticatedApplication() {
           const hours = Number(event.overtimeHours);
           const hoursLabel = Number.isFinite(hours) ? ` (${hours} ساعة)` : '';
           setOperationsAlert(`أوفر تايم جديد بانتظار الاعتماد${hoursLabel}${event.employeeName ? ` · ${event.employeeName}` : ''}.`);
+          setOperationsAlertLink('/accounting');
+        } else if (event.type === 'rep.machine.correction-submitted') {
+          setOperationsAlert(`بلاغ تصحيح ماكينة ${event.reportedCode || ''} بانتظار المراجعة.`);
+          setOperationsAlertLink('/maintenance?view=machines&review=corrections');
         }
       } catch {
         // Ignore malformed event frames; the regular API refresh remains available.
@@ -232,7 +239,7 @@ function AuthenticatedApplication() {
       {user?.role === 'admin' && operationsAlert && (
         <aside className="madar-operations-alert" role="status">
           <span>{operationsAlert}</span>
-          <a href="/accounting">مراجعة شيت الحضور</a>
+          <a href={operationsAlertLink}>{operationsAlertLink.includes('review=corrections') ? 'مراجعة بلاغات الماكينات' : 'مراجعة شيت الحضور'}</a>
           <button type="button" onClick={() => setOperationsAlert('')} aria-label="إغلاق التنبيه">×</button>
         </aside>
       )}

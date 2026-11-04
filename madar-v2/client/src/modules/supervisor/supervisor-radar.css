@@ -8,6 +8,8 @@
 #madar-app .supervisor-head-actions .supervisor-export { border-color: #146b55; color: #fff; background: #146b55; }
 #madar-app .supervisor-alert, #madar-app .supervisor-notice { margin: 0 0 14px; padding: 11px 14px; border: 1px solid #e5bcbc; border-radius: 11px; color: #7a3434; background: #fff2f2; font-size: 12px; font-weight: 700; }
 #madar-app .supervisor-notice { border-color: #9dceb9; color: #145d48; background: #eef8f3; }
+#madar-app .supervisor-overdue-warning { display: flex; flex-wrap: wrap; gap: 8px 14px; margin: 0 0 14px; padding: 12px 15px; border: 1px solid #e7c86c; border-radius: 11px; color: #765411; background: #fff8df; font-size: 12px; }
+#madar-app .supervisor-overdue-warning strong { color: #65470b; }
 #madar-app .supervisor-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
 #madar-app .supervisor-kpis article { display: grid; min-height: 115px; align-content: center; gap: 4px; padding: 15px 18px; border: 1px solid #d6e0e2; border-radius: 14px; background: #fff; box-shadow: 0 5px 16px rgba(30, 52, 67, .035); }
 #madar-app .supervisor-kpis article > span { color: #536573; font-size: 11px; font-weight: 800; }
@@ -38,6 +40,10 @@
 #madar-app .radar-stops-list > strong { flex: 0 0 100%; color: #364f60; font-size: 10px; }
 #madar-app .radar-stops-list > span { display: grid; gap: 3px; padding: 7px 9px; border: 1px solid #edd3c6; border-radius: 8px; color: #803d25; background: #fff7f2; }
 #madar-app .radar-stops-list > span small, #madar-app .radar-stops-list > small { color: #6d7375; font-size: 8px; }
+#madar-app .radar-visited-list { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; padding: 0 15px 12px; color: #566972; font-size: 9px; }
+#madar-app .radar-visited-list > strong { flex: 0 0 100%; color: #364f60; font-size: 10px; }
+#madar-app .radar-visited-list > span { display: grid; gap: 3px; padding: 7px 9px; border: 1px solid #daceed; border-radius: 8px; color: #563d7e; background: #faf7ff; }
+#madar-app .radar-visited-list > span small, #madar-app .radar-visited-list > small { color: #6d7375; font-size: 8px; }
 #madar-app .radar-below { display: grid; grid-template-columns: minmax(0, 1fr) minmax(210px, .78fr); gap: 11px; padding: 11px 13px 14px; }
 #madar-app .radar-rep-list { display: grid; align-content: start; gap: 6px; }
 #madar-app .radar-rep-row { display: flex; min-width: 0; align-items: center; gap: 9px; padding: 9px; border: 1px solid transparent; border-radius: 9px; color: #273c4f; background: #f7f9f8; cursor: pointer; text-align: right; }

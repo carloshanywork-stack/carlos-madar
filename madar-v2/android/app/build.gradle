@@ -1,10 +1,20 @@
 apply plugin: 'com.android.application'
 
+def releaseSigningPropertiesFile = rootProject.file('key.properties')
+def releaseSigningProperties = new Properties()
+if (releaseSigningPropertiesFile.exists()) {
+    releaseSigningPropertiesFile.withInputStream { releaseSigningProperties.load(it) }
+}
+def releaseStorePath = releaseSigningProperties.getProperty('storeFile')?.trim()
+def releaseStoreFile = releaseStorePath ? rootProject.file(releaseStorePath) : null
+def releaseSigningConfigured = ['storePassword', 'keyAlias', 'keyPassword']
+    .every { releaseSigningProperties.getProperty(it)?.trim() } && releaseStoreFile?.isFile()
+
 android {
-    namespace = "com.madar.rep"
+    namespace = "com.madar.rep.app"
     compileSdk = rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "com.madar.rep"
+        applicationId "com.madar.rep.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
@@ -16,11 +26,31 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        if (releaseSigningConfigured) {
+            release {
+                storeFile releaseStoreFile
+                storePassword releaseSigningProperties.getProperty('storePassword')
+                keyAlias releaseSigningProperties.getProperty('keyAlias')
+                keyPassword releaseSigningProperties.getProperty('keyPassword')
+            }
+        }
+    }
     buildTypes {
         release {
             minifyEnabled false
+            if (releaseSigningConfigured) signingConfig signingConfigs.release
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
+    }
+}
+
+gradle.taskGraph.whenReady { taskGraph ->
+    def releaseBuildRequested = taskGraph.allTasks.any { task ->
+        task.path.startsWith(':app:') && task.name.toLowerCase().contains('release')
+    }
+    if (releaseBuildRequested && !releaseSigningConfigured) {
+        throw new GradleException('Release signing is not configured. Provide a valid android/key.properties and the approved signing keystore outside source control.')
     }
 }
 

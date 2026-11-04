@@ -1,13 +1,15 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test, { after } from 'node:test';
+import Database from 'better-sqlite3';
 
 const temporaryDirectory = mkdtempSync(join(tmpdir(), 'madar-v2-rep-'));
 process.env.MADAR_V2_DATABASE_PATH = join(temporaryDirectory, 'rep.sqlite');
 process.env.MADAR_V2_STORAGE_ROOT = join(temporaryDirectory, 'storage');
+process.env.MADAR_V2_OFFLINE_MAP_PATH = join(temporaryDirectory, 'local-map.mbtiles');
 process.env.MADAR_REP_APK_PATH = join(temporaryDirectory, 'madar-rep.apk');
 process.env.STORAGE_MOUNT_PATH = '';
 process.env.NODE_ENV = 'test';
@@ -19,6 +21,7 @@ const [
   {
     initializeDatabase,
     migrateMachineGeofenceAndBreadcrumbs,
+    migrateMachineVerificationAndCorrections,
     migrateRepSupervisorRadar,
     migrateRepUserProfiles,
     migrateRepVisitMachineCondition,
@@ -26,6 +29,8 @@ const [
   { default: sharp },
   { ensureStorageDirectory, resolveStorageFile, storageDirectory, writeStorageFile },
   { recoverRepVisitUploads },
+  { recoverMachineCorrectionRenames },
+  { closeOfflineMap },
 ] = await Promise.all([
   import('../server/app.js'),
   import('../server/database/connection.js'),
@@ -33,9 +38,22 @@ const [
   import('sharp'),
   import('../server/modules/storage.js'),
   import('../server/modules/rep/service.js'),
+  import('../server/modules/maintenance/service.js'),
+  import('../server/modules/supervisor/offline-tiles.js'),
 ]);
 
 initializeDatabase({ initialAdminPassword: '' });
+const tileDatabase = new Database(process.env.MADAR_V2_OFFLINE_MAP_PATH);
+tileDatabase.exec(`
+  CREATE TABLE metadata (name TEXT PRIMARY KEY, value TEXT);
+  CREATE TABLE tiles (zoom_level INTEGER, tile_column INTEGER, tile_row INTEGER, tile_data BLOB,
+    PRIMARY KEY (zoom_level, tile_column, tile_row));
+  INSERT INTO metadata (name, value) VALUES ('name', 'MADAR local test map'), ('format', 'png'), ('minzoom', '1'), ('maxzoom', '8');
+`);
+tileDatabase.prepare('INSERT INTO tiles (zoom_level, tile_column, tile_row, tile_data) VALUES (1, 1, 1, ?)')
+  .run(Buffer.from('local-raster-tile'));
+tileDatabase.prepare('INSERT INTO tiles (zoom_level, tile_column, tile_row, tile_data) VALUES (8, 150, 150, ?)')
+  .run(Buffer.from('cairo-raster-tile'));
 writeFileSync(process.env.MADAR_REP_APK_PATH, Buffer.from('synthetic-debug-apk'));
 const server = app.listen(0, '127.0.0.1');
 await new Promise((resolve, reject) => {
@@ -47,6 +65,8 @@ let legacyDatabase;
 
 after(async () => {
   await new Promise((resolve) => server.close(resolve));
+  closeOfflineMap();
+  if (tileDatabase.open) tileDatabase.close();
   if (db.open) db.close();
   if (legacyDatabase?.open) legacyDatabase.close();
   rmSync(temporaryDirectory, { recursive: true, force: true });
@@ -171,6 +191,8 @@ test('rep role migration preserves users and their existing foreign-key referenc
 
 test('geofence and breadcrumb migrations are additive and idempotent', () => {
   migrateMachineGeofenceAndBreadcrumbs(db);
+  migrateMachineVerificationAndCorrections(db);
+  migrateMachineVerificationAndCorrections(db);
   const machineColumns = new Set(db.pragma('table_info(machines)').map((column) => column.name));
   for (const column of ['latitude', 'longitude', 'is_location_locked', 'geofence_radius_meters', 'area_name']) {
     assert.ok(machineColumns.has(column), `missing machines.${column}`);
@@ -181,6 +203,13 @@ test('geofence and breadcrumb migrations are additive and idempotent', () => {
     'is_stop', 'stop_duration_minutes', 'stop_name', 'stop_arrived_at', 'stop_departed_at',
   ]) assert.ok(breadcrumbColumns.has(column), `missing rep_location_breadcrumbs.${column}`);
   assert.ok(db.prepare(`SELECT 1 FROM schema_migrations WHERE version = '20261103-machine-geofence-route-stops'`).get());
+  assert.ok(db.prepare(`SELECT 1 FROM schema_migrations WHERE version = '20261104-machine-verification-corrections'`).get());
+  assert.ok(db.prepare(`SELECT 1 FROM schema_migrations WHERE version = '20261104-machine-correction-rename-recovery'`).get());
+  for (const table of ['rep_machine_location_verifications', 'machine_correction_requests', 'machine_correction_reviews']) {
+    assert.ok(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table), `missing ${table}`);
+  }
+  assert.ok(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'machine_correction_rename_operations'").get());
+  assert.ok(db.pragma('table_info(machine_correction_reviews)').some((column) => column.name === 'approved_code'));
   assert.deepEqual(db.pragma('foreign_key_check'), []);
 });
 
@@ -196,6 +225,23 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   assert.equal(setup.response.status, 201);
   const adminCookie = setup.cookie;
   assert.ok(adminCookie.startsWith('madar_token='));
+  const mapStatus = await request('/api/supervisor/map/status', {}, adminCookie);
+  assert.deepEqual(mapStatus.body, {
+    available: true,
+    renderable: true,
+    format: 'png',
+    name: 'MADAR local test map',
+    attribution: '',
+    minZoom: 1,
+    maxZoom: 8,
+    bounds: null,
+  });
+  const localTile = await fetch(`${baseUrl}/api/supervisor/map/tiles/1/1/0`, { headers: { cookie: adminCookie } });
+  assert.equal(localTile.status, 200);
+  assert.equal(localTile.headers.get('content-type'), 'image/png');
+  assert.equal(Buffer.from(await localTile.arrayBuffer()).toString(), 'local-raster-tile');
+  const invalidLocalTile = await request('/api/supervisor/map/tiles/1/2/0', {}, adminCookie);
+  assert.equal(invalidLocalTile.response.status, 400);
   const adminApkDownload = await fetch(`${baseUrl}/download/apk`, { headers: { cookie: adminCookie } });
   assert.equal(adminApkDownload.status, 200);
   assert.match(adminApkDownload.headers.get('content-type'), /application\/vnd\.android\.package-archive/);
@@ -325,6 +371,28 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   assert.equal(route.body.regions[0].machines[0].isCompleted, true);
   assert.equal(route.body.regions[0].machines[1].isCompleted, false);
   assert.equal(route.body.regions[0].machines[2].isCompleted, false);
+  const unpinnedMachine = route.body.regions[0].machines.find((machine) => machine.machineCode === '1434');
+  assert.equal(unpinnedMachine.isLocationLocked, false);
+  assert.equal(unpinnedMachine.areaName, 'التجمع');
+
+  const repMapCatalog = await request('/api/rep/map/packs', {}, login.cookie);
+  assert.equal(repMapCatalog.response.status, 200);
+  assert.equal(repMapCatalog.body.success, true);
+  const cairoPack = repMapCatalog.body.packs.find((pack) => pack.id === 'greater-cairo');
+  assert.equal(cairoPack.available, true);
+  assert.equal(cairoPack.tileCount, 1);
+  assert.equal(cairoPack.minZoom, 8);
+  const cairoManifest = await request('/api/rep/map/packs/greater-cairo/manifest', {}, login.cookie);
+  assert.equal(cairoManifest.response.status, 200);
+  assert.deepEqual(cairoManifest.body.pack.tiles, [{ z: 8, x: 150, y: 105, sizeBytes: Buffer.byteLength('cairo-raster-tile') }]);
+  const repMapTile = await fetch(`${baseUrl}/api/rep/map/tiles/greater-cairo/8/150/105`, { headers: { cookie: login.cookie } });
+  assert.equal(repMapTile.status, 200);
+  assert.equal(repMapTile.headers.get('content-type'), 'image/png');
+  assert.equal(Buffer.from(await repMapTile.arrayBuffer()).toString(), 'cairo-raster-tile');
+  const tileOutsideMapPack = await request('/api/rep/map/tiles/greater-cairo/8/0/0', {}, login.cookie);
+  assert.equal(tileOutsideMapPack.response.status, 400);
+  const invalidRepMapPack = await request('/api/rep/map/packs/not-a-region/manifest', {}, login.cookie);
+  assert.equal(invalidRepMapPack.response.status, 404);
 
   const otherRepRoute = await request('/api/rep/today-route?username=someone-else', {}, login.cookie);
   assert.equal(otherRepRoute.response.status, 403);
@@ -358,17 +426,83 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
     reasonIds: [faultReasons.body.reasons[0].id],
     notes: 'تم تنظيف الواجهة وفحص الإضاءة',
     capturedAt: new Date(currentTime).toISOString(),
-    beforeCapturedAt: new Date(currentTime - 8 * 60 * 1000).toISOString(),
-    afterCapturedAt: new Date(currentTime - 3 * 60 * 1000).toISOString(),
+    beforeCapturedAt: [
+      new Date(currentTime - 8 * 60 * 1000).toISOString(),
+      new Date(currentTime - 7 * 60 * 1000).toISOString(),
+      new Date(currentTime - 6 * 60 * 1000).toISOString(),
+    ],
+    afterCapturedAt: [
+      new Date(currentTime - 3 * 60 * 1000).toISOString(),
+      new Date(currentTime - 2 * 60 * 1000).toISOString(),
+      new Date(currentTime - 1 * 60 * 1000).toISOString(),
+    ],
     location: { latitude: 24.8123, longitude: 46.7012, accuracy: 9, updatedAt: new Date(currentTime).toISOString() },
   };
-  const buildVisitForm = (payload) => {
+  const buildVisitForm = (payload, beforeCount = 3, afterCount = 3) => {
     const form = new FormData();
     form.append('visit', JSON.stringify(payload));
-    form.append('beforePhoto', new Blob([beforeBuffer], { type: 'image/jpeg' }), 'before.jpg');
-    form.append('afterPhoto', new Blob([afterBuffer], { type: 'image/jpeg' }), 'after.jpg');
+    for (let index = 0; index < beforeCount; index += 1) form.append('beforePhoto', new Blob([beforeBuffer], { type: 'image/jpeg' }), `before_${index}.jpg`);
+    for (let index = 0; index < afterCount; index += 1) form.append('afterPhoto', new Blob([afterBuffer], { type: 'image/jpeg' }), `after_${index}.jpg`);
     return form;
   };
+  const tooFewPhotos = await request('/api/rep/sync-visit', {
+    method: 'POST', body: buildVisitForm({ ...visitPayload, visitUuid: randomUUID() }, 2, 3),
+  }, login.cookie);
+  assert.equal(tooFewPhotos.response.status, 400);
+  assert.match(tooFewPhotos.body.error, /exactly three/);
+
+  const unpinnedVisit = await request('/api/rep/sync-visit', {
+    method: 'POST', body: buildVisitForm({ ...visitPayload, visitUuid: randomUUID() }),
+  }, login.cookie);
+  assert.equal(unpinnedVisit.response.status, 409);
+  assert.match(unpinnedVisit.body.error, /تثبيت موقع الماكينة/);
+  const targetMachineId = db.prepare('SELECT id FROM machines WHERE code = ?').get('1434').id;
+  const invalidAccuracyConfirmation = await request(`/api/rep/machines/${targetMachineId}/confirm-location`, jsonOptions('POST', {
+    actionUuid: randomUUID(), cardId: missingAfterCardId,
+    location: { ...visitPayload.location, accuracy: 101 },
+  }), login.cookie);
+  assert.equal(invalidAccuracyConfirmation.response.status, 400);
+  const outsideAssignmentConfirmation = await request(`/api/rep/machines/${db.prepare('SELECT id FROM machines WHERE code = ?').get('2400').id}/confirm-location`, jsonOptions('POST', {
+    actionUuid: randomUUID(), cardId: otherRegionCardId, location: visitPayload.location,
+  }), login.cookie);
+  assert.equal(outsideAssignmentConfirmation.response.status, 403);
+  const locationConfirmationPayload = {
+    actionUuid: randomUUID(),
+    cardId: missingAfterCardId,
+    location: visitPayload.location,
+  };
+  const locationConfirmation = await request(`/api/rep/machines/${targetMachineId}/confirm-location`, jsonOptions('POST', locationConfirmationPayload), login.cookie);
+  assert.equal(locationConfirmation.response.status, 201, JSON.stringify(locationConfirmation.body));
+  assert.equal(locationConfirmation.body.success, true);
+  assert.equal(locationConfirmation.body.machine.is_location_locked, 1);
+  assert.equal(locationConfirmation.body.machine.geofence_radius_meters, 50);
+  assert.equal(locationConfirmation.body.machine.latitude, visitPayload.location.latitude);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM rep_machine_location_verifications WHERE machine_id = ?').get(targetMachineId).count, 1);
+  const repeatedLocationConfirmation = await request(`/api/rep/machines/${targetMachineId}/confirm-location`, jsonOptions('POST', locationConfirmationPayload), login.cookie);
+  assert.equal(repeatedLocationConfirmation.response.status, 200);
+  assert.equal(repeatedLocationConfirmation.body.idempotent, true);
+  const secondLocationConfirmation = await request(`/api/rep/machines/${targetMachineId}/confirm-location`, jsonOptions('POST', {
+    ...locationConfirmationPayload, actionUuid: randomUUID(),
+  }), login.cookie);
+  assert.equal(secondLocationConfirmation.response.status, 409);
+  const representativeCannotSetGeofence = await request(`/api/maintenance/machines/${targetMachineId}/geofence`, jsonOptions('PATCH', {
+    latitude: visitPayload.location.latitude,
+    longitude: visitPayload.location.longitude,
+  }), login.cookie);
+  assert.equal(representativeCannotSetGeofence.response.status, 403);
+  const setMachineGeofence = await request(`/api/maintenance/machines/${targetMachineId}/geofence`, jsonOptions('PATCH', {
+    latitude: visitPayload.location.latitude,
+    longitude: visitPayload.location.longitude,
+    areaName: 'محافظة القاهرة - الدقي',
+  }), adminCookie);
+  assert.equal(setMachineGeofence.response.status, 200, JSON.stringify(setMachineGeofence.body));
+  assert.equal(setMachineGeofence.body.is_location_locked, 1);
+  assert.equal(setMachineGeofence.body.geofence_radius_meters, 50);
+  assert.equal(setMachineGeofence.body.area_name, 'محافظة القاهرة - الدقي');
+  const machineDirectory = await request(`/api/maintenance/machines?search=1434`, {}, adminCookie);
+  assert.equal(machineDirectory.body.machines[0].is_location_locked, 1);
+  assert.equal(machineDirectory.body.machines[0].area_name, 'محافظة القاهرة - الدقي');
+
   const visitSync = await request('/api/rep/sync-visit', {
     method: 'POST',
     body: buildVisitForm(visitPayload),
@@ -401,9 +535,10 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
     longitude: visitPayload.location.longitude,
     is_location_locked: 1,
     geofence_radius_meters: 50,
-    area_name: 'التجمع',
+    area_name: 'محافظة القاهرة - الدقي',
   });
-  assert.match(storedVisit.before_path, /^Areas\/التجمع\/1434_.*\/\d{4}-\d{2}-\d{2}_\d+\/before\/[0-9a-f-]{36}-before-0001\.jpg$/i);
+  assert.match(storedVisit.before_path, /^Areas\/.*\/1434_.*\/\d{4}-\d{2}-\d{2}_\d+\/[0-9a-f-]{8}-[0-9a-f-]{4}-[1-8][0-9a-f-]{3}-[89ab][0-9a-f-]{3}-[0-9a-f-]{12}\/before_0\.jpg$/i);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM rep_visit_photos WHERE visit_id = (SELECT id FROM rep_visits WHERE visit_uuid = ?)').get(visitUuid).count, 6);
   const compressedBeforeMetadata = await sharp(readFileSync(beforePath)).metadata();
   assert.equal(compressedBeforeMetadata.format, 'jpeg');
   assert.ok(compressedBeforeMetadata.width <= 1920 && compressedBeforeMetadata.height <= 1080);
@@ -509,8 +644,8 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
     visitUuid: randomUUID(),
     notes: 'إعادة تصوير واضحة بعد ملاحظة المشرف',
     capturedAt: new Date().toISOString(),
-    beforeCapturedAt: new Date(Date.now() - 4 * 60 * 1000).toISOString(),
-    afterCapturedAt: new Date(Date.now() - 60 * 1000).toISOString(),
+    beforeCapturedAt: Array.from({ length: 3 }, (_, index) => new Date(Date.now() - (4 - index) * 60 * 1000).toISOString()),
+    afterCapturedAt: Array.from({ length: 3 }, (_, index) => new Date(Date.now() - (3 - index) * 30 * 1000).toISOString()),
   };
   const replacementSync = await request('/api/rep/sync-visit', {
     method: 'POST', body: buildVisitForm(replacementPayload),
@@ -524,8 +659,8 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   const approvedCard = db.prepare('SELECT before_photos_json, after_photos_json, reason_ids_json, notes, status FROM maintenance_cards WHERE id = ?')
     .get(missingAfterCardId);
   assert.equal(approvedCard.status, 'completed');
-  assert.equal(JSON.parse(approvedCard.before_photos_json).length, 2);
-  assert.equal(JSON.parse(approvedCard.after_photos_json).length, 1);
+  assert.equal(JSON.parse(approvedCard.before_photos_json).length, 4);
+  assert.equal(JSON.parse(approvedCard.after_photos_json).length, 3);
   assert.ok(JSON.parse(approvedCard.reason_ids_json).includes(faultReasons.body.reasons[0].id));
   assert.match(approvedCard.notes, /إعادة تصوير واضحة/);
 
@@ -590,11 +725,24 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   }
   assert.equal(trackingEvent.userId, repId);
   assert.equal(trackingEvent.acceptedPoints, 3);
+  const offlineBacklogPoint = {
+    latitude: 24.7990,
+    longitude: 46.6990,
+    accuracy: 12,
+    speed: 0,
+    updatedAt: new Date(now - 2 * 24 * 60 * 60 * 1000).toISOString(),
+  };
+  const recoveredBacklog = await request('/api/rep/tracking', jsonOptions('POST', {
+    onDuty: true,
+    trail: [offlineBacklogPoint],
+  }), login.cookie);
+  assert.equal(recoveredBacklog.response.status, 200);
+  assert.equal(recoveredBacklog.body.acceptedPoints, 1, 'offline breadcrumbs up to the local 90-day retention window should be accepted');
   const duplicateTracking = await request('/api/rep/tracking', jsonOptions('POST', {
     onDuty: true, location: { ...trackPoints[1], updatedAt: new Date(now).toISOString() }, trail: trackPoints,
   }), login.cookie);
   assert.equal(duplicateTracking.response.status, 200);
-  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM rep_location_points WHERE rep_user_id = ?').get(repId).count, 3);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM rep_location_points WHERE rep_user_id = ?').get(repId).count, 4);
   const stopBase = Date.now();
   const stopTrail = [-7, -5, -3, -1].map((minutes) => ({
     latitude: 24.8020,
@@ -637,6 +785,9 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   assert.ok(repRoute.body.polyline.length >= 7);
   assert.equal(repRoute.body.stops.length, 1);
   assert.equal(repRoute.body.stops[0].durationMinutes, 6);
+  assert.ok(repRoute.body.speedSummary.averageKmh >= 0);
+  assert.ok(repRoute.body.visitedMachines.length >= 2);
+  assert.equal(repRoute.body.visitedMachines[0].machineCode, '1434');
 
   const activeSession = db.prepare('SELECT id FROM rep_duty_sessions WHERE rep_user_id = ? AND ended_at IS NULL').get(repId);
   const finalTrailPoint = {
@@ -650,7 +801,7 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   assert.equal(stopTracking.body.onDuty, false);
   assert.equal(stopTracking.body.acceptedPoints, 1);
   assert.ok(db.prepare('SELECT ended_at FROM rep_duty_sessions WHERE id = ?').get(activeSession.id).ended_at);
-  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM rep_location_points WHERE duty_session_id = ?').get(activeSession.id).count, 8);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM rep_location_points WHERE duty_session_id = ?').get(activeSession.id).count, 9);
 
   const approvedWorkbook = await fetch(`${baseUrl}/api/supervisor/reports/approved-visits.xlsx`, { headers: { cookie: adminCookie } });
   assert.equal(approvedWorkbook.status, 200);
@@ -681,6 +832,236 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   assert.equal(db.prepare('SELECT status FROM rep_visits WHERE visit_uuid = ?').get(interruptedUuid).status, 'failed');
   assert.equal(existsSync(join(temporaryDirectory, 'storage', ...interruptedStage.split('/'))), false);
   assert.equal(existsSync(join(temporaryDirectory, 'storage', ...interruptedFinal.split('/'))), false);
+
+  const code1433MachineId = Number(db.prepare('SELECT id FROM machines WHERE code = ?').get('1433').id);
+  const correctionPayload = {
+    actionUuid: randomUUID(),
+    cardId: missingAfterCardId,
+    reportedCode: '1433',
+    reportedName: 'ماكينة الموقع الصحيح 1433',
+    note: 'الكود الموجود على اللوحة يختلف عن سجل المسار.',
+    location: { latitude: 24.81231, longitude: 46.70125, accuracy: 8, updatedAt: new Date().toISOString() },
+    capturedAt: new Date().toISOString(),
+  };
+  const correctionForm = new FormData();
+  correctionForm.append('correction', JSON.stringify(correctionPayload));
+  correctionForm.append('evidence', new Blob([afterBuffer], { type: 'image/jpeg' }), 'machine-proof.jpg');
+  const submittedCorrection = await request(`/api/rep/machines/${targetMachineId}/corrections`, {
+    method: 'POST', body: correctionForm,
+  }, login.cookie);
+  assert.equal(submittedCorrection.response.status, 201, JSON.stringify(submittedCorrection.body));
+  assert.equal(submittedCorrection.body.status, 'pending');
+  assert.equal(submittedCorrection.body.codeConflict, true);
+  const correctionId = submittedCorrection.body.correctionId;
+  const visitWhileCorrectionPending = await request('/api/rep/sync-visit', {
+    method: 'POST', body: buildVisitForm({ ...visitPayload, visitUuid: randomUUID() }),
+  }, login.cookie);
+  assert.equal(visitWhileCorrectionPending.response.status, 409);
+  assert.match(visitWhileCorrectionPending.body.error, /wrong-machine report is awaiting administrator review/i);
+  const repeatedCorrection = await request(`/api/rep/machines/${targetMachineId}/corrections`, {
+    method: 'POST', body: correctionForm,
+  }, login.cookie);
+  assert.equal(repeatedCorrection.response.status, 200);
+  assert.equal(repeatedCorrection.body.idempotent, true);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM machine_correction_requests WHERE id = ?').get(correctionId).count, 1);
+  const correctionQueue = await request('/api/maintenance/machine-corrections', {}, adminCookie);
+  assert.equal(correctionQueue.response.status, 200);
+  assert.equal(correctionQueue.body.corrections.length, 1);
+  assert.equal(correctionQueue.body.corrections[0].codeConflict, true);
+  assert.ok(correctionQueue.body.corrections[0].duplicateCandidates.some((candidate) => candidate.id === code1433MachineId));
+  const duplicateCodeCandidates = await request(`/api/maintenance/machine-corrections/${correctionId}/candidates?code=1433`, {}, adminCookie);
+  assert.equal(duplicateCodeCandidates.response.status, 200);
+  assert.equal(duplicateCodeCandidates.body.hasConflict, true);
+  assert.ok(duplicateCodeCandidates.body.candidates.some((candidate) => candidate.id === code1433MachineId && candidate.matches_code));
+  const reportedCodeDirectoryFilter = await request('/api/maintenance/machines?locationStatus=pending_correction&search=1433', {}, adminCookie);
+  assert.equal(reportedCodeDirectoryFilter.response.status, 200);
+  assert.equal(reportedCodeDirectoryFilter.body.machines.length, 1);
+  assert.equal(reportedCodeDirectoryFilter.body.machines[0].id, targetMachineId);
+  const correctionMap = await request('/api/maintenance/machines/map?locationStatus=pending_correction', {}, adminCookie);
+  assert.equal(correctionMap.response.status, 200);
+  assert.equal(correctionMap.body.machines.length, 1);
+  assert.equal(correctionMap.body.machines[0].id, targetMachineId);
+  assert.equal(correctionMap.body.machines[0].correction_reported_code, '1433');
+  assert.equal(correctionMap.body.machines[0].correction_latitude, correctionPayload.location.latitude);
+  assert.equal(correctionMap.body.machines[0].pending_correction_count, 1);
+  assert.equal(correctionMap.body.machines[0].latest_visit.order_code, 'REP-ROUTE-1');
+  assert.equal(correctionMap.body.machines[0].latest_visit.representative_name, 'Nour Field Rep');
+  assert.equal(correctionMap.body.machines[0].latest_visit.captured_at, db.prepare(`SELECT captured_at FROM rep_visits
+    WHERE machine_id = ? AND status = 'completed' ORDER BY datetime(captured_at) DESC, id DESC LIMIT 1`).get(targetMachineId).captured_at);
+  const reportedCodeMapFilter = await request('/api/maintenance/machines/map?locationStatus=pending_correction&search=1433', {}, adminCookie);
+  assert.equal(reportedCodeMapFilter.body.machines.length, 1);
+  const repCannotReviewCorrections = await request('/api/maintenance/machine-corrections', {}, login.cookie);
+  assert.equal(repCannotReviewCorrections.response.status, 403);
+  const repCannotCheckCorrectionCandidates = await request(`/api/maintenance/machine-corrections/${correctionId}/candidates?code=1433`, {}, login.cookie);
+  assert.equal(repCannotCheckCorrectionCandidates.response.status, 403);
+  const repCannotLoadMachineMap = await request('/api/maintenance/machines/map', {}, login.cookie);
+  assert.equal(repCannotLoadMachineMap.response.status, 403);
+  const repCannotFilterCorrectionQueue = await request('/api/maintenance/machines?locationStatus=pending_correction', {}, login.cookie);
+  assert.equal(repCannotFilterCorrectionQueue.response.status, 403);
+
+  const evidenceResponse = await fetch(`${baseUrl}/api/maintenance/machine-corrections/${correctionId}/evidence`, {
+    headers: { cookie: adminCookie },
+  });
+  assert.equal(evidenceResponse.status, 200);
+  assert.equal(evidenceResponse.headers.get('content-type'), 'image/jpeg');
+  assert.deepEqual(Buffer.from(await evidenceResponse.arrayBuffer()), afterBuffer);
+  const approveConflictWithoutChoice = await request(`/api/maintenance/machine-corrections/${correctionId}/review`, jsonOptions('PATCH', {
+    action: 'approved', note: 'تأكيد البلاغ',
+  }), adminCookie);
+  assert.equal(approveConflictWithoutChoice.response.status, 400);
+  const originalMachineRows = db.prepare('SELECT id, code, name_ar FROM machines WHERE id IN (?, ?) ORDER BY id')
+    .all(targetMachineId, code1433MachineId);
+  const resolveCorrection = await request(`/api/maintenance/machine-corrections/${correctionId}/review`, jsonOptions('PATCH', {
+    action: 'approved', resolvedMachineId: code1433MachineId, note: 'تم التحقق من اللوحة وربط البلاغ بالسجل القائم دون دمج.',
+  }), adminCookie);
+  assert.equal(resolveCorrection.response.status, 200, JSON.stringify(resolveCorrection.body));
+  assert.equal(resolveCorrection.body.status, 'approved');
+  assert.equal(resolveCorrection.body.resolvedMachineId, code1433MachineId);
+  assert.deepEqual(db.prepare('SELECT id, code, name_ar FROM machines WHERE id IN (?, ?) ORDER BY id')
+    .all(targetMachineId, code1433MachineId), originalMachineRows, 'review must never merge or rewrite machine records');
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM machine_correction_reviews WHERE correction_id = ?').get(correctionId).count, 1);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM audit_log WHERE entity_type = 'machine_correction_request' AND entity_id = ? AND action = 'machine_correction_approved'").get(correctionId).count, 1);
+  const resolvedCorrectionQueue = await request('/api/maintenance/machine-corrections?status=approved', {}, adminCookie);
+  assert.equal(resolvedCorrectionQueue.body.corrections[0].resolved_machine_id, code1433MachineId);
+  const resolvedCorrectionMap = await request('/api/maintenance/machines/map?locationStatus=pending_correction', {}, adminCookie);
+  assert.equal(resolvedCorrectionMap.body.machines.length, 0);
+
+  const correctedMachineCode = '1434-CORRECTED';
+  const correctedMachineName = 'ماكينة الدقي المصححة';
+  const originalVisitBeforeBytes = Buffer.from(readFileSync(await resolveStorageFile(storedVisit.before_path)));
+  const originalVisitAfterBytes = Buffer.from(readFileSync(await resolveStorageFile(storedVisit.after_path)));
+  await ensureStorageDirectory('Machines', '1434');
+  const machineFileBytes = Buffer.from('machine-directory-original-bytes');
+  await writeStorageFile(storageDirectory('Machines', '1434', 'catalog.txt'), machineFileBytes);
+  const clientPhotoPath = storageDirectory('clients', 'REP-CLIENT', 'maintenance', 'REP-ROUTE-1', '1434', 'before', 'legacy.jpg');
+  await ensureStorageDirectory(...clientPhotoPath.split('/').slice(0, -1));
+  const clientPhotoBytes = Buffer.from('client-maintenance-photo-original-bytes');
+  await writeStorageFile(clientPhotoPath, clientPhotoBytes);
+  db.prepare('UPDATE maintenance_cards SET before_photos_json = ? WHERE id = ?')
+    .run(JSON.stringify([clientPhotoPath]), missingAfterCardId);
+  const archivedPhotoPath = storageDirectory('Clients', 'REP-CLIENT', 'Archived_Orders', 'REP-ROUTE-1', '1434', 'Before', 'archived.jpg');
+  await ensureStorageDirectory(...archivedPhotoPath.split('/').slice(0, -1));
+  const archivedPhotoBytes = Buffer.from('archived-machine-photo-original-bytes');
+  await writeStorageFile(archivedPhotoPath, archivedPhotoBytes);
+
+  const uniqueRenamePayload = {
+    actionUuid: randomUUID(),
+    cardId: missingAfterCardId,
+    reportedCode: correctedMachineCode,
+    reportedName: correctedMachineName,
+    note: 'تمت مطابقة اللوحة؛ الكود الجديد غير مستخدم.',
+    location: correctionPayload.location,
+    capturedAt: new Date().toISOString(),
+  };
+  const uniqueRenameForm = new FormData();
+  uniqueRenameForm.append('correction', JSON.stringify(uniqueRenamePayload));
+  const uniqueRenameReport = await request(`/api/rep/machines/${targetMachineId}/corrections`, {
+    method: 'POST', body: uniqueRenameForm,
+  }, login.cookie);
+  assert.equal(uniqueRenameReport.response.status, 201, JSON.stringify(uniqueRenameReport.body));
+  assert.equal(uniqueRenameReport.body.codeConflict, false);
+  const uniqueRenameApproval = await request(`/api/maintenance/machine-corrections/${uniqueRenameReport.body.correctionId}/review`, jsonOptions('PATCH', {
+    action: 'approved', approvedCode: correctedMachineCode, note: 'اعتماد إعادة التسمية الفريدة.',
+  }), adminCookie);
+  assert.equal(uniqueRenameApproval.response.status, 200, JSON.stringify(uniqueRenameApproval.body));
+  assert.equal(uniqueRenameApproval.body.renamed, true);
+  assert.equal(uniqueRenameApproval.body.resolvedMachineId, targetMachineId);
+  assert.deepEqual(db.prepare('SELECT id, code, name_ar FROM machines WHERE id = ?').get(targetMachineId), {
+    id: targetMachineId, code: correctedMachineCode, name_ar: correctedMachineName,
+  });
+  assert.equal(db.prepare('SELECT id FROM maintenance_cards WHERE id = ? AND machine_id = ?')
+    .get(missingAfterCardId, targetMachineId).id, missingAfterCardId, 'the machine/card relation stays on the same machine ID');
+  assert.equal(db.prepare('SELECT code FROM machines WHERE id = ?').get(code1433MachineId).code, '1433',
+    'the existing duplicate-code record is not merged or rewritten');
+  assert.equal(db.prepare('SELECT approved_code FROM machine_correction_reviews WHERE correction_id = ?')
+    .get(uniqueRenameReport.body.correctionId).approved_code, correctedMachineCode);
+  assert.ok(db.prepare(`SELECT 1 FROM audit_log WHERE entity_type = 'machine' AND entity_id = ?
+    AND action = 'rename_from_machine_correction'`).get(targetMachineId));
+
+  const renamedVisit = db.prepare('SELECT final_path, before_path, after_path FROM rep_visits WHERE visit_uuid = ?').get(visitUuid);
+  const oldAreaMachineFolder = storedVisit.final_path.split('/')[2];
+  const newAreaMachineFolder = `${correctedMachineCode}_${correctedMachineName.normalize('NFKC').trim()
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_').replace(/[. ]+$/g, '')}`;
+  const expectedAreaRoot = [...storedVisit.final_path.split('/').slice(0, 2), newAreaMachineFolder].join('/');
+  const expectedVisitFinalPath = storedVisit.final_path.replace(`/${oldAreaMachineFolder}/`, `/${newAreaMachineFolder}/`);
+  assert.equal(renamedVisit.final_path, expectedVisitFinalPath);
+  assert.equal(renamedVisit.before_path, storedVisit.before_path.replace(`/${oldAreaMachineFolder}/`, `/${newAreaMachineFolder}/`));
+  assert.equal(renamedVisit.after_path, storedVisit.after_path.replace(`/${oldAreaMachineFolder}/`, `/${newAreaMachineFolder}/`));
+  assert.deepEqual(readFileSync(await resolveStorageFile(renamedVisit.before_path)), originalVisitBeforeBytes,
+    'rep visit image bytes are preserved during area-folder rename');
+  assert.deepEqual(readFileSync(await resolveStorageFile(renamedVisit.after_path)), originalVisitAfterBytes);
+  assert.ok(existsSync(join(temporaryDirectory, 'storage', ...expectedAreaRoot.split('/'))));
+  assert.equal(existsSync(join(temporaryDirectory, 'storage', ...storedVisit.final_path.split('/').slice(0, 3))), false);
+  assert.deepEqual(readFileSync(await resolveStorageFile(storageDirectory('Machines', correctedMachineCode, 'catalog.txt'))), machineFileBytes);
+  assert.equal(existsSync(join(temporaryDirectory, 'storage', 'Machines', '1434')), false);
+  const renamedClientPhotoPath = storageDirectory('clients', 'REP-CLIENT', 'maintenance', 'REP-ROUTE-1', correctedMachineCode, 'before', 'legacy.jpg');
+  assert.deepEqual(readFileSync(await resolveStorageFile(renamedClientPhotoPath)), clientPhotoBytes);
+  assert.deepEqual(JSON.parse(db.prepare('SELECT before_photos_json FROM maintenance_cards WHERE id = ?')
+    .get(missingAfterCardId).before_photos_json), [renamedClientPhotoPath]);
+  assert.deepEqual(readFileSync(await resolveStorageFile(storageDirectory(
+    'Clients', 'REP-CLIENT', 'Archived_Orders', 'REP-ROUTE-1', correctedMachineCode, 'Before', 'archived.jpg',
+  ))), archivedPhotoBytes);
+  assert.ok(db.prepare('SELECT 1 FROM rep_visit_photos WHERE visit_id = (SELECT id FROM rep_visits WHERE visit_uuid = ?) AND stored_path = ?')
+    .get(visitUuid, renamedVisit.before_path));
+  const renamedMachineMap = await request(`/api/maintenance/machines/map?search=${correctedMachineCode}`, {}, adminCookie);
+  assert.equal(renamedMachineMap.response.status, 200);
+  assert.equal(renamedMachineMap.body.machines.length, 1);
+  assert.equal(renamedMachineMap.body.machines[0].id, targetMachineId);
+  assert.equal(renamedMachineMap.body.machines[0].latest_visit.order_code, 'REP-ROUTE-1');
+  assert.equal(renamedMachineMap.body.machines[0].latest_visit.representative_name, 'Nour Field Rep');
+
+  const recoveryPayload = {
+    ...uniqueRenamePayload,
+    actionUuid: randomUUID(),
+    reportedCode: '1434-RECOVERY',
+    reportedName: 'ماكينة الاستعادة',
+    capturedAt: new Date().toISOString(),
+  };
+  const recoveryForm = new FormData();
+  recoveryForm.append('correction', JSON.stringify(recoveryPayload));
+  const recoveryReport = await request(`/api/rep/machines/${targetMachineId}/corrections`, {
+    method: 'POST', body: recoveryForm,
+  }, login.cookie);
+  assert.equal(recoveryReport.response.status, 201, JSON.stringify(recoveryReport.body));
+  const recoveryOperationId = randomUUID();
+  const recoveryTarget = {
+    sourcePath: storageDirectory('Machines', correctedMachineCode),
+    destinationPath: storageDirectory('Machines', '1434-RECOVERY'),
+  };
+  db.prepare(`INSERT INTO machine_correction_rename_operations
+    (operation_id, correction_id, machine_id, old_code, old_name_ar, new_code, new_name_ar, targets_json, state)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'prepared')`).run(
+    recoveryOperationId, recoveryReport.body.correctionId, targetMachineId,
+    correctedMachineCode, correctedMachineName, '1434-RECOVERY', recoveryPayload.reportedName, JSON.stringify([recoveryTarget]),
+  );
+  const recoveryStage = await ensureStorageDirectory('.madar-recovery', 'machine-correction-renames', recoveryOperationId);
+  renameSync(
+    join(temporaryDirectory, 'storage', ...recoveryTarget.sourcePath.split('/')),
+    join(recoveryStage, 'item-0'),
+  );
+  const visitDuringPendingRename = await request('/api/rep/sync-visit', {
+    method: 'POST', body: buildVisitForm(visitPayload),
+  }, login.cookie);
+  assert.equal(visitDuringPendingRename.response.status, 409);
+  assert.match(visitDuringPendingRename.body.error, /machine-folder recovery is pending/i);
+  const blockedPhotoForm = new FormData();
+  blockedPhotoForm.append('photo', new Blob([beforeBuffer], { type: 'image/jpeg' }), 'blocked-photo.jpg');
+  const maintenanceOrderId = db.prepare('SELECT order_id FROM maintenance_cards WHERE id = ?').get(missingAfterCardId).order_id;
+  const photoDuringPendingRename = await request(`/api/maintenance/orders/${maintenanceOrderId}/cards/${missingAfterCardId}/photos/before`, {
+    method: 'POST', body: blockedPhotoForm,
+  }, adminCookie);
+  assert.equal(photoDuringPendingRename.response.status, 409);
+  assert.match(photoDuringPendingRename.body.error, /maintenance file recovery is pending/i);
+  const recoveryResult = await recoverMachineCorrectionRenames();
+  assert.equal(recoveryResult.recoveredCount, 1);
+  assert.ok(existsSync(join(temporaryDirectory, 'storage', ...recoveryTarget.sourcePath.split('/'))));
+  assert.equal(existsSync(join(temporaryDirectory, 'storage', ...recoveryTarget.destinationPath.split('/'))), false);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM machine_correction_rename_operations WHERE operation_id = ?')
+    .get(recoveryOperationId).count, 0);
+  const rejectRecoveryReport = await request(`/api/maintenance/machine-corrections/${recoveryReport.body.correctionId}/review`, jsonOptions('PATCH', {
+    action: 'rejected', note: 'اختبار الاستعادة للعملية المعدّة دون اعتماد التغيير.',
+  }), adminCookie);
+  assert.equal(rejectRecoveryReport.response.status, 200, JSON.stringify(rejectRecoveryReport.body));
 
   const disabledRep = await request(`/api/users/${repId}`, jsonOptions('PUT', { isActive: 0 }), adminCookie);
   assert.equal(disabledRep.response.status, 200);

@@ -2,10 +2,11 @@ import { Router } from 'express';
 import { env } from '../../config/env.js';
 import { db } from '../../database/connection.js';
 import { asyncHandler, allowOnlyKeys, HttpError, requireObject, requireText } from '../http.js';
-import { diskUploadMany } from '../upload.js';
+import { diskUploadMany, memoryUpload } from '../upload.js';
 import { ensureStorageDirectory, removeStorageFile } from '../storage.js';
 import { publishOperationsEvent, subscribeOperationsEvents } from '../operations-events.js';
 import { loginRateLimiter } from '../auth/login-rate-limit.js';
+import { getOfflineMapPackCatalog, getOfflineMapPackManifest, readOfflineMapPackTile } from '../supervisor/offline-tiles.js';
 import { clockInForRep, clockOutForRep, getTodayAttendanceForRep } from '../employees/attendance.js';
 import {
   authenticateRepUser,
@@ -16,7 +17,9 @@ import {
 import {
   getRepFaultReasons,
   getRepTodayRoute,
+  confirmRepMachineLocation,
   requireRepUsername,
+  submitRepMachineCorrection,
   syncRepLocationPing,
   syncRepTracking,
   syncRepVisit,
@@ -28,6 +31,10 @@ const syncVisitUpload = diskUploadMany({
   extensions: ['.jpg', '.jpeg', '.webp'],
   destination: () => ensureStorageDirectory('.incoming'),
 });
+const machineCorrectionUpload = memoryUpload({
+  maxBytes: 4 * 1024 * 1024,
+  extensions: ['.jpg', '.jpeg', '.png', '.webp'],
+}).single('evidence');
 
 function setSessionCookie(res, token) {
   res.cookie(env.authCookieName, token, {
@@ -136,9 +143,77 @@ router.get('/today-route', (req, res, next) => {
   }
 });
 
+router.post('/machines/:machineId/confirm-location', (req, res, next) => {
+  try {
+    const result = confirmRepMachineLocation(req.user, req.params.machineId, req.body);
+    if (!result.idempotent) {
+      publishOperationsEvent('rep.machine.location-confirmed', {
+        userId: req.user.id,
+        machineId: result.machine.id,
+        machineCode: result.machine.code,
+        verificationId: result.verificationId,
+      });
+    }
+    res.set({ 'Cache-Control': 'private, no-store', Pragma: 'no-cache' });
+    res.status(result.idempotent ? 200 : 201).json(result);
+  } catch (error) { next(error); }
+});
+
+router.post('/machines/:machineId/corrections', machineCorrectionUpload, asyncHandler(async (req, res) => {
+  let correction;
+  try {
+    correction = JSON.parse(req.body?.correction ?? '');
+  } catch {
+    throw new HttpError(400, 'correction must contain valid JSON.');
+  }
+  const result = await submitRepMachineCorrection(req.user, req.params.machineId, correction, req.file);
+  if (!result.idempotent) {
+    publishOperationsEvent('rep.machine.correction-submitted', {
+      userId: req.user.id,
+      machineId: Number(req.params.machineId),
+      correctionId: result.correctionId,
+      reportedCode: correction.reportedCode,
+      codeConflict: result.codeConflict,
+    });
+  }
+  res.set({ 'Cache-Control': 'private, no-store', Pragma: 'no-cache' });
+  res.status(result.idempotent ? 200 : 201).json(result);
+}));
+
 router.get('/fault-reasons', (_req, res) => {
   res.set({ 'Cache-Control': 'private, no-store', Pragma: 'no-cache' });
   res.json(getRepFaultReasons());
+});
+
+router.get('/map/packs', (_req, res) => {
+  res.set({ 'Cache-Control': 'private, no-store', Pragma: 'no-cache' });
+  res.json({ success: true, packs: getOfflineMapPackCatalog() });
+});
+
+router.get('/map/packs/:packId/manifest', (req, res, next) => {
+  try {
+    res.set({ 'Cache-Control': 'private, no-store', Pragma: 'no-cache' });
+    res.json({ success: true, pack: getOfflineMapPackManifest(req.params.packId) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/map/tiles/:packId/:z/:x/:y', (req, res, next) => {
+  try {
+    const tile = readOfflineMapPackTile(req.params.packId, req.params.z, req.params.x, req.params.y);
+    if (!tile) {
+      res.status(204).end();
+      return;
+    }
+    res.set({
+      'Cache-Control': 'private, no-store',
+      'X-Content-Type-Options': 'nosniff',
+      'Content-Type': tile.contentType,
+    }).status(200).send(tile.data);
+  } catch (error) {
+    next(error);
+  }
 });
 
 router.post(['/tracking', '/track-location'], (req, res, next) => {

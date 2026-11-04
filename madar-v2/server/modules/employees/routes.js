@@ -4,6 +4,8 @@ import { publishOperationsEvent } from '../operations-events.js';
 import { buildMonthlyAttendanceWorkbook } from './attendance-export.js';
 import {
   createEmployee,
+  createEmployeeAdvance,
+  createPayrollAdjustment,
   deactivateEmployee,
   finalizePayroll,
   getAttendance,
@@ -20,6 +22,14 @@ import {
 } from './service.js';
 
 const router = Router();
+
+function requireAdmin(req, res, next) {
+  if (req.user?.role !== 'admin') {
+    res.status(403).json({ error: 'Administrator access is required.' });
+    return;
+  }
+  next();
+}
 
 router.get('/', (req, res) => {
   const includeAll = req.query.all === '1';
@@ -72,8 +82,18 @@ router.post('/attendance', (req, res) => {
 router.get('/payroll', (req, res) => {
   res.json(getPayroll(req.query.month));
 });
-router.post('/payroll/finalize', (req, res) => {
+router.post('/payroll/finalize', requireAdmin, (req, res) => {
   res.json(finalizePayroll(req.body, requestActorId(req)));
+});
+router.post('/:id/advances', requireAdmin, (req, res) => {
+  const advance = createEmployeeAdvance(req.params.id, req.body, requestActorId(req));
+  publishOperationsEvent('payroll.changed', { employeeId: Number(req.params.id), month: advance.month_year, actorId: requestActorId(req) });
+  res.status(201).json(advance);
+});
+router.post('/:id/payroll-adjustments', requireAdmin, (req, res) => {
+  const adjustment = createPayrollAdjustment(req.params.id, req.body, requestActorId(req));
+  publishOperationsEvent('payroll.changed', { employeeId: Number(req.params.id), month: adjustment.month_year, actorId: requestActorId(req) });
+  res.status(201).json(adjustment);
 });
 
 router.get('/:id/tools', (req, res) => {

@@ -9,6 +9,7 @@ const sections = [
   { path: '/warehouse', label: 'المخزون والمواد', icon: 'boxes' },
   { path: '/finance', label: 'الخزينة والفواتير', icon: 'wallet' },
   { path: '/accounting', label: 'المحاسبة والموظفون', icon: 'chart' },
+  { path: '/staff', label: 'الفريق والكادر', icon: 'users' },
   { path: '/archive', label: 'الأرشيف والتقارير', icon: 'archive' },
   { path: '/settings', label: 'إعدادات النظام', icon: 'settings' },
 ];
@@ -28,7 +29,8 @@ export default function Sidebar({ open, onNavigate, user }) {
         </div>
         <div className="madar-sidebar-caption">مساحات العمل</div>
         <nav className="madar-nav" aria-label="التنقل الرئيسي">
-          {[...sections.slice(0, 3), ...(user?.role === 'admin' ? [{ path: '/supervisor', label: 'رادار المشرف', icon: 'map' }] : []), ...sections.slice(3)].map((item) => {
+          {[...sections.slice(0, 3), ...(user?.role === 'admin' ? [{ path: '/supervisor', label: 'رادار المشرف', icon: 'map' }] : []), ...sections.slice(3)]
+            .filter((item) => item.path !== '/staff' || user?.role === 'admin').map((item) => {
             const nested = item.path !== '/' && location.pathname.startsWith(`${item.path}/`);
             return (
               <NavLink

@@ -29,29 +29,92 @@ function currentLocalDate() {
   return `${parts.year}-${parts.month}-${parts.day}`;
 }
 
+function projectToWorld(location, zoom) {
+  const latitude = Math.max(-85.051129, Math.min(85.051129, Number(location.latitude)));
+  const longitude = Number(location.longitude);
+  const size = 256 * (2 ** zoom);
+  const sine = Math.sin(latitude * Math.PI / 180);
+  return {
+    x: ((longitude + 180) / 360) * size,
+    y: (0.5 - Math.log((1 + sine) / (1 - sine)) / (4 * Math.PI)) * size,
+  };
+}
+
 function TrackMap({ representatives, selectedId, onSelect, selectedRoute }) {
   const positions = [
     ...representatives.flatMap((rep) => rep.trail?.length ? rep.trail : rep.lastLocation ? [rep.lastLocation] : []),
     ...(selectedRoute?.polyline ?? []),
     ...(selectedRoute?.stops ?? []),
+    ...(selectedRoute?.visitedMachines ?? []).filter((visit) => Number.isFinite(visit.latitude) && Number.isFinite(visit.longitude)),
   ];
-  const bounds = useMemo(() => {
-    if (!positions.length) return { minLat: 24, maxLat: 26, minLon: 45, maxLon: 48 };
-    const lats = positions.map((point) => point.latitude);
-    const lons = positions.map((point) => point.longitude);
-    const latSpan = Math.max(Math.max(...lats) - Math.min(...lats), 0.015);
-    const lonSpan = Math.max(Math.max(...lons) - Math.min(...lons), 0.015);
+  const [mapStatus, setMapStatus] = useState(null);
+  useEffect(() => {
+    let active = true;
+    api.get('/api/supervisor/map/status', { timeoutMs: 4000 })
+      .then((result) => { if (active) setMapStatus(result); })
+      .catch(() => { if (active) setMapStatus({ available: false, renderable: false }); });
+    return () => { active = false; };
+  }, []);
+
+  const geometry = useMemo(() => {
+    const focus = positions.length ? positions : [{ latitude: 30.0444, longitude: 31.2357 }];
+    const atZero = focus.map((location) => projectToWorld(location, 0));
+    const minX0 = Math.min(...atZero.map((item) => item.x));
+    const maxX0 = Math.max(...atZero.map((item) => item.x));
+    const minY0 = Math.min(...atZero.map((item) => item.y));
+    const maxY0 = Math.max(...atZero.map((item) => item.y));
+    const spanX0 = Math.max(maxX0 - minX0, 0.45);
+    const spanY0 = Math.max(maxY0 - minY0, 0.45);
+    const desiredZoom = Math.floor(Math.log2(Math.min(812 / spanX0, 412 / spanY0)));
+    const minZoom = mapStatus?.renderable ? mapStatus.minZoom : 0;
+    const maxZoom = mapStatus?.renderable ? mapStatus.maxZoom : 18;
+    const zoom = Math.max(minZoom, Math.min(maxZoom, desiredZoom));
+    const projected = focus.map((location) => projectToWorld(location, zoom));
+    const minX = Math.min(...projected.map((item) => item.x));
+    const maxX = Math.max(...projected.map((item) => item.x));
+    const minY = Math.min(...projected.map((item) => item.y));
+    const maxY = Math.max(...projected.map((item) => item.y));
+    const spanX = Math.max(maxX - minX, 24);
+    const spanY = Math.max(maxY - minY, 24);
+    const scale = Math.min(812 / (spanX * 1.3), 412 / (spanY * 1.3));
+    return { zoom, centerX: (minX + maxX) / 2, centerY: (minY + maxY) / 2, scale };
+  }, [mapStatus, positions]);
+
+  const point = (location) => {
+    const projected = projectToWorld(location, geometry.zoom);
     return {
-      minLat: Math.min(...lats) - latSpan * 0.15,
-      maxLat: Math.max(...lats) + latSpan * 0.15,
-      minLon: Math.min(...lons) - lonSpan * 0.15,
-      maxLon: Math.max(...lons) + lonSpan * 0.15,
+      x: 450 + (projected.x - geometry.centerX) * geometry.scale,
+      y: 250 + (projected.y - geometry.centerY) * geometry.scale,
     };
+  };
+  const tileImages = useMemo(() => {
+    if (!mapStatus?.renderable || !geometry.scale) return [];
+    const worldTiles = 2 ** geometry.zoom;
+    const left = geometry.centerX - 450 / geometry.scale;
+    const right = geometry.centerX + 450 / geometry.scale;
+    const top = geometry.centerY - 250 / geometry.scale;
+    const bottom = geometry.centerY + 250 / geometry.scale;
+    const images = [];
+    for (let tileY = Math.max(0, Math.floor(top / 256)); tileY <= Math.min(worldTiles - 1, Math.floor(bottom / 256)); tileY += 1) {
+      for (let tileX = Math.floor(left / 256); tileX <= Math.floor(right / 256); tileX += 1) {
+        const wrappedX = ((tileX % worldTiles) + worldTiles) % worldTiles;
+        images.push({
+          key: `${geometry.zoom}/${tileX}/${tileY}`,
+          href: `/api/supervisor/map/tiles/${geometry.zoom}/${wrappedX}/${tileY}`,
+          x: 450 + (tileX * 256 - geometry.centerX) * geometry.scale,
+          y: 250 + (tileY * 256 - geometry.centerY) * geometry.scale,
+          size: 256 * geometry.scale,
+        });
+      }
+    }
+    return images;
+  }, [geometry, mapStatus]);
+  const bounds = useMemo(() => {
+    const focus = positions.length ? positions : [{ latitude: 30.0444, longitude: 31.2357 }];
+    const lats = focus.map((item) => Number(item.latitude));
+    const lons = focus.map((item) => Number(item.longitude));
+    return { minLat: Math.min(...lats), maxLat: Math.max(...lats), minLon: Math.min(...lons), maxLon: Math.max(...lons) };
   }, [positions]);
-  const point = (location) => ({
-    x: 44 + ((location.longitude - bounds.minLon) / (bounds.maxLon - bounds.minLon)) * 812,
-    y: 40 + ((bounds.maxLat - location.latitude) / (bounds.maxLat - bounds.minLat)) * 412,
-  });
 
   return (
     <div className="radar-map-wrap">
@@ -65,12 +128,15 @@ function TrackMap({ representatives, selectedId, onSelect, selectedRoute }) {
           </pattern>
         </defs>
         <rect x="0" y="0" width="900" height="500" fill="#f7faf8" />
-        <rect x="0" y="0" width="900" height="500" fill="url(#radar-minor-grid)" />
-        <rect x="0" y="0" width="900" height="500" fill="url(#radar-grid)" />
-        <path d="M0 375 C180 330 245 404 415 350 S690 287 900 325" fill="none" stroke="#e2e9e5" strokeWidth="24" />
-        <path d="M90 0 C130 145 210 231 190 500 M570 0 C520 151 630 324 590 500 M0 130 C230 165 420 120 900 183" fill="none" stroke="#fff" strokeWidth="10" />
-        <path d="M90 0 C130 145 210 231 190 500 M570 0 C520 151 630 324 590 500 M0 130 C230 165 420 120 900 183" fill="none" stroke="#e2e9e5" strokeWidth="1.2" />
-        <text x="18" y="481" className="radar-map-caption">مخطط إحداثي محلي · لا تُرسل بيانات الموقع إلى مزوّد خرائط خارجي</text>
+        {tileImages.map((tile) => <image key={tile.key} href={tile.href} x={tile.x} y={tile.y} width={tile.size} height={tile.size} preserveAspectRatio="none" />)}
+        {!mapStatus?.renderable && <>
+          <rect x="0" y="0" width="900" height="500" fill="url(#radar-minor-grid)" />
+          <rect x="0" y="0" width="900" height="500" fill="url(#radar-grid)" />
+          <path d="M0 375 C180 330 245 404 415 350 S690 287 900 325" fill="none" stroke="#e2e9e5" strokeWidth="24" />
+          <path d="M90 0 C130 145 210 231 190 500 M570 0 C520 151 630 324 590 500 M0 130 C230 165 420 120 900 183" fill="none" stroke="#fff" strokeWidth="10" />
+          <path d="M90 0 C130 145 210 231 190 500 M570 0 C520 151 630 324 590 500 M0 130 C230 165 420 120 900 183" fill="none" stroke="#e2e9e5" strokeWidth="1.2" />
+        </>}
+        <text x="18" y="481" className="radar-map-caption">{mapStatus?.renderable ? `${mapStatus.name} · خريطة محلية بلا اتصال` : 'لا توجد حزمة MBTiles محلية · لا اتصال بمزوّد خرائط خارجي'}</text>
         {!positions.length && <text x="450" y="250" textAnchor="middle" className="radar-map-empty">بانتظار أول إشارة GPS</text>}
         {selectedRoute?.polyline?.length > 1 && <polyline
           points={selectedRoute.polyline.map((location) => {
@@ -88,6 +154,14 @@ function TrackMap({ representatives, selectedId, onSelect, selectedRoute }) {
             <title>{`${stop.name || 'توقف'} · ${stop.durationMinutes} دقيقة`}</title>
             <rect x={xy.x + 11} y={xy.y - 23} width="48" height="17" rx="7" fill="#7d351e" />
             <text x={xy.x + 35} y={xy.y - 11} textAnchor="middle" className="radar-stop-label">{stop.durationMinutes} د</text>
+          </g>;
+        })}
+        {(selectedRoute?.visitedMachines ?? []).filter((visit) => Number.isFinite(visit.latitude) && Number.isFinite(visit.longitude)).map((visit, index) => {
+          const xy = point(visit);
+          return <g key={`visit-${visit.visitUuid ?? index}`}>
+            <circle cx={xy.x} cy={xy.y} r="10" fill="#fff" stroke="#6944a3" strokeWidth="3" />
+            <text x={xy.x} y={xy.y + 3.5} textAnchor="middle" className="radar-stop-label">م</text>
+            <title>{`${visit.machineCode} · ${visit.machineName || ''} · ${formatTime(visit.capturedAt)}`}</title>
           </g>;
         })}
         {representatives.map((rep) => {
@@ -120,6 +194,7 @@ function TrackMap({ representatives, selectedId, onSelect, selectedRoute }) {
 export default function SupervisorRadarPage() {
   const [radar, setRadar] = useState(null);
   const [visits, setVisits] = useState([]);
+  const [overdueAttendance, setOverdueAttendance] = useState([]);
   const [selectedRep, setSelectedRep] = useState(null);
   const [routeDate, setRouteDate] = useState(currentLocalDate);
   const manuallySelectedRouteDate = useRef(false);
@@ -135,12 +210,14 @@ export default function SupervisorRadarPage() {
 
   const refresh = useCallback(async () => {
     try {
-      const [radarData, queueData] = await Promise.all([
+      const [radarData, queueData, attendanceData] = await Promise.all([
         api.get('/api/supervisor/radar'),
         api.get('/api/supervisor/qa/queue'),
+        api.get('/api/attendance/today').catch(() => null),
       ]);
       setRadar(radarData);
       setVisits(queueData.visits ?? []);
+      setOverdueAttendance(attendanceData?.overdue ?? []);
       setRouteRevision((revision) => revision + 1);
       setError('');
     } catch (requestError) {
@@ -232,6 +309,10 @@ export default function SupervisorRadarPage() {
 
       {error && <div className="supervisor-alert" role="alert">{error}</div>}
       {notice && <div className="supervisor-notice" role="status">✓ {notice}</div>}
+      {overdueAttendance.length > 0 && <div className="supervisor-overdue-warning" role="alert">
+        <strong>تنبيه انصراف متأخر</strong>
+        <span>{overdueAttendance.map((record) => `${record.name} · تجاوز موعد الانصراف بـ ${record.overdue_hours} ساعة`).join('　 |　 ')}</span>
+      </div>}
 
       <section className="supervisor-kpis" aria-label="ملخص الوردية">
         <article><span>المناديب المسجلون</span><strong>{representatives.length}</strong><small>حسابات ميدانية فعالة أو محفوظة</small></article>
@@ -252,7 +333,7 @@ export default function SupervisorRadarPage() {
               {representatives.map((rep) => <option key={rep.id} value={rep.id}>{rep.fullName}</option>)}
             </select></label>
             <label>التاريخ<input type="date" value={routeDate} onChange={(event) => { manuallySelectedRouteDate.current = true; setRouteDate(event.target.value); }} /></label>
-            <span>{routeLoading ? 'جارٍ تحميل نقاط المسار…' : `${selectedRoute?.polyline?.length ?? 0} نقطة · ${selectedRoute?.stops?.length ?? 0} توقف`}</span>
+            <span>{routeLoading ? 'جارٍ تحميل نقاط المسار…' : `${selectedRoute?.polyline?.length ?? 0} نقطة · ${selectedRoute?.stops?.length ?? 0} توقف · ${selectedRoute?.speedSummary?.averageKmh ?? 0} كم/س متوسط`}</span>
           </div>
           <TrackMap representatives={representatives} selectedId={selectedRep} onSelect={setSelectedRep} selectedRoute={selectedRoute} />
           {selectedRoute && <div className="radar-stops-list" aria-label="توقفات المندوب المحدد">
@@ -261,6 +342,13 @@ export default function SupervisorRadarPage() {
               <b>{stop.name || `توقف ${index + 1}`}</b>
               <small>وصول {formatTime(stop.arrivedAt)} · مغادرة {formatTime(stop.departedAt)} · {stop.durationMinutes} دقيقة</small>
             </span>) : <small>لم تُسجّل توقفات متصلة لأكثر من 5 دقائق في هذا اليوم.</small>}
+          </div>}
+          {selectedRoute && <div className="radar-visited-list" aria-label="الماكينات التي زارها المندوب">
+            <strong>الماكينات التي زارها · {selectedRoute.visitedMachines?.length ?? 0}</strong>
+            {selectedRoute.visitedMachines?.length ? selectedRoute.visitedMachines.map((visit, index) => <span key={visit.visitUuid ?? index}>
+              <b dir="ltr">{visit.machineCode}</b>
+              <small>{visit.machineName || 'ماكينة'} · {visit.regionName} · {formatTime(visit.capturedAt)} · {visit.reviewStatus === 'approved' ? 'معتمدة' : visit.reviewStatus === 'reshoot_requested' ? 'إعادة تصوير' : 'بانتظار المراجعة'}</small>
+            </span>) : <small>لا توجد زيارات مسجلة لهذا المندوب في اليوم المحدد.</small>}
           </div>}
           <div className="radar-below">
             <div className="radar-rep-list">
@@ -282,6 +370,7 @@ export default function SupervisorRadarPage() {
                 <div><dt>زيارات معتمدة اليوم</dt><dd>{focusedRep.completedToday}</dd></div>
                 <div><dt>بانتظار المراجعة</dt><dd>{focusedRep.pendingReview}</dd></div>
                 <div><dt>المسافة التقديرية</dt><dd>{focusedRep.distanceKm.toFixed(1)} كم</dd></div>
+                <div><dt>السرعة الحالية المسجلة</dt><dd>{focusedRep.speedKmh === null ? 'غير متاحة' : `${focusedRep.speedKmh} كم/س`}</dd></div>
                 <div><dt>آخر إشارة GPS</dt><dd>{formatTime(focusedRep.lastSignal)}</dd></div>
                 <div><dt>بداية الوردية</dt><dd>{formatTime(focusedRep.dutyStartedAt)}</dd></div>
               </dl>

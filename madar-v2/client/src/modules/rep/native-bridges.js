@@ -79,6 +79,11 @@ export async function getNativeDutyTrackingState() {
   return RepLocation.getDutyState();
 }
 
+export async function acknowledgeNativeDutyTracking(throughId) {
+  if (!isNativeRepApp()) return { removed: 0 };
+  return RepLocation.acknowledgeDutyTracking({ throughId: Number(throughId) });
+}
+
 export async function getNativeNetworkStatus() {
   if (!isNativeRepApp()) return null;
   return Network.getStatus();
@@ -140,7 +145,7 @@ export async function saveNativePendingBackup(visit) {
       if (!photos.length) throw new Error(`لا توجد صور ${phase} في الزيارة التي يجري حفظها.`);
       savedPhotos[`${phase}Photos`] = [];
       for (const [index, photo] of photos.entries()) {
-        const path = `${folder}/${phase}-${String(index + 1).padStart(4, '0')}.jpg`;
+        const path = `${folder}/${phase}_${index}.jpg`;
         await Filesystem.writeFile({
           path,
           data: await blobToBase64(photo),

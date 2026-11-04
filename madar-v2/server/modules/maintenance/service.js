@@ -1,5 +1,5 @@
-import { randomUUID } from 'node:crypto';
-import { extname, join } from 'node:path';
+import { createHash, randomUUID } from 'node:crypto';
+import { basename, extname, join } from 'node:path';
 import { lstat, mkdtemp, readFile, readdir, rename, rm, stat } from 'node:fs/promises';
 import * as XLSX from 'xlsx';
 import { db } from '../../database/connection.js';
@@ -32,7 +32,7 @@ import {
   storageDirectory,
   writeStorageFile,
 } from '../storage.js';
-import { withMaintenanceOrderStorageLock } from './deletion-lock.js';
+import { withMachineStorageLock, withMaintenanceOrderStorageLock } from './deletion-lock.js';
 import { compressFieldImage } from '../upload.js';
 
 const MAINTENANCE_STATUSES = ['in_progress', 'review', 'archived'];
@@ -80,7 +80,7 @@ function updateMaintenanceTripProgress(orderId, { totalFiles, processedFiles, pe
   return progress;
 }
 
-function safeMachineStorageSegment(value, fallback) {
+function safeMachineStorageSegment(value, fallback = 'unknown') {
   const cleaned = String(value ?? '').normalize('NFKC').trim()
     .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_')
     .replace(/[. ]+$/g, '')
@@ -215,13 +215,22 @@ function validateStoredPhotoList(value, label) {
   return value.map((photo, index) => requireText(photo, `${label}[${index}]`, { maxLength: 1024 }));
 }
 
-export function listMachines({ area, search, page = 1, limit = 100 } = {}, database = db) {
+export function listMachines({ area, search, page = 1, limit = 100, locationStatus = 'all' } = {}, database = db) {
   const pageNumber = Number(page ?? 1);
   const pageSize = Number(limit ?? 100);
   if (!Number.isInteger(pageNumber) || pageNumber < 1) throw new HttpError(400, 'page must be a positive integer.');
   if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > 500) throw new HttpError(400, 'limit must be between 1 and 500.');
+  if (!['all', 'located', 'unlocated', 'pending_correction'].includes(locationStatus)) {
+    throw new HttpError(400, 'locationStatus must be all, located, unlocated, or pending_correction.');
+  }
   const where = ['machine.active = 1', 'machine.deleted_at IS NULL'];
   const parameters = [];
+  if (locationStatus === 'located') where.push('machine.is_location_locked = 1 AND machine.latitude IS NOT NULL AND machine.longitude IS NOT NULL');
+  if (locationStatus === 'unlocated') where.push('(machine.is_location_locked != 1 OR machine.latitude IS NULL OR machine.longitude IS NULL)');
+  if (locationStatus === 'pending_correction') where.push(`EXISTS (
+    SELECT 1 FROM machine_correction_requests correction
+    WHERE correction.machine_id = machine.id AND correction.status = 'pending'
+  )`);
   if (area !== undefined && area !== '') {
     const selectedAreas = normalizeMaintenanceAreaNames(area, 'area');
     if (!selectedAreas.length) throw new HttpError(400, 'area must not be blank.');
@@ -231,20 +240,134 @@ export function listMachines({ area, search, page = 1, limit = 100 } = {}, datab
   const query = search ?? '';
   if (query !== '') {
     const term = `%${requireText(query, 'search', { maxLength: 160 })}%`;
-    where.push('(machine.code LIKE ? COLLATE NOCASE OR machine.name_ar LIKE ? OR machine.name_en LIKE ? COLLATE NOCASE OR machine.area LIKE ? COLLATE NOCASE)');
-    parameters.push(term, term, term, term);
+    where.push(`(machine.code LIKE ? COLLATE NOCASE OR machine.name_ar LIKE ? OR machine.name_en LIKE ? COLLATE NOCASE
+      OR machine.area LIKE ? COLLATE NOCASE OR EXISTS (
+        SELECT 1 FROM machine_correction_requests correction
+        WHERE correction.machine_id = machine.id AND correction.status = 'pending'
+          AND (correction.reported_code LIKE ? COLLATE NOCASE OR correction.reported_name LIKE ?)
+      ))`);
+    parameters.push(term, term, term, term, term, term);
   }
   const condition = where.join(' AND ');
   const total = database.prepare(`SELECT COUNT(*) AS total FROM machines machine WHERE ${condition}`).get(...parameters).total;
   const machines = database.prepare(`
     SELECT machine.id, machine.code, machine.name_ar, machine.name_en, machine.area,
-      machine.active, machine.created_at,
-       (SELECT COUNT(*) FROM maintenance_cards card WHERE card.machine_id = machine.id AND card.deleted_at IS NULL) AS order_count
+       machine.area_name, machine.latitude, machine.longitude, machine.is_location_locked,
+       machine.geofence_radius_meters, machine.active, machine.created_at,
+        (SELECT COUNT(*) FROM maintenance_cards card WHERE card.machine_id = machine.id AND card.deleted_at IS NULL) AS order_count,
+        (SELECT COUNT(*) FROM machine_correction_requests correction
+          WHERE correction.machine_id = machine.id AND correction.status = 'pending') AS pending_correction_count
     FROM machines machine WHERE ${condition}
     ORDER BY machine.area COLLATE NOCASE, machine.name_ar COLLATE NOCASE, machine.id
     LIMIT ? OFFSET ?
   `).all(...parameters, pageSize, (pageNumber - 1) * pageSize);
   return { machines, total, areas: listAreas(database), page: pageNumber, limit: pageSize };
+}
+
+/** Return the active machine catalog with pending correction coordinates for the local Admin map. */
+export function getMachineMap({ area, search, locationStatus = 'all' } = {}, database = db) {
+  if (!['all', 'located', 'unlocated', 'pending_correction'].includes(locationStatus)) {
+    throw new HttpError(400, 'locationStatus must be all, located, unlocated, or pending_correction.');
+  }
+  const where = ['machine.active = 1', 'machine.deleted_at IS NULL'];
+  const parameters = [];
+  if (area !== undefined && area !== '') {
+    const selectedAreas = normalizeMaintenanceAreaNames(area, 'area');
+    if (!selectedAreas.length) throw new HttpError(400, 'area must not be blank.');
+    where.push(`machine.area COLLATE NOCASE IN (${selectedAreas.map(() => '?').join(',')})`);
+    parameters.push(...selectedAreas);
+  }
+  if (search !== undefined && search !== '') {
+    const term = `%${requireText(search, 'search', { maxLength: 160 })}%`;
+    where.push(`(machine.code LIKE ? COLLATE NOCASE OR machine.name_ar LIKE ? OR machine.name_en LIKE ? COLLATE NOCASE
+      OR machine.area LIKE ? COLLATE NOCASE OR EXISTS (
+        SELECT 1 FROM machine_correction_requests correction
+        WHERE correction.machine_id = machine.id AND correction.status = 'pending'
+          AND (correction.reported_code LIKE ? COLLATE NOCASE OR correction.reported_name LIKE ?)
+      ))`);
+    parameters.push(term, term, term, term, term, term);
+  }
+  if (locationStatus === 'located') where.push('machine.is_location_locked = 1 AND machine.latitude IS NOT NULL AND machine.longitude IS NOT NULL');
+  if (locationStatus === 'unlocated') where.push('(machine.is_location_locked != 1 OR machine.latitude IS NULL OR machine.longitude IS NULL)');
+  if (locationStatus === 'pending_correction') where.push(`EXISTS (
+    SELECT 1 FROM machine_correction_requests correction
+    WHERE correction.machine_id = machine.id AND correction.status = 'pending'
+  )`);
+
+  const machines = database.prepare(`
+    SELECT machine.id, machine.code, machine.name_ar, machine.name_en, machine.area,
+      machine.area_name, machine.latitude, machine.longitude, machine.is_location_locked,
+      machine.geofence_radius_meters,
+      (SELECT COUNT(*) FROM machine_correction_requests correction
+        WHERE correction.machine_id = machine.id AND correction.status = 'pending') AS pending_correction_count,
+      (SELECT correction.reported_code FROM machine_correction_requests correction
+        WHERE correction.machine_id = machine.id AND correction.status = 'pending'
+        ORDER BY datetime(correction.created_at) DESC, correction.id DESC LIMIT 1) AS correction_reported_code,
+      (SELECT correction.reported_name FROM machine_correction_requests correction
+        WHERE correction.machine_id = machine.id AND correction.status = 'pending'
+        ORDER BY datetime(correction.created_at) DESC, correction.id DESC LIMIT 1) AS correction_reported_name,
+      (SELECT json_extract(correction.location_json, '$.latitude') FROM machine_correction_requests correction
+        WHERE correction.machine_id = machine.id AND correction.status = 'pending'
+        ORDER BY datetime(correction.created_at) DESC, correction.id DESC LIMIT 1) AS correction_latitude,
+       (SELECT json_extract(correction.location_json, '$.longitude') FROM machine_correction_requests correction
+         WHERE correction.machine_id = machine.id AND correction.status = 'pending'
+         ORDER BY datetime(correction.created_at) DESC, correction.id DESC LIMIT 1) AS correction_longitude
+       ,(SELECT visit.captured_at FROM rep_visits visit
+         WHERE visit.machine_id = machine.id AND visit.status = 'completed'
+         ORDER BY datetime(visit.captured_at) DESC, visit.id DESC LIMIT 1) AS latest_visit_at
+       ,(SELECT visit.order_code FROM rep_visits visit
+         WHERE visit.machine_id = machine.id AND visit.status = 'completed'
+         ORDER BY datetime(visit.captured_at) DESC, visit.id DESC LIMIT 1) AS latest_visit_order_code
+       ,(SELECT representative.full_name FROM rep_visits visit
+         JOIN users representative ON representative.id = visit.rep_user_id
+         WHERE visit.machine_id = machine.id AND visit.status = 'completed'
+         ORDER BY datetime(visit.captured_at) DESC, visit.id DESC LIMIT 1) AS latest_visit_representative
+    FROM machines machine
+    WHERE ${where.join(' AND ')}
+    ORDER BY machine.area COLLATE NOCASE, machine.name_ar COLLATE NOCASE, machine.id
+  `).all(...parameters).map((machine) => ({
+    ...machine,
+    latitude: machine.latitude === null ? null : Number(machine.latitude),
+    longitude: machine.longitude === null ? null : Number(machine.longitude),
+    correction_latitude: machine.correction_latitude === null ? null : Number(machine.correction_latitude),
+    correction_longitude: machine.correction_longitude === null ? null : Number(machine.correction_longitude),
+    is_location_locked: Number(machine.is_location_locked) === 1,
+    geofence_radius_meters: Number(machine.geofence_radius_meters) || 50,
+    pending_correction_count: Number(machine.pending_correction_count) || 0,
+    latest_visit: machine.latest_visit_at ? {
+      captured_at: machine.latest_visit_at,
+      order_code: machine.latest_visit_order_code,
+      representative_name: machine.latest_visit_representative,
+    } : null,
+  }));
+  const countWhere = ['machine.active = 1', 'machine.deleted_at IS NULL'];
+  const countParameters = [];
+  if (area !== undefined && area !== '') {
+    const selectedAreas = normalizeMaintenanceAreaNames(area, 'area');
+    countWhere.push(`machine.area COLLATE NOCASE IN (${selectedAreas.map(() => '?').join(',')})`);
+    countParameters.push(...selectedAreas);
+  }
+  if (search !== undefined && search !== '') {
+    const term = `%${requireText(search, 'search', { maxLength: 160 })}%`;
+    countWhere.push(`(machine.code LIKE ? COLLATE NOCASE OR machine.name_ar LIKE ? OR machine.name_en LIKE ? COLLATE NOCASE
+      OR machine.area LIKE ? COLLATE NOCASE OR EXISTS (
+        SELECT 1 FROM machine_correction_requests correction
+        WHERE correction.machine_id = machine.id AND correction.status = 'pending'
+          AND (correction.reported_code LIKE ? COLLATE NOCASE OR correction.reported_name LIKE ?)
+      ))`);
+    countParameters.push(term, term, term, term, term, term);
+  }
+  const allCounts = database.prepare(`
+    SELECT
+      COUNT(*) AS total,
+      SUM(CASE WHEN machine.is_location_locked = 1 AND machine.latitude IS NOT NULL AND machine.longitude IS NOT NULL THEN 1 ELSE 0 END) AS located,
+      SUM(CASE WHEN machine.is_location_locked != 1 OR machine.latitude IS NULL OR machine.longitude IS NULL THEN 1 ELSE 0 END) AS unlocated,
+      SUM(CASE WHEN EXISTS (SELECT 1 FROM machine_correction_requests correction
+        WHERE correction.machine_id = machine.id AND correction.status = 'pending') THEN 1 ELSE 0 END) AS pending_correction
+    FROM machines machine
+    WHERE ${countWhere.join(' AND ')}
+  `).get(...countParameters);
+  return { machines, areas: listAreas(database), counts: Object.fromEntries(Object.entries(allCounts).map(([key, value]) => [key, Number(value) || 0])), locationStatus };
 }
 
 export function listAreas(database = db) {
@@ -366,6 +489,690 @@ export async function updateMachine(machineId, input, actorId = null, database =
     throw error;
   }
   return database.prepare('SELECT id, code, name_ar, name_en, area, active, created_at FROM machines WHERE id = ?').get(id);
+}
+
+export function setMachineGeofenceLocation(machineId, input, actorId = null, database = db) {
+  const id = positiveId(machineId, 'machineId');
+  const body = requireObject(input);
+  allowOnlyKeys(body, ['latitude', 'longitude', 'areaName']);
+  if (typeof body.latitude !== 'number' || !Number.isFinite(body.latitude) || body.latitude < -90 || body.latitude > 90
+      || typeof body.longitude !== 'number' || !Number.isFinite(body.longitude) || body.longitude < -180 || body.longitude > 180) {
+    throw new HttpError(400, 'latitude and longitude must be valid numeric GPS coordinates.');
+  }
+  const machine = database.prepare(`SELECT id, code, name_ar, area, area_name, latitude, longitude,
+    is_location_locked, geofence_radius_meters FROM machines WHERE id = ? AND active = 1 AND deleted_at IS NULL`).get(id);
+  if (!machine) throw new HttpError(404, 'Active machine was not found.');
+  const areaName = body.areaName === undefined
+    ? (machine.area_name || machine.area)
+    : requireText(body.areaName, 'areaName', { maxLength: 160 });
+
+  return database.transaction(() => {
+    database.prepare(`UPDATE machines SET latitude = ?, longitude = ?, area_name = ?,
+      is_location_locked = 1, geofence_radius_meters = 50 WHERE id = ?`)
+      .run(body.latitude, body.longitude, areaName, id);
+    const updated = database.prepare(`SELECT id, code, name_ar, area, area_name, latitude, longitude,
+      is_location_locked, geofence_radius_meters FROM machines WHERE id = ?`).get(id);
+    recordAudit({
+      database,
+      actorId,
+      action: 'set_geofence_location',
+      entityType: 'machine',
+      entityId: id,
+      oldValues: {
+        area_name: machine.area_name,
+        latitude: machine.latitude,
+        longitude: machine.longitude,
+        is_location_locked: machine.is_location_locked,
+        geofence_radius_meters: machine.geofence_radius_meters,
+      },
+      newValues: {
+        area_name: updated.area_name,
+        latitude: updated.latitude,
+        longitude: updated.longitude,
+        is_location_locked: updated.is_location_locked,
+        geofence_radius_meters: updated.geofence_radius_meters,
+      },
+    });
+    return updated;
+  }).immediate();
+}
+
+function parseCorrectionLocation(value) {
+  try {
+    const location = JSON.parse(value ?? '{}');
+    return location && typeof location === 'object' && !Array.isArray(location) ? location : {};
+  } catch {
+    return {};
+  }
+}
+
+function machineCorrectionRenameTargets(operation) {
+  let targets;
+  try { targets = JSON.parse(operation.targets_json ?? '[]'); } catch { targets = null; }
+  if (!Array.isArray(targets) || targets.length > 512) {
+    throw new HttpError(500, 'Machine correction recovery contains invalid staged paths.');
+  }
+  const safeSegments = (path) => typeof path === 'string' && path.length <= 2048
+    && !path.includes('\\') && !path.includes('\0') && !path.startsWith('/')
+    && path.split('/').every((segment) => segment && segment !== '.' && segment !== '..' && !segment.includes(':'));
+  const newMachineFolder = safeMachineStorageSegment(`${operation.new_code}_${operation.new_name_ar}`);
+  const sources = new Set();
+  const destinations = new Set();
+  for (const target of targets) {
+    if (!target || !safeSegments(target.sourcePath) || !safeSegments(target.destinationPath)) {
+      throw new HttpError(500, 'Machine correction recovery contains an unsafe storage path.');
+    }
+    const source = target.sourcePath.split('/');
+    const destination = target.destinationPath.split('/');
+    let valid = false;
+    if (source[0] === 'Machines' && destination[0] === 'Machines') {
+      valid = source.length === 2 && destination.length === 2
+        && source[1].toLocaleLowerCase('en') === operation.old_code.toLocaleLowerCase('en')
+        && destination[1].toLocaleLowerCase('en') === operation.new_code.toLocaleLowerCase('en');
+    } else if (source[0] === 'Areas' && destination[0] === 'Areas') {
+      valid = source.length === 3 && destination.length === 3 && source[1] === destination[1]
+        && source[2].toLocaleLowerCase('en').startsWith(`${safeMachineStorageSegment(operation.old_code)}_`.toLocaleLowerCase('en'))
+        && destination[2] === newMachineFolder;
+    } else if (source[0]?.toLocaleLowerCase('en') === 'clients'
+      && destination[0]?.toLocaleLowerCase('en') === 'clients') {
+      const section = source[2]?.toLocaleLowerCase('en');
+      valid = source.length === 5 && destination.length === 5
+        && ['maintenance', 'archived_orders'].includes(section)
+        && source.slice(0, 4).every((segment, index) => segment === destination[index])
+        && source[4].toLocaleLowerCase('en') === operation.old_code.toLocaleLowerCase('en')
+        && destination[4].toLocaleLowerCase('en') === operation.new_code.toLocaleLowerCase('en');
+    }
+    if (!valid || target.sourcePath === target.destinationPath
+        || sources.has(target.sourcePath) || destinations.has(target.destinationPath)) {
+      throw new HttpError(500, 'Machine correction recovery contains a duplicate or mismatched rename target.');
+    }
+    sources.add(target.sourcePath);
+    destinations.add(target.destinationPath);
+  }
+  return targets;
+}
+
+function machineCorrectionRenameStagePath(operationId, index) {
+  return storageDirectory(...MACHINE_CORRECTION_RENAME_STAGE_ROOT, operationId, `item-${index}`);
+}
+
+function removeMachineCorrectionRenameOperation(operationId, database) {
+  database.transaction(() => {
+    database.prepare('DELETE FROM machine_correction_rename_operations WHERE operation_id = ?').run(operationId);
+  }).immediate();
+}
+
+async function finishMachineCorrectionRename(operation, targets) {
+  const stageDirectoryPath = storageDirectory(...MACHINE_CORRECTION_RENAME_STAGE_ROOT, operation.operation_id);
+  const stageDirectory = await resolveStorageDirectoryIfPresent(stageDirectoryPath);
+  const stagedNames = stageDirectory ? await readdir(stageDirectory) : [];
+  const expectedNames = new Set(targets.map((_, index) => `item-${index}`));
+  if (stagedNames.some((name) => !expectedNames.has(name))) {
+    throw new HttpError(500, 'Machine correction recovery staging contains unexpected entries.');
+  }
+  for (const [index, target] of targets.entries()) {
+    const source = await resolveStorageDirectoryIfPresent(target.sourcePath);
+    const destination = await resolveStorageDirectoryIfPresent(target.destinationPath);
+    const staged = await resolveStorageDirectoryIfPresent(machineCorrectionRenameStagePath(operation.operation_id, index));
+    const caseOnlyRename = target.sourcePath !== target.destinationPath
+      && target.sourcePath.toLocaleLowerCase('en') === target.destinationPath.toLocaleLowerCase('en');
+    if (operation.state === 'prepared') {
+      if (caseOnlyRename && source && destination && !staged && source.toLocaleLowerCase('en') === destination.toLocaleLowerCase('en')) {
+        if (basename(source) !== basename(target.sourcePath)) {
+          throw new HttpError(500, 'A prepared case-only machine rename found the destination spelling before commit.');
+        }
+        continue;
+      }
+      if (destination || (source && staged) || (!source && !staged)) {
+        throw new HttpError(500, 'Prepared machine correction has conflicting source/stage folders; startup was stopped for safety.');
+      }
+      if (staged) {
+        const segments = target.sourcePath.split('/');
+        const parent = await ensureStorageDirectory(...segments.slice(0, -1));
+        await rename(staged, join(parent, segments.at(-1)));
+      }
+    } else if (operation.state === 'committed') {
+      if (caseOnlyRename && source && destination && !staged && source.toLocaleLowerCase('en') === destination.toLocaleLowerCase('en')) {
+        if (basename(destination) !== basename(target.destinationPath)) {
+          throw new HttpError(500, 'A committed case-only machine rename has not reached its destination spelling.');
+        }
+        continue;
+      }
+      if ((source && staged) || (source && destination) || (staged && destination) || (!staged && !destination)) {
+        throw new HttpError(500, 'Committed machine correction has conflicting source/stage folders; startup was stopped for safety.');
+      }
+      if (staged) {
+        const segments = target.destinationPath.split('/');
+        const parent = await ensureStorageDirectory(...segments.slice(0, -1));
+        await rename(staged, join(parent, segments.at(-1)));
+      }
+    } else {
+      throw new HttpError(500, 'Machine correction recovery has an unknown state.');
+    }
+  }
+  if (stageDirectory) await rm(stageDirectory, { recursive: true, force: true });
+}
+
+async function recoverMachineCorrectionRenameOperations(database) {
+  const stageRoot = await ensureStorageDirectory(...MACHINE_CORRECTION_RENAME_STAGE_ROOT);
+  const stageEntries = await readdir(stageRoot, { withFileTypes: true });
+  const operations = database.prepare(`
+    SELECT operation_id, correction_id, machine_id, old_code, old_name_ar, new_code, new_name_ar, targets_json, state
+    FROM machine_correction_rename_operations ORDER BY created_at, operation_id
+  `).all();
+  const operationsById = new Map(operations.map((operation) => [operation.operation_id, operation]));
+  if (stageEntries.some((entry) => !entry.isDirectory() || !UUID_PATTERN.test(entry.name) || !operationsById.has(entry.name))) {
+    throw new HttpError(500, 'Machine correction recovery contains an unexpected staging entry; startup was stopped for safety.');
+  }
+  let recoveredCount = 0;
+  for (const operation of operations) {
+    if (!UUID_PATTERN.test(operation.operation_id)) throw new HttpError(500, 'Machine correction recovery contains an invalid operation ID.');
+    const machine = database.prepare('SELECT code, name_ar FROM machines WHERE id = ?').get(operation.machine_id);
+    const correction = database.prepare('SELECT status, resolved_machine_id FROM machine_correction_requests WHERE id = ?').get(operation.correction_id);
+    const isOld = machine?.code === operation.old_code && machine?.name_ar === operation.old_name_ar;
+    const isNew = machine?.code === operation.new_code && machine?.name_ar === operation.new_name_ar;
+    if (!correction || !machine || (operation.state === 'prepared' && (!isOld || correction.status !== 'pending'))
+        || (operation.state === 'committed' && (!isNew || correction.status !== 'approved'
+          || Number(correction.resolved_machine_id) !== Number(operation.machine_id)))) {
+      throw new HttpError(500, 'Machine correction recovery no longer matches its database records; startup was stopped for safety.');
+    }
+    const targets = machineCorrectionRenameTargets(operation);
+    await finishMachineCorrectionRename(operation, targets);
+    removeMachineCorrectionRenameOperation(operation.operation_id, database);
+    recoveredCount += 1;
+  }
+  return recoveredCount;
+}
+
+function remapMachineCorrectionStoragePath(value, mappings) {
+  if (typeof value !== 'string') return value;
+  for (const mapping of mappings) {
+    if (value === mapping.sourcePath || value.startsWith(`${mapping.sourcePath}/`)) {
+      return `${mapping.destinationPath}${value.slice(mapping.sourcePath.length)}`;
+    }
+  }
+  return value;
+}
+
+async function collectMachineCorrectionRenamePlan(machine, database) {
+  const newMachineFolder = safeMachineStorageSegment(`${machine.new_code}_${machine.new_name_ar}`);
+  const oldCodeFolder = safeMachineStorageSegment(machine.old_code);
+  const mappings = new Map();
+  const addMapping = (sourcePath, destinationPath) => {
+    if (!sourcePath || !destinationPath || sourcePath === destinationPath) return;
+    const existing = mappings.get(sourcePath);
+    if (existing && existing.destinationPath !== destinationPath) {
+      throw new HttpError(409, 'Several historical machine folders would converge on one path; resolve the storage paths before approval.');
+    }
+    mappings.set(sourcePath, { sourcePath, destinationPath });
+  };
+  const areaFolderMapping = (storedPath) => {
+    if (typeof storedPath !== 'string' || storedPath.includes('\\')) return;
+    const segments = storedPath.split('/');
+    if (segments[0] !== 'Areas' || segments.length < 4
+        || !segments[2].toLocaleLowerCase('en').startsWith(`${oldCodeFolder}_`.toLocaleLowerCase('en'))) return;
+    const sourcePath = segments.slice(0, 3).join('/');
+    addMapping(sourcePath, storageDirectory('Areas', segments[1], newMachineFolder));
+  };
+
+  addMapping(storageDirectory('Machines', machine.old_code), storageDirectory('Machines', machine.new_code));
+  const cards = database.prepare(`
+    SELECT card.id, card.machine_id, card.before_photos_json, card.after_photos_json,
+      order_record.order_code, client.code AS client_code, order_record.area AS order_area
+    FROM maintenance_cards card
+    JOIN maintenance_orders order_record ON order_record.id = card.order_id
+    JOIN clients client ON client.id = order_record.client_id
+    WHERE card.machine_id = ?
+    ORDER BY card.id
+  `).all(machine.id);
+  const areas = new Set([machine.area, ...cards.flatMap((card) => parseMaintenanceOrderAreas(card.order_area))]);
+  for (const card of cards) {
+    addMapping(
+      storageDirectory('clients', card.client_code, 'maintenance', card.order_code, machine.old_code),
+      storageDirectory('clients', card.client_code, 'maintenance', card.order_code, machine.new_code),
+    );
+    addMapping(
+      storageDirectory('Clients', card.client_code, 'Archived_Orders', card.order_code, machine.old_code),
+      storageDirectory('Clients', card.client_code, 'Archived_Orders', card.order_code, machine.new_code),
+    );
+    for (const photoPath of maintenanceCardPhotoPaths(card)) areaFolderMapping(photoPath);
+  }
+  const visits = database.prepare(`
+    SELECT final_path, before_path, after_path FROM rep_visits WHERE machine_id = ? ORDER BY id
+  `).all(machine.id);
+  for (const visit of visits) {
+    for (const path of [visit.final_path, visit.before_path, visit.after_path]) areaFolderMapping(path);
+  }
+
+  for (const area of areas) {
+    if (!area) continue;
+    const areaDirectory = storageDirectory('Areas', safeStorageFolderName(area));
+    const absoluteAreaDirectory = await resolveStorageDirectoryIfPresent(areaDirectory);
+    if (!absoluteAreaDirectory) continue;
+    for (const entry of await readdir(absoluteAreaDirectory, { withFileTypes: true })) {
+      if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
+      if (findMachineForAreaFolder(entry.name, area, machine.id, database)) {
+        addMapping(storageDirectory(areaDirectory, entry.name), storageDirectory(areaDirectory, newMachineFolder));
+      }
+    }
+  }
+
+  const pathMappings = [...mappings.values()];
+  const destinationPaths = new Set();
+  const targets = [];
+  for (const mapping of pathMappings) {
+    const normalizedDestinationPath = mapping.destinationPath.toLocaleLowerCase('en');
+    if (destinationPaths.has(normalizedDestinationPath)) {
+      throw new HttpError(409, 'Several machine folders share the corrected destination; resolve them before approval.');
+    }
+    destinationPaths.add(normalizedDestinationPath);
+    const sourcePath = await resolveStorageDirectoryIfPresent(mapping.sourcePath);
+    const destinationPath = await resolveStorageDirectoryIfPresent(mapping.destinationPath);
+    const samePathIgnoringCase = mapping.sourcePath.toLocaleLowerCase('en') === mapping.destinationPath.toLocaleLowerCase('en');
+    if (sourcePath && destinationPath && !samePathIgnoringCase) {
+      throw new HttpError(409, `The corrected machine folder already exists: ${mapping.destinationPath}`);
+    }
+    if (!sourcePath && destinationPath) {
+      throw new HttpError(409, `An unrelated folder already uses the corrected machine path: ${mapping.destinationPath}`);
+    }
+    if (sourcePath && mapping.sourcePath !== mapping.destinationPath) {
+      targets.push(mapping);
+    }
+  }
+  if (targets.length > 512) throw new HttpError(409, 'Too many machine folders require a rename; split the correction for review.');
+  return { pathMappings, targets };
+}
+
+function remapMachineCorrectionHistory(machineId, pathMappings, database) {
+  const cards = database.prepare(`SELECT id, before_photos_json, after_photos_json
+    FROM maintenance_cards WHERE machine_id = ? ORDER BY id`).all(machineId);
+  for (const card of cards) {
+    let before;
+    let after;
+    try {
+      before = JSON.parse(card.before_photos_json);
+      after = JSON.parse(card.after_photos_json);
+    } catch {
+      throw new HttpError(409, 'An inspection card photo list is invalid and cannot be safely renamed.');
+    }
+    if (!Array.isArray(before) || !Array.isArray(after)
+        || [...before, ...after].some((path) => typeof path !== 'string')) {
+      throw new HttpError(409, 'An inspection card photo list is invalid and cannot be safely renamed.');
+    }
+    const nextBefore = before.map((path) => remapMachineCorrectionStoragePath(path, pathMappings));
+    const nextAfter = after.map((path) => remapMachineCorrectionStoragePath(path, pathMappings));
+    if (nextBefore.some((path, index) => path !== before[index])
+        || nextAfter.some((path, index) => path !== after[index])) {
+      database.prepare('UPDATE maintenance_cards SET before_photos_json = ?, after_photos_json = ? WHERE id = ?')
+        .run(JSON.stringify(nextBefore), JSON.stringify(nextAfter), card.id);
+    }
+  }
+  const visits = database.prepare(`SELECT id, final_path, before_path, after_path
+    FROM rep_visits WHERE machine_id = ? ORDER BY id`).all(machineId);
+  const updateVisit = database.prepare(`UPDATE rep_visits SET final_path = ?, before_path = ?, after_path = ? WHERE id = ?`);
+  for (const visit of visits) {
+    const next = [visit.final_path, visit.before_path, visit.after_path]
+      .map((path) => remapMachineCorrectionStoragePath(path, pathMappings));
+    if (next.some((path, index) => path !== [visit.final_path, visit.before_path, visit.after_path][index])) {
+      updateVisit.run(...next, visit.id);
+    }
+  }
+  const photos = database.prepare(`SELECT photo.id, photo.stored_path
+    FROM rep_visit_photos photo JOIN rep_visits visit ON visit.id = photo.visit_id
+    WHERE visit.machine_id = ? ORDER BY photo.id`).all(machineId);
+  const updatePhoto = database.prepare('UPDATE rep_visit_photos SET stored_path = ? WHERE id = ?');
+  for (const photo of photos) {
+    const nextPath = remapMachineCorrectionStoragePath(photo.stored_path, pathMappings);
+    if (nextPath !== photo.stored_path) updatePhoto.run(nextPath, photo.id);
+  }
+}
+
+export function getMachineCorrectionRequests({ status = 'pending' } = {}, database = db) {
+  if (!['pending', 'approved', 'rejected', 'all'].includes(status)) {
+    throw new HttpError(400, 'status must be pending, approved, rejected, or all.');
+  }
+  const parameters = status === 'all' ? [] : [status];
+  const where = status === 'all' ? '' : 'WHERE correction.status = ?';
+  const rows = database.prepare(`
+    SELECT correction.id, correction.machine_id, correction.card_id, correction.rep_user_id,
+      correction.reported_code, correction.reported_name, correction.note, correction.location_json,
+      correction.captured_at, correction.status, correction.resolved_machine_id,
+      correction.evidence_data IS NOT NULL AS has_evidence,
+      correction.evidence_content_type, correction.created_at, correction.updated_at,
+      rep.full_name AS representative_name, machine.code AS current_machine_code,
+      machine.name_ar AS current_machine_name, machine.area AS current_machine_area,
+      order_record.order_code,
+       review.action AS review_action, review.review_note, review.approved_code, review.created_at AS reviewed_at,
+      reviewer.full_name AS reviewer_name
+    FROM machine_correction_requests correction
+    JOIN users rep ON rep.id = correction.rep_user_id
+    JOIN machines machine ON machine.id = correction.machine_id
+    JOIN maintenance_cards card ON card.id = correction.card_id
+    JOIN maintenance_orders order_record ON order_record.id = card.order_id
+    LEFT JOIN machine_correction_reviews review ON review.id = (
+      SELECT latest.id FROM machine_correction_reviews latest
+      WHERE latest.correction_id = correction.id
+      ORDER BY datetime(latest.created_at) DESC, latest.id DESC LIMIT 1
+    )
+    LEFT JOIN users reviewer ON reviewer.id = review.actor_user_id
+    ${where}
+    ORDER BY CASE correction.status WHEN 'pending' THEN 0 ELSE 1 END,
+      datetime(correction.created_at) DESC, correction.id DESC
+    LIMIT 500
+  `).all(...parameters);
+  const candidatesForCode = database.prepare(`SELECT id, code, name_ar, area, active, deleted_at
+    FROM machines WHERE code = ? COLLATE NOCASE
+    ORDER BY id`);
+  const reportingMachineCandidates = database.prepare(`SELECT DISTINCT machine.id, machine.code, machine.name_ar, machine.area,
+      machine.active, machine.deleted_at
+    FROM machine_correction_requests correction
+    JOIN machines machine ON machine.id = correction.machine_id
+    WHERE correction.reported_code = ? COLLATE NOCASE AND correction.status = 'pending'
+    ORDER BY machine.id`);
+  const pendingSameCode = database.prepare(`SELECT COUNT(DISTINCT machine_id) AS count
+    FROM machine_correction_requests
+    WHERE status = 'pending' AND reported_code = ? COLLATE NOCASE`);
+  return rows.map((row) => {
+    const candidateMap = new Map();
+    for (const candidate of [...candidatesForCode.all(row.reported_code), ...reportingMachineCandidates.all(row.reported_code)]) {
+      candidateMap.set(Number(candidate.id), {
+        id: Number(candidate.id),
+        code: candidate.code,
+        name_ar: candidate.name_ar,
+        area: candidate.area,
+        active: candidate.active === 1 && candidate.deleted_at === null,
+        matches_reported_code: candidate.code.toLocaleLowerCase('en') === row.reported_code.toLocaleLowerCase('en'),
+      });
+    }
+    const duplicateCandidates = [...candidateMap.values()];
+    const reportedByMachineCount = Number(pendingSameCode.get(row.reported_code)?.count) || 0;
+    const codeConflict = duplicateCandidates.some((candidate) => candidate.id !== Number(row.machine_id))
+      || reportedByMachineCount > 1;
+    const { location_json: locationJson, ...rest } = row;
+    return {
+      ...rest,
+      id: Number(row.id),
+      machine_id: Number(row.machine_id),
+      card_id: Number(row.card_id),
+      rep_user_id: Number(row.rep_user_id),
+      resolved_machine_id: row.resolved_machine_id === null ? null : Number(row.resolved_machine_id),
+      has_evidence: Boolean(row.has_evidence),
+      location: parseCorrectionLocation(locationJson),
+      duplicateCandidates,
+      reportedByMachineCount,
+      codeConflict,
+      evidenceUrl: row.has_evidence ? `/api/maintenance/machine-corrections/${Number(row.id)}/evidence` : null,
+    };
+  });
+}
+
+export function getMachineCorrectionEvidence(correctionId, database = db) {
+  const id = positiveId(correctionId, 'correctionId');
+  const row = database.prepare(`SELECT evidence_data, evidence_content_type
+    FROM machine_correction_requests WHERE id = ?`).get(id);
+  if (!row) throw new HttpError(404, 'Machine correction request was not found.');
+  if (!row.evidence_data || !row.evidence_content_type) throw new HttpError(404, 'This correction has no evidence photo.');
+  return { data: row.evidence_data, contentType: row.evidence_content_type };
+}
+
+function correctionCodeCandidates(code, database) {
+  const codeCandidates = database.prepare(`SELECT id, code, name_ar, area, active, deleted_at FROM machines
+    WHERE code = ? COLLATE NOCASE`).all(code);
+  const reportingCandidates = database.prepare(`SELECT DISTINCT machine.id, machine.code, machine.name_ar, machine.area,
+      machine.active, machine.deleted_at
+    FROM machine_correction_requests request
+    JOIN machines machine ON machine.id = request.machine_id
+    WHERE request.reported_code = ? COLLATE NOCASE AND request.status = 'pending'`).all(code);
+  const all = new Map([...codeCandidates, ...reportingCandidates]
+    .map((candidate) => [Number(candidate.id), candidate]));
+  const active = new Map([...all].filter(([, candidate]) => candidate.active === 1 && candidate.deleted_at === null));
+  return {
+    all,
+    active,
+    hasConflict: [...all.keys()].length > 1,
+  };
+}
+
+export function getMachineCorrectionCodeCandidates(correctionId, code, database = db) {
+  const id = positiveId(correctionId, 'correctionId');
+  const approvedCode = safeMachineCode(code);
+  const correction = database.prepare('SELECT machine_id FROM machine_correction_requests WHERE id = ?').get(id);
+  if (!correction) throw new HttpError(404, 'Machine correction request was not found.');
+  const candidates = correctionCodeCandidates(approvedCode, database);
+  const machineId = Number(correction.machine_id);
+  const otherPendingReport = database.prepare(`SELECT 1 FROM machine_correction_requests
+    WHERE id != ? AND status = 'pending' AND reported_code = ? COLLATE NOCASE AND machine_id != ? LIMIT 1`)
+    .get(id, approvedCode, machineId);
+  const candidateList = [...candidates.all.values()].map((candidate) => ({
+    id: Number(candidate.id),
+    code: candidate.code,
+    name_ar: candidate.name_ar,
+    area: candidate.area,
+    active: candidate.active === 1 && candidate.deleted_at === null,
+    matches_code: candidate.code.toLocaleLowerCase('en') === approvedCode.toLocaleLowerCase('en'),
+  }));
+  return {
+    code: approvedCode,
+    hasConflict: candidateList.some((candidate) => candidate.id !== machineId) || Boolean(otherPendingReport),
+    candidates: candidateList,
+  };
+}
+
+function saveMachineCorrectionReview({ correction, action, resolvedMachineId, approvedCode, reviewNote, actorId, database }) {
+  database.prepare(`UPDATE machine_correction_requests SET status = ?, resolved_machine_id = ?, updated_at = CURRENT_TIMESTAMP
+    WHERE id = ? AND status = 'pending'`).run(action, resolvedMachineId, correction.id);
+  database.prepare(`INSERT INTO machine_correction_reviews
+    (correction_id, action, resolved_machine_id, review_note, actor_user_id, approved_code)
+    VALUES (?, ?, ?, ?, ?, ?)`).run(correction.id, action, resolvedMachineId, reviewNote, actorId, approvedCode);
+  recordAudit({
+    database,
+    actorId,
+    action: `machine_correction_${action}`,
+    entityType: 'machine_correction_request',
+    entityId: correction.id,
+    oldValues: {
+      status: correction.status,
+      resolved_machine_id: correction.resolved_machine_id,
+    },
+    newValues: {
+      status: action,
+      resolved_machine_id: resolvedMachineId,
+      approved_code: approvedCode,
+      review_note: reviewNote,
+      machine_id: Number(correction.machine_id),
+      reported_code: correction.reported_code,
+      reported_name: correction.reported_name,
+    },
+  });
+}
+
+/** Rename only the reported machine for unique codes; duplicate codes remain link/reject decisions, never merges. */
+export async function resolveMachineCorrection(correctionId, input, actorId, database = db) {
+  const id = positiveId(correctionId, 'correctionId');
+  const actor = positiveId(actorId, 'actorId');
+  const body = requireObject(input);
+  allowOnlyKeys(body, ['action', 'resolvedMachineId', 'approvedCode', 'note']);
+  if (!['approved', 'rejected'].includes(body.action)) throw new HttpError(400, 'action must be approved or rejected.');
+  const reviewNote = optionalText(body.note, 'note', { maxLength: 2000 });
+  const requestedMachineId = body.resolvedMachineId === undefined || body.resolvedMachineId === null || body.resolvedMachineId === ''
+    ? null : positiveId(body.resolvedMachineId, 'resolvedMachineId');
+  if (body.action === 'rejected' && (requestedMachineId !== null || body.approvedCode !== undefined)) {
+    throw new HttpError(400, 'A rejected correction cannot be linked to a machine.');
+  }
+  if (hasPendingMaintenanceFileRecovery(database)) {
+    throw new HttpError(409, 'A maintenance file recovery is pending. Restart the server before reviewing machine corrections.');
+  }
+
+  const lockMachineId = database.prepare('SELECT machine_id FROM machine_correction_requests WHERE id = ?').get(id)?.machine_id ?? id;
+  return withMaintenanceOrderStorageLock(async () => withMachineStorageLock(lockMachineId, async () => {
+    if (hasPendingMaintenanceFileRecovery(database)) {
+      throw new HttpError(409, 'A maintenance file recovery is pending. Restart the server before reviewing machine corrections.');
+    }
+    const correction = database.prepare(`SELECT * FROM machine_correction_requests WHERE id = ?`).get(id);
+    if (!correction) throw new HttpError(404, 'Machine correction request was not found.');
+    if (correction.status !== 'pending') throw new HttpError(409, 'This machine correction has already been reviewed.');
+    if (body.action === 'rejected') {
+      database.transaction(() => saveMachineCorrectionReview({
+        correction, action: 'rejected', resolvedMachineId: null, approvedCode: null,
+        reviewNote, actorId: actor, database,
+      })).immediate();
+      return { success: true, id, status: 'rejected', resolvedMachineId: null };
+    }
+
+    const approvedCode = safeMachineCode(body.approvedCode === undefined ? correction.reported_code : body.approvedCode);
+    const machineId = Number(correction.machine_id);
+    const machine = database.prepare(`SELECT id, code, name_ar, name_en, area, area_name, active, deleted_at
+      FROM machines WHERE id = ?`).get(machineId);
+    if (!machine || machine.active !== 1 || machine.deleted_at !== null) {
+      throw new HttpError(409, 'The machine attached to this report is no longer active.');
+    }
+    const candidates = correctionCodeCandidates(approvedCode, database);
+    const conflictingMachine = [...candidates.all.keys()].some((candidateId) => candidateId !== machineId);
+    const conflictsWithAnotherReport = database.prepare(`SELECT 1 FROM machine_correction_requests
+      WHERE id != ? AND status = 'pending' AND reported_code = ? COLLATE NOCASE AND machine_id != ? LIMIT 1`)
+      .get(id, approvedCode, machineId);
+    const hasConflict = conflictingMachine || Boolean(conflictsWithAnotherReport);
+    if (hasConflict) {
+      if (requestedMachineId === null) {
+        throw new HttpError(400, 'This code is already used. Select its active machine record or enter a different unique code. No records were merged.');
+      }
+      const selectedCandidate = candidates.active.get(requestedMachineId);
+      if (requestedMachineId === machineId || !selectedCandidate
+          || selectedCandidate.code.toLocaleLowerCase('en') !== approvedCode.toLocaleLowerCase('en')) {
+        throw new HttpError(400, 'Select a different active machine record with this exact code. No machine records were merged.');
+      }
+      database.transaction(() => saveMachineCorrectionReview({
+        correction, action: 'approved', resolvedMachineId: requestedMachineId, approvedCode,
+        reviewNote, actorId: actor, database,
+      })).immediate();
+      return { success: true, id, status: 'approved', resolvedMachineId: requestedMachineId, approvedCode, merged: false };
+    }
+    if (requestedMachineId !== null && requestedMachineId !== machineId) {
+      throw new HttpError(400, 'The corrected code is unique; it must be applied to the machine attached to this report.');
+    }
+
+    const plan = await collectMachineCorrectionRenamePlan({
+      ...machine,
+      id: machineId,
+      old_code: machine.code,
+      old_name_ar: machine.name_ar,
+      new_code: approvedCode,
+      new_name_ar: correction.reported_name,
+    }, database);
+    const operationId = plan.targets.length ? randomUUID() : null;
+    const operation = operationId ? {
+      operation_id: operationId,
+      correction_id: id,
+      machine_id: machineId,
+      old_code: machine.code,
+      old_name_ar: machine.name_ar,
+      new_code: approvedCode,
+      new_name_ar: correction.reported_name,
+      targets_json: JSON.stringify(plan.targets),
+      state: 'prepared',
+    } : null;
+
+    if (operation) {
+      database.transaction(() => {
+        database.prepare(`INSERT INTO machine_correction_rename_operations
+          (operation_id, correction_id, machine_id, old_code, old_name_ar, new_code, new_name_ar, targets_json, state)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'prepared')`)
+          .run(operation.operation_id, id, machineId, machine.code, machine.name_ar, approvedCode,
+            correction.reported_name, operation.targets_json);
+      }).immediate();
+      const stageDirectory = await ensureStorageDirectory(...MACHINE_CORRECTION_RENAME_STAGE_ROOT, operationId);
+      try {
+        for (const [index, target] of plan.targets.entries()) {
+          const source = await resolveStorageDirectory(target.sourcePath);
+          await rename(source, join(stageDirectory, `item-${index}`));
+        }
+      } catch (error) {
+        try {
+          await finishMachineCorrectionRename(operation, machineCorrectionRenameTargets(operation));
+          removeMachineCorrectionRenameOperation(operationId, database);
+        } catch (restoreError) {
+          console.error(`Machine correction folder rollback for ${machine.code} is pending: ${restoreError.message}`);
+          throw new HttpError(500, 'The correction was not approved, but machine-folder recovery is pending. Restart the server before continuing.');
+        }
+        throw error;
+      }
+    }
+
+    let committed = false;
+    try {
+      const result = database.transaction(() => {
+        const currentCorrection = database.prepare('SELECT * FROM machine_correction_requests WHERE id = ?').get(id);
+        const currentMachine = database.prepare(`SELECT id, code, name_ar, active, deleted_at FROM machines WHERE id = ?`).get(machineId);
+        if (!currentCorrection || currentCorrection.status !== 'pending'
+            || !currentMachine || currentMachine.code !== machine.code || currentMachine.name_ar !== machine.name_ar
+            || currentMachine.active !== 1 || currentMachine.deleted_at !== null) {
+          throw new HttpError(409, 'The correction or machine changed while its folders were being prepared.');
+        }
+        const currentCandidates = correctionCodeCandidates(approvedCode, database);
+        if ([...currentCandidates.all.keys()].some((candidateId) => candidateId !== machineId)) {
+          throw new HttpError(409, 'The corrected machine code was claimed by another record before approval.');
+        }
+        database.prepare(`UPDATE machines SET code = ?, name_ar = ? WHERE id = ? AND active = 1 AND deleted_at IS NULL`)
+          .run(approvedCode, correction.reported_name, machineId);
+        remapMachineCorrectionHistory(machineId, plan.pathMappings, database);
+        saveMachineCorrectionReview({
+          correction: currentCorrection, action: 'approved', resolvedMachineId: machineId,
+          approvedCode, reviewNote, actorId: actor, database,
+        });
+        recordAudit({
+          database,
+          actorId: actor,
+          action: 'rename_from_machine_correction',
+          entityType: 'machine',
+          entityId: machineId,
+          oldValues: { code: machine.code, name_ar: machine.name_ar },
+          newValues: {
+            code: approvedCode,
+            name_ar: correction.reported_name,
+            correction_id: id,
+            updated_folder_count: plan.targets.length,
+            path_mappings: plan.pathMappings,
+          },
+        });
+        if (operationId) {
+          const changed = database.prepare(`UPDATE machine_correction_rename_operations SET state = 'committed'
+            WHERE operation_id = ? AND state = 'prepared'`).run(operationId);
+          if (changed.changes !== 1) throw new HttpError(500, 'Machine correction rename journal was not found.');
+        }
+        return { success: true, id, status: 'approved', resolvedMachineId: machineId, approvedCode, renamed: true };
+      }).immediate();
+      committed = true;
+      if (operation) {
+        try {
+          await finishMachineCorrectionRename({ ...operation, state: 'committed' }, machineCorrectionRenameTargets(operation));
+          removeMachineCorrectionRenameOperation(operationId, database);
+        } catch (error) {
+          console.error(`Machine correction folder publication for ${machine.code} is pending: ${error.message}`);
+          throw new HttpError(500, 'The correction was saved, but folder recovery is pending. Restart the server before continuing.');
+        }
+      }
+      return result;
+    } catch (error) {
+      if (committed) throw error;
+      if (operation) {
+        try {
+          await finishMachineCorrectionRename(operation, machineCorrectionRenameTargets(operation));
+          removeMachineCorrectionRenameOperation(operationId, database);
+        } catch (restoreError) {
+          console.error(`Machine correction folder rollback for ${machine.code} is pending: ${restoreError.message}`);
+          throw new HttpError(500, 'The correction was not approved, but machine-folder recovery is pending. Restart the server before continuing.');
+        }
+      }
+      if (error.code === 'SQLITE_CONSTRAINT_UNIQUE') throw new HttpError(409, 'The corrected machine code already exists. No machine records were merged.');
+      throw error;
+    }
+  }));
+}
+
+export async function recoverMachineCorrectionRenames(database = db) {
+  return withMaintenanceOrderStorageLock(async () => ({
+    recoveredCount: await recoverMachineCorrectionRenameOperations(database),
+  }));
 }
 
 export function deactivateMachine(machineId, actorId = null, database = db) {
@@ -619,6 +1426,7 @@ export function listMaintenanceOrders(status, database = db) {
 const MAINTENANCE_ORDER_DELETION_STAGE_ROOT = ['.madar-recovery', 'maintenance-order-deletions'];
 const MAINTENANCE_CARD_DELETION_STAGE_ROOT = ['.madar-recovery', 'maintenance-card-deletions'];
 const MAINTENANCE_MACHINE_DECOMMISSION_STAGE_ROOT = ['.madar-recovery', 'maintenance-machine-decommissions'];
+const MACHINE_CORRECTION_RENAME_STAGE_ROOT = ['.madar-recovery', 'machine-correction-renames'];
 const MAINTENANCE_UNMATCHED_FOLDER_DELETION_STAGE_ROOT = ['.madar-recovery', 'maintenance-unmatched-folder-deletions'];
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -630,9 +1438,17 @@ function hasPendingMaintenanceFileRecovery(database) {
     UNION ALL
     SELECT 1 FROM maintenance_machine_decommission_operations WHERE state = 'prepared'
     UNION ALL
+    SELECT 1 FROM machine_correction_rename_operations
+    UNION ALL
     SELECT 1 FROM maintenance_unmatched_folder_deletion_operations
     LIMIT 1
   `).get());
+}
+
+function assertNoPendingMaintenanceFileRecovery(database) {
+  if (hasPendingMaintenanceFileRecovery(database)) {
+    throw new HttpError(409, 'A maintenance file recovery is pending. Restart the server before changing maintenance photos or folders.');
+  }
 }
 
 async function resolveStorageDirectoryIfPresent(relativePath) {
@@ -2413,7 +3229,7 @@ function getTripFolderGroups(files, machines, wrapper = null) {
   return groups;
 }
 
-export async function processMaintenanceTripFolder(orderId, { folderPath, file } = {}, actorId = null, database = db) {
+async function processMaintenanceTripFolderUnlocked(orderId, { folderPath, file } = {}, actorId = null, database = db) {
   const id = positiveId(orderId, 'orderId');
   const order = findMaintenanceOrder(id, database);
   if (order.status !== 'in_progress') throw new HttpError(409, 'Trip photos can only be imported while the order is in progress.');
@@ -2704,7 +3520,14 @@ export async function processMaintenanceTripFolder(orderId, { folderPath, file }
   }
 }
 
-export async function bindUnmatchedMaintenanceFolder(orderId, folderId, input, actorId = null, database = db) {
+export async function processMaintenanceTripFolder(orderId, input = {}, actorId = null, database = db) {
+  return withMaintenanceOrderStorageLock(() => {
+    assertNoPendingMaintenanceFileRecovery(database);
+    return processMaintenanceTripFolderUnlocked(orderId, input, actorId, database);
+  });
+}
+
+async function bindUnmatchedMaintenanceFolderUnlocked(orderId, folderId, input, actorId = null, database = db) {
   const id = positiveId(orderId, 'orderId');
   const unmatchedId = positiveId(folderId, 'folderId');
   const body = requireObject(input);
@@ -2813,6 +3636,10 @@ export async function bindUnmatchedMaintenanceFolder(orderId, folderId, input, a
     await Promise.all(savedFiles.map((absolutePath) => removeStorageFile(absolutePath)));
     throw error;
   }
+}
+
+export async function bindUnmatchedMaintenanceFolder(orderId, folderId, input, actorId = null, database = db) {
+  return withMaintenanceOrderStorageLock(() => bindUnmatchedMaintenanceFolderUnlocked(orderId, folderId, input, actorId, database));
 }
 
 export async function deleteUnmatchedMaintenanceFolder(orderId, folderId, actorId = null, database = db) {
@@ -3101,7 +3928,7 @@ export function populateMaintenanceOrderArea(orderId, input, actorId = null, dat
   return { order: getMaintenanceOrder(id, database), addedCount: addedIds.length };
 }
 
-export async function importMaintenanceServerFolder(orderId, input, actorId = null, database = db) {
+async function importMaintenanceServerFolderUnlocked(orderId, input, actorId = null, database = db) {
   const id = positiveId(orderId, 'orderId');
   const body = requireObject(input);
   allowOnlyKeys(body, ['folderPath']);
@@ -3192,7 +4019,14 @@ export async function importMaintenanceServerFolder(orderId, input, actorId = nu
   }
 }
 
-export async function updateMaintenanceCard(orderId, cardId, input, actorId = null, database = db) {
+export async function importMaintenanceServerFolder(orderId, input, actorId = null, database = db) {
+  return withMaintenanceOrderStorageLock(() => {
+    assertNoPendingMaintenanceFileRecovery(database);
+    return importMaintenanceServerFolderUnlocked(orderId, input, actorId, database);
+  });
+}
+
+async function updateMaintenanceCardUnlocked(orderId, cardId, input, actorId = null, database = db) {
   const id = positiveId(orderId, 'orderId');
   const targetCardId = positiveId(cardId, 'cardId');
   const body = requireObject(input);
@@ -3350,7 +4184,15 @@ export async function updateMaintenanceCard(orderId, cardId, input, actorId = nu
   return getMaintenanceOrder(id, database).cards.find((item) => item.id === targetCardId);
 }
 
-export async function uploadMaintenancePhoto(orderId, cardId, phase, file, actorId = null, database = db) {
+export async function updateMaintenanceCard(orderId, cardId, input, actorId = null, database = db) {
+  return withMaintenanceOrderStorageLock(() => {
+    assertNoPendingMaintenanceFileRecovery(database);
+    return updateMaintenanceCardUnlocked(orderId, cardId, input, actorId, database);
+  });
+}
+
+async function uploadMaintenancePhotoUnlocked(orderId, cardId, phase, file, actorId = null, database = db) {
+  assertNoPendingMaintenanceFileRecovery(database);
   const id = positiveId(orderId, 'orderId');
   const targetCardId = positiveId(cardId, 'cardId');
   if (!['before', 'after'].includes(phase)) throw new HttpError(400, 'Photo phase must be before or after.');
@@ -3429,6 +4271,15 @@ export async function uploadMaintenancePhoto(orderId, cardId, phase, file, actor
   }
 }
 
+export async function uploadMaintenancePhoto(orderId, cardId, phase, file, actorId = null, database = db) {
+  const id = positiveId(orderId, 'orderId');
+  const targetCardId = positiveId(cardId, 'cardId');
+  const card = database.prepare(`SELECT machine_id FROM maintenance_cards WHERE id = ? AND order_id = ?`).get(targetCardId, id);
+  if (!card) return uploadMaintenancePhotoUnlocked(orderId, cardId, phase, file, actorId, database);
+  return withMachineStorageLock(card.machine_id,
+    () => uploadMaintenancePhotoUnlocked(orderId, cardId, phase, file, actorId, database));
+}
+
 export async function deleteCardPhoto(orderId, cardId, phase, filename, actorId = null, database = db) {
   const id = positiveId(orderId, 'orderId');
   const targetCardId = positiveId(cardId, 'cardId');
@@ -3437,6 +4288,7 @@ export async function deleteCardPhoto(orderId, cardId, phase, filename, actorId 
   if (name.includes('/') || name.includes('\\')) throw new HttpError(400, 'Invalid photo filename.');
 
   return withMaintenanceOrderStorageLock(async () => {
+    assertNoPendingMaintenanceFileRecovery(database);
     const removedPhoto = database.transaction(() => {
       const card = database.prepare(`
         SELECT card.id, card.order_id, card.before_photos_json, card.after_photos_json, card.status,
@@ -3510,6 +4362,7 @@ export async function moveCardPhoto(orderId, cardId, input, actorId = null, data
   if (name.includes('/') || name.includes('\\')) throw new HttpError(400, 'Invalid photo filename.');
 
   return withMaintenanceOrderStorageLock(async () => {
+    assertNoPendingMaintenanceFileRecovery(database);
     const card = database.prepare(`
       SELECT card.id, card.order_id, card.before_photos_json, card.after_photos_json, card.status,
         order_record.status AS order_status, order_record.order_code,
