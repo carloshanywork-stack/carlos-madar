@@ -1,0 +1,6 @@
+# Copy to android/key.properties after choosing the permanent release key.
+# Keep the keystore outside this repository and protect this file and key offline.
+storeFile=C:/secure/path/madar-rep-release.jks
+storePassword=REPLACE_WITH_KEYSTORE_PASSWORD
+keyAlias=REPLACE_WITH_APPROVED_ALIAS
+keyPassword=REPLACE_WITH_KEY_PASSWORD

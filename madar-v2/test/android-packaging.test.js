@@ -9,15 +9,19 @@ const read = (path) => readFileSync(resolve(projectRoot, path), 'utf8');
 
 test('Android application ID, namespace, Capacitor ID, and native packages are aligned', () => {
   const gradle = read('android/app/build.gradle');
-  const capacitor = JSON.parse(read('capacitor.config.json'));
+  const capacitor = read('capacitor.config.ts');
   const generatedCapacitor = JSON.parse(read('android/app/src/main/assets/capacitor.config.json'));
   const strings = read('android/app/src/main/res/values/strings.xml');
   const instrumentedTest = read('android/app/src/androidTest/java/com/madar/rep/app/ExampleInstrumentedTest.java');
 
   assert.match(gradle, /namespace\s*=\s*["']com\.madar\.rep\.app["']/);
   assert.match(gradle, /applicationId\s+["']com\.madar\.rep\.app["']/);
-  assert.equal(capacitor.appId, 'com.madar.rep.app');
+  assert.match(capacitor, /appId:\s*'com\.madar\.rep\.app'/);
+  assert.match(capacitor, /MADAR_REP_SERVER_URL/);
+  assert.match(capacitor, /Non-local MADAR_REP_SERVER_URL must use HTTPS/);
+  assert.match(capacitor, /loggingBehavior: releaseBuild \? 'none' : 'debug'/);
   assert.equal(generatedCapacitor.appId, 'com.madar.rep.app');
+  assert.match(generatedCapacitor.server.url, /^https?:\/\//);
   assert.match(strings, /<string name="package_name">com\.madar\.rep\.app<\/string>/);
   assert.match(strings, /<string name="custom_url_scheme">com\.madar\.rep\.app<\/string>/);
   assert.match(instrumentedTest, /assertEquals\("com\.madar\.rep\.app", appContext\.getPackageName\(\)\)/);
@@ -51,6 +55,7 @@ test('release signing credentials are loaded locally and missing signing blocks 
   const buildScript = read('scripts/build-android.js');
   const ignore = read('.gitignore');
   const paths = read('server/config/paths.js');
+  const keyTemplate = read('android/key.properties.example');
 
   assert.match(gradle, /rootProject\.file\('key\.properties'\)/);
   assert.match(gradle, /gradle\.taskGraph\.whenReady/);
@@ -59,5 +64,8 @@ test('release signing credentials are loaded locally and missing signing blocks 
   assert.match(buildScript, /madar-rep-release\.apk/);
   assert.match(ignore, /^key\.properties$/m);
   assert.match(ignore, /^madar-rep-release\.apk$/m);
-  assert.match(paths, /env\.repApkPath\s*\?\?\s*'madar-rep-release\.apk'/);
+  assert.match(paths, /existsSync\(join\(projectRoot, 'madar-rep-release\.apk'\)\)/);
+  assert.match(paths, /existsSync\(join\(projectRoot, 'madar-rep\.apk'\)\)/);
+  assert.match(keyTemplate, /^storeFile=/m);
+  assert.match(keyTemplate, /^storePassword=REPLACE_WITH_/m);
 });

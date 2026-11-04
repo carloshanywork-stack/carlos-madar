@@ -216,6 +216,8 @@ test('geofence and breadcrumb migrations are additive and idempotent', () => {
 test('rep login, assigned-region route sync, active fault reasons, and strict API isolation', async () => {
   const anonymousApk = await request('/download/apk');
   assert.equal(anonymousApk.response.status, 401);
+  const anonymousApkStatus = await request('/download/apk/status');
+  assert.equal(anonymousApkStatus.response.status, 401);
 
   const setup = await request('/api/auth/setup', jsonOptions('POST', {
     username: 'root-admin',
@@ -225,6 +227,15 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   assert.equal(setup.response.status, 201);
   const adminCookie = setup.cookie;
   assert.ok(adminCookie.startsWith('madar_token='));
+  const adminApkStatus = await request('/download/apk/status', {}, adminCookie);
+  assert.equal(adminApkStatus.response.status, 200);
+  assert.deepEqual(adminApkStatus.body, {
+    available: true,
+    artifactType: 'fallback',
+    sizeBytes: Buffer.byteLength('synthetic-debug-apk'),
+    modifiedAt: adminApkStatus.body.modifiedAt,
+  });
+  assert.ok(Number.isFinite(Date.parse(adminApkStatus.body.modifiedAt)));
   const mapStatus = await request('/api/supervisor/map/status', {}, adminCookie);
   assert.deepEqual(mapStatus.body, {
     available: true,
@@ -354,6 +365,9 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
     updatedAt: '2026-11-02T08:30:00.000Z',
   });
   assert.ok(login.cookie.startsWith('madar_token='));
+  const repApkStatus = await request('/download/apk/status', {}, login.cookie);
+  assert.equal(repApkStatus.response.status, 200);
+  assert.equal(repApkStatus.body.artifactType, 'fallback');
   const repApkDownload = await fetch(`${baseUrl}/download/apk`, { headers: { cookie: login.cookie } });
   assert.equal(repApkDownload.status, 200);
   assert.equal(Buffer.from(await repApkDownload.arrayBuffer()).toString(), 'synthetic-debug-apk');

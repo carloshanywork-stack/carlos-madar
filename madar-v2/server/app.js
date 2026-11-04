@@ -1,7 +1,7 @@
 import cors from 'cors';
 import express from 'express';
-import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, statSync } from 'node:fs';
+import { basename, join } from 'node:path';
 import { env } from './config/env.js';
 import { clientDistPath, repApkPath } from './config/paths.js';
 import { errorHandler, notFoundHandler } from './middleware/error-handler.js';
@@ -50,6 +50,36 @@ app.get('/download/apk', requireAuthentication, (req, res, next) => {
   res.download(repApkPath, 'madar-rep.apk', (error) => {
     if (error && !res.headersSent) next(error);
   });
+});
+
+app.get('/download/apk/status', requireAuthentication, (req, res) => {
+  if (!['admin', 'rep'].includes(req.user?.role)) {
+    res.status(403).json({ error: 'Administrator or field representative access is required.' });
+    return;
+  }
+
+  try {
+    const metadata = statSync(repApkPath);
+    if (!metadata.isFile()) throw new Error('APK artifact is not a regular file.');
+    const artifactType = basename(repApkPath) === 'madar-rep-release.apk' ? 'release' : 'fallback';
+    res.set('Cache-Control', 'private, no-store').json({
+      available: true,
+      artifactType,
+      sizeBytes: metadata.size,
+      modifiedAt: metadata.mtime.toISOString(),
+    });
+  } catch (error) {
+    if (error.code !== 'ENOENT' && error.code !== 'ENOTDIR') {
+      res.status(500).json({ error: 'Unable to inspect the representative APK artifact.' });
+      return;
+    }
+    res.set('Cache-Control', 'private, no-store').json({
+      available: false,
+      artifactType: 'missing',
+      sizeBytes: null,
+      modifiedAt: null,
+    });
+  }
 });
 
 app.use('/api/auth', authRouter);

@@ -17,13 +17,13 @@ This packages the existing field-representative UI in a Capacitor Android shell.
 
 ## Local USB/emulator build
 
-1. In `madar-v2/.env`, keep the default during local testing:
+1. Copy `.env.example` to `.env` if needed and keep the default during local testing:
 
    ```dotenv
    MADAR_REP_SERVER_URL=http://localhost:3000
    ```
 
-   `capacitor.config.ts` reads the value whenever Capacitor synchronizes. `localhost` on Android means the Android device itself, so keep the device attached and run this from a terminal with Android platform-tools:
+   `capacitor.config.ts` loads this value on each Capacitor sync, validates the URL, and allows cleartext only for `localhost`. `localhost` on Android means the Android device itself, so keep the device attached and run this from a terminal with Android platform-tools:
 
    ```powershell
    adb reverse tcp:3000 tcp:3000
@@ -46,7 +46,7 @@ This packages the existing field-representative UI in a Capacitor Android shell.
 
 Debug APKs use Gradle's machine-local debug key and are for testing only. Do not distribute them as production updates. Each release APK must use the same approved signing key as every previous release of `com.madar.rep.app`; Android rejects an update signed with a different key. Keep the keystore and `android/key.properties` outside source control, retain secure backups of the keystore, and do not rotate or replace it for an existing package.
 
-After the permanent release key has been approved, create the ignored `android/key.properties` file with these fields (use an absolute keystore path, or a path relative to `android/`; do not commit actual credentials):
+After the permanent release key has been approved, copy `android/key.properties.example` to the ignored `android/key.properties`, then fill in its fields (use an absolute keystore path, or a path relative to `android/`; never commit actual credentials):
 
 ```properties
 storeFile=C:/secure/path/madar-rep-release.jks
@@ -55,7 +55,7 @@ keyAlias=<approved key alias>
 keyPassword=<key password>
 ```
 
-Then increment `versionCode` in `android/app/build.gradle` for every update and run `npm run android:release`. The script refuses to launch Gradle if `android/key.properties` is absent; Gradle requires non-empty signing properties and an existing keystore, and validates the credentials during signing. The release APK is written to the ignored `madar-rep-release.apk`; the authenticated download endpoint serves this release artifact and returns 404 until one is built on the server.
+Then increment `versionCode` in `android/app/build.gradle` for every update and run `npm run android:release`. The script refuses to launch Gradle if `android/key.properties` is absent; Gradle requires non-empty signing properties and an existing keystore, and validates the credentials during signing. The release APK is written to the ignored `madar-rep-release.apk`. The Settings → System screen reports whether the current download is a signed release or a fallback/test artifact, and its APK download button uses `/download/apk`.
 
 ## Package identity, storage isolation, and compatibility
 

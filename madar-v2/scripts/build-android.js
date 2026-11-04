@@ -7,6 +7,11 @@ const syncOnly = process.argv.includes('--sync-only');
 const releaseBuild = process.argv.includes('--release');
 const isWindows = process.platform === 'win32';
 
+if (releaseBuild && !existsSync(resolve(projectRoot, 'android/key.properties'))) {
+  throw new Error('Release signing is not configured. Copy android/key.properties.example to android/key.properties and fill it with the approved keystore values.');
+}
+process.env.MADAR_ANDROID_BUILD_TYPE = releaseBuild ? 'release' : 'debug';
+
 function run(command, args, options = {}) {
   console.log(`> ${command} ${args.join(' ')}`);
   execFileSync(command, args, {
@@ -54,9 +59,6 @@ run(process.execPath, [resolve(projectRoot, 'node_modules/@capacitor/cli/bin/cap
 
 if (!syncOnly) {
   const androidDirectory = resolve(projectRoot, 'android');
-  if (releaseBuild && !existsSync(resolve(androidDirectory, 'key.properties'))) {
-    throw new Error('Release signing is not configured. Create android/key.properties for the approved signing keystore; keep the keystore and credentials outside source control.');
-  }
   assertAndroidToolchain();
   const gradleWrapperJar = resolve(androidDirectory, 'gradle/wrapper/gradle-wrapper.jar');
   if (!existsSync(gradleWrapperJar)) throw new Error(`Gradle wrapper is missing: ${gradleWrapperJar}`);

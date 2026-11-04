@@ -1,5 +1,5 @@
 import { ZipArchive } from 'archiver';
-import { closeSync, createWriteStream, openSync, readSync } from 'node:fs';
+import { closeSync, createWriteStream, existsSync, openSync, readSync } from 'node:fs';
 import { access, lstat, mkdir, mkdtemp, readdir, realpath, rename, rm, stat } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
@@ -9,7 +9,7 @@ import * as yauzl from 'yauzl';
 import multer from 'multer';
 import { Router } from 'express';
 import { db } from '../../database/connection.js';
-import { backupRoot, dataDirectory, storageMountPath, storageRoot } from '../../config/paths.js';
+import { backupRoot, dataDirectory, repApkPath, storageMountPath, storageRoot } from '../../config/paths.js';
 import { recordAudit } from '../audit.js';
 import { requestActorId } from '../actor.js';
 import { asyncHandler, HttpError } from '../http.js';
@@ -507,6 +507,24 @@ router.post('/backup/restore', restoreUpload, asyncHandler(async (req, res) => {
   } finally {
     await rm(req.file.path, { force: true });
   }
+}));
+
+router.get('/apk-info', asyncHandler(async (_req, res) => {
+  const exists = existsSync(repApkPath);
+  let sizeBytes = 0;
+  let modifiedAt = null;
+  if (exists) {
+    const fileStat = await stat(repApkPath);
+    sizeBytes = fileStat.size;
+    modifiedAt = fileStat.mtime.toISOString();
+  }
+  res.json({
+    exists,
+    filename: 'madar-rep.apk',
+    downloadUrl: '/download/apk',
+    sizeBytes,
+    modifiedAt,
+  });
 }));
 
 export default router;

@@ -1,4 +1,4 @@
-import { lstatSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 import { env } from './env.js';
 import { assertMountedStorage, resolveStorageLayout } from './storage-layout.js';
@@ -22,7 +22,15 @@ export const backupRoot = storageLayout.backupRoot;
 export const offlineMapPath = resolve(projectRoot, env.offlineMapPath ?? join(dataDirectory, 'offline-maps.mbtiles'));
 export const schemaPath = join(projectRoot, 'server', 'database', 'schema.sql');
 export const clientDistPath = join(projectRoot, 'client', 'dist');
-export const repApkPath = resolve(projectRoot, env.repApkPath ?? 'madar-rep-release.apk');
+export const repApkPath = resolve(
+  projectRoot,
+  env.repApkPath
+    ?? (existsSync(join(projectRoot, 'madar-rep-release.apk'))
+      ? 'madar-rep-release.apk'
+      : existsSync(join(projectRoot, 'madar-rep.apk'))
+        ? 'madar-rep.apk'
+        : 'madar-rep-release.apk')
+);
 
 function assertExistingPathIsSafe(path, { mountDevice, type, label }) {
   const relativePath = relative(storageMountPath, path);
