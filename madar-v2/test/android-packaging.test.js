@@ -10,6 +10,7 @@ const read = (path) => readFileSync(resolve(projectRoot, path), 'utf8');
 test('Android application ID, namespace, Capacitor ID, and native packages are aligned', () => {
   const gradle = read('android/app/build.gradle');
   const capacitor = read('capacitor.config.ts');
+  const buildScript = read('scripts/build-android.js');
   const generatedCapacitor = JSON.parse(read('android/app/src/main/assets/capacitor.config.json'));
   const strings = read('android/app/src/main/res/values/strings.xml');
   const instrumentedTest = read('android/app/src/androidTest/java/com/madar/rep/app/ExampleInstrumentedTest.java');
@@ -21,6 +22,10 @@ test('Android application ID, namespace, Capacitor ID, and native packages are a
   assert.match(capacitor, /Non-local MADAR_REP_SERVER_URL must use HTTPS/);
   assert.match(capacitor, /MADAR_REP_LIVE_RELOAD/);
   assert.match(capacitor, /const standaloneBuild = !liveReloadBuild/);
+  assert.match(buildScript, /const liveReloadBuild = process\.argv\.includes\('--live-reload'\)/);
+  assert.match(buildScript, /process\.env\.MADAR_REP_LIVE_RELOAD = liveReloadBuild \? 'true' : 'false'/);
+  assert.match(buildScript, /capacitorConfig\.server\?\.url/);
+  assert.match(buildScript, /http:\/\/localhost:3000/);
   assert.match(capacitor, /liveReloadBuild \? \{/);
   assert.match(capacitor, /CapacitorHttp: \{ enabled: standaloneBuild \}/);
   assert.match(capacitor, /CapacitorCookies: \{ enabled: standaloneBuild \}/);

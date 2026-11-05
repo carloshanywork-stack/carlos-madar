@@ -25,7 +25,7 @@ const liveReloadBuild = !releaseBuild && process.env.MADAR_REP_LIVE_RELOAD === '
 const standaloneBuild = !liveReloadBuild;
 
 if (serverUrl.protocol === 'http:' && !liveReloadBuild) {
-  throw new Error('Android builds require HTTPS by default. For localhost testing only, set MADAR_REP_LIVE_RELOAD=true and use adb reverse.');
+  throw new Error('Android builds require HTTPS by default. For localhost testing only, pass --live-reload to the Android build script and use adb reverse.');
 }
 
 if (standaloneBuild && serverUrl.protocol !== 'https:') {

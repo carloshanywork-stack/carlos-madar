@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, readdirSync, renameSync, rmSync } from 'node:fs';
+import { copyFileSync, existsSync, readFileSync, readdirSync, renameSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { config as loadDotEnv } from 'dotenv';
@@ -7,13 +7,18 @@ const projectRoot = resolve(import.meta.dirname, '..');
 loadDotEnv({ path: resolve(projectRoot, '.env') });
 const syncOnly = process.argv.includes('--sync-only');
 const releaseBuild = process.argv.includes('--release');
+const liveReloadBuild = process.argv.includes('--live-reload');
 const isWindows = process.platform === 'win32';
 
+if (releaseBuild && liveReloadBuild) {
+  throw new Error('Live reload is for local development only and cannot be used for a release APK.');
+}
 if (releaseBuild && !existsSync(resolve(projectRoot, 'android/key.properties'))) {
   throw new Error('Release signing is not configured. Copy android/key.properties.example to android/key.properties and fill it with the approved keystore values.');
 }
 process.env.MADAR_ANDROID_BUILD_TYPE = releaseBuild ? 'release' : 'debug';
-if (releaseBuild) process.env.MADAR_REP_LIVE_RELOAD = 'false';
+// A stale .env or terminal variable must never make an ordinary APK point at localhost.
+process.env.MADAR_REP_LIVE_RELOAD = liveReloadBuild ? 'true' : 'false';
 
 function run(command, args, options = {}) {
   console.log(`> ${command} ${args.join(' ')}`);
@@ -59,6 +64,21 @@ const clientDirectory = resolve(projectRoot, 'client');
 run(process.execPath, [viteEntrypoint, 'build'], { cwd: clientDirectory });
 run(process.execPath, [viteEntrypoint, 'build', '--mode', 'capacitor'], { cwd: clientDirectory });
 run(process.execPath, [resolve(projectRoot, 'node_modules/@capacitor/cli/bin/capacitor'), 'sync', 'android']);
+
+if (!liveReloadBuild) {
+  const capacitorConfigPath = resolve(projectRoot, 'android/app/src/main/assets/capacitor.config.json');
+  const capacitorConfig = JSON.parse(readFileSync(capacitorConfigPath, 'utf8'));
+  if (capacitorConfig.server?.url) {
+    throw new Error('Standalone Android build unexpectedly points the WebView at a server URL. Refusing to continue.');
+  }
+  const bundledAssets = resolve(projectRoot, 'android/app/src/main/assets/public');
+  const containsLocalhostUrl = readdirSync(join(bundledAssets, 'assets'))
+    .filter((filename) => filename.endsWith('.js'))
+    .some((filename) => readFileSync(join(bundledAssets, 'assets', filename), 'utf8').includes('http://localhost:3000'));
+  if (containsLocalhostUrl) {
+    throw new Error('Standalone Android web assets contain http://localhost:3000. Refusing to continue.');
+  }
+}
 
 if (!syncOnly) {
   const androidDirectory = resolve(projectRoot, 'android');

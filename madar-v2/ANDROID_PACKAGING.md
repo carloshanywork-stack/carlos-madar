@@ -17,11 +17,11 @@ This packages the existing field-representative UI in a Capacitor Android shell.
 
 ## Local USB/emulator build
 
-1. Android debug/release APKs bundle the UI and use the HTTPS API by default. For intentional USB live-reload development only, set both values in `.env`:
+1. Android debug/release APKs bundle the UI and use the HTTPS API by default. For intentional USB live-reload development only, temporarily set the URL in `.env`:
 
    ```dotenv
    MADAR_REP_SERVER_URL=http://localhost:3000
-   MADAR_REP_LIVE_RELOAD=true
+   # Do not set MADAR_REP_LIVE_RELOAD in .env; pass --live-reload to the build command below.
    ```
 
    `capacitor.config.ts` loads this value on each Capacitor sync, validates the URL, and allows cleartext only for `localhost`. `localhost` on Android means the Android device itself, so keep the device attached and run this from a terminal with Android platform-tools:
@@ -33,8 +33,8 @@ This packages the existing field-representative UI in a Capacitor Android shell.
 2. Start the MADAR API on port 3000, then build/synchronize and create the debug APK:
 
    ```powershell
-   npm run android:sync
-   npm run android:debug
+   npm run android:sync -- --live-reload
+   npm run android:debug -- --live-reload
    ```
 
    The build script runs Vite and Capacitor via the active Node executable, including on Windows. `android:sync` builds `client/dist` for the local Express server and `public/rep` for the Android package, then copies the latest web assets/plugins into `android/`. `android:debug` repeats that sync, invokes Gradle's wrapper, and atomically copies the resulting debug APK to `madar-v2/madar-rep.apk`. The generated APK is ignored by Git.
@@ -58,7 +58,7 @@ keyPassword=<key password>
 
 Then increment `versionCode` in `android/app/build.gradle` for every update and run `npm run android:release`. The script refuses to launch Gradle if `android/key.properties` is absent; Gradle requires non-empty signing properties and an existing keystore, and validates the credentials during signing. The release APK is written to the ignored `madar-rep-release.apk`. The Settings → System screen reports whether the current download is a signed release or a fallback/test artifact, and its APK download button uses `/download/apk`.
 
-Android APKs bundle the UI by default (debug and release): the WebView never navigates to `localhost` or a remote UI URL. The default API host is `https://carlos-pc.tail852ef0.ts.net`; set `MADAR_REP_SERVER_URL` in `.env` to override it before building. Capacitor embeds the host as the API base URL and Android WorkManager uses the same value. Capacitor's native HTTP/cookie bridges carry foreground requests and uploads. The server allows the fixed Android WebView origin `https://localhost`; its session cookie is `Secure; SameSite=None` only for that origin and remains `SameSite=Strict` elsewhere. `MADAR_REP_LIVE_RELOAD=true` is the only opt-in that makes the WebView navigate to the configured server URL; use it only for local development with `adb reverse`.
+Android APKs bundle the UI by default (debug and release): the WebView never navigates to `localhost` or a remote UI URL. The default API host is `https://carlos-pc.tail852ef0.ts.net`; set `MADAR_REP_SERVER_URL` in `.env` to override it before building. Capacitor embeds the host as the API base URL and Android WorkManager uses the same value. Capacitor's native HTTP/cookie bridges carry foreground requests and uploads. The server allows the fixed Android WebView origin `https://localhost`; its session cookie is `Secure; SameSite=None` only for that origin and remains `SameSite=Strict` elsewhere. Normal Android build scripts forcibly disable live reload even if an old environment variable is present. Only passing `--live-reload` to `android:sync` or `android:debug` enables live reload; use it only for local development with `adb reverse`.
 
 ## Package identity, storage isolation, and compatibility
 
@@ -66,7 +66,7 @@ Android APKs bundle the UI by default (debug and release): the WebView never nav
 - Camera sharing is restricted to this app's `Pictures/` external-files directory and its private cache. It does not expose the entire device external-storage tree. The manifest disables Android backup (`allowBackup=false`); native SQLite, visit photos, and encrypted session preferences use app-private storage.
 - Changing from the previous ID `com.madar.rep` to `com.madar.rep.app` intentionally creates a separate Android app identity. It can be installed beside the old app without package/provider collision, but it is **not** an in-place update: Android will not transfer the old app's private database, preferences, IndexedDB, or pending files. Keep the old app installed until any needed data has been synchronized or otherwise handled. Updates to the new package require both a monotonically increasing `versionCode` and the same release signing certificate.
 
-Debug and release builds open the packaged UI offline; login, server synchronization, and uploads still require the configured MADAR API. Only explicit `MADAR_REP_LIVE_RELOAD=true` development uses `adb reverse` and cleartext localhost. Normal Android builds require HTTPS and reject localhost configuration. An authenticated Admin or representative can download the latest available APK from `/download/apk`; release artifacts take precedence, with the existing debug APK retained as a clearly identified fallback.
+Debug and release builds open the packaged UI offline; login, server synchronization, and uploads still require the configured MADAR API. Only an explicit `--live-reload` build command uses `adb reverse` and cleartext localhost. Normal Android builds require HTTPS and reject localhost configuration. An authenticated Admin or representative can download the latest available APK from `/download/apk`; release artifacts take precedence, with the existing debug APK retained as a clearly identified fallback.
 
 ## Later Cloudflare Tunnel configuration
 
