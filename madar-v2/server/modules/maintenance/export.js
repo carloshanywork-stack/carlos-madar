@@ -41,12 +41,23 @@ const PPTX_EXPORT_SOCKET_TIMEOUT_MS = 7 * 60 * 1000;
 const PPTX_IMAGE_MAX_DIMENSION = 680;
 const PPTX_IMAGE_JPEG_QUALITY = 70;
 const exportProgressMap = new Map();
+const completedReportsMap = new Map();
+
+function pruneExpiredCompletedExports(now = Date.now()) {
+  for (const [exportId, report] of completedReportsMap) {
+    if (report.expiresAt && report.expiresAt <= now) completedReportsMap.delete(exportId);
+  }
+}
 
 function pruneExpiredExportProgress(now = Date.now()) {
   for (const [exportId, progress] of exportProgressMap) {
     if (progress.expiresAt && progress.expiresAt <= now) exportProgressMap.delete(exportId);
   }
+  pruneExpiredCompletedExports(now);
 }
+
+const exportCacheCleanupTimer = setInterval(() => pruneExpiredExportProgress(), 60_000);
+exportCacheCleanupTimer.unref?.();
 
 function storeExportProgress(exportId, progress, { completed = false } = {}) {
   if (!exportId) return;
@@ -65,6 +76,26 @@ export function getExportProgress(exportId) {
   if (!progress) return null;
   const { expiresAt, ...publicProgress } = progress;
   return publicProgress;
+}
+
+export function storeCompletedExport(exportId, report) {
+  if (typeof exportId !== 'string' || !exportId || !report) return;
+  const now = Date.now();
+  pruneExpiredExportProgress(now);
+  completedReportsMap.set(exportId, {
+    ...report,
+    expiresAt: now + EXPORT_PROGRESS_TTL_MS,
+  });
+}
+
+export function getCompletedExportReport(exportId) {
+  if (typeof exportId !== 'string' || !exportId) return null;
+  const now = Date.now();
+  pruneExpiredExportProgress(now);
+  const report = completedReportsMap.get(exportId);
+  if (!report) return null;
+  const { expiresAt, ...completedReport } = report;
+  return completedReport;
 }
 
 async function loadImage(storedPath, { ensurePortrait = false } = {}) {
@@ -129,12 +160,11 @@ async function loadFixedReportLogo() {
 }
 
 async function loadCardImages(paths) {
-  const images = [];
-  for (const path of paths.slice(0, 4)) {
-    const image = await loadImage(path, { ensurePortrait: true });
-    if (image) images.push(image);
-  }
-  return images;
+  const topPaths = paths.slice(0, 4);
+  const results = await Promise.all(
+    topPaths.map((path) => loadImage(path, { ensurePortrait: true })),
+  );
+  return results.filter(Boolean);
 }
 
 async function loadClientLogo(order) {
@@ -566,7 +596,7 @@ function pptxDocument(title, subject) {
   return pptx;
 }
 
-function downloadReport(res, report) {
+export function downloadReport(res, report) {
   const fallbackFilename = report.filename.replace(/[^A-Za-z0-9._-]/g, '-');
   res.set({
     'Content-Type': report.contentType,
@@ -1046,10 +1076,68 @@ export async function exportMaintenancePptx(req, res, database = defaultDatabase
       return cleaned ? cleaned.split(',').map((id) => id.trim()) : [];
     });
   }
-  for (const key of ['reasonId', 'area', 'groupBy', 'showReasonFooter', 'exportId', 'useFixedLogoOnCover']) {
+  for (const key of ['reasonId', 'area', 'groupBy', 'showReasonFooter', 'exportId', 'useFixedLogoOnCover', 'mode']) {
     if (query[key] !== undefined) input[key] = query[key];
   }
   if (input.orderIds === undefined) input.orderIds = [];
+  const mode = optionalText(input.mode, 'mode', { maxLength: 16 }) ?? 'sync';
+  delete input.mode;
+  if (!['sync', 'async'].includes(mode)) throw new HttpError(400, 'mode must be sync or async.');
+
+  if (mode === 'async') {
+    const exportId = optionalText(input.exportId, 'exportId', { maxLength: 128 });
+    if (!exportId) throw new HttpError(400, 'exportId is required for asynchronous PowerPoint exports.');
+    if (getExportProgress(exportId)?.active || getCompletedExportReport(exportId)) {
+      throw new HttpError(409, 'This exportId is already being used; create a new export request.');
+    }
+    input.exportId = exportId;
+    storeExportProgress(exportId, {
+      active: true,
+      total: 0,
+      current: 0,
+      percent: 0,
+      stage: 'جارٍ بدء تجهيز التقرير في الخلفية...',
+      machineName: null,
+      machineNameAr: null,
+      machineNameEn: null,
+      machineCode: null,
+      area: null,
+      estimatedSeconds: null,
+      speedSecPerMachine: null,
+    });
+
+    setImmediate(async () => {
+      try {
+        const report = await buildMaintenancePptxExport(input, database);
+        storeCompletedExport(exportId, report);
+        const completedProgress = getExportProgress(exportId) ?? {};
+        storeExportProgress(exportId, {
+          ...completedProgress,
+          active: false,
+          percent: 100,
+          stage: 'اكتمل إنشاء ملف PowerPoint.',
+          ready: true,
+          downloadUrl: `/api/maintenance/export/pptx/download/${encodeURIComponent(exportId)}`,
+        }, { completed: true });
+      } catch (error) {
+        const currentProgress = getExportProgress(exportId) ?? {};
+        const message = error instanceof HttpError && error.status < 500
+          ? error.message
+          : 'تعذر إنشاء ملف PowerPoint.';
+        storeExportProgress(exportId, {
+          ...currentProgress,
+          active: false,
+          stage: 'تعذر إنشاء ملف PowerPoint.',
+          error: message,
+        }, { completed: true });
+      }
+    });
+
+    res.set('Cache-Control', 'private, no-store');
+    res.status(202).json({ ok: true, status: 'processing', exportId });
+    return;
+  }
+
   let report;
   try {
     report = await buildMaintenancePptxExport(input, database);

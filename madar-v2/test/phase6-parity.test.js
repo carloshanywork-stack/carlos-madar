@@ -809,6 +809,101 @@ test('V2 parity operations cover imports, area maintenance, HR, exports, users, 
   assert.equal(indexFixtureCards.length, 17);
 });
 
+test('asynchronous maintenance PPTX exports return 202 and expose the completed report for download', async () => {
+  const area = 'منطقة التصدير غير المتزامن';
+  let machineId = null;
+  let orderId = null;
+  try {
+    const client = await request('/api/clients', json('POST', { name: 'Async PPTX Test Client' }));
+    assert.equal(client.response.status, 201, JSON.stringify(client.body));
+    const machine = await request('/api/maintenance/machines', json('POST', {
+      code: 'ASYNC-PPTX-01',
+      name_ar: 'ماكينة التصدير غير المتزامن',
+      name_en: 'Async Export Machine',
+      area,
+    }));
+    assert.equal(machine.response.status, 201, JSON.stringify(machine.body));
+    machineId = machine.body.id;
+    const order = await request('/api/maintenance/orders', json('POST', {
+      clientId: client.body.id,
+      areas: [area],
+      employeeIds: [],
+      autoPopulateAreaMachines: true,
+    }));
+    assert.equal(order.response.status, 201, JSON.stringify(order.body));
+    orderId = order.body.id;
+    const card = order.body.cards.find((entry) => entry.machine_id === machineId);
+    assert.ok(card);
+    const photo = await writePptxPhotoFixture('Maintenance/Export Fixtures/async-export.jpg', '#3a86ff');
+    db.prepare(`UPDATE maintenance_cards
+      SET status = 'completed', before_photos_json = ?, after_photos_json = '[]' WHERE id = ?`)
+      .run(JSON.stringify([photo.path]), card.id);
+    db.prepare(`UPDATE maintenance_orders
+      SET status = 'archived', archived_at = '2031-04-07 12:00:00', updated_at = '2031-04-07 12:00:00'
+      WHERE id = ?`).run(orderId);
+
+    const exportId = 'phase6-async-pptx-export';
+    const accepted = await request('/api/maintenance/export/pptx', json('POST', {
+      orderIds: [orderId], mode: 'async', exportId,
+    }));
+    assert.equal(accepted.response.status, 202, JSON.stringify(accepted.body));
+    assert.deepEqual(accepted.body, { ok: true, status: 'processing', exportId });
+
+    const deadline = Date.now() + 15_000;
+    let progress = null;
+    while (Date.now() < deadline) {
+      const result = await request(`/api/maintenance/export/pptx/progress?exportId=${encodeURIComponent(exportId)}`);
+      assert.equal(result.response.status, 200, JSON.stringify(result.body));
+      progress = result.body;
+      if (progress?.ready || progress?.error) break;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    assert.ok(progress?.ready, progress?.error || 'the async PPTX report should reach ready state');
+    assert.equal(progress.active, false);
+    assert.equal(progress.percent, 100);
+    assert.equal(progress.total, 1);
+    assert.equal(progress.current, 1);
+    assert.equal(progress.downloadUrl, `/api/maintenance/export/pptx/download/${encodeURIComponent(exportId)}`);
+
+    const downloaded = await request(progress.downloadUrl);
+    assert.equal(downloaded.response.status, 200);
+    assert.match(downloaded.response.headers.get('content-type'), /presentationml\.presentation/);
+    assert.match(downloaded.response.headers.get('content-disposition'), /filename\*=UTF-8''Madar_Report_/);
+    assert.equal(downloaded.body.subarray(0, 2).toString(), 'PK');
+
+    const expiredOrMissing = await request('/api/maintenance/export/pptx/download/not-a-real-export');
+    assert.equal(expiredOrMissing.response.status, 404);
+    const reusedId = await request('/api/maintenance/export/pptx', json('POST', {
+      orderIds: [orderId], mode: 'async', exportId,
+    }));
+    assert.equal(reusedId.response.status, 409);
+
+    const missingId = await request('/api/maintenance/export/pptx', json('POST', {
+      orderIds: [orderId], mode: 'async',
+    }));
+    assert.equal(missingId.response.status, 400);
+    const failedExportId = 'phase6-async-pptx-error';
+    const failedExportAccepted = await request('/api/maintenance/export/pptx', json('POST', {
+      orderIds: [orderId], groupBy: 'invalid', mode: 'async', exportId: failedExportId,
+    }));
+    assert.equal(failedExportAccepted.response.status, 202);
+    let failureProgress = null;
+    const failureDeadline = Date.now() + 5_000;
+    while (Date.now() < failureDeadline) {
+      const result = await request(`/api/maintenance/export/pptx/progress?exportId=${encodeURIComponent(failedExportId)}`);
+      failureProgress = result.body;
+      if (failureProgress?.error) break;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    assert.equal(failureProgress?.error, 'groupBy must be reason, area, or none.');
+    assert.equal(failureProgress.active, false);
+  } finally {
+    if (orderId) db.prepare('UPDATE maintenance_orders SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?').run(orderId);
+    if (machineId) db.prepare('UPDATE machines SET active = 0, deleted_at = CURRENT_TIMESTAMP WHERE id = ?').run(machineId);
+    rmSync(join(storageRoot, 'Areas', area), { recursive: true, force: true });
+  }
+});
+
 test('maintenance reasons support audited soft deactivation and area analysis exports filtered Excel records', async () => {
   const postRestoreLogin = await fetch(`${baseUrl}/api/auth/login`, {
     method: 'POST', headers: { 'content-type': 'application/json' },

@@ -7,7 +7,13 @@ import { requestActorId } from '../actor.js';
 import { publishOperationsEvent } from '../operations-events.js';
 import { getMaintenanceThumbnail } from './thumbnails.js';
 import { ensureStorageDirectory, listStorageDirectories, removeStorageFile } from '../storage.js';
-import { exportMaintenancePptx, exportMaintenanceReport, getExportProgress } from './export.js';
+import {
+  downloadReport,
+  exportMaintenancePptx,
+  exportMaintenanceReport,
+  getCompletedExportReport,
+  getExportProgress,
+} from './export.js';
 import { buildMaintenanceAnalysisWorkbook, getMaintenanceAreaAnalysis } from './analysis.js';
 import { buildAreaMaintenanceNotesWorkbook, getAreaMaintenanceNotes } from './area-notes.js';
 import {
@@ -435,6 +441,14 @@ router.get('/export/pptx/progress', asyncHandler(async (req, res) => {
   }
   res.set('Cache-Control', 'private, no-store');
   res.json(getExportProgress(exportId.trim()));
+}));
+
+router.get('/export/pptx/download/:exportId', asyncHandler(async (req, res) => {
+  const report = getCompletedExportReport(req.params.exportId);
+  if (!report) {
+    throw new HttpError(404, 'انتهت صلاحية الملف أو لم يتم العثور عليه. يرجى إعادة محاولة التصدير.');
+  }
+  downloadReport(res, report);
 }));
 
 router.get('/export/pptx', asyncHandler(async (req, res) => {

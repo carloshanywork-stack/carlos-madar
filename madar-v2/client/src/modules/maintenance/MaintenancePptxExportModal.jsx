@@ -5,92 +5,20 @@ import { Select } from '../../components/ui/Field.jsx';
 import LoadingState from '../../components/ui/LoadingState.jsx';
 import Modal from '../../components/ui/Modal.jsx';
 import { errorMessage } from '../../lib/format.js';
+import { api, apiUrl } from '../../lib/api.js';
 import { useApi } from '../../lib/useApi.js';
 
 function statusLabel(status) {
   return ({ in_progress: 'قيد التنفيذ', review: 'بانتظار المراجعة', archived: 'مؤرشف' })[status] ?? status;
 }
 
-function downloadFile(blob, filename) {
-  const objectUrl = window.URL.createObjectURL(blob);
+function downloadExportUrl(downloadUrl) {
   const anchor = document.createElement('a');
-  anchor.href = objectUrl;
-  anchor.download = filename;
+  anchor.href = apiUrl(downloadUrl);
+  anchor.rel = 'noopener';
   document.body.append(anchor);
   anchor.click();
   anchor.remove();
-  window.setTimeout(() => window.URL.revokeObjectURL(objectUrl), 1000);
-}
-
-function filenameFromDisposition(header, fallback) {
-  const encoded = /filename\*=UTF-8''([^;]+)/i.exec(header ?? '')?.[1];
-  if (encoded) {
-    try { return decodeURIComponent(encoded); } catch { /* use the regular filename below */ }
-  }
-  return /filename="?([^";]+)"?/i.exec(header ?? '')?.[1] ?? fallback;
-}
-
-async function responseErrorMessage(response, status) {
-  let text = '';
-  try {
-    if (typeof response?.text === 'function') text = await response.text();
-    else if (response instanceof ArrayBuffer) text = new TextDecoder().decode(response);
-  } catch {
-    // Use the status-specific fallback if the response body could not be read.
-  }
-  const fallback = `تعذر إنشاء العرض (${status}).`;
-  try {
-    const payload = JSON.parse(text);
-    return payload.error || payload.message || fallback;
-  } catch {
-    return text.trim() || fallback;
-  }
-}
-
-function requestPptxExport(payload, { onDownloadStart, onDownloadProgress }) {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    let downloadStarted = false;
-    const markDownloadStarted = () => {
-      if (downloadStarted) return;
-      downloadStarted = true;
-      onDownloadStart?.();
-    };
-    const query = new URLSearchParams();
-    for (const orderId of payload.orderIds ?? []) query.append('orderIds', String(orderId));
-    if (payload.reasonId !== null && payload.reasonId !== undefined) query.set('reasonId', String(payload.reasonId));
-    const queryString = query.toString();
-    xhr.open('POST', `/api/maintenance/export/pptx${queryString ? `?${queryString}` : ''}`);
-    xhr.timeout = 360_000;
-    xhr.withCredentials = true;
-    xhr.responseType = 'blob';
-    xhr.setRequestHeader('Content-Type', 'application/json');
-    xhr.addEventListener('readystatechange', () => {
-      if (xhr.readyState === XMLHttpRequest.HEADERS_RECEIVED) markDownloadStarted();
-    });
-    xhr.addEventListener('progress', (event) => {
-      markDownloadStarted();
-      onDownloadProgress?.(event.lengthComputable ? Math.round((event.loaded / event.total) * 100) : null);
-    });
-    xhr.addEventListener('error', async () => {
-      const message = await responseErrorMessage(xhr.response, xhr.status);
-      reject(new Error(xhr.status ? message : 'تعذر الاتصال بالخادم أثناء إنشاء العرض. تحقق من الشبكة أو إعدادات الوصول ثم أعد المحاولة.'));
-    });
-    xhr.addEventListener('abort', () => reject(new Error('تم إلغاء إنشاء العرض.')));
-    xhr.addEventListener('timeout', () => reject(new Error('استغرق إنشاء وتنزيل العرض أكثر من 6 دقائق؛ قلّل نطاق الأرشيف ثم أعد المحاولة.')));
-    xhr.addEventListener('load', async () => {
-      markDownloadStarted();
-      if (xhr.status !== 200) {
-        const message = await responseErrorMessage(xhr.response, xhr.status);
-        reject(new Error(message));
-        return;
-      }
-      const fallback = 'Madar_Report_Maintenance.pptx';
-      const filename = filenameFromDisposition(xhr.getResponseHeader('Content-Disposition'), fallback);
-      resolve({ blob: xhr.response, filename });
-    });
-    xhr.send(JSON.stringify(payload));
-  });
 }
 
 function createExportId() {
@@ -176,18 +104,25 @@ export default function MaintenancePptxExportModal({
         });
         if (!response.ok) return;
         const progress = await response.json();
-        if (progress && !controller.signal.aborted) {
-          setLiveProgress((current) => current?.downloadStarted
-            ? {
-              ...current,
-              active: true,
-              percent: Math.max(current.percent ?? 94, 94),
-              stage: 'جارٍ تنزيل ملف PowerPoint...',
-            }
-            : progress);
+        if (!progress || controller.signal.aborted) return;
+        if (progress.error) {
+          stopProgressPolling();
+          setLiveProgress({ ...progress, active: false });
+          setError(progress.error);
+          setExporting(false);
+          return;
         }
+        if (progress.ready && progress.downloadUrl) {
+          stopProgressPolling();
+          setLiveProgress({ active: false, percent: 100, stage: 'اكتمل التجهيز، جارٍ التنزيل...' });
+          downloadExportUrl(progress.downloadUrl);
+          setExporting(false);
+          onClose?.();
+          return;
+        }
+        setLiveProgress(progress);
       } catch {
-        // The export request owns error reporting; keep the latest progress during transient poll failures.
+        // Keep polling through transient network failures; the start request reports submission errors.
       } finally {
         requestPending = false;
       }
@@ -228,44 +163,22 @@ export default function MaintenancePptxExportModal({
     setLiveProgress({ active: true, total: 0, current: 0, percent: 0, stage: 'جارٍ بدء تجهيز التقرير...' });
     startProgressPolling(exportId);
     try {
-      const result = await requestPptxExport({
+      const result = await api.post('/api/maintenance/export/pptx', {
         orderIds,
         reasonId: reasonId ? Number(reasonId) : null,
         area: area || null,
         groupBy,
         showReasonFooter,
         useFixedLogoOnCover,
+        mode: 'async',
         exportId,
-      }, {
-        onDownloadStart: () => {
-          setLiveProgress((current) => ({
-            ...current,
-            active: true,
-            downloadStarted: true,
-            percent: Math.max(current?.percent ?? 0, 94),
-            stage: 'جارٍ تنزيل ملف PowerPoint...',
-          }));
-        },
-        onDownloadProgress: (downloadPercent) => {
-          if (downloadPercent === null) return;
-          const percent = 94 + Math.round((downloadPercent / 100) * 6);
-          setLiveProgress((current) => ({
-            ...current,
-            active: true,
-            downloadStarted: true,
-            percent: Math.min(100, percent),
-            stage: 'جارٍ تنزيل ملف PowerPoint...',
-          }));
-        },
       });
-      setLiveProgress((current) => ({ ...current, active: false, percent: 100, stage: 'اكتمل تنزيل ملف PowerPoint.' }));
-      downloadFile(result.blob, result.filename);
-      onClose?.();
+      if (result?.status !== 'processing' || result.exportId !== exportId) {
+        throw new Error('لم يؤكد الخادم بدء تجهيز ملف PowerPoint.');
+      }
     } catch (caught) {
       stopProgressPolling();
       setError(errorMessage(caught));
-    } finally {
-      stopProgressPolling();
       setExporting(false);
     }
   }
