@@ -163,9 +163,9 @@ export async function createStaffMember(input, actorId = null, database = db) {
   if (value.classification === 'system' && !SYSTEM_ROLES.includes(role)) {
     throw new HttpError(400, `System role must be one of: ${SYSTEM_ROLES.join(', ')}.`);
   }
-  const regions = value.assignedRegions ?? [];
+  let regions = value.assignedRegions ?? [];
   if (role !== 'rep' && regions.length) throw new HttpError(400, 'Assigned regions are only valid for representatives.');
-  if (role === 'rep' && !regions.length) throw new HttpError(400, 'Assign at least one operating region to the representative.');
+  if (role === 'rep' && !regions.length) regions = ['*'];
   const active = value.active ?? 1;
   const passwordHash = withLogin ? await bcrypt.hash(value.password, 12) : null;
   try {
@@ -259,9 +259,7 @@ export async function updateStaffMember(employeeIdValue, input, actorId = null, 
   if (requestedRole !== null && !['rep', ...SYSTEM_ROLES].includes(requestedRole)) throw new HttpError(400, 'role is not supported.');
   let regions = changes.assignedRegions ?? regionsFor(current);
   if (requestedRole !== 'rep') regions = [];
-  if ((requestedRole === 'rep' || enablingLogin && changes.classification === 'representative') && !regions.length) {
-    throw new HttpError(400, 'Assign at least one operating region to the representative.');
-  }
+  else if (!regions.length) regions = ['*'];
   const passwordHash = changes.password === undefined ? null : await bcrypt.hash(changes.password, 12);
   const next = {
     name: changes.name ?? current.name,
@@ -284,7 +282,6 @@ export async function updateStaffMember(employeeIdValue, input, actorId = null, 
         revokeUser(userId, actorId, database);
       } else if (enablingLogin) {
         if (!requestedRole) throw new HttpError(400, 'Choose a system role to enable login.');
-        if (requestedRole === 'rep' && !regions.length) throw new HttpError(400, 'Assign at least one operating region to the representative.');
         if (!changes.username || !passwordHash) {
           throw new HttpError(400, 'Enabling login requires a username and a password of at least 4 characters.');
         }

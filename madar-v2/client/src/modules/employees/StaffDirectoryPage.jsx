@@ -7,11 +7,12 @@ import Alert from '../../components/ui/Alert.jsx';
 import Badge from '../../components/ui/Badge.jsx';
 import Button from '../../components/ui/Button.jsx';
 import EmptyState from '../../components/ui/EmptyState.jsx';
-import { Input, Select, Textarea } from '../../components/ui/Field.jsx';
+import { Input, Select } from '../../components/ui/Field.jsx';
 import LoadingState from '../../components/ui/LoadingState.jsx';
 import Modal from '../../components/ui/Modal.jsx';
 import PageHeader from '../../components/ui/PageHeader.jsx';
 import Toast from '../../components/ui/Toast.jsx';
+import { regionAccessLabel } from '../../lib/regions.js';
 import './staff-directory.css';
 
 const filters = [
@@ -101,9 +102,7 @@ export default function StaffDirectoryPage() {
         payload.username = form.get('username') || undefined;
         if (form.get('password')) payload.password = form.get('password');
         payload.role = classification === 'representative' ? 'rep' : form.get('role');
-        payload.assignedRegions = classification === 'representative'
-          ? String(form.get('assigned_regions') ?? '').split(/[،,]/).map((item) => item.trim()).filter(Boolean)
-          : [];
+        payload.assignedRegions = classification === 'representative' ? ['*'] : [];
       } else if (editing?.can_login) {
         payload.enableLogin = false;
       }
@@ -157,7 +156,7 @@ export default function StaffDirectoryPage() {
               <td>{member.phone || '—'}</td>
               <td>{member.national_id || '—'}<br /><small className="madar-small madar-muted">{member.hire_date || 'تاريخ التعيين غير مسجل'}</small></td>
               <td>{formatMoney(member.monthly_salary_cents)}</td>
-              <td>{member.can_login ? <><strong>{member.username}</strong><br /><small className="madar-small madar-muted">{roleLabel(member.role)}{member.role === 'rep' && member.assignedRegions.length ? ` · ${member.assignedRegions.join('، ')}` : ''}</small></> : <span className="madar-muted">بدون بيانات دخول</span>}</td>
+              <td>{member.can_login ? <><strong>{member.username}</strong><br /><small className="madar-small madar-muted">{roleLabel(member.role)}{member.role === 'rep' ? ` · ${regionAccessLabel(member.assignedRegions)}` : ''}</small></> : <span className="madar-muted">بدون بيانات دخول</span>}</td>
               <td><Badge tone={member.active ? 'success' : 'neutral'}>{member.active ? 'نشط' : 'موقوف'}</Badge>{member.can_login && !member.login_active && <><br /><Badge tone="danger">الدخول معطّل</Badge></>}</td>
               <td><div className="madar-inline-wrap"><Button size="small" variant="ghost" onClick={() => openEdit(member)}>تعديل</Button><Button size="small" variant="ghost" onClick={() => void toggleActive(member)}>{member.active ? 'إيقاف' : 'تفعيل'}</Button></div></td>
             </tr>)}</tbody>
@@ -190,7 +189,15 @@ export default function StaffDirectoryPage() {
               {canLogin && <>
                 <Input label="اسم المستخدم *" name="username" required={!editing?.can_login} defaultValue={editing?.username ?? ''} minLength={3} maxLength={64} />
                 <Input label={editing?.can_login ? 'كلمة مرور جديدة (اختياري)' : 'كلمة المرور * (4 خانات على الأقل)'} name="password" type="password" required={!editing?.can_login} minLength={4} maxLength={72} autoComplete="new-password" />
-                {classification === 'representative' ? <Textarea label="مناطق المسار * (افصل بينها بفاصلة)" name="assigned_regions" required defaultValue={editing?.assignedRegions?.join('، ') ?? ''} maxLength={2000} rows={2} /> : <Select label="الدور *" name="role" required defaultValue={editing?.role && editing.role !== 'rep' ? editing.role : 'operations'}>{systemRoles.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</Select>}
+                {classification === 'representative' ? (
+                  <div className="madar-callout-info" style={{ padding: '10px 14px', borderRadius: '8px', background: 'rgba(56, 189, 248, 0.08)', border: '1px solid rgba(56, 189, 248, 0.2)', color: '#38bdf8', fontSize: '13px', marginTop: '6px' }}>
+                    ✓ <strong>تغطية شاملة:</strong> المندوب الميداني لديه صلاحية وصول تلقائية لكافة المناطق الميدانية المسندة لأوامر التشغيل.
+                  </div>
+                ) : (
+                  <Select label="الدور *" name="role" required defaultValue={editing?.role && editing.role !== 'rep' ? editing.role : 'operations'}>
+                    {systemRoles.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+                  </Select>
+                )}
               </>}
             </section>
           </div>

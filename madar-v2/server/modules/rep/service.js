@@ -26,6 +26,11 @@ function regionKey(value) {
   return String(value ?? '').normalize('NFKC').trim().toLocaleLowerCase('ar');
 }
 
+function hasUniversalAccess(assignedRegions) {
+  if (!Array.isArray(assignedRegions) || assignedRegions.length === 0) return true;
+  return assignedRegions.some((region) => ['*', 'all', 'الكل'].includes(regionKey(region)));
+}
+
 function parsePhotoList(value) {
   try {
     const parsed = JSON.parse(value ?? '[]');
@@ -161,14 +166,8 @@ function getBusinessDayRange(database, now = new Date()) {
 
 export function getRepTodayRoute(rep, database = db) {
   const assignedRegions = Array.isArray(rep?.assignedRegions) ? rep.assignedRegions : [];
+  const isUniversal = hasUniversalAccess(rep?.assignedRegions);
   const assignedByKey = new Map(assignedRegions.map((name) => [regionKey(name), name]));
-  if (!assignedByKey.size) {
-    return {
-      success: true,
-      summary: { totalMachines: 0, completed: 0, pending: 0, pendingReview: 0, progress: 0 },
-      regions: [],
-    };
-  }
 
   const { start: dayStart, end: dayEnd } = getBusinessDayRange(database);
   const cards = database.prepare(`
@@ -225,8 +224,12 @@ export function getRepTodayRoute(rep, database = db) {
   let completed = 0;
   let pendingReview = 0;
   for (const row of cards) {
-    const key = regionKey(row.region_name);
-    if (!assignedByKey.has(key)) continue;
+    const machineRegionKey = regionKey(row.region_name);
+    if (!isUniversal && !assignedByKey.has(machineRegionKey)) continue;
+    const regionName = isUniversal
+      ? (row.area_name || row.region_name || 'المنطقة العامة')
+      : assignedByKey.get(machineRegionKey);
+    const groupKey = regionKey(regionName) || regionKey('المنطقة العامة');
     const beforePhotos = parsePhotoList(row.before_photos_json);
     const afterPhotos = parsePhotoList(row.after_photos_json);
     const latestVisit = reviewByCard.get(Number(row.card_id));
@@ -237,9 +240,8 @@ export function getRepTodayRoute(rep, database = db) {
       // New visits use the supervisor-approved review above, where After photos are optional.
       : uploadedToday.has(Number(row.card_id)) && beforePhotos.length > 0 && afterPhotos.length > 0;
     const isSubmitted = Boolean(latestVisit && latestVisit.review_status !== 'reshoot');
-    const regionName = assignedByKey.get(key);
-    if (!regionsByKey.has(key)) regionsByKey.set(key, { regionName, machines: [] });
-    regionsByKey.get(key).machines.push({
+    if (!regionsByKey.has(groupKey)) regionsByKey.set(groupKey, { regionName, machines: [] });
+    regionsByKey.get(groupKey).machines.push({
       machineCode: row.machine_code,
       machineId: Number(row.machine_id),
       arabicName: row.machine_name_ar,
@@ -247,7 +249,7 @@ export function getRepTodayRoute(rep, database = db) {
       workOrderCode: row.order_code,
       clientName: row.client_name,
       address: row.client_address ?? '',
-      areaName: row.area_name || row.region_name,
+      areaName: row.area_name || row.region_name || 'المنطقة العامة',
       isCompleted,
       isSubmitted,
       reviewStatus: latestVisit?.review_status ?? null,
@@ -460,9 +462,11 @@ function findRepVisitCard(rep, visit, database) {
   `).get(card.order_id, rep.id)) {
     throw new HttpError(403, 'This work order is not assigned to your account.');
   }
-  const assigned = new Set((rep.assignedRegions ?? []).map(regionKey));
-  if (!assigned.has(regionKey(card.machine_area))) {
-    throw new HttpError(403, 'This machine is outside your assigned regions.');
+  if (!hasUniversalAccess(rep.assignedRegions)) {
+    const assigned = new Set(rep.assignedRegions.map(regionKey));
+    if (!assigned.has(regionKey(card.machine_area))) {
+      throw new HttpError(403, 'This machine is outside your assigned regions.');
+    }
   }
   const orderAreas = String(card.order_area ?? '').split(/[،,]/).map(regionKey).filter(Boolean);
   if (orderAreas.length && !orderAreas.includes(regionKey(card.machine_area))) {
@@ -518,9 +522,11 @@ function findAssignedRepMachine(rep, machineId, cardId, database) {
     .get(machine.order_id, rep.id)) {
     throw new HttpError(403, 'This work order is not assigned to your account.');
   }
-  const assigned = new Set((rep.assignedRegions ?? []).map(regionKey));
-  if (!assigned.has(regionKey(machine.machine_area))) {
-    throw new HttpError(403, 'This machine is outside your assigned regions.');
+  if (!hasUniversalAccess(rep.assignedRegions)) {
+    const assigned = new Set(rep.assignedRegions.map(regionKey));
+    if (!assigned.has(regionKey(machine.machine_area))) {
+      throw new HttpError(403, 'This machine is outside your assigned regions.');
+    }
   }
   const orderAreas = String(machine.order_area ?? '').split(/[،,]/).map(regionKey).filter(Boolean);
   if (orderAreas.length && !orderAreas.includes(regionKey(machine.machine_area))) {

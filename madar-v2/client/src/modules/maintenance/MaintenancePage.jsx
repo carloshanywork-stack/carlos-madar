@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { api } from '../../lib/api.js';
+import { regionAccessLabel } from '../../lib/regions.js';
 import { errorMessage, formatDate } from '../../lib/format.js';
 import { useApi } from '../../lib/useApi.js';
 import { useToast } from '../../lib/useToast.js';
@@ -215,7 +216,7 @@ export default function MaintenancePage({ isAdmin = false }) {
                           ? current.filter((userId) => userId !== Number(rep.id))
                           : [...current, Number(rep.id)])} />
                       <span className="madar-checkbox-title">{rep.full_name}</span>
-                      <small className="madar-field-hint">{rep.username} · {rep.assignedRegions?.join('، ') || 'لا توجد مناطق محددة'}</small>
+                      <small className="madar-field-hint">{rep.username} · {regionAccessLabel(rep.assignedRegions)}</small>
                     </label>;
                   })}
                 </div>

@@ -1,6 +1,6 @@
 {
   "../node_modules/@capacitor/app/dist/esm/web.js": {
-    "file": "assets/web-B__NUJd2.js",
+    "file": "assets/web-6-wfq9jZ.js",
     "name": "web",
     "src": "../node_modules/@capacitor/app/dist/esm/web.js",
     "isDynamicEntry": true,
@@ -13,13 +13,13 @@
     ]
   },
   "../node_modules/@capacitor/filesystem/dist/esm/web.js": {
-    "file": "assets/web-D13krCAG.js",
+    "file": "assets/web-CBWSASjX.js",
     "name": "web",
     "src": "../node_modules/@capacitor/filesystem/dist/esm/web.js",
     "isDynamicEntry": true,
     "imports": [
       "index.html",
-      "_RepApp-DzZX47xW.js",
+      "_RepApp-Dxk6zu9r.js",
       "_react-vendor-DGbYTHPG.js",
       "_react-dom-vendor-CtNGUtKY.js",
       "_scheduler-vendor-CoSDG3-6.js",
@@ -28,7 +28,7 @@
     ]
   },
   "../node_modules/@capacitor/geolocation/dist/esm/web.js": {
-    "file": "assets/web-C2CcEAgL.js",
+    "file": "assets/web-B1Qb6xeF.js",
     "name": "web",
     "src": "../node_modules/@capacitor/geolocation/dist/esm/web.js",
     "isDynamicEntry": true,
@@ -41,7 +41,7 @@
     ]
   },
   "../node_modules/@capacitor/network/dist/esm/web.js": {
-    "file": "assets/web-QjF7i7kb.js",
+    "file": "assets/web-Br3Tp9ll.js",
     "name": "web",
     "src": "../node_modules/@capacitor/network/dist/esm/web.js",
     "isDynamicEntry": true,
@@ -53,20 +53,20 @@
       "_router-vendor-CHc_B4Kd.js"
     ]
   },
-  "_Alert-CsJLdJym.js": {
-    "file": "assets/Alert-CsJLdJym.js",
+  "_Alert-CbFC2Ahn.js": {
+    "file": "assets/Alert-CbFC2Ahn.js",
     "name": "Alert",
     "imports": [
       "_react-vendor-DGbYTHPG.js",
       "index.html"
     ]
   },
-  "_Badge-PXhFulJE.js": {
-    "file": "assets/Badge-PXhFulJE.js",
+  "_Badge-CO32xP1r.js": {
+    "file": "assets/Badge-CO32xP1r.js",
     "name": "Badge",
     "imports": [
       "_react-vendor-DGbYTHPG.js",
-      "_Alert-CsJLdJym.js"
+      "_Alert-CbFC2Ahn.js"
     ]
   },
   "_Checkbox-CEYtWA8Z.js": {
@@ -76,28 +76,28 @@
       "_react-vendor-DGbYTHPG.js"
     ]
   },
-  "_EmployeeCheckboxList-DRBFnCN1.js": {
-    "file": "assets/EmployeeCheckboxList-DRBFnCN1.js",
+  "_EmployeeCheckboxList-Ugko-ydr.js": {
+    "file": "assets/EmployeeCheckboxList-Ugko-ydr.js",
     "name": "EmployeeCheckboxList",
     "imports": [
       "_react-vendor-DGbYTHPG.js",
       "index.html",
       "_Checkbox-CEYtWA8Z.js",
-      "_Alert-CsJLdJym.js"
+      "_Alert-CbFC2Ahn.js"
     ]
   },
-  "_MaintenancePptxExportModal-B4FsQRqE.js": {
-    "file": "assets/MaintenancePptxExportModal-B4FsQRqE.js",
+  "_MaintenancePptxExportModal-pPPJcEP2.js": {
+    "file": "assets/MaintenancePptxExportModal-pPPJcEP2.js",
     "name": "MaintenancePptxExportModal",
     "imports": [
       "_react-vendor-DGbYTHPG.js",
-      "_Alert-CsJLdJym.js",
+      "_Alert-CbFC2Ahn.js",
       "index.html",
-      "_Modal-C93U3Uhp.js"
+      "_Modal-B0shymAD.js"
     ]
   },
-  "_Modal-C93U3Uhp.js": {
-    "file": "assets/Modal-C93U3Uhp.js",
+  "_Modal-B0shymAD.js": {
+    "file": "assets/Modal-B0shymAD.js",
     "name": "Modal",
     "imports": [
       "_react-vendor-DGbYTHPG.js",
@@ -116,8 +116,8 @@
     "file": "assets/RepApp-DPMpdBAJ.css",
     "src": "_RepApp-DPMpdBAJ.css"
   },
-  "_RepApp-DzZX47xW.js": {
-    "file": "assets/RepApp-DzZX47xW.js",
+  "_RepApp-Dxk6zu9r.js": {
+    "file": "assets/RepApp-Dxk6zu9r.js",
     "name": "RepApp",
     "isDynamicEntry": true,
     "imports": [
@@ -144,8 +144,8 @@
       "_react-vendor-DGbYTHPG.js"
     ]
   },
-  "_Toast-DBxKM8Bo.js": {
-    "file": "assets/Toast-DBxKM8Bo.js",
+  "_Toast-DWVONmRV.js": {
+    "file": "assets/Toast-DWVONmRV.js",
     "name": "Toast",
     "imports": [
       "_react-vendor-DGbYTHPG.js",
@@ -168,6 +168,10 @@
     "file": "assets/react-vendor-DGbYTHPG.js",
     "name": "react-vendor"
   },
+  "_regions--NgafTtu.js": {
+    "file": "assets/regions--NgafTtu.js",
+    "name": "regions"
+  },
   "_router-vendor-CHc_B4Kd.js": {
     "file": "assets/router-vendor-CHc_B4Kd.js",
     "name": "router-vendor",
@@ -180,7 +184,7 @@
     "name": "scheduler-vendor"
   },
   "index.html": {
-    "file": "assets/index-BO1nk6I8.js",
+    "file": "assets/index-Pe-lh1M5.js",
     "name": "index",
     "src": "index.html",
     "isEntry": true,
@@ -191,7 +195,7 @@
       "_scheduler-vendor-CoSDG3-6.js"
     ],
     "dynamicImports": [
-      "_RepApp-DzZX47xW.js",
+      "_RepApp-Dxk6zu9r.js",
       "src/modules/supervisor/SupervisorRadarPage.jsx",
       "src/modules/dashboard/OverviewPage.jsx",
       "src/modules/clients/ClientsPage.jsx",
@@ -211,17 +215,17 @@
     ]
   },
   "src/modules/accounting/AccountingPage.jsx": {
-    "file": "assets/AccountingPage-B5N_FwD2.js",
+    "file": "assets/AccountingPage-CCNhNxka.js",
     "name": "AccountingPage",
     "src": "src/modules/accounting/AccountingPage.jsx",
     "isDynamicEntry": true,
     "imports": [
       "_react-vendor-DGbYTHPG.js",
       "index.html",
-      "_Alert-CsJLdJym.js",
-      "_Toast-DBxKM8Bo.js",
-      "_Badge-PXhFulJE.js",
-      "_Modal-C93U3Uhp.js",
+      "_Alert-CbFC2Ahn.js",
+      "_Toast-DWVONmRV.js",
+      "_Badge-CO32xP1r.js",
+      "_Modal-B0shymAD.js",
       "_Tabs-Cu-GGHV2.js",
       "_router-vendor-CHc_B4Kd.js",
       "_react-dom-vendor-CtNGUtKY.js",
@@ -232,66 +236,67 @@
     ]
   },
   "src/modules/archive/ArchivePage.jsx": {
-    "file": "assets/ArchivePage-BM5QUqXQ.js",
+    "file": "assets/ArchivePage-Dg7GGvvM.js",
     "name": "ArchivePage",
     "src": "src/modules/archive/ArchivePage.jsx",
     "isDynamicEntry": true,
     "imports": [
       "_react-vendor-DGbYTHPG.js",
       "index.html",
-      "_Alert-CsJLdJym.js",
-      "_Badge-PXhFulJE.js",
-      "_Modal-C93U3Uhp.js",
+      "_Alert-CbFC2Ahn.js",
+      "_Badge-CO32xP1r.js",
+      "_Modal-B0shymAD.js",
       "_Tabs-Cu-GGHV2.js",
-      "_MaintenancePptxExportModal-B4FsQRqE.js",
+      "_MaintenancePptxExportModal-pPPJcEP2.js",
       "_router-vendor-CHc_B4Kd.js",
       "_react-dom-vendor-CtNGUtKY.js",
       "_scheduler-vendor-CoSDG3-6.js"
     ]
   },
   "src/modules/clients/ClientsPage.jsx": {
-    "file": "assets/ClientsPage-BmelBDB1.js",
+    "file": "assets/ClientsPage-DUrGW-ba.js",
     "name": "ClientsPage",
     "src": "src/modules/clients/ClientsPage.jsx",
     "isDynamicEntry": true,
     "imports": [
       "_react-vendor-DGbYTHPG.js",
       "index.html",
-      "_Alert-CsJLdJym.js",
-      "_Toast-DBxKM8Bo.js",
-      "_Modal-C93U3Uhp.js",
+      "_Alert-CbFC2Ahn.js",
+      "_Toast-DWVONmRV.js",
+      "_Modal-B0shymAD.js",
       "_react-dom-vendor-CtNGUtKY.js",
       "_scheduler-vendor-CoSDG3-6.js",
       "_router-vendor-CHc_B4Kd.js"
     ]
   },
   "src/modules/dashboard/OverviewPage.jsx": {
-    "file": "assets/OverviewPage-CEk4S_jD.js",
+    "file": "assets/OverviewPage-DaFrnAAa.js",
     "name": "OverviewPage",
     "src": "src/modules/dashboard/OverviewPage.jsx",
     "isDynamicEntry": true,
     "imports": [
       "_react-vendor-DGbYTHPG.js",
       "index.html",
-      "_Alert-CsJLdJym.js",
-      "_Badge-PXhFulJE.js",
+      "_Alert-CbFC2Ahn.js",
+      "_Badge-CO32xP1r.js",
       "_router-vendor-CHc_B4Kd.js",
       "_react-dom-vendor-CtNGUtKY.js",
       "_scheduler-vendor-CoSDG3-6.js"
     ]
   },
   "src/modules/employees/StaffDirectoryPage.jsx": {
-    "file": "assets/StaffDirectoryPage-C2e5Zvjz.js",
+    "file": "assets/StaffDirectoryPage-DysfDLqe.js",
     "name": "StaffDirectoryPage",
     "src": "src/modules/employees/StaffDirectoryPage.jsx",
     "isDynamicEntry": true,
     "imports": [
       "_react-vendor-DGbYTHPG.js",
       "index.html",
-      "_Alert-CsJLdJym.js",
-      "_Toast-DBxKM8Bo.js",
-      "_Badge-PXhFulJE.js",
-      "_Modal-C93U3Uhp.js",
+      "_Alert-CbFC2Ahn.js",
+      "_Toast-DWVONmRV.js",
+      "_Badge-CO32xP1r.js",
+      "_Modal-B0shymAD.js",
+      "_regions--NgafTtu.js",
       "_react-dom-vendor-CtNGUtKY.js",
       "_scheduler-vendor-CoSDG3-6.js",
       "_router-vendor-CHc_B4Kd.js"
@@ -301,17 +306,17 @@
     ]
   },
   "src/modules/finance/FinancePage.jsx": {
-    "file": "assets/FinancePage-euPDt8kO.js",
+    "file": "assets/FinancePage-8tL3Gd6p.js",
     "name": "FinancePage",
     "src": "src/modules/finance/FinancePage.jsx",
     "isDynamicEntry": true,
     "imports": [
       "_react-vendor-DGbYTHPG.js",
       "index.html",
-      "_Alert-CsJLdJym.js",
-      "_Toast-DBxKM8Bo.js",
-      "_Badge-PXhFulJE.js",
-      "_Modal-C93U3Uhp.js",
+      "_Alert-CbFC2Ahn.js",
+      "_Toast-DWVONmRV.js",
+      "_Badge-CO32xP1r.js",
+      "_Modal-B0shymAD.js",
       "_Tabs-Cu-GGHV2.js",
       "_router-vendor-CHc_B4Kd.js",
       "_react-dom-vendor-CtNGUtKY.js",
@@ -319,18 +324,19 @@
     ]
   },
   "src/modules/maintenance/MaintenancePage.jsx": {
-    "file": "assets/MaintenancePage-D0cFjN-b.js",
+    "file": "assets/MaintenancePage-B2SVsrSM.js",
     "name": "MaintenancePage",
     "src": "src/modules/maintenance/MaintenancePage.jsx",
     "isDynamicEntry": true,
     "imports": [
       "_react-vendor-DGbYTHPG.js",
       "index.html",
-      "_Alert-CsJLdJym.js",
-      "_Toast-DBxKM8Bo.js",
-      "_Badge-PXhFulJE.js",
-      "_EmployeeCheckboxList-DRBFnCN1.js",
-      "_Modal-C93U3Uhp.js",
+      "_regions--NgafTtu.js",
+      "_Alert-CbFC2Ahn.js",
+      "_Toast-DWVONmRV.js",
+      "_Badge-CO32xP1r.js",
+      "_EmployeeCheckboxList-Ugko-ydr.js",
+      "_Modal-B0shymAD.js",
       "_Tabs-Cu-GGHV2.js",
       "_offline-store-CU3jRgGX.js",
       "_OfflineRouteMap-y02-81uJ.js",
@@ -344,32 +350,33 @@
     ]
   },
   "src/modules/maintenance/OrderDetail.jsx": {
-    "file": "assets/OrderDetail-BRenfAOU.js",
+    "file": "assets/OrderDetail-B2k9AAHg.js",
     "name": "OrderDetail",
     "src": "src/modules/maintenance/OrderDetail.jsx",
     "isDynamicEntry": true,
     "imports": [
       "_react-vendor-DGbYTHPG.js",
       "index.html",
-      "_Alert-CsJLdJym.js",
-      "_Toast-DBxKM8Bo.js",
-      "_Badge-PXhFulJE.js",
-      "_Modal-C93U3Uhp.js",
+      "_regions--NgafTtu.js",
+      "_Alert-CbFC2Ahn.js",
+      "_Toast-DWVONmRV.js",
+      "_Badge-CO32xP1r.js",
+      "_Modal-B0shymAD.js",
       "_Tabs-Cu-GGHV2.js",
-      "_MaintenancePptxExportModal-B4FsQRqE.js",
+      "_MaintenancePptxExportModal-pPPJcEP2.js",
       "_router-vendor-CHc_B4Kd.js",
       "_react-dom-vendor-CtNGUtKY.js",
       "_scheduler-vendor-CoSDG3-6.js"
     ]
   },
   "src/modules/rep/MachineVisitSheet.jsx": {
-    "file": "assets/MachineVisitSheet-DbfegaxU.js",
+    "file": "assets/MachineVisitSheet-jpEZE-tR.js",
     "name": "MachineVisitSheet",
     "src": "src/modules/rep/MachineVisitSheet.jsx",
     "isDynamicEntry": true,
     "imports": [
       "_react-vendor-DGbYTHPG.js",
-      "_RepApp-DzZX47xW.js",
+      "_RepApp-Dxk6zu9r.js",
       "index.html",
       "_offline-store-CU3jRgGX.js",
       "_react-dom-vendor-CtNGUtKY.js",
@@ -378,7 +385,7 @@
     ]
   },
   "src/modules/rep/OfflineMapPanel.jsx": {
-    "file": "assets/OfflineMapPanel-DZZkQVZA.js",
+    "file": "assets/OfflineMapPanel-Chb2Y_d9.js",
     "name": "OfflineMapPanel",
     "src": "src/modules/rep/OfflineMapPanel.jsx",
     "isDynamicEntry": true,
@@ -393,30 +400,32 @@
     ]
   },
   "src/modules/settings/SettingsPage.jsx": {
-    "file": "assets/SettingsPage-DKTEOqQj.js",
+    "file": "assets/SettingsPage-DJsWNfyu.js",
     "name": "SettingsPage",
     "src": "src/modules/settings/SettingsPage.jsx",
     "isDynamicEntry": true,
     "imports": [
       "_react-vendor-DGbYTHPG.js",
       "index.html",
-      "_Alert-CsJLdJym.js",
-      "_Toast-DBxKM8Bo.js",
-      "_Badge-PXhFulJE.js",
-      "_Modal-C93U3Uhp.js",
+      "_Alert-CbFC2Ahn.js",
+      "_regions--NgafTtu.js",
+      "_Toast-DWVONmRV.js",
+      "_Badge-CO32xP1r.js",
+      "_Modal-B0shymAD.js",
       "_react-dom-vendor-CtNGUtKY.js",
       "_scheduler-vendor-CoSDG3-6.js",
       "_router-vendor-CHc_B4Kd.js"
     ]
   },
   "src/modules/supervisor/SupervisorRadarPage.jsx": {
-    "file": "assets/SupervisorRadarPage-D07qSdNC.js",
+    "file": "assets/SupervisorRadarPage-CZj9u6vi.js",
     "name": "SupervisorRadarPage",
     "src": "src/modules/supervisor/SupervisorRadarPage.jsx",
     "isDynamicEntry": true,
     "imports": [
       "_react-vendor-DGbYTHPG.js",
       "index.html",
+      "_regions--NgafTtu.js",
       "_react-dom-vendor-CtNGUtKY.js",
       "_scheduler-vendor-CoSDG3-6.js",
       "_router-vendor-CHc_B4Kd.js"
@@ -426,18 +435,18 @@
     ]
   },
   "src/modules/warehouse/WarehousePage.jsx": {
-    "file": "assets/WarehousePage-CjyVe_F7.js",
+    "file": "assets/WarehousePage-BnD1SjSA.js",
     "name": "WarehousePage",
     "src": "src/modules/warehouse/WarehousePage.jsx",
     "isDynamicEntry": true,
     "imports": [
       "_react-vendor-DGbYTHPG.js",
       "index.html",
-      "_Alert-CsJLdJym.js",
-      "_Toast-DBxKM8Bo.js",
-      "_Badge-PXhFulJE.js",
+      "_Alert-CbFC2Ahn.js",
+      "_Toast-DWVONmRV.js",
+      "_Badge-CO32xP1r.js",
       "_Checkbox-CEYtWA8Z.js",
-      "_Modal-C93U3Uhp.js",
+      "_Modal-B0shymAD.js",
       "_Tabs-Cu-GGHV2.js",
       "_router-vendor-CHc_B4Kd.js",
       "_react-dom-vendor-CtNGUtKY.js",
@@ -445,35 +454,35 @@
     ]
   },
   "src/modules/workshop/WorkshopOrderDetail.jsx": {
-    "file": "assets/WorkshopOrderDetail-Eg37t9eC.js",
+    "file": "assets/WorkshopOrderDetail-COnVQzB6.js",
     "name": "WorkshopOrderDetail",
     "src": "src/modules/workshop/WorkshopOrderDetail.jsx",
     "isDynamicEntry": true,
     "imports": [
       "_react-vendor-DGbYTHPG.js",
       "index.html",
-      "_Alert-CsJLdJym.js",
-      "_Toast-DBxKM8Bo.js",
-      "_Badge-PXhFulJE.js",
+      "_Alert-CbFC2Ahn.js",
+      "_Toast-DWVONmRV.js",
+      "_Badge-CO32xP1r.js",
       "_router-vendor-CHc_B4Kd.js",
       "_react-dom-vendor-CtNGUtKY.js",
       "_scheduler-vendor-CoSDG3-6.js"
     ]
   },
   "src/modules/workshop/WorkshopPage.jsx": {
-    "file": "assets/WorkshopPage-D_ksD1XH.js",
+    "file": "assets/WorkshopPage-DAL8rVyL.js",
     "name": "WorkshopPage",
     "src": "src/modules/workshop/WorkshopPage.jsx",
     "isDynamicEntry": true,
     "imports": [
       "_react-vendor-DGbYTHPG.js",
       "index.html",
-      "_Alert-CsJLdJym.js",
-      "_Toast-DBxKM8Bo.js",
-      "_Badge-PXhFulJE.js",
+      "_Alert-CbFC2Ahn.js",
+      "_Toast-DWVONmRV.js",
+      "_Badge-CO32xP1r.js",
       "_Checkbox-CEYtWA8Z.js",
-      "_EmployeeCheckboxList-DRBFnCN1.js",
-      "_Modal-C93U3Uhp.js",
+      "_EmployeeCheckboxList-Ugko-ydr.js",
+      "_Modal-B0shymAD.js",
       "_Tabs-Cu-GGHV2.js",
       "_router-vendor-CHc_B4Kd.js",
       "_react-dom-vendor-CtNGUtKY.js",

@@ -1,0 +1,1 @@
+function a(r){return!Array.isArray(r)||r.length===0?!0:r.some(e=>["*","all","الكل"].includes(String(e??"").normalize("NFKC").trim().toLocaleLowerCase("ar")))}function n(r){return a(r)?"كافة المناطق":r.join("، ")}export{a as h,n as r};

@@ -199,6 +199,17 @@ test('unified staff directory, salary advances, adjustments, Friday pay, treasur
   assert.equal(representative.response.status, 201, JSON.stringify(representative.body));
   assert.equal(representative.body.role, 'rep');
   assert.equal(representative.body.can_login, 1);
+  const universalRepresentative = await request('/api/staff', jsonOptions('POST', {
+    classification: 'representative', name: 'Universal Region Representative', department: 'Maintenance',
+    username: 'universal-staff-rep', password: 'rep4',
+  }), adminCookie);
+  assert.equal(universalRepresentative.response.status, 201, JSON.stringify(universalRepresentative.body));
+  assert.deepEqual(universalRepresentative.body.assignedRegions, ['*'], 'a new representative without a region list defaults to universal access');
+  const resetUniversalRegions = await request(`/api/staff/${universalRepresentative.body.id}`, jsonOptions('PATCH', {
+    assignedRegions: [],
+  }), adminCookie);
+  assert.equal(resetUniversalRegions.response.status, 200, JSON.stringify(resetUniversalRegions.body));
+  assert.deepEqual(resetUniversalRegions.body.assignedRegions, ['*'], 'clearing a representative region list restores universal access');
   const repLogin = await request('/api/rep/login', jsonOptions('POST', { username: 'unified-rep', password: 'rep4' }));
   assert.equal(repLogin.response.status, 200);
   const repDenied = await request('/api/staff', {}, repLogin.cookie);

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { api } from '../../lib/api.js';
 import { errorMessage } from '../../lib/format.js';
+import { hasUniversalRegionAccess, regionAccessLabel } from '../../lib/regions.js';
 import { useApi } from '../../lib/useApi.js';
 import { useToast } from '../../lib/useToast.js';
 import Alert from '../../components/ui/Alert.jsx';
@@ -59,6 +60,7 @@ export default function SettingsPage() {
   const { data: backups, loading: backupsLoading, error: backupsError, reload: reloadBackups } = useApi('/api/system/backups', { enabled: isAdmin });
   const [userModal, setUserModal] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
+  const [userRole, setUserRole] = useState('operations');
   const [restoreModal, setRestoreModal] = useState(false);
   const [restoreFile, setRestoreFile] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -203,9 +205,9 @@ export default function SettingsPage() {
         </section>
 
         <section className="madar-panel madar-section">
-          <div className="madar-panel-header"><div><h2>إدارة المستخدمين والمناديب</h2><p>أنشئ حسابات المندوبين، وأسند مناطقهم، واقفل الحساب فوراً مع إلغاء الجلسات. تبقى الزيارات السابقة محفوظة.</p></div><Button icon="plus" onClick={() => { setEditingUser(null); setActionError(''); setUserModal(true); }}>إضافة مستخدم / مندوب</Button></div>
+          <div className="madar-panel-header"><div><h2>إدارة المستخدمين والمناديب</h2><p>أنشئ حسابات المندوبين، وأسند أوامر التشغيل لهم، واقفل الحساب فوراً مع إلغاء الجلسات. تغطية المندوب تشمل كافة المناطق.</p></div><Button icon="plus" onClick={() => { setEditingUser(null); setUserRole('operations'); setActionError(''); setUserModal(true); }}>إضافة مستخدم / مندوب</Button></div>
           {usersError && <div className="madar-panel-body"><Alert tone="error">{usersError}</Alert></div>}
-          {usersLoading ? <LoadingState /> : users?.length ? <div className="madar-table-wrap"><table className="madar-table"><thead><tr><th>اسم المستخدم</th><th>الاسم الكامل</th><th>الدور</th><th>مناطق المندوب</th><th>الحالة</th><th>تاريخ الإنشاء</th><th>إجراءات</th></tr></thead><tbody>{users.map((user) => <tr key={user.id}><td className="madar-code">{user.username}</td><td>{user.full_name}</td><td><Badge tone={user.role === 'admin' ? 'info' : user.role === 'rep' ? 'success' : 'neutral'}>{roleLabel(user.role)}</Badge></td><td>{user.role === 'rep' ? (user.assignedRegions?.join('، ') || 'لم تُسند مناطق') : '—'}</td><td><Badge tone={user.active ? 'success' : 'warning'}>{user.active ? 'نشط' : 'موقوف'}</Badge></td><td>{String(user.created_at).slice(0, 10)}</td><td><div className="madar-inline-wrap"><Button variant="ghost" size="small" onClick={() => { setEditingUser(user); setActionError(''); setUserModal(true); }}>تعديل الحساب</Button>{user.role === 'rep' && <Button variant="ghost" size="small" onClick={() => setRepActive(user, !user.active)}>{user.active ? 'قفل فوراً' : 'تفعيل'}</Button>}{user.id !== authStatus?.user?.id && <Button variant="ghost" size="small" onClick={() => deactivateUser(user)}>حذف</Button>}</div></td></tr>)}</tbody></table></div> : <EmptyState icon="users" title="لا توجد حسابات مستخدمين" />}
+          {usersLoading ? <LoadingState /> : users?.length ? <div className="madar-table-wrap"><table className="madar-table"><thead><tr><th>اسم المستخدم</th><th>الاسم الكامل</th><th>الدور</th><th>نطاق المناطق</th><th>الحالة</th><th>تاريخ الإنشاء</th><th>إجراءات</th></tr></thead><tbody>{users.map((user) => <tr key={user.id}><td className="madar-code">{user.username}</td><td>{user.full_name}</td><td><Badge tone={user.role === 'admin' ? 'info' : user.role === 'rep' ? 'success' : 'neutral'}>{roleLabel(user.role)}</Badge></td><td>{user.role === 'rep' ? regionAccessLabel(user.assignedRegions) : '—'}</td><td><Badge tone={user.active ? 'success' : 'warning'}>{user.active ? 'نشط' : 'موقوف'}</Badge></td><td>{String(user.created_at).slice(0, 10)}</td><td><div className="madar-inline-wrap"><Button variant="ghost" size="small" onClick={() => { setEditingUser(user); setUserRole(user.role); setActionError(''); setUserModal(true); }}>تعديل الحساب</Button>{user.role === 'rep' && <Button variant="ghost" size="small" onClick={() => setRepActive(user, !user.active)}>{user.active ? 'قفل فوراً' : 'تفعيل'}</Button>}{user.id !== authStatus?.user?.id && <Button variant="ghost" size="small" onClick={() => deactivateUser(user)}>حذف</Button>}</div></td></tr>)}</tbody></table></div> : <EmptyState icon="users" title="لا توجد حسابات مستخدمين" />}
         </section>
 
         <section className="madar-panel madar-section">
@@ -220,8 +222,8 @@ export default function SettingsPage() {
           <Input key={`username-${editingUser?.id ?? 'new'}`} label="اسم المستخدم *" name="username" defaultValue={editingUser?.username ?? ''} required minLength={3} maxLength={64} />
           <Input key={`fullname-${editingUser?.id ?? 'new'}`} label="الاسم الكامل *" name="full_name" defaultValue={editingUser?.full_name ?? ''} required minLength={2} maxLength={120} />
           {!editingUser && <Input label="كلمة المرور المؤقتة *" name="password" type="password" required minLength={4} maxLength={72} autoComplete="new-password" />}
-          <Select key={`role-${editingUser?.id ?? 'new'}`} label="الدور" name="role" defaultValue={editingUser?.role ?? 'operations'}><option value="operations">عمليات</option><option value="sales">مبيعات</option><option value="purchasing">مشتريات</option><option value="rep">مندوب ميداني</option><option value="admin">مدير</option></Select>
-          <Input key={`regions-${editingUser?.id ?? 'new'}`} label="مناطق المسار (للمندوب)" name="assignedRegions" defaultValue={editingUser?.assignedRegions?.join('، ') ?? ''} hint="اكتب كل منطقة مفصولة بفاصلة. تُستخدم لتحديد مسار المندوب." />
+          <Select key={`role-${editingUser?.id ?? 'new'}`} label="الدور" name="role" value={userRole} onChange={(event) => setUserRole(event.target.value)}><option value="operations">عمليات</option><option value="sales">مبيعات</option><option value="purchasing">مشتريات</option><option value="rep">مندوب ميداني</option><option value="admin">مدير</option></Select>
+          {userRole === 'rep' && <Input key={`regions-${editingUser?.id ?? 'new'}`} label="مناطق إضافية محددة (اختياري)" name="assignedRegions" defaultValue={hasUniversalRegionAccess(editingUser?.assignedRegions) ? '' : editingUser?.assignedRegions?.join('، ') ?? ''} hint="اتركه فارغاً لمنح المندوب وصولاً تلقائياً إلى كافة المناطق. أدرج مناطق فقط عند الحاجة لتقييد الوصول." />}
           {editingUser && <><Select key={`active-${editingUser.id}`} label="حالة الحساب" name="active" defaultValue={String(Boolean(editingUser.active))}><option value="true">نشط</option><option value="false">موقوف</option></Select><Input label="كلمة مرور جديدة (اختياري)" name="password" type="password" minLength={4} maxLength={72} autoComplete="new-password" /></>}
         </div>{actionError && <div className="madar-form-error"><Alert tone="error">{actionError}</Alert></div>}<div className="madar-form-actions"><Button variant="secondary" onClick={() => setUserModal(false)}>إلغاء</Button><Button type="submit" disabled={saving}>{saving ? 'جارٍ الحفظ…' : 'حفظ المستخدم'}</Button></div></form>
       </Modal>

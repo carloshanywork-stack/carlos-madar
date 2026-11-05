@@ -399,6 +399,44 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   assert.equal(unpinnedMachine.isLocationLocked, false);
   assert.equal(unpinnedMachine.areaName, 'التجمع');
 
+  const universalRep = await request('/api/users', jsonOptions('POST', {
+    username: 'rep-all-regions',
+    full_name: 'Universal Field Rep',
+    role: 'rep',
+    assignedRegions: [],
+    password: 'Rep-All-Regions-2026!',
+  }), adminCookie);
+  assert.equal(universalRep.response.status, 201, JSON.stringify(universalRep.body));
+  assert.deepEqual(universalRep.body.assignedRegions, [], 'the user-management blank value remains backward-compatible and means universal access');
+  const universalRepId = universalRep.body.id;
+  db.prepare('INSERT INTO maintenance_order_reps (order_id, user_id) VALUES (?, ?)').run(orderId, universalRepId);
+  const universalLogin = await request('/api/rep/login', jsonOptions('POST', {
+    username: 'rep-all-regions', password: 'Rep-All-Regions-2026!',
+  }));
+  assert.equal(universalLogin.response.status, 200, JSON.stringify(universalLogin.body));
+  const universalRoute = await request('/api/rep/today-route?username=rep-all-regions', {}, universalLogin.cookie);
+  assert.equal(universalRoute.response.status, 200, JSON.stringify(universalRoute.body));
+  assert.equal(universalRoute.body.summary.totalMachines, 4, 'empty region assignments expose all cards on assigned maintenance orders');
+  assert.equal(universalRoute.body.regions.find((item) => item.regionName === 'الرياض')?.machines.some((machine) => machine.machineCode === '2400'), true);
+  assert.equal(universalRoute.body.regions.find((item) => item.regionName === 'التجمع')?.machines.some((machine) => machine.machineCode === '1434'), true);
+  const clearUniversalRepRegions = await request(`/api/users/${universalRepId}`, jsonOptions('PUT', {
+    assignedRegions: [],
+  }), adminCookie);
+  assert.equal(clearUniversalRepRegions.response.status, 200, JSON.stringify(clearUniversalRepRegions.body));
+  assert.deepEqual(clearUniversalRepRegions.body.assignedRegions, []);
+  const emptyUpdateRoute = await request('/api/rep/today-route?username=rep-all-regions', {}, universalLogin.cookie);
+  assert.equal(emptyUpdateRoute.body.summary.totalMachines, 4, 'clearing the optional region field preserves universal access');
+  for (const universalRegion of ['*', 'all', 'الكل']) {
+    const setUniversalRegion = await request(`/api/users/${universalRepId}`, jsonOptions('PUT', {
+      assignedRegions: [universalRegion],
+    }), adminCookie);
+    assert.equal(setUniversalRegion.response.status, 200, JSON.stringify(setUniversalRegion.body));
+    assert.deepEqual(setUniversalRegion.body.assignedRegions, [universalRegion]);
+    const wildcardRoute = await request('/api/rep/today-route?username=rep-all-regions', {}, universalLogin.cookie);
+    assert.equal(wildcardRoute.response.status, 200);
+    assert.equal(wildcardRoute.body.summary.totalMachines, 4, `${universalRegion} is a universal-access marker`);
+  }
+
   const repMapCatalog = await request('/api/rep/map/packs', {}, login.cookie);
   assert.equal(repMapCatalog.response.status, 200);
   assert.equal(repMapCatalog.body.success, true);
@@ -490,6 +528,11 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
     actionUuid: randomUUID(), cardId: otherRegionCardId, location: visitPayload.location,
   }), login.cookie);
   assert.equal(outsideAssignmentConfirmation.response.status, 403);
+  const otherRegionMachineId = db.prepare('SELECT id FROM machines WHERE code = ?').get('2400').id;
+  const universalLocationConfirmation = await request(`/api/rep/machines/${otherRegionMachineId}/confirm-location`, jsonOptions('POST', {
+    actionUuid: randomUUID(), cardId: otherRegionCardId, location: visitPayload.location,
+  }), universalLogin.cookie);
+  assert.equal(universalLocationConfirmation.response.status, 201, JSON.stringify(universalLocationConfirmation.body));
   const locationConfirmationPayload = {
     actionUuid: randomUUID(),
     cardId: missingAfterCardId,
@@ -602,7 +645,7 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   assert.equal(repEventResponse.status, 200);
   const assignmentEventPromise = readOperationsEvent(repEventResponse, 'maintenance.order.assigned');
   const reassigned = await request(`/api/maintenance/orders/${orderId}/representatives`, jsonOptions('PUT', {
-    repUserIds: [repId],
+    repUserIds: [repId, universalRepId],
   }), adminCookie);
   assert.equal(reassigned.response.status, 200);
   let assignmentEvent;
@@ -628,6 +671,23 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   const beforePhotoResponse = await fetch(`${baseUrl}${firstQa.body.visits[0].beforePhotoUrl}`, { headers: { cookie: adminCookie } });
   assert.equal(beforePhotoResponse.status, 200);
   assert.match(beforePhotoResponse.headers.get('content-type'), /image\/jpeg/);
+  const universalVisitTime = Date.now();
+  const universalVisitPayload = {
+    ...visitPayload,
+    visitUuid: randomUUID(),
+    cardId: otherRegionCardId,
+    machineCode: '2400',
+    regionName: 'الرياض',
+    capturedAt: new Date(universalVisitTime).toISOString(),
+    beforeCapturedAt: Array.from({ length: 3 }, (_, index) => new Date(universalVisitTime - (3 - index) * 60 * 1000).toISOString()),
+    afterCapturedAt: [],
+    location: { ...visitPayload.location, updatedAt: new Date(universalVisitTime).toISOString() },
+  };
+  const universalVisit = await request('/api/rep/sync-visit', {
+    method: 'POST', body: buildVisitForm(universalVisitPayload, 3, 0),
+  }, universalLogin.cookie);
+  assert.equal(universalVisit.response.status, 200, JSON.stringify(universalVisit.body));
+  assert.equal(universalVisit.body.status, 'pending_review', 'universal representatives can submit visits for all regions on their assigned orders');
   const firstVisitId = db.prepare('SELECT id FROM rep_visits WHERE visit_uuid = ?').get(visitUuid).id;
   const reshoot = await request(`/api/supervisor/visits/${firstVisitId}/review`, jsonOptions('POST', {
     action: 'reshoot', note: 'الصورة مظلمة؛ أعد التصوير بإضاءة أوضح.',

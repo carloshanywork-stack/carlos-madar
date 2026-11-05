@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../../lib/api.js';
+import { regionAccessLabel } from '../../lib/regions.js';
 import { egpToCents, errorMessage, formatMoney } from '../../lib/format.js';
 import { useApi } from '../../lib/useApi.js';
 import { useToast } from '../../lib/useToast.js';
@@ -1599,7 +1600,7 @@ export default function MaintenanceOrderDetail() {
         </form>
       </Modal>
 
-      <Modal open={representativesOpen} onClose={() => { if (!representativeSaving) setRepresentativesOpen(false); }} title="تعيين مندوبي أمر الصيانة" description="سيظهر هذا الأمر وبطاقات ماكيناته فقط للمناديب النشطين المعيّنين ضمن مناطقهم.">
+      <Modal open={representativesOpen} onClose={() => { if (!representativeSaving) setRepresentativesOpen(false); }} title="تعيين مندوبي أمر الصيانة" description="سيظهر هذا الأمر وبطاقات ماكيناته للمناديب النشطين المعيّنين إليه؛ ويتمتع المندوبون بصلاحية الوصول لكافة المناطق.">
         <form onSubmit={saveRepresentativeAssignments}>
           <div className="madar-form-stack">
             {(representativeOptions ?? []).length ? <div className="madar-employee-picker" role="group" aria-label="اختيار مندوبي أمر الصيانة">
@@ -1611,7 +1612,7 @@ export default function MaintenanceOrderDetail() {
                       ? current.filter((userId) => userId !== Number(rep.id))
                       : [...current, Number(rep.id)])} />
                   <span className="madar-checkbox-title">{rep.full_name}</span>
-                  <small className="madar-field-hint">{rep.username} · {rep.assignedRegions?.join('، ') || 'لا توجد مناطق محددة'}</small>
+                  <small className="madar-field-hint">{rep.username} · {regionAccessLabel(rep.assignedRegions)}</small>
                 </label>;
               })}
             </div> : <Alert tone="info">لا توجد حسابات مندوب نشطة. يمكنك إنشاء حساب من صفحة الإعدادات.</Alert>}

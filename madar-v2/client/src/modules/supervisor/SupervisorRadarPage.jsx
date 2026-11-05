@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../lib/api.js';
+import { regionAccessLabel } from '../../lib/regions.js';
 import './supervisor-radar.css';
 
 const STATUS = {
@@ -356,7 +357,7 @@ export default function SupervisorRadarPage() {
                 const status = STATUS[rep.status] ?? STATUS.offline;
                 return <button className={`radar-rep-row ${selectedRep === rep.id ? 'selected' : ''}`} key={rep.id} type="button" onClick={() => setSelectedRep(rep.id)}>
                   <i style={{ '--rep-status': status.color }} />
-                  <span><strong>{rep.fullName}</strong><small>{status.label} · {rep.assignedRegions.join('، ') || 'دون منطقة مسندة'}</small></span>
+                  <span><strong>{rep.fullName}</strong><small>{status.label} · {regionAccessLabel(rep.assignedRegions)}</small></span>
                   <b>{rep.distanceKm.toFixed(1)} كم</b>
                 </button>;
               })}
@@ -366,7 +367,7 @@ export default function SupervisorRadarPage() {
               <div className="rep-details-title"><span className="rep-avatar">{focusedRep.fullName.slice(0, 1)}</span><div><strong>{focusedRep.fullName}</strong><small style={{ color: mapStatus?.color }}>{mapStatus?.label}</small></div></div>
               <dl>
                 <div><dt>الهاتف</dt><dd dir="ltr">{focusedRep.phone || 'غير مسجل'}</dd></div>
-                <div><dt>المناطق</dt><dd>{focusedRep.assignedRegions.join('، ') || '—'}</dd></div>
+                <div><dt>المناطق</dt><dd>{regionAccessLabel(focusedRep.assignedRegions)}</dd></div>
                 <div><dt>زيارات معتمدة اليوم</dt><dd>{focusedRep.completedToday}</dd></div>
                 <div><dt>بانتظار المراجعة</dt><dd>{focusedRep.pendingReview}</dd></div>
                 <div><dt>المسافة التقديرية</dt><dd>{focusedRep.distanceKm.toFixed(1)} كم</dd></div>
