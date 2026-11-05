@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../../lib/api.js';
+import { isNativeRepApp, saveNativeSession } from '../rep/native-session.js';
 
 export default function SignInPage({ setupRequired, initialError = '', onLoginSuccess, theme, onThemeToggle }) {
   const [form, setForm] = useState({ fullName: '', username: '', password: '', confirmPassword: '' });
@@ -61,7 +62,8 @@ export default function SignInPage({ setupRequired, initialError = '', onLoginSu
         result = await api.post('/api/rep/login', {
           username: form.username,
           password: form.password,
-        });
+        }, isNativeRepApp() ? { headers: { 'X-Madar-Native-Client': 'android' } } : {});
+        if (isNativeRepApp() && result.token) await saveNativeSession(result.token, result.rep);
       } else {
         result = await api.post('/api/auth/login', {
           username: form.username,

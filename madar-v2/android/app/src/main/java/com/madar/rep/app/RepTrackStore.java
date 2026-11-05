@@ -15,8 +15,8 @@ import org.json.JSONObject;
 /** Durable, acknowledged-on-delivery GPS queue for native background tracking. */
 public final class RepTrackStore extends SQLiteOpenHelper {
     private static final String DATABASE_NAME = "madar_rep_tracking.db";
-    private static final int DATABASE_VERSION = 1;
-    private static final String TABLE = "gps_points";
+    private static final int DATABASE_VERSION = 2;
+    private static final String TABLE = "breadcrumbs";
     private static final int READ_BATCH_LIMIT = 20000;
 
     private static boolean isFinite(double value) {
@@ -31,7 +31,11 @@ public final class RepTrackStore extends SQLiteOpenHelper {
 
     @Override
     public void onCreate(SQLiteDatabase database) {
-        database.execSQL("CREATE TABLE " + TABLE + " ("
+        createBreadcrumbTable(database);
+    }
+
+    private static void createBreadcrumbTable(SQLiteDatabase database) {
+        database.execSQL("CREATE TABLE IF NOT EXISTS " + TABLE + " ("
             + "_id INTEGER PRIMARY KEY AUTOINCREMENT, "
             + "timestamp INTEGER NOT NULL, "
             + "latitude REAL NOT NULL, "
@@ -44,7 +48,13 @@ public final class RepTrackStore extends SQLiteOpenHelper {
 
     @Override
     public void onUpgrade(SQLiteDatabase database, int oldVersion, int newVersion) {
-        // This local queue is removed only after server acknowledgment; future upgrades must be additive.
+        if (oldVersion < 2) {
+            createBreadcrumbTable(database);
+            // Preserve every point queued by the previous app version before switching the writer.
+            database.execSQL("INSERT OR IGNORE INTO " + TABLE
+                + " (timestamp, latitude, longitude, accuracy, speed)"
+                + " SELECT timestamp, latitude, longitude, accuracy, speed FROM gps_points");
+        }
     }
 
     public long append(Location location) {

@@ -365,6 +365,16 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
     updatedAt: '2026-11-02T08:30:00.000Z',
   });
   assert.ok(login.cookie.startsWith('madar_token='));
+  const nativeLogin = await request('/api/rep/login', {
+    ...jsonOptions('POST', { username: 'rep-nour', password: 'Rep-Nour-Password-2026!' }),
+    headers: { 'content-type': 'application/json', 'x-madar-native-client': 'android' },
+  });
+  assert.equal(nativeLogin.response.status, 200);
+  assert.match(nativeLogin.body.token, /^eyJ/);
+  const nativeBearerRoute = await request('/api/rep/today-route?username=rep-nour', {
+    headers: { authorization: `Bearer ${nativeLogin.body.token}` },
+  });
+  assert.equal(nativeBearerRoute.response.status, 200, 'native background jobs authenticate with the bearer token returned only to the native client');
   const repApkStatus = await request('/download/apk/status', {}, login.cookie);
   assert.equal(repApkStatus.response.status, 200);
   assert.equal(repApkStatus.body.artifactType, 'fallback');

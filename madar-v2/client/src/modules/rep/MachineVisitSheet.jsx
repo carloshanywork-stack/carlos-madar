@@ -1,6 +1,23 @@
 import { useEffect, useRef, useState } from 'react';
 import { compressAndWatermark, locationPayload } from './image-processing.js';
-import { captureNativeCameraPhoto, isNativeRepApp } from './native-bridges.js';
+import {
+  captureNativeCameraPhoto,
+  deleteNativeVisitPhoto,
+  isNativeRepApp,
+  nativeFilePreviewUrl,
+  processNativeVisitPhoto,
+} from './native-bridges.js';
+
+function createDraftVisitUuid() {
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+  const bytes = new Uint8Array(16);
+  globalThis.crypto?.getRandomValues?.(bytes);
+  if (!globalThis.crypto?.getRandomValues) bytes.forEach((_value, index) => { bytes[index] = Math.floor(Math.random() * 256); });
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = [...bytes].map((value) => value.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
 
 function showLocation(location) {
   if (!location) return 'بانتظار إشارة GPS';
@@ -35,12 +52,25 @@ export default function MachineVisitSheet({ machine, reasons, gps, gpsError, cap
   const beforeInput = useRef(null);
   const afterInput = useRef(null);
   const previewUrls = useRef(new Set());
+  const draftVisitUuid = useRef(createDraftVisitUuid()).current;
+  const draftSaved = useRef(false);
+  const photosRef = useRef(photos);
+  photosRef.current = photos;
   const nativeApp = isNativeRepApp();
 
   useEffect(() => () => {
     for (const previewUrl of previewUrls.current) URL.revokeObjectURL(previewUrl);
     previewUrls.current.clear();
   }, []);
+
+  useEffect(() => () => {
+    if (!nativeApp || draftSaved.current) return;
+    for (const phase of ['before', 'after']) {
+      photosRef.current[phase].forEach((photo, index) => {
+        void deleteNativeVisitPhoto(draftVisitUuid, phase, photo.photoIndex ?? index).catch(() => undefined);
+      });
+    }
+  }, [draftVisitUuid, nativeApp]);
 
   useEffect(() => {
     void captureLocation?.();
@@ -151,18 +181,46 @@ export default function MachineVisitSheet({ machine, reasons, gps, gpsError, cap
       setProcessingPhase(phase);
       try {
         const capturedAt = new Date();
-        const blob = await compressAndWatermark(file, {
-          machineCode: activeMachine.machineCode,
-          machineName: activeMachine.arabicName,
-          regionName: activeMachine.regionName,
-          areaName: activeMachine.areaName,
-          phase,
-          capturedAt,
-          location: locationPayload(currentLocation),
-        });
-        const previewUrl = URL.createObjectURL(blob);
-        previewUrls.current.add(previewUrl);
-        preparedPhotos.push({ blob, previewUrl, capturedAt: capturedAt.toISOString() });
+        if (nativeApp) {
+          const usedIndexes = new Set([...photos[phase], ...preparedPhotos].map((photo) => Number(photo.photoIndex)));
+          const photoIndex = [0, 1, 2].find((candidate) => !usedIndexes.has(candidate));
+          if (photoIndex === undefined) throw new Error('اكتملت الصور الثلاث لهذه المرحلة.');
+          const saved = await processNativeVisitPhoto({
+            visitUuid: draftVisitUuid,
+            phase,
+            index: photoIndex,
+            sourceUri: file.sourceUri,
+            watermark: {
+              machineCode: activeMachine.machineCode,
+              machineName: activeMachine.arabicName,
+              regionName: activeMachine.regionName,
+              areaName: activeMachine.areaName,
+              phase,
+              capturedAt: capturedAt.toISOString(),
+              location: locationPayload(currentLocation),
+            },
+          });
+          preparedPhotos.push({
+            path: saved.path,
+            photoIndex,
+            sizeBytes: Number(saved.sizeBytes),
+            previewUrl: nativeFilePreviewUrl(saved.path),
+            capturedAt: capturedAt.toISOString(),
+          });
+        } else {
+          const blob = await compressAndWatermark(file, {
+            machineCode: activeMachine.machineCode,
+            machineName: activeMachine.arabicName,
+            regionName: activeMachine.regionName,
+            areaName: activeMachine.areaName,
+            phase,
+            capturedAt,
+            location: locationPayload(currentLocation),
+          });
+          const previewUrl = URL.createObjectURL(blob);
+          previewUrls.current.add(previewUrl);
+          preparedPhotos.push({ blob, previewUrl, capturedAt: capturedAt.toISOString() });
+        }
       } catch (captureError) {
         setError(captureError.message || `تعذر تجهيز الصورة ${index + 1}. حاول التقاطها مرة أخرى.`);
         break;
@@ -197,6 +255,7 @@ export default function MachineVisitSheet({ machine, reasons, gps, gpsError, cap
   const removePhoto = (phase, index) => {
     setPhotos((current) => {
       const removed = current[phase][index];
+      if (nativeApp) void deleteNativeVisitPhoto(draftVisitUuid, phase, removed?.photoIndex ?? index).catch(() => undefined);
       if (removed?.previewUrl) {
         URL.revokeObjectURL(removed.previewUrl);
         previewUrls.current.delete(removed.previewUrl);
@@ -236,16 +295,18 @@ export default function MachineVisitSheet({ machine, reasons, gps, gpsError, cap
         throw new Error(`أنت خارج نطاق الماكينة (المسافة الفعالة: ${Math.round(distance)} متر، المسموح: ${radius} متر).`);
       }
       await onSave({
+        visitUuid: draftVisitUuid,
         machineCondition,
         reasonIds,
         notes: notes.trim(),
-        beforePhotos: photos.before.map(({ blob }) => blob),
-        afterPhotos: photos.after.map(({ blob }) => blob),
+        beforePhotos: photos.before.map(({ blob, path, sizeBytes, capturedAt: photoCapturedAt }) => blob ?? ({ path, sizeBytes, capturedAt: photoCapturedAt })),
+        afterPhotos: photos.after.map(({ blob, path, sizeBytes, capturedAt: photoCapturedAt }) => blob ?? ({ path, sizeBytes, capturedAt: photoCapturedAt })),
         beforeCapturedAt: photos.before.map(({ capturedAt }) => capturedAt),
         afterCapturedAt: photos.after.map(({ capturedAt }) => capturedAt),
         capturedAt: new Date().toISOString(),
         location: locationPayload(currentLocation),
       });
+      draftSaved.current = true;
     } catch (saveError) {
       setError(saveError.message || 'تعذر حفظ الزيارة محلياً. لم تُحذف الصور؛ حاول مرة أخرى.');
     } finally {
@@ -267,7 +328,7 @@ export default function MachineVisitSheet({ machine, reasons, gps, gpsError, cap
         {phasePhotos.length > 0 && <div className="rep-photo-preview-grid">
           {phasePhotos.map((photo, index) => <div className="rep-photo-preview" key={`${photo.capturedAt}-${index}`}>
             <img src={photo.previewUrl} alt={`صورة ${label} رقم ${index + 1} للماكينة ${machine.machineCode}`} />
-            <small>{index + 1} · {Math.max(1, Math.round(photo.blob.size / 1024))} KB · {new Intl.DateTimeFormat('ar-EG', { timeStyle: 'short' }).format(new Date(photo.capturedAt))}</small>
+            <small>{index + 1} · {Math.max(1, Math.round((photo.blob?.size ?? photo.sizeBytes ?? 1) / 1024))} KB · {new Intl.DateTimeFormat('ar-EG', { timeStyle: 'short' }).format(new Date(photo.capturedAt))}</small>
             <button type="button" className="rep-button rep-button-danger-light" onClick={() => removePhoto(phase, index)} disabled={saving}>حذف الصورة</button>
           </div>)}
         </div>}

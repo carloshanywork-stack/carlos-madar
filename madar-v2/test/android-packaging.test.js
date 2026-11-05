@@ -29,11 +29,60 @@ test('Android application ID, namespace, Capacitor ID, and native packages are a
   assert.match(strings, /<string name="custom_url_scheme">com\.madar\.rep\.app<\/string>/);
   assert.match(instrumentedTest, /assertEquals\("com\.madar\.rep\.app", appContext\.getPackageName\(\)\)/);
 
-  for (const source of ['MainActivity.java', 'RepLocationPlugin.java', 'RepLocationService.java', 'RepTrackStore.java']) {
+  for (const source of [
+    'MainActivity.java', 'RepLocationPlugin.java', 'RepLocationService.java', 'RepTrackStore.java',
+    'RepNativeEnginePlugin.java', 'RepLocalStore.java', 'RepAuthStore.java', 'MadarSyncScheduler.java', 'MadarSyncWorker.java',
+  ]) {
     const path = `android/app/src/main/java/com/madar/rep/app/${source}`;
     assert.ok(existsSync(resolve(projectRoot, path)), `${path} should be in the app namespace package`);
     assert.match(read(path), /^package com\.madar\.rep\.app;/m);
   }
+});
+
+test('native rep gate, private SQLite queue, and WorkManager upload contract are configured', () => {
+  const manifest = read('android/app/src/main/AndroidManifest.xml');
+  const activity = read('android/app/src/main/java/com/madar/rep/app/MainActivity.java');
+  const engine = read('android/app/src/main/java/com/madar/rep/app/RepNativeEnginePlugin.java');
+  const store = read('android/app/src/main/java/com/madar/rep/app/RepLocalStore.java');
+  const worker = read('android/app/src/main/java/com/madar/rep/app/MadarSyncWorker.java');
+  const scheduler = read('android/app/src/main/java/com/madar/rep/app/MadarSyncScheduler.java');
+  const secureStore = read('android/app/src/main/java/com/madar/rep/app/RepAuthStore.java');
+  const gradle = read('android/app/build.gradle');
+  const gate = read('client/src/NativePermissionGate.jsx');
+  const nativeBridges = read('client/src/modules/rep/native-bridges.js');
+  const visitSheet = read('client/src/modules/rep/MachineVisitSheet.jsx');
+
+  assert.match(activity, /ActivityResultContracts\.RequestMultiplePermissions/);
+  assert.match(activity, /registerPlugin\(RepNativeEnginePlugin\.class\)/);
+  assert.match(gate, /requestInitialPermissions/);
+  assert.match(gate, /requestBackgroundPermission/);
+  assert.match(gate, /openAppSettings/);
+  assert.match(gate, /requestBatteryExemption/);
+  for (const permission of ['CAMERA', 'ACCESS_FINE_LOCATION', 'ACCESS_COARSE_LOCATION', 'ACCESS_BACKGROUND_LOCATION', 'POST_NOTIFICATIONS']) {
+    assert.match(manifest, new RegExp(`android.permission.${permission}`));
+  }
+  assert.match(secureStore, /EncryptedSharedPreferences\.create/);
+  assert.match(gradle, /androidx\.work:work-runtime/);
+  assert.match(gradle, /security-crypto/);
+  assert.match(store, /CREATE TABLE machines/);
+  assert.match(store, /CREATE TABLE fault_reasons/);
+  assert.match(store, /CREATE TABLE pending_visits/);
+  assert.match(store, /CREATE TABLE visit_photos/);
+  const trackStore = read('android/app/src/main/java/com/madar/rep/app/RepTrackStore.java');
+  assert.match(trackStore, /TABLE = "breadcrumbs"/);
+  assert.match(trackStore, /CREATE TABLE IF NOT EXISTS/);
+  assert.match(scheduler, /NetworkType\.CONNECTED/);
+  assert.match(scheduler, /15,\s*TimeUnit\.MINUTES/);
+  assert.match(worker, /addFormDataPart\("visit"/);
+  assert.match(worker, /addFormDataPart\(field, filename/);
+  assert.match(worker, /response\.code\(\) == 202[\s\S]*?Result\.retry\(\)/);
+  assert.match(worker, /response\.code\(\) == 200[\s\S]*?markSynced/);
+  assert.match(worker, /Authorization/);
+  assert.match(engine, /new File\(new File\(getContext\(\)\.getFilesDir\(\), "visits"\), visitUuid\)/);
+  assert.match(nativeBridges, /sourceUri: photo\.path/);
+  assert.doesNotMatch(nativeBridges.match(/export async function captureNativeCameraPhoto\(\)[\s\S]*?\n\}/)?.[0] ?? '', /fetch\(|\.blob\(/);
+  assert.match(visitSheet, /processNativeVisitPhoto/);
+  assert.match(visitSheet, /path: saved\.path/);
 });
 
 test('FileProvider authority is application-specific and only exposes app-owned camera files', () => {

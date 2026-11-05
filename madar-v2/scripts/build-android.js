@@ -1,8 +1,10 @@
 import { copyFileSync, existsSync, readdirSync, renameSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
+import { config as loadDotEnv } from 'dotenv';
 
 const projectRoot = resolve(import.meta.dirname, '..');
+loadDotEnv({ path: resolve(projectRoot, '.env') });
 const syncOnly = process.argv.includes('--sync-only');
 const releaseBuild = process.argv.includes('--release');
 const isWindows = process.platform === 'win32';

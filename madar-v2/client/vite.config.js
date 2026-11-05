@@ -16,7 +16,7 @@ export default defineConfig(({ mode }) => {
   const apiServerUrl = projectEnv.VITE_MADAR_API_BASE_URL
     || projectEnv.MADAR_REP_SERVER_URL
     || process.env.MADAR_REP_SERVER_URL
-    || '';
+    || (standaloneBuild ? 'https://carlos-pc.tail852ef0.ts.net' : '');
   let apiBaseUrl = '';
   if (standaloneBuild) {
     try {

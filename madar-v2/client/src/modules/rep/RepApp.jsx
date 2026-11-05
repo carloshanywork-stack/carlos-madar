@@ -26,10 +26,16 @@ import {
   acknowledgeNativeDutyTracking,
   deleteNativePendingBackup,
   getNativeDutyTrackingState,
+  getNativeRepCache,
   getNativeGpsLocation,
   getNativeNetworkStatus,
   isNativeRepApp,
+  listNativeVisits,
+  cacheNativeReasons,
+  cacheNativeRoute,
   restoreNativePendingBackups,
+  retryNativeVisit,
+  requestNativeSync,
   saveNativePendingBackup,
   startNativeDutyTracking,
   stopNativeDutyTracking,
@@ -283,15 +289,40 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
   }, [attendance?.clock_in_time, attendance?.clock_out_time]);
 
   const refreshPending = useCallback(async () => {
-    const [visits, actions] = await Promise.all([
+    const [storedVisits, actions] = await Promise.all([
       listPendingVisits(userId),
       listPendingMachineActions(userId),
     ]);
+    let visits = storedVisits;
+    if (nativeApp) {
+      const nativeVisits = await listNativeVisits(userId);
+      const nativeByUuid = new Map(nativeVisits.map((visit) => [visit.visitUuid, visit]));
+      const seen = new Set();
+      visits = [];
+      for (const stored of storedVisits) {
+        const native = nativeByUuid.get(stored.visitUuid);
+        if (native?.status === 'synced') {
+          await deletePendingVisit(stored.visitUuid).catch(() => undefined);
+          continue;
+        }
+        if (native) {
+          seen.add(native.visitUuid);
+          visits.push({ ...stored, ...native, beforePhotos: [], afterPhotos: [] });
+        } else {
+          visits.push(stored);
+        }
+      }
+      for (const native of nativeVisits) {
+        if (native.status === 'synced' || seen.has(native.visitUuid)) continue;
+        visits.push({ ...native, beforePhotos: [], afterPhotos: [] });
+      }
+      visits.sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+    }
     pendingMachineActionsRef.current = actions;
     setPendingMachineActions(actions);
     setPendingVisits(visits);
     return { visits, actions };
-  }, [userId]);
+  }, [nativeApp, userId]);
 
   const syncTracking = useCallback(async (options = {}) => {
     const duty = options.duty ?? onDuty;
@@ -404,17 +435,20 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
   const loadLocalSnapshots = useCallback(async () => {
     try {
       const recoveredCount = await restoreNativePendingBackups(userId);
-      const [savedRoute, savedReasons, visits, actions, savedAttendance] = await Promise.all([
+      const [savedRoute, savedReasons, visits, actions, savedAttendance, nativeCache] = await Promise.all([
         getSnapshot('route_snapshots', userId),
         getSnapshot('reason_snapshots', userId),
         listPendingVisits(userId),
         listPendingMachineActions(userId),
         getSnapshot('attendance_snapshots', userId),
+        nativeApp ? getNativeRepCache(userId) : Promise.resolve(null),
       ]);
       pendingMachineActionsRef.current = actions;
       setPendingMachineActions(actions);
-      if (savedRoute?.route) setRoute(applyPendingMachineLocations({ ...savedRoute.route, cachedAt: savedRoute.cachedAt }, actions));
-      if (savedReasons?.reasons) setReasons(savedReasons.reasons);
+      const cachedRoute = savedRoute?.route ?? nativeCache?.route;
+      const cachedReasons = savedReasons?.reasons ?? nativeCache?.reasons;
+      if (cachedRoute) setRoute(applyPendingMachineLocations({ ...cachedRoute, cachedAt: savedRoute?.cachedAt ?? cachedRoute.cachedAt }, actions));
+      if (cachedReasons) setReasons(cachedReasons);
       if (savedAttendance?.date === currentBusinessDate()) {
         const cachedAttendance = savedAttendance.attendance ?? null;
         setAttendance(cachedAttendance);
@@ -425,9 +459,24 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
       if (recoveredCount) setToast(`استُعيدت ${recoveredCount} زيارة من نسخة الهاتف الاحتياطية.`);
       setStorageError('');
     } catch (error) {
-      setStorageError(error.message || 'لا يمكن استخدام قاعدة البيانات المحلية لهذا المتصفح.');
+      if (nativeApp) {
+        try {
+          const [nativeCache, nativeVisits] = await Promise.all([
+            getNativeRepCache(userId),
+            listNativeVisits(userId),
+          ]);
+          if (nativeCache?.route) setRoute(applyPendingMachineLocations(nativeCache.route));
+          if (Array.isArray(nativeCache?.reasons)) setReasons(nativeCache.reasons);
+          setPendingVisits(nativeVisits.filter((visit) => visit.status !== 'synced'));
+          setStorageError('قاعدة المتصفح غير متاحة؛ يعمل المسار والزيارات من قاعدة SQLite الأصلية على الهاتف.');
+        } catch {
+          setStorageError(error.message || 'تعذر فتح التخزين المحلي على الهاتف.');
+        }
+      } else {
+        setStorageError(error.message || 'لا يمكن استخدام قاعدة البيانات المحلية لهذا المتصفح.');
+      }
     }
-  }, [userId]);
+  }, [nativeApp, userId]);
 
   const refreshData = useCallback(async () => {
     if (offlineOnly || !navigator.onLine) return;
@@ -443,6 +492,7 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
         pendingMachineActionsRef.current,
       );
       setRoute(cachedRoute);
+      if (nativeApp) void cacheNativeRoute(userId, cachedRoute).catch(() => undefined);
       for (const machine of (cachedRoute.regions ?? []).flatMap((region) => region.machines ?? [])) {
         if (machine.reviewStatus !== 'reshoot' || !machine.reviewNote) continue;
         const key = `${machine.cardId}:${machine.reviewNote}`;
@@ -461,6 +511,7 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
     }
     if (reasonsResult.status === 'fulfilled' && Array.isArray(reasonsResult.value?.reasons)) {
       setReasons(reasonsResult.value.reasons);
+      if (nativeApp) void cacheNativeReasons(userId, reasonsResult.value.reasons).catch(() => undefined);
       try {
         await saveSnapshot('reason_snapshots', userId, { reasons: reasonsResult.value.reasons, cachedAt: new Date().toISOString() });
       } catch (error) {
@@ -471,7 +522,7 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
       await loadLocalSnapshots();
     }
     setRouteLoading(false);
-  }, [loadLocalSnapshots, offlineOnly, user.username, userId]);
+  }, [loadLocalSnapshots, nativeApp, offlineOnly, user.username, userId]);
 
   const refreshAttendance = useCallback(async () => {
     if (offlineOnly || !navigator.onLine) return null;
@@ -658,7 +709,7 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
             return;
           }
           void checkServer().then((reachable) => {
-            if (reachable) { void refreshData(); void refreshAttendance(); void syncTracking(); }
+          if (reachable) { void requestNativeSync().catch(() => undefined); void refreshData(); void refreshAttendance(); void syncTracking(); }
           });
         });
         if (!active) await networkHandle?.remove();
@@ -988,11 +1039,13 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
         }
       }
 
-      const visits = await listPendingVisits(userId);
-      setPendingVisits(visits);
-      for (const queuedVisit of (canDrainVisits ? visits : [])) {
+        const visits = await listPendingVisits(userId);
+        setPendingVisits(visits);
+        for (const queuedVisit of (canDrainVisits ? visits : [])) {
         // Never send a visit queued by another representative, even after an account switch.
-        if (Number(queuedVisit.repId) !== userId || queuedVisit.status === 'blocked') continue;
+          if (Number(queuedVisit.repId) !== userId || queuedVisit.status === 'blocked') continue;
+          // Native Android visits are uploaded from filesDir by WorkManager, never through WebView Blobs.
+          if (nativeApp && queuedVisit.nativeStoragePath?.startsWith('internal://visits/')) continue;
         if (pausedCardIds.has(Number(queuedVisit.payload.cardId))) continue;
         await updatePendingVisit(queuedVisit.visitUuid, { status: 'syncing', lastAttemptAt: new Date().toISOString() });
         const formData = new FormData();
@@ -1074,7 +1127,7 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
       try { await refreshPending(); } catch { /* Keep the previous queue count visible. */ }
       if (changedServer) void refreshData();
     }
-  }, [offlineOnly, refreshData, refreshPending, serverState, userId]);
+  }, [nativeApp, offlineOnly, refreshData, refreshPending, serverState, userId]);
 
   useEffect(() => {
     if (!nativeApp) return undefined;
@@ -1178,8 +1231,8 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
     await onLogout();
   };
 
-  const saveVisit = async ({ machineCondition, reasonIds, notes, beforePhotos, afterPhotos, beforeCapturedAt, afterCapturedAt, capturedAt, location }) => {
-    const visitUuid = createVisitUuid();
+  const saveVisit = async ({ visitUuid: draftVisitUuid, machineCondition, reasonIds, notes, beforePhotos, afterPhotos, beforeCapturedAt, afterCapturedAt, capturedAt, location }) => {
+    const visitUuid = draftVisitUuid || createVisitUuid();
     const payload = {
       visitUuid,
       cardId: Number(selectedMachine.cardId),
@@ -1207,13 +1260,14 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
     };
     try {
       const nativeStoragePath = await saveNativePendingBackup(queuedVisit);
-      const storedVisit = { ...queuedVisit, nativeStoragePath };
-      try {
-        await addPendingVisit(storedVisit);
-      } catch (error) {
-        if (nativeStoragePath) await deleteNativePendingBackup(visitUuid).catch(() => undefined);
-        throw error;
-      }
+      const storedVisit = nativeApp
+        ? { ...queuedVisit, beforePhotos: [], afterPhotos: [], nativeStoragePath }
+        : { ...queuedVisit, nativeStoragePath };
+      // SQLite is the Android source of truth. IndexedDB only mirrors queue metadata for the existing UI.
+      await addPendingVisit(storedVisit).catch((error) => {
+        if (!nativeApp) throw error;
+        setStorageError(error.message || 'حُفظت الزيارة في قاعدة أندرويد المحلية، وتعذر تحديث عرض قائمة الزيارات.');
+      });
       setPendingVisits((current) => [...current, storedVisit].sort((left, right) => left.createdAt.localeCompare(right.createdAt)));
       try { await refreshPending(); } catch { /* The IndexedDB add transaction already confirmed durable storage. */ }
       setSelectedMachine(null);
@@ -1513,8 +1567,8 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
          {pendingVisits.map((visit) => <li key={visit.visitUuid}>
            <span className={`rep-queue-state ${visit.status === 'syncing' ? 'syncing' : ''} ${visit.status === 'blocked' ? 'blocked' : ''}`} aria-hidden="true">{visit.status === 'syncing' ? '↻' : visit.status === 'blocked' ? '!' : '⏳'}</span>
            <div><strong>ماكينة {visit.payload.machineCode} · {visit.payload.regionName}</strong><small>حُفظت {formatTime(visit.createdAt)}{visit.attempts ? ` · محاولات ${visit.attempts}` : ''} · {visit.status === 'blocked' ? 'تحتاج مراجعة' : visit.status === 'syncing' ? 'جارٍ الإرسال' : 'بانتظار المزامنة'}</small>{visit.lastError && <small className="rep-queue-error">{visit.lastError}</small>}</div>
-           {visit.status === 'blocked'
-             ? <button type="button" className="rep-queue-retry" disabled={serverState !== 'online' || offlineOnly} onClick={async () => { await updatePendingVisit(visit.visitUuid, { status: 'queued', lastError: '' }); await refreshPending(); void drainQueue(); }}>إعادة المحاولة</button>
+            {visit.status === 'blocked'
+              ? <button type="button" className="rep-queue-retry" disabled={serverState !== 'online' || offlineOnly} onClick={async () => { if (nativeApp && visit.nativeStoragePath?.startsWith('internal://visits/')) await retryNativeVisit(visit.visitUuid, userId); else await updatePendingVisit(visit.visitUuid, { status: 'queued', lastError: '' }); await refreshPending(); void drainQueue(); }}>إعادة المحاولة</button>
              : <span className="rep-queue-local">محفوظة محلياً</span>}
          </li>)}</ul>}
          <button type="button" className="rep-button rep-button-primary rep-sync-now" disabled={!pendingQueueCount || serverState !== 'online' || offlineOnly} onClick={() => void drainQueue()}>{serverState === 'online' ? 'مزامنة الآن ↻' : 'ستتم المزامنة عند الاتصال'}</button>

@@ -63,7 +63,11 @@ router.post('/login', loginRateLimiter, asyncHandler(async (req, res) => {
   }
 
   setSessionCookie(req, res, result.token);
-  res.json({ success: true, rep: result.user });
+  const response = { success: true, rep: result.user };
+  // Only the native Android client needs the bearer credential for WorkManager jobs.
+  // Browser sessions continue to use the HttpOnly cookie exclusively.
+  if (req.get('x-madar-native-client') === 'android') response.token = result.token;
+  res.json(response);
 }));
 
 router.use(requireActiveRep);

@@ -3,7 +3,7 @@ import { config as loadDotEnv } from 'dotenv';
 
 loadDotEnv();
 
-const serverUrlValue = process.env.MADAR_REP_SERVER_URL?.trim() || 'http://localhost:3000';
+const serverUrlValue = process.env.MADAR_REP_SERVER_URL?.trim() || 'https://carlos-pc.tail852ef0.ts.net';
 let serverUrl: URL;
 try {
   serverUrl = new URL(serverUrlValue);

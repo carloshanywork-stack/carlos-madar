@@ -4,12 +4,13 @@ import { Capacitor, registerPlugin } from '@capacitor/core';
 import { Directory, Filesystem } from '@capacitor/filesystem';
 import { Geolocation } from '@capacitor/geolocation';
 import { Network } from '@capacitor/network';
-import { addPendingVisit, getPendingVisit } from './offline-store.js';
+import { addPendingVisit, deletePendingVisit, getPendingVisit } from './offline-store.js';
+import { isNativeRepApp, RepEngine } from './native-session.js';
 
 const PENDING_ROOT = 'Pending';
 const RepLocation = registerPlugin('RepLocation');
 
-export const isNativeRepApp = () => Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android';
+export { isNativeRepApp };
 
 function isPermissionGranted(permissionStatus) {
   return permissionStatus === 'granted' || permissionStatus === 'limited';
@@ -26,9 +27,80 @@ export async function captureNativeCameraPhoto() {
     correctOrientation: true,
   });
   if (!photo.webPath) throw new Error('لم تُرجع الكاميرا صورة صالحة. حاول مرة أخرى.');
-  const response = await fetch(photo.webPath);
-  if (!response.ok) throw new Error('تعذر قراءة الصورة من الكاميرا.');
-  return response.blob();
+  if (!photo.path) throw new Error('لم تُرجع الكاميرا مساراً محلياً آمناً للصورة.');
+  return { sourceUri: photo.path, previewUrl: photo.webPath };
+}
+
+export async function getNativePermissionState() {
+  if (!isNativeRepApp()) return null;
+  return RepEngine.getPermissionState();
+}
+
+export async function requestNativeInitialPermissions() {
+  if (!isNativeRepApp()) return null;
+  return RepEngine.requestInitialPermissions();
+}
+
+export async function requestNativeBackgroundPermission() {
+  if (!isNativeRepApp()) return null;
+  return RepEngine.requestBackgroundPermission();
+}
+
+export async function openNativeAppSettings() {
+  if (!isNativeRepApp()) return null;
+  return RepEngine.openAppSettings();
+}
+
+export async function requestNativeBatteryExemption() {
+  if (!isNativeRepApp()) return null;
+  return RepEngine.requestBatteryExemption();
+}
+
+export async function processNativeVisitPhoto({ visitUuid, phase, index, sourceUri, watermark }) {
+  if (!isNativeRepApp()) throw new Error('معالجة الصور الأصلية متاحة داخل تطبيق أندرويد فقط.');
+  return RepEngine.processVisitPhoto({ visitUuid, phase, index, sourceUri, watermark });
+}
+
+export async function deleteNativeVisitPhoto(visitUuid, phase, index) {
+  if (!isNativeRepApp()) return null;
+  return RepEngine.deleteVisitPhoto({ visitUuid, phase, index });
+}
+
+export function nativeFilePreviewUrl(path) {
+  if (!isNativeRepApp() || !path) return '';
+  return Capacitor.convertFileSrc(path);
+}
+
+export async function cacheNativeRoute(repId, route) {
+  if (!isNativeRepApp() || !route) return null;
+  return RepEngine.cacheRoute({ repId: Number(repId), route: JSON.stringify(route) });
+}
+
+export async function cacheNativeReasons(repId, reasons) {
+  if (!isNativeRepApp() || !reasons) return null;
+  return RepEngine.cacheReasons({ repId: Number(repId), reasons: JSON.stringify({ reasons }) });
+}
+
+export async function listNativeVisits(repId) {
+  if (!isNativeRepApp()) return [];
+  const result = await RepEngine.listVisits({ repId: Number(repId) });
+  return Array.isArray(result.visits) ? result.visits : [];
+}
+
+export async function getNativeRepCache(repId) {
+  if (!isNativeRepApp()) return null;
+  return RepEngine.getCachedRepData({ repId: Number(repId) });
+}
+
+export async function requestNativeSync() {
+  if (!isNativeRepApp()) return null;
+  return RepEngine.requestSync();
+}
+
+export async function retryNativeVisit(visitUuid, repId) {
+  if (!isNativeRepApp()) return null;
+  const result = await RepEngine.retryVisit({ visitUuid, repId: Number(repId) });
+  return Boolean(result.updated);
 }
 
 async function ensureForegroundLocationPermission() {
@@ -138,50 +210,23 @@ function pendingPhotos(visit, phase) {
 
 export async function saveNativePendingBackup(visit) {
   if (!isNativeRepApp()) return null;
-  const folder = visitFolder(visit.visitUuid);
-  const metadataPath = `${folder}/visit.json`;
-  try {
-    const savedPhotos = {};
-    for (const phase of ['before', 'after']) {
-      const photos = pendingPhotos(visit, phase);
-      if (!photos.length) throw new Error(`لا توجد صور ${phase} في الزيارة التي يجري حفظها.`);
-      savedPhotos[`${phase}Photos`] = [];
-      for (const [index, photo] of photos.entries()) {
-        const path = `${folder}/${phase}_${index}.jpg`;
-        await Filesystem.writeFile({
-          path,
-          data: await blobToBase64(photo),
-          directory: Directory.External,
-          recursive: true,
-        });
-        savedPhotos[`${phase}Photos`].push({
-          path,
-          capturedAt: visit.payload?.[`${phase}CapturedAt`]?.[index]
-            ?? visit.payload?.[`${phase}CapturedAt`]
-            ?? visit.createdAt,
-        });
-      }
-    }
-    await Filesystem.writeFile({
-      path: metadataPath,
-      data: JSON.stringify({
-        visitUuid: visit.visitUuid,
-        repId: visit.repId,
-        repUsername: visit.repUsername,
-        createdAt: visit.createdAt,
-        payload: visit.payload,
-        status: visit.status,
-        attempts: visit.attempts,
-        ...savedPhotos,
-      }),
-      directory: Directory.External,
-      recursive: true,
-    });
-    return folder;
-  } catch (error) {
-    await deleteNativePendingBackup(visit.visitUuid).catch(() => undefined);
-    throw error;
-  }
+  const toEntries = (phase) => pendingPhotos(visit, phase).map((photo, index) => {
+    if (!photo?.path) throw new Error(`صورة ${phase} ليست محفوظة داخل مساحة التطبيق الداخلية.`);
+    return {
+      path: photo.path,
+      capturedAt: visit.payload?.[`${phase}CapturedAt`]?.[index] ?? photo.capturedAt ?? visit.createdAt,
+    };
+  });
+  const result = await RepEngine.enqueueVisit({
+    visitUuid: visit.visitUuid,
+    repId: Number(visit.repId),
+    repUsername: visit.repUsername,
+    createdAt: visit.createdAt,
+    payload: visit.payload,
+    beforePhotos: toEntries('before'),
+    afterPhotos: toEntries('after'),
+  });
+  return result.nativeStoragePath;
 }
 
 export async function deleteNativePendingBackup(visitUuid) {
@@ -191,15 +236,30 @@ export async function deleteNativePendingBackup(visitUuid) {
 
 export async function restoreNativePendingBackups(repId) {
   if (!isNativeRepApp()) return 0;
+  let restoredNative = 0;
+  try {
+    const savedVisits = await listNativeVisits(repId);
+    for (const visit of savedVisits) {
+      if (visit.status === 'synced') {
+        await deletePendingVisit(visit.visitUuid).catch(() => undefined);
+        continue;
+      }
+      if (await getPendingVisit(visit.visitUuid)) continue;
+      await addPendingVisit({ ...visit, beforePhotos: [], afterPhotos: [] });
+      restoredNative += 1;
+    }
+  } catch (error) {
+    console.warn('Could not restore native SQLite visit queue:', error);
+  }
   let folders;
   try {
     folders = (await Filesystem.readdir({ path: PENDING_ROOT, directory: Directory.External })).files;
   } catch (error) {
-    if (/does not exist|not found|ENOENT/i.test(error.message ?? '')) return 0;
+    if (/does not exist|not found|ENOENT/i.test(error.message ?? '')) return restoredNative;
     throw error;
   }
 
-  let restored = 0;
+  let restored = restoredNative;
   for (const entry of folders) {
     if (entry.type !== 'directory' || !/^[0-9a-f-]{36}$/i.test(entry.name)) continue;
     const folder = visitFolder(entry.name);

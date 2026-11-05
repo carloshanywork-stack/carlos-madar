@@ -4,6 +4,8 @@ import AppShell from './components/layout/AppShell.jsx';
 import LoadingState from './components/ui/LoadingState.jsx';
 import SignInPage from './modules/auth/SignInPage.jsx';
 import { api } from './lib/api.js';
+import { clearNativeSession, isNativeRepApp } from './modules/rep/native-session.js';
+import NativePermissionGate from './NativePermissionGate.jsx';
 
 const RepApp = lazy(() => import('./modules/rep/RepApp.jsx'));
 const SupervisorRadarPage = lazy(() => import('./modules/supervisor/SupervisorRadarPage.jsx'));
@@ -224,6 +226,7 @@ function AuthenticatedApplication() {
       // Leave the workspace locally; the next status check will validate the server session.
     } finally {
       if (user?.role === 'rep') {
+        if (isNativeRepApp()) await clearNativeSession().catch(() => undefined);
         try {
           const cachedRep = readCachedRep();
           if (Number(cachedRep?.id) === Number(user.id)) window.localStorage.removeItem('madar-rep-profile');
@@ -274,7 +277,9 @@ function AuthenticatedApplication() {
 export default function App() {
   return (
     <BrowserRouter>
-      <AuthenticatedApplication />
+      <NativePermissionGate>
+        <AuthenticatedApplication />
+      </NativePermissionGate>
     </BrowserRouter>
   );
 }
