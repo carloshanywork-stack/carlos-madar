@@ -10,7 +10,7 @@ process.env.MADAR_V2_STORAGE_ROOT = join(temporaryDirectory, 'storage');
 process.env.NODE_ENV = 'test';
 process.env.COOKIE_SECURE = 'false';
 
-const [{ db, createConnection }, { initializeDatabase, migrateAccountLoginProtection, migrateAttendanceAdminClockOutNote, migrateCairoTimezone }, { runDatabaseMaintenance }] = await Promise.all([
+const [{ db, createConnection }, { initializeDatabase, migrateAccountLoginProtection, migrateAttendanceAdminClockOutNote, migrateAttendanceClockLocations, migrateCairoTimezone }, { runDatabaseMaintenance }] = await Promise.all([
   import('../server/database/connection.js'),
   import('../server/database/init.js'),
   import('../server/database/maintenance.js'),
@@ -35,8 +35,37 @@ test('database initialization sets Cairo and adds account lockout fields', () =>
   assert.ok(db.pragma('table_info(employee_daily_attendance)').some((column) => column.name === 'clock_out_admin_note'));
   migrateAttendanceAdminClockOutNote(db);
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE version = '20261104-attendance-admin-clockout-note'").get().count, 1);
+  const attendanceColumns = new Set(db.pragma('table_info(employee_daily_attendance)').map((column) => column.name));
+  for (const column of [
+    'clock_in_accuracy', 'clock_in_location_at', 'clock_out_lat', 'clock_out_lng',
+    'clock_out_accuracy', 'clock_out_location_at',
+  ]) assert.ok(attendanceColumns.has(column), `missing attendance GPS column ${column}`);
+  migrateAttendanceClockLocations(db);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE version = '20261105-attendance-clock-gps'").get().count, 1);
   assert.deepEqual(db.pragma('index_xinfo(idx_rep_breadcrumbs_recorded_at)').filter((column) => column.key)
     .map((column) => column.name), [null], 'retention pruning indexes the julianday expression');
+});
+
+test('attendance GPS migration is additive, preserves existing records, and is idempotent', () => {
+  const legacy = createConnection(':memory:');
+  try {
+    legacy.exec(`CREATE TABLE schema_migrations (version TEXT PRIMARY KEY);
+      CREATE TABLE employee_daily_attendance (
+        id INTEGER PRIMARY KEY, clock_in_lat REAL, clock_in_lng REAL, clock_out_time TEXT
+      );
+      INSERT INTO employee_daily_attendance (id, clock_in_lat, clock_in_lng) VALUES (91, 30.1, 31.2);`);
+    migrateAttendanceClockLocations(legacy);
+    migrateAttendanceClockLocations(legacy);
+    const record = legacy.prepare('SELECT * FROM employee_daily_attendance WHERE id = 91').get();
+    assert.equal(record.clock_in_lat, 30.1);
+    assert.equal(record.clock_in_lng, 31.2);
+    assert.equal(record.clock_out_lat, null);
+    assert.equal(record.clock_out_accuracy, null);
+    assert.equal(legacy.prepare('SELECT COUNT(*) AS count FROM employee_daily_attendance').get().count, 1);
+    assert.equal(legacy.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE version = '20261105-attendance-clock-gps'").get().count, 1);
+  } finally {
+    legacy.close();
+  }
 });
 
 test('legacy timezone migration updates Riyadh only and preserves explicit custom zones', () => {

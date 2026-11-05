@@ -509,11 +509,19 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
     try {
       const location = await captureVisitLocation();
       if (!location) throw new Error('يلزم تفعيل GPS لتسجيل الحضور أو الانصراف.');
+      try {
+        await saveGpsSample(userId, location);
+        setStorageError('');
+      } catch (error) {
+        // Keep the server punch available even if local browser storage is full;
+        // schema-related failures are repaired by offline-store before surfacing here.
+        setStorageError(error.message || 'تعذر حفظ نقطة GPS محلياً.');
+      }
       if (action === 'in' && nativeApp) {
         await startNativeDutyTracking();
         nativeTrackingStarted = true;
       }
-      const result = await api.post(`/api/rep/attendance/clock-${action}`, { location }, { timeoutMs: 4000 });
+      const result = await api.post(`/api/rep/attendance/clock-${action}`, { location }, { timeoutMs: 15000 });
       const currentAttendance = result.attendance ?? null;
       setAttendance(currentAttendance);
       setOnDuty(action === 'in');
@@ -528,16 +536,19 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
       } catch {
         // The server has already committed the attendance event.
       }
-      let trackingSaved = true;
-      if (action === 'in') {
-        trackingSaved = await syncTracking({ duty: true, location });
+      const trackingSync = syncTracking({
+        duty: action === 'in',
+        stop: action === 'out',
+        location,
+      });
+      if (action === 'out' && nativeApp) {
+        void trackingSync.finally(() => stopNativeDutyTracking().catch(() => undefined));
       } else {
-        trackingSaved = await syncTracking({ duty: false, stop: true, location });
-        if (nativeApp) await stopNativeDutyTracking().catch(() => undefined);
+        void trackingSync;
       }
       setToast(action === 'in'
-        ? trackingSaved ? 'تم تسجيل الحضور وبدأ حفظ خط السير.' : 'تم تسجيل الحضور؛ سيُرسل خط السير المحلي عند عودة الاتصال.'
-        : trackingSaved ? 'تم تسجيل الانصراف ومزامنة آخر نقاط المسار.' : 'تم تسجيل الانصراف؛ بقيت نقاط GPS محفوظة محلياً للمزامنة.');
+        ? 'تم تسجيل الحضور؛ وحُفظ موقع البداية محلياً وعلى الخادم.'
+        : 'تم تسجيل الانصراف؛ وحُفظ موقع النهاية محلياً وعلى الخادم.');
       void refreshAttendance();
     } catch (error) {
       if (action === 'in' && nativeTrackingStarted) await stopNativeDutyTracking().catch(() => undefined);

@@ -904,7 +904,7 @@ export default function MaintenanceOrderDetail() {
                 <Select
                   label="أوامر / أسباب الصيانة *"
                   value=""
-                  disabled={order.status === 'archived'}
+                  disabled={saving}
                   onChange={(event) => {
                     addCardReason(card, event.target.value);
                     event.target.value = '';
@@ -956,26 +956,25 @@ export default function MaintenanceOrderDetail() {
                         }}
                       >
                         <span>{name}</span>
-                        {order.status !== 'archived' && (
-                          <button
-                            type="button"
-                            onClick={() => removeCardReason(card, rid)}
-                            style={{
-                              background: 'transparent',
-                              border: 'none',
-                              color: '#94a3b8',
-                              cursor: 'pointer',
-                              padding: '0 2px',
-                              fontSize: '14px',
-                              lineHeight: 1,
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                            }}
-                            title="إزالة هذا الأمر"
-                          >
-                            ×
-                          </button>
-                        )}
+                        <button
+                          type="button"
+                          onClick={() => removeCardReason(card, rid)}
+                          disabled={saving}
+                          style={{
+                            background: 'transparent',
+                            border: 'none',
+                            color: '#94a3b8',
+                            cursor: 'pointer',
+                            padding: '0 2px',
+                            fontSize: '14px',
+                            lineHeight: 1,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                          }}
+                          title="إزالة هذا الأمر"
+                        >
+                          ×
+                        </button>
                       </span>
                     );
                   })}
@@ -991,7 +990,7 @@ export default function MaintenanceOrderDetail() {
                 value={getCardDraft(card).notes}
                 placeholder="اكتب الملاحظات الفنية الخاصة بهذه الماكينة..."
                 maxLength={10000}
-                disabled={order.status === 'archived'}
+                disabled={saving}
                 onChange={(event) => updateCardNotesDraft(card, event.target.value)}
                 onBlur={(event) => { void setCardNotes(card, event.target.value); }}
               />

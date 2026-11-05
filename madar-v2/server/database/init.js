@@ -42,6 +42,7 @@ const cairoTimezoneMigration = '20261103-africa-cairo-timezone';
 const gpsRetentionIndexMigration = '20261103-gps-retention-index';
 const staffPayrollRulesMigration = '20261103-staff-payroll-shift-and-settlement';
 const adminClockOutNoteMigration = '20261104-attendance-admin-clockout-note';
+const attendanceClockLocationMigration = '20261105-attendance-clock-gps';
 const machineVerificationCorrectionsMigration = '20261104-machine-verification-corrections';
 const machineCorrectionRenameRecoveryMigration = '20261104-machine-correction-rename-recovery';
 
@@ -599,6 +600,29 @@ export function migrateAttendanceAdminClockOutNote(database) {
   migrate.immediate();
 }
 
+export function migrateAttendanceClockLocations(database) {
+  const migrate = database.transaction(() => {
+    const applied = database.prepare('SELECT 1 FROM schema_migrations WHERE version = ?')
+      .get(attendanceClockLocationMigration);
+    if (applied) return;
+
+    const columns = new Set(database.pragma('table_info(employee_daily_attendance)').map((column) => column.name));
+    const additions = [
+      ['clock_in_accuracy', 'REAL'],
+      ['clock_in_location_at', 'TEXT'],
+      ['clock_out_lat', 'REAL'],
+      ['clock_out_lng', 'REAL'],
+      ['clock_out_accuracy', 'REAL'],
+      ['clock_out_location_at', 'TEXT'],
+    ];
+    for (const [column, declaration] of additions) {
+      if (!columns.has(column)) database.exec(`ALTER TABLE employee_daily_attendance ADD COLUMN ${column} ${declaration}`);
+    }
+    database.prepare('INSERT INTO schema_migrations (version) VALUES (?)').run(attendanceClockLocationMigration);
+  });
+  migrate.immediate();
+}
+
 export function migrateUserEmployeeLinks(database) {
   const migrate = database.transaction(() => {
     const applied = database.prepare('SELECT 1 FROM schema_migrations WHERE version = ?')
@@ -1149,6 +1173,7 @@ export function initializeDatabase({ database = db, initialAdminPassword = env.i
     migrateRepVisitPhotoCollections(database);
     migrateNativeAttendance(database);
     migrateAttendanceAdminClockOutNote(database);
+    migrateAttendanceClockLocations(database);
     migrateUserEmployeeLinks(database);
     migrateUserEmployeeProfileSync(database);
     migrateMaintenanceTripFolders(database);

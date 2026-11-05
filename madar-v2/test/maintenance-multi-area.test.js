@@ -211,6 +211,71 @@ test('maintenance orders accept multiple areas and use every selected area for p
   assert.equal(storageCompletedProgress.body.processed, storageCompletedProgress.body.total);
 });
 
+test('archived maintenance cards allow reason and note updates but reject machine and photo changes', async () => {
+  const clientCode = 'ARCHIVED-CARD-EDIT-CLIENT';
+  const clientId = Number(db.prepare('INSERT INTO clients (code, name) VALUES (?, ?)')
+    .run(clientCode, 'Archived Card Edit Client').lastInsertRowid);
+  const machineResponse = await request('/api/maintenance/machines', json('POST', {
+    code: 'ARCHIVED-CARD-EDIT-01',
+    name_ar: 'ماكينة اختبار تعديل بطاقة مؤرشفة',
+    area: 'Archived Card Edit Area',
+  }));
+  assert.equal(machineResponse.response.status, 201, JSON.stringify(machineResponse.body));
+  const orderResponse = await request('/api/maintenance/orders', json('POST', {
+    clientId,
+    areas: ['Archived Card Edit Area'],
+    employeeIds: [],
+    autoPopulateAreaMachines: true,
+  }));
+  assert.equal(orderResponse.response.status, 201, JSON.stringify(orderResponse.body));
+  const card = orderResponse.body.cards.find((item) => item.machine_id === machineResponse.body.id);
+  assert.ok(card);
+
+  const createReason = async (name) => {
+    const result = await request('/api/maintenance/reasons', json('POST', { name }));
+    assert.equal(result.response.status, 201, JSON.stringify(result.body));
+    return result.body.id;
+  };
+  const removedReasonId = await createReason('سبب أرشيفي سيُزال');
+  const keptReasonId = await createReason('سبب أرشيفي باقٍ');
+  const addedReasonId = await createReason('سبب أرشيفي جديد');
+  const initialUpdate = await request(`/api/maintenance/orders/${orderResponse.body.id}/cards/${card.id}`, json('PATCH', {
+    reasonIds: [removedReasonId, keptReasonId],
+    notes: 'ملاحظة قبل الأرشفة',
+  }));
+  assert.equal(initialUpdate.response.status, 200, JSON.stringify(initialUpdate.body));
+
+  db.prepare("UPDATE maintenance_orders SET status = 'archived', archived_at = '2026-11-05 12:00:00' WHERE id = ?")
+    .run(orderResponse.body.id);
+  const archivedUpdate = await request(`/api/maintenance/orders/${orderResponse.body.id}/cards/${card.id}`, json('PATCH', {
+    reasonIds: [keptReasonId, addedReasonId],
+    notes: 'ملاحظة فنية محدّثة بعد الأرشفة',
+  }));
+  assert.equal(archivedUpdate.response.status, 200, JSON.stringify(archivedUpdate.body));
+  assert.deepEqual(archivedUpdate.body.reason_ids, [keptReasonId, addedReasonId]);
+  assert.equal(archivedUpdate.body.notes, 'ملاحظة فنية محدّثة بعد الأرشفة');
+  assert.equal(archivedUpdate.body.reason_id, keptReasonId);
+
+  const rejectedMachineCode = await request(`/api/maintenance/orders/${orderResponse.body.id}/cards/${card.id}`, json('PATCH', {
+    machineCode: 'ARCHIVED-CARD-EDIT-REPLACEMENT',
+  }));
+  assert.equal(rejectedMachineCode.response.status, 409);
+  const rejectedBeforePhotos = await request(`/api/maintenance/orders/${orderResponse.body.id}/cards/${card.id}`, json('PATCH', {
+    beforePhotos: [],
+  }));
+  assert.equal(rejectedBeforePhotos.response.status, 409);
+  const rejectedAfterPhotos = await request(`/api/maintenance/orders/${orderResponse.body.id}/cards/${card.id}`, json('PATCH', {
+    afterPhotos: [],
+  }));
+  assert.equal(rejectedAfterPhotos.response.status, 409);
+
+  assert.equal(db.prepare('SELECT code FROM machines WHERE id = ?').get(machineResponse.body.id).code, 'ARCHIVED-CARD-EDIT-01');
+  const storedCard = db.prepare('SELECT reason_id, reason_ids_json, notes FROM maintenance_cards WHERE id = ?').get(card.id);
+  assert.equal(storedCard.reason_id, keptReasonId);
+  assert.deepEqual(JSON.parse(storedCard.reason_ids_json), [keptReasonId, addedReasonId]);
+  assert.equal(storedCard.notes, 'ملاحظة فنية محدّثة بعد الأرشفة');
+});
+
 test('duplicate trip folders keep the first machine match and route later folders to review without merging photos', async () => {
   const clientId = Number(db.prepare('INSERT INTO clients (code, name) VALUES (?, ?)').run('C-DUPLICATE-FOLDERS', 'Duplicate Folder Client').lastInsertRowid);
   const machineId = Number(db.prepare(`

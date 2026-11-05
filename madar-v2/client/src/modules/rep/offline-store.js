@@ -11,12 +11,16 @@ export const REQUIRED_OFFLINE_STORES = Object.freeze([
   'attendance_snapshots',
 ]);
 const REQUIRED_OFFLINE_INDEXES = Object.freeze({
-  pending_visits: ['by_rep_created'],
-  pending_machine_actions: ['by_rep_created', 'by_machine_created'],
-  gps_samples: ['by_rep_captured'],
-  offline_map_tiles: ['by_pack', 'by_pack_zoom'],
+  pending_visits: { by_rep_created: ['repId', 'createdAt'] },
+  pending_machine_actions: {
+    by_rep_created: ['repId', 'createdAt'],
+    by_machine_created: ['machineId', 'createdAt'],
+  },
+  gps_samples: { by_rep_captured: ['repId', 'capturedAt'] },
+  offline_map_tiles: { by_pack: 'packId', by_pack_zoom: ['packId', 'z'] },
 });
 let databasePromise;
+let databaseRecoveryPromise;
 
 function createStore(database, transaction, name, keyPath, indexes = []) {
   const store = database.objectStoreNames.contains(name)
@@ -50,7 +54,9 @@ function migrateDatabase(request) {
 
 function openDatabaseAtVersion(version) {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DATABASE_NAME, version);
+    const request = version === undefined
+      ? indexedDB.open(DATABASE_NAME)
+      : indexedDB.open(DATABASE_NAME, version);
     request.onupgradeneeded = () => migrateDatabase(request);
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error ?? new Error('تعذر فتح التخزين المحلي.'));
@@ -58,28 +64,30 @@ function openDatabaseAtVersion(version) {
   });
 }
 
-async function openAndRepairDatabase() {
-  let database = await openDatabaseAtVersion(DATABASE_VERSION);
-  const hasRequiredSchema = () => {
-    if (REQUIRED_OFFLINE_STORES.some((name) => !database.objectStoreNames.contains(name))) return false;
-    const indexStores = Object.keys(REQUIRED_OFFLINE_INDEXES);
-    const transaction = database.transaction(indexStores, 'readonly');
+function sameKeyPath(actual, expected) {
+  if (Array.isArray(expected)) {
+    return Array.isArray(actual) && actual.length === expected.length
+      && expected.every((part, index) => actual[index] === part);
+  }
+  return actual === expected;
+}
+
+function hasRequiredSchema(database) {
+  if (REQUIRED_OFFLINE_STORES.some((name) => !database.objectStoreNames.contains(name))) return false;
+  try {
+    const transaction = database.transaction(Object.keys(REQUIRED_OFFLINE_INDEXES), 'readonly');
     return Object.entries(REQUIRED_OFFLINE_INDEXES).every(([storeName, indexes]) => {
       const store = transaction.objectStore(storeName);
-      return indexes.every((indexName) => store.indexNames.contains(indexName));
+      return Object.entries(indexes).every(([indexName, keyPath]) => (
+        store.indexNames.contains(indexName) && sameKeyPath(store.index(indexName).keyPath, keyPath)
+      ));
     });
-  };
-  if (!hasRequiredSchema()) {
-    // Repair in-place with an additive version bump. This preserves queued visits,
-    // machine corrections, GPS breadcrumbs, and downloaded maps (unlike deleteDatabase).
-    const repairVersion = database.version + 1;
-    database.close();
-    database = await openDatabaseAtVersion(repairVersion);
-    if (!hasRequiredSchema()) {
-      database.close();
-      throw new Error('تعذر إصلاح مخازن وفهارس قاعدة البيانات المحلية.');
-    }
+  } catch {
+    return false;
   }
+}
+
+function attachDatabaseLifecycle(database) {
   database.onversionchange = () => {
     database.close();
     databasePromise = null;
@@ -87,8 +95,69 @@ async function openAndRepairDatabase() {
   return database;
 }
 
+async function openAndRepairDatabase() {
+  let database;
+  try {
+    database = await openDatabaseAtVersion(DATABASE_VERSION);
+  } catch (error) {
+    // A previous auto-repair may have advanced the on-device DB beyond the app's
+    // baseline version. Open the latest version rather than failing with VersionError.
+    if (error?.name !== 'VersionError') throw error;
+    database = await openDatabaseAtVersion();
+  }
+  if (!hasRequiredSchema(database)) {
+    // Add missing stores/indexes in place. Never delete the DB: it may contain
+    // visits, photos, GPS samples, and maps that have not reached the server yet.
+    const repairVersion = database.version + 1;
+    database.close();
+    database = await openDatabaseAtVersion(repairVersion);
+    if (!hasRequiredSchema(database)) {
+      database.close();
+      throw new Error('تعذر إصلاح مخازن وفهارس قاعدة البيانات المحلية.');
+    }
+  }
+  return attachDatabaseLifecycle(database);
+}
+
+function isMissingSchemaError(error) {
+  return error?.name === 'NotFoundError'
+    || /object store .*not found|object store .*does not exist|missing object store/i.test(String(error?.message ?? ''));
+}
+
+async function recoverMissingSchema(database) {
+  if (databaseRecoveryPromise) return databaseRecoveryPromise;
+  const recovery = (async () => {
+    const previousPromise = databasePromise;
+    database.close();
+    const previousDatabase = await previousPromise?.catch(() => null);
+    if (previousDatabase && previousDatabase !== database) previousDatabase.close();
+
+    const latestDatabase = await openDatabaseAtVersion();
+    if (hasRequiredSchema(latestDatabase)) return attachDatabaseLifecycle(latestDatabase);
+    const repairVersion = latestDatabase.version + 1;
+    latestDatabase.close();
+    const repairedDatabase = await openDatabaseAtVersion(repairVersion);
+    if (!hasRequiredSchema(repairedDatabase)) {
+      repairedDatabase.close();
+      throw new Error('تعذر إصلاح مخازن وفهارس قاعدة البيانات المحلية.');
+    }
+    return attachDatabaseLifecycle(repairedDatabase);
+  })();
+  databaseRecoveryPromise = recovery;
+  databasePromise = recovery;
+  try {
+    return await recovery;
+  } catch (error) {
+    if (databasePromise === recovery) databasePromise = null;
+    throw error;
+  } finally {
+    if (databaseRecoveryPromise === recovery) databaseRecoveryPromise = null;
+  }
+}
+
 function openDatabase() {
   if (!('indexedDB' in window)) return Promise.reject(new Error('التخزين المحلي غير متاح في هذا المتصفح.'));
+  if (databaseRecoveryPromise) return databaseRecoveryPromise;
   if (databasePromise) return databasePromise;
 
   databasePromise = openAndRepairDatabase().catch((error) => {
@@ -96,6 +165,17 @@ function openDatabase() {
     throw error;
   });
   return databasePromise;
+}
+
+async function createTransaction(storeNames, mode) {
+  let database = await openDatabase();
+  try {
+    return database.transaction(storeNames, mode);
+  } catch (error) {
+    if (!isMissingSchemaError(error)) throw error;
+    database = await recoverMissingSchema(database);
+    return database.transaction(storeNames, mode);
+  }
 }
 
 function requestValue(request) {
@@ -118,8 +198,7 @@ export async function requestPersistentStorage() {
 export async function saveGpsSample(repId, location) {
   if (!location || !Number.isFinite(location.latitude) || !Number.isFinite(location.longitude)
       || !Number.isFinite(location.accuracy) || !Number.isFinite(Date.parse(location.updatedAt))) return false;
-  const database = await openDatabase();
-  const transaction = database.transaction('gps_samples', 'readwrite');
+  const transaction = await createTransaction('gps_samples', 'readwrite');
   const capturedAt = new Date(location.updatedAt).toISOString();
   const sampleId = `${Number(repId)}:${capturedAt}:${Math.random().toString(36).slice(2, 10)}`;
   transaction.objectStore('gps_samples').put({
@@ -136,8 +215,7 @@ export async function saveGpsSample(repId, location) {
 }
 
 export async function listGpsSamples(repId, limit = 20000) {
-  const database = await openDatabase();
-  const transaction = database.transaction('gps_samples', 'readonly');
+  const transaction = await createTransaction('gps_samples', 'readonly');
   const samples = await requestValue(transaction.objectStore('gps_samples').index('by_rep_captured').getAll(
     IDBKeyRange.bound([Number(repId), ''], [Number(repId), '\uffff']),
   ));
@@ -154,8 +232,7 @@ export function selectGpsSamplesForSync(samples, limit = 20000) {
 
 export async function deleteGpsSamples(sampleIds) {
   if (!sampleIds?.length) return 0;
-  const database = await openDatabase();
-  const transaction = database.transaction('gps_samples', 'readwrite');
+  const transaction = await createTransaction('gps_samples', 'readwrite');
   const store = transaction.objectStore('gps_samples');
   for (const sampleId of sampleIds) store.delete(sampleId);
   return new Promise((resolve, reject) => {
@@ -166,14 +243,12 @@ export async function deleteGpsSamples(sampleIds) {
 }
 
 export async function getSnapshot(storeName, repId) {
-  const database = await openDatabase();
-  const transaction = database.transaction(storeName, 'readonly');
+  const transaction = await createTransaction(storeName, 'readonly');
   return requestValue(transaction.objectStore(storeName).get(Number(repId)));
 }
 
 export async function saveSnapshot(storeName, repId, data) {
-  const database = await openDatabase();
-  const transaction = database.transaction(storeName, 'readwrite');
+  const transaction = await createTransaction(storeName, 'readwrite');
   transaction.objectStore(storeName).put({ repId: Number(repId), ...data });
   return new Promise((resolve, reject) => {
     transaction.oncomplete = () => resolve(true);
@@ -183,15 +258,13 @@ export async function saveSnapshot(storeName, repId, data) {
 }
 
 export async function listOfflineMapPacks() {
-  const database = await openDatabase();
-  const transaction = database.transaction('offline_map_packs', 'readonly');
+  const transaction = await createTransaction('offline_map_packs', 'readonly');
   return requestValue(transaction.objectStore('offline_map_packs').getAll());
 }
 
 export async function saveOfflineMapPack(pack) {
   if (!pack?.packId) throw new Error('معرّف حزمة الخريطة غير صالح.');
-  const database = await openDatabase();
-  const transaction = database.transaction('offline_map_packs', 'readwrite');
+  const transaction = await createTransaction('offline_map_packs', 'readwrite');
   transaction.objectStore('offline_map_packs').put({ ...pack, packId: String(pack.packId), updatedAt: new Date().toISOString() });
   return new Promise((resolve, reject) => {
     transaction.oncomplete = () => resolve(true);
@@ -202,8 +275,7 @@ export async function saveOfflineMapPack(pack) {
 
 export async function saveOfflineMapTiles(packId, tiles) {
   if (!tiles?.length) return 0;
-  const database = await openDatabase();
-  const transaction = database.transaction('offline_map_tiles', 'readwrite');
+  const transaction = await createTransaction('offline_map_tiles', 'readwrite');
   const store = transaction.objectStore('offline_map_tiles');
   for (const tile of tiles) {
     store.put({
@@ -223,8 +295,7 @@ export async function saveOfflineMapTiles(packId, tiles) {
 }
 
 export async function getOfflineMapTile(packId, zoom, column, row) {
-  const database = await openDatabase();
-  const transaction = database.transaction('offline_map_tiles', 'readonly');
+  const transaction = await createTransaction('offline_map_tiles', 'readonly');
   const tile = await requestValue(transaction.objectStore('offline_map_tiles').get([
     String(packId), Number(zoom), Number(column), Number(row),
   ]));
@@ -232,16 +303,14 @@ export async function getOfflineMapTile(packId, zoom, column, row) {
 }
 
 export async function listOfflineMapTileKeys(packId) {
-  const database = await openDatabase();
-  const transaction = database.transaction('offline_map_tiles', 'readonly');
+  const transaction = await createTransaction('offline_map_tiles', 'readonly');
   const keys = await requestValue(transaction.objectStore('offline_map_tiles').index('by_pack')
     .getAllKeys(IDBKeyRange.only(String(packId))));
   return keys.map((key) => `${key[1]}/${key[2]}/${key[3]}`);
 }
 
 export async function deleteOfflineMapPack(packId) {
-  const database = await openDatabase();
-  const transaction = database.transaction(['offline_map_tiles', 'offline_map_packs'], 'readwrite');
+  const transaction = await createTransaction(['offline_map_tiles', 'offline_map_packs'], 'readwrite');
   const tileStore = transaction.objectStore('offline_map_tiles');
   const cursorRequest = tileStore.index('by_pack').openKeyCursor(IDBKeyRange.only(String(packId)));
   cursorRequest.onsuccess = () => {
@@ -260,8 +329,7 @@ export async function deleteOfflineMapPack(packId) {
 }
 
 export async function addPendingVisit(visit) {
-  const database = await openDatabase();
-  const transaction = database.transaction('pending_visits', 'readwrite');
+  const transaction = await createTransaction('pending_visits', 'readwrite');
   transaction.objectStore('pending_visits').add(visit);
   return new Promise((resolve, reject) => {
     transaction.oncomplete = () => resolve(visit);
@@ -271,8 +339,7 @@ export async function addPendingVisit(visit) {
 }
 
 export async function listPendingVisits(repId) {
-  const database = await openDatabase();
-  const transaction = database.transaction('pending_visits', 'readonly');
+  const transaction = await createTransaction('pending_visits', 'readonly');
   const visits = await requestValue(
     transaction.objectStore('pending_visits').index('by_rep_created').getAll(
       IDBKeyRange.bound([Number(repId), ''], [Number(repId), '\uffff']),
@@ -282,14 +349,12 @@ export async function listPendingVisits(repId) {
 }
 
 export async function getPendingVisit(visitUuid) {
-  const database = await openDatabase();
-  const transaction = database.transaction('pending_visits', 'readonly');
+  const transaction = await createTransaction('pending_visits', 'readonly');
   return requestValue(transaction.objectStore('pending_visits').get(visitUuid));
 }
 
 export async function updatePendingVisit(visitUuid, updates) {
-  const database = await openDatabase();
-  const transaction = database.transaction('pending_visits', 'readwrite');
+  const transaction = await createTransaction('pending_visits', 'readwrite');
   const store = transaction.objectStore('pending_visits');
   const request = store.get(visitUuid);
   request.onsuccess = () => {
@@ -303,8 +368,7 @@ export async function updatePendingVisit(visitUuid, updates) {
 }
 
 export async function deletePendingVisit(visitUuid) {
-  const database = await openDatabase();
-  const transaction = database.transaction('pending_visits', 'readwrite');
+  const transaction = await createTransaction('pending_visits', 'readwrite');
   transaction.objectStore('pending_visits').delete(visitUuid);
   return new Promise((resolve, reject) => {
     transaction.oncomplete = () => resolve(true);
@@ -315,8 +379,7 @@ export async function deletePendingVisit(visitUuid) {
 
 /** Durable outbox for first-visit confirmations and wrong-machine corrections (including photo evidence). */
 export async function addPendingMachineAction(action) {
-  const database = await openDatabase();
-  const transaction = database.transaction('pending_machine_actions', 'readwrite');
+  const transaction = await createTransaction('pending_machine_actions', 'readwrite');
   transaction.objectStore('pending_machine_actions').add(action);
   return new Promise((resolve, reject) => {
     transaction.oncomplete = () => resolve(action);
@@ -326,8 +389,7 @@ export async function addPendingMachineAction(action) {
 }
 
 export async function listPendingMachineActions(repId) {
-  const database = await openDatabase();
-  const transaction = database.transaction('pending_machine_actions', 'readonly');
+  const transaction = await createTransaction('pending_machine_actions', 'readonly');
   const actions = await requestValue(transaction.objectStore('pending_machine_actions').index('by_rep_created').getAll(
     IDBKeyRange.bound([Number(repId), ''], [Number(repId), '\uffff']),
   ));
@@ -335,8 +397,7 @@ export async function listPendingMachineActions(repId) {
 }
 
 export async function updatePendingMachineAction(actionUuid, updates) {
-  const database = await openDatabase();
-  const transaction = database.transaction('pending_machine_actions', 'readwrite');
+  const transaction = await createTransaction('pending_machine_actions', 'readwrite');
   const store = transaction.objectStore('pending_machine_actions');
   const request = store.get(actionUuid);
   request.onsuccess = () => {
@@ -350,8 +411,7 @@ export async function updatePendingMachineAction(actionUuid, updates) {
 }
 
 export async function deletePendingMachineAction(actionUuid) {
-  const database = await openDatabase();
-  const transaction = database.transaction('pending_machine_actions', 'readwrite');
+  const transaction = await createTransaction('pending_machine_actions', 'readwrite');
   transaction.objectStore('pending_machine_actions').delete(actionUuid);
   return new Promise((resolve, reject) => {
     transaction.oncomplete = () => resolve(true);
@@ -361,8 +421,7 @@ export async function deletePendingMachineAction(actionUuid) {
 }
 
 export async function markRouteCardSubmitted(repId, cardId, status = 'pending_review') {
-  const database = await openDatabase();
-  const transaction = database.transaction('route_snapshots', 'readwrite');
+  const transaction = await createTransaction('route_snapshots', 'readwrite');
   const store = transaction.objectStore('route_snapshots');
   const request = store.get(Number(repId));
   request.onsuccess = () => {

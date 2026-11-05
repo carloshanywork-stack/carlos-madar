@@ -72,7 +72,9 @@ test('4-character passwords, new user employee sync, and first-admin employee sy
   assert.equal(adminEmployee.active, 1);
   const attendanceColumns = new Set(db.pragma('table_info(employee_daily_attendance)').map((column) => column.name));
   for (const column of [
-    'clock_in_time', 'clock_in_source', 'clock_in_lat', 'clock_in_lng', 'clock_out_time',
+    'clock_in_time', 'clock_in_source', 'clock_in_lat', 'clock_in_lng', 'clock_in_accuracy',
+    'clock_in_location_at', 'clock_out_time', 'clock_out_lat', 'clock_out_lng',
+    'clock_out_accuracy', 'clock_out_location_at',
     'clock_out_source', 'clock_out_admin_note', 'total_hours', 'regular_hours', 'overtime_status', 'overtime_approved_by',
   ]) assert.ok(attendanceColumns.has(column), `missing attendance migration column ${column}`);
 
@@ -308,12 +310,18 @@ test('rep and admin clock actions persist source/GPS, guard duplicate punches, a
   assert.equal(clockIn.body.attendance.clock_in_source, 'app');
   assert.equal(clockIn.body.attendance.clock_in_lat, location.latitude);
   assert.equal(clockIn.body.attendance.clock_in_lng, location.longitude);
+  assert.equal(clockIn.body.attendance.clock_in_accuracy, location.accuracy);
+  assert.equal(clockIn.body.attendance.clock_in_location_at, location.updatedAt);
   assert.equal(clockIn.body.attendance.clock_out_time, null);
   const duplicateClockIn = await request('/api/rep/attendance/clock-in', jsonOptions('POST', { location }), repCookie);
   assert.equal(duplicateClockIn.response.status, 409);
   const clockOut = await request('/api/rep/attendance/clock-out', jsonOptions('POST', { location }), repCookie);
   assert.equal(clockOut.response.status, 200, JSON.stringify(clockOut.body));
   assert.equal(clockOut.body.attendance.clock_out_source, 'app');
+  assert.equal(clockOut.body.attendance.clock_out_lat, location.latitude);
+  assert.equal(clockOut.body.attendance.clock_out_lng, location.longitude);
+  assert.equal(clockOut.body.attendance.clock_out_accuracy, location.accuracy);
+  assert.equal(clockOut.body.attendance.clock_out_location_at, location.updatedAt);
   assert.ok(Number.isFinite(clockOut.body.attendance.total_hours));
   const duplicateClockOut = await request('/api/rep/attendance/clock-out', jsonOptions('POST', {}), repCookie);
   assert.equal(duplicateClockOut.response.status, 409);

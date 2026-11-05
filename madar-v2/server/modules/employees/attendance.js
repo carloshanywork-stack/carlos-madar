@@ -262,17 +262,20 @@ function clockIn(employeeIdValue, source, location, actorId, database = db, { no
   const run = database.transaction(() => {
     database.prepare(`INSERT INTO employee_daily_attendance
         (employee_id, work_date, status, overtime_hours, notes, clock_in_time, clock_in_source,
-         clock_in_lat, clock_in_lng, clock_out_time, clock_out_source, total_hours, regular_hours,
+         clock_in_lat, clock_in_lng, clock_in_accuracy, clock_in_location_at,
+         clock_out_time, clock_out_source, total_hours, regular_hours,
          overtime_status, overtime_approved_by)
-      VALUES (?, ?, ?, 0, ?, ?, ?, ?, ?, NULL, NULL, 0, 0, 'none', NULL)
+      VALUES (?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, 0, 0, 'none', NULL)
       ON CONFLICT(employee_id, work_date) DO UPDATE SET
         status = excluded.status, overtime_hours = 0, normal_overtime_hours = 0, holiday_overtime_hours = 0,
         clock_in_time = excluded.clock_in_time,
         clock_in_source = excluded.clock_in_source, clock_in_lat = excluded.clock_in_lat,
-        clock_in_lng = excluded.clock_in_lng, clock_out_time = NULL, clock_out_source = NULL,
+        clock_in_lng = excluded.clock_in_lng, clock_in_accuracy = excluded.clock_in_accuracy,
+        clock_in_location_at = excluded.clock_in_location_at, clock_out_time = NULL, clock_out_source = NULL,
+        clock_out_lat = NULL, clock_out_lng = NULL, clock_out_accuracy = NULL, clock_out_location_at = NULL,
         total_hours = 0, regular_hours = 0, overtime_status = 'none', overtime_approved_by = NULL`)
       .run(employee.id, date, status, previous?.notes ?? null, clockInTime, source,
-        location?.latitude ?? null, location?.longitude ?? null);
+        location?.latitude ?? null, location?.longitude ?? null, location?.accuracy ?? null, location?.updatedAt ?? null);
     const current = getAttendanceRecord(employee.id, date, database);
     recordAudit({ database, actorId, action: 'clock_in', entityType: 'employee_attendance', entityId: current.id,
       oldValues: previous ? {
@@ -287,6 +290,8 @@ function clockIn(employeeIdValue, source, location, actorId, database = db, { no
         clock_in_source: source,
         clock_in_lat: location?.latitude ?? null,
         clock_in_lng: location?.longitude ?? null,
+        clock_in_accuracy: location?.accuracy ?? null,
+        clock_in_location_at: location?.updatedAt ?? null,
         status,
       } });
     return current;
@@ -313,24 +318,30 @@ function clockOut(employeeIdValue, source, location, actorId, database = db,
   const overtimeStatus = hours.overtimeHours > 0 ? 'pending' : 'none';
   const run = database.transaction(() => {
     const result = database.prepare(`UPDATE employee_daily_attendance
-      SET clock_out_time = ?, clock_out_source = ?, total_hours = ?, regular_hours = ?,
+      SET clock_out_time = ?, clock_out_source = ?, clock_out_lat = ?, clock_out_lng = ?,
+        clock_out_accuracy = ?, clock_out_location_at = ?, total_hours = ?, regular_hours = ?,
         overtime_hours = ?, normal_overtime_hours = ?, holiday_overtime_hours = ?, clock_out_admin_note = ?,
         overtime_status = ?, overtime_approved_by = NULL
       WHERE id = ? AND clock_out_time IS NULL`)
-      .run(clockOutTime, source, hours.totalHours, hours.regularHours, hours.overtimeHours,
+      .run(clockOutTime, source, location?.latitude ?? null, location?.longitude ?? null,
+        location?.accuracy ?? null, location?.updatedAt ?? null, hours.totalHours, hours.regularHours, hours.overtimeHours,
         hours.normalOvertimeHours, hours.holidayOvertimeHours, source === 'admin' ? adminNote : null,
         overtimeStatus, current.id);
     if (!result.changes) throw new HttpError(409, 'This attendance record has already been clocked out.');
     const updated = getAttendanceRecord(employee.id, current.work_date, database);
     recordAudit({ database, actorId, action: source === 'admin' ? 'admin_clock_out' : 'clock_out',
       entityType: 'employee_attendance', entityId: current.id,
-      oldValues: { clock_out_time: null, clock_out_admin_note: current.clock_out_admin_note ?? null,
+      oldValues: { clock_out_time: null, clock_out_lat: current.clock_out_lat ?? null,
+        clock_out_lng: current.clock_out_lng ?? null, clock_out_admin_note: current.clock_out_admin_note ?? null,
         overtime_hours: current.overtime_hours, overtime_status: current.overtime_status },
       newValues: {
         clock_out_time: clockOutTime,
         clock_out_source: source,
+        clock_out_lat: location?.latitude ?? null,
+        clock_out_lng: location?.longitude ?? null,
+        clock_out_accuracy: location?.accuracy ?? null,
+        clock_out_location_at: location?.updatedAt ?? null,
         clock_out_admin_note: source === 'admin' ? adminNote : null,
-        location: location ?? null,
         ...hours,
         overtime_status: overtimeStatus,
       } });

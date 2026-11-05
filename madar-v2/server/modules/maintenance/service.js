@@ -4034,7 +4034,12 @@ async function updateMaintenanceCardUnlocked(orderId, cardId, input, actorId = n
   if (!Object.keys(body).length) throw new HttpError(400, 'At least one card field must be provided.');
 
   const order = findMaintenanceOrder(id, database);
-  if (order.status === 'archived') throw new HttpError(409, 'Archived maintenance orders are read-only.');
+  if (order.status === 'archived') {
+    const hasDisallowedFields = ['beforePhotos', 'afterPhotos', 'machineCode'].some((key) => body[key] !== undefined);
+    if (hasDisallowedFields) {
+      throw new HttpError(409, 'Archived maintenance orders are read-only except for reasons and notes.');
+    }
+  }
   const card = database.prepare(`
     SELECT card.*, machine.code AS machine_code
     FROM maintenance_cards card JOIN machines machine ON machine.id = card.machine_id

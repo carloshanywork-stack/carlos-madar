@@ -33,8 +33,10 @@ export async function captureNativeCameraPhoto() {
 
 async function ensureForegroundLocationPermission() {
   let status = await Geolocation.checkPermissions();
-  if (!isPermissionGranted(status.location) && !isPermissionGranted(status.coarseLocation)) {
-    status = await Geolocation.requestPermissions({ permissions: ['location', 'coarseLocation'] });
+  // A coarse-only grant is not enough for attendance GPS; still request precise
+  // location instead of silently skipping the Android permission prompt.
+  if (!isPermissionGranted(status.location)) {
+    status = await Geolocation.requestPermissions({ permissions: ['location'] });
   }
   if (!isPermissionGranted(status.location)) {
     throw new Error('اسمح بالوصول إلى الموقع الدقيق من إعدادات التطبيق للمتابعة.');
