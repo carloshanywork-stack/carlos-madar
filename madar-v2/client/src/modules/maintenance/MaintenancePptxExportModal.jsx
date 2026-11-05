@@ -30,6 +30,23 @@ function filenameFromDisposition(header, fallback) {
   return /filename="?([^";]+)"?/i.exec(header ?? '')?.[1] ?? fallback;
 }
 
+async function responseErrorMessage(response, status) {
+  let text = '';
+  try {
+    if (typeof response?.text === 'function') text = await response.text();
+    else if (response instanceof ArrayBuffer) text = new TextDecoder().decode(response);
+  } catch {
+    // Use the status-specific fallback if the response body could not be read.
+  }
+  const fallback = `تعذر إنشاء العرض (${status}).`;
+  try {
+    const payload = JSON.parse(text);
+    return payload.error || payload.message || fallback;
+  } catch {
+    return text.trim() || fallback;
+  }
+}
+
 function requestPptxExport(payload, { onDownloadStart, onDownloadProgress }) {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
@@ -44,6 +61,7 @@ function requestPptxExport(payload, { onDownloadStart, onDownloadProgress }) {
     if (payload.reasonId !== null && payload.reasonId !== undefined) query.set('reasonId', String(payload.reasonId));
     const queryString = query.toString();
     xhr.open('POST', `/api/maintenance/export/pptx${queryString ? `?${queryString}` : ''}`);
+    xhr.timeout = 240_000;
     xhr.withCredentials = true;
     xhr.responseType = 'blob';
     xhr.setRequestHeader('Content-Type', 'application/json');
@@ -54,14 +72,16 @@ function requestPptxExport(payload, { onDownloadStart, onDownloadProgress }) {
       markDownloadStarted();
       onDownloadProgress?.(event.lengthComputable ? Math.round((event.loaded / event.total) * 100) : null);
     });
-    xhr.addEventListener('error', () => reject(new Error('تعذر الاتصال بالخادم أثناء إنشاء العرض.')));
+    xhr.addEventListener('error', async () => {
+      const message = await responseErrorMessage(xhr.response, xhr.status);
+      reject(new Error(xhr.status ? message : 'تعذر الاتصال بالخادم أثناء إنشاء العرض. تحقق من الشبكة أو إعدادات الوصول ثم أعد المحاولة.'));
+    });
     xhr.addEventListener('abort', () => reject(new Error('تم إلغاء إنشاء العرض.')));
+    xhr.addEventListener('timeout', () => reject(new Error('استغرق إنشاء وتنزيل العرض أكثر من 4 دقائق؛ قلّل نطاق الأرشيف ثم أعد المحاولة.')));
     xhr.addEventListener('load', async () => {
       markDownloadStarted();
-      if (xhr.status < 200 || xhr.status >= 300) {
-        const text = await xhr.response?.text?.().catch(() => '');
-        let message = `تعذر إنشاء العرض (${xhr.status}).`;
-        try { message = JSON.parse(text).error || message; } catch { /* response is not JSON */ }
+      if (xhr.status !== 200) {
+        const message = await responseErrorMessage(xhr.response, xhr.status);
         reject(new Error(message));
         return;
       }
@@ -156,7 +176,16 @@ export default function MaintenancePptxExportModal({
         });
         if (!response.ok) return;
         const progress = await response.json();
-        if (progress && !controller.signal.aborted) setLiveProgress(progress);
+        if (progress && !controller.signal.aborted) {
+          setLiveProgress((current) => current?.downloadStarted
+            ? {
+              ...current,
+              active: true,
+              percent: Math.max(current.percent ?? 94, 94),
+              stage: 'جارٍ تنزيل ملف PowerPoint...',
+            }
+            : progress);
+        }
       } catch {
         // The export request owns error reporting; keep the latest progress during transient poll failures.
       } finally {
@@ -209,10 +238,10 @@ export default function MaintenancePptxExportModal({
         exportId,
       }, {
         onDownloadStart: () => {
-          stopProgressPolling();
           setLiveProgress((current) => ({
             ...current,
             active: true,
+            downloadStarted: true,
             percent: Math.max(current?.percent ?? 0, 94),
             stage: 'جارٍ تنزيل ملف PowerPoint...',
           }));
@@ -223,12 +252,13 @@ export default function MaintenancePptxExportModal({
           setLiveProgress((current) => ({
             ...current,
             active: true,
+            downloadStarted: true,
             percent: Math.min(100, percent),
             stage: 'جارٍ تنزيل ملف PowerPoint...',
           }));
         },
       });
-      setLiveProgress((current) => ({ ...current, active: false, percent: 100, stage: 'اكتمل إنشاء الملف، جارٍ بدء التنزيل...' }));
+      setLiveProgress((current) => ({ ...current, active: false, percent: 100, stage: 'اكتمل تنزيل ملف PowerPoint.' }));
       downloadFile(result.blob, result.filename);
       onClose?.();
     } catch (caught) {

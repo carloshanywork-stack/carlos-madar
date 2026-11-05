@@ -38,6 +38,21 @@ const cookieSecure = cookieSecureValue === undefined
   ? nodeEnv === 'production'
   : ['true', '1', 'yes'].includes(cookieSecureValue.trim().toLowerCase());
 
+const defaultCorsOrigins = [
+  'http://127.0.0.1:5173',
+  'http://localhost:5173',
+  'http://localhost:3000',
+  'https://localhost',
+];
+const corsOrigins = [...new Set([
+  ...defaultCorsOrigins,
+  ...(process.env.CORS_ORIGINS ?? '').split(',').map((origin) => origin.trim()).filter(Boolean),
+])];
+const corsTailscaleSuffixes = (process.env.CORS_TAILSCALE_SUFFIXES ?? '.ts.net')
+  .split(',')
+  .map((suffix) => suffix.trim().toLowerCase())
+  .filter((suffix) => /^\.[a-z\d.-]+$/i.test(suffix));
+
 export const env = Object.freeze({
   projectRoot,
   nodeEnv,
@@ -55,8 +70,6 @@ export const env = Object.freeze({
   jwtSecret,
   authCookieName: 'madar_token',
   authCookieSecure: cookieSecure,
-  corsOrigins: (process.env.CORS_ORIGINS ?? 'http://127.0.0.1:5173,http://localhost:5173')
-    .split(',')
-    .map((origin) => origin.trim())
-    .filter(Boolean),
+  corsOrigins,
+  corsTailscaleSuffixes,
 });

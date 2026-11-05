@@ -11,6 +11,7 @@ process.env.MADAR_V2_DATABASE_PATH = join(temporaryDirectory, 'auth.sqlite');
 process.env.MADAR_V2_STORAGE_ROOT = join(temporaryDirectory, 'storage');
 process.env.NODE_ENV = 'test';
 process.env.COOKIE_SECURE = 'false';
+process.env.TRUST_PROXY_HOPS = '1';
 
 const [{ app }, { db }, { initializeDatabase }, { verifyToken, authenticateUser }] = await Promise.all([
   import('../server/app.js'),
@@ -188,6 +189,30 @@ test('auth status, one-time setup, protected APIs, login and revocable sessions'
   assert.equal(disabledSession.body.authenticated, false);
   assert.equal(disabledSession.body.setupRequired, false);
   assert.equal((await request('/api/clients', {}, reloginCookie)).response.status, 401);
+});
+
+test('CORS permits the local UI, the request host, trusted forwarded hosts, and HTTPS Tailscale origins', async () => {
+  const localOrigin = await request('/api/health', { headers: { origin: 'http://localhost:3000' } });
+  assert.equal(localOrigin.response.headers.get('access-control-allow-origin'), 'http://localhost:3000');
+  assert.match(localOrigin.response.headers.get('access-control-expose-headers') ?? '', /Content-Disposition/i);
+
+  const sameHostOrigin = await request('/api/health', { headers: { origin: baseUrl } });
+  assert.equal(sameHostOrigin.response.headers.get('access-control-allow-origin'), baseUrl);
+
+  const forwardedOrigin = 'https://madar-proxy.example:8443';
+  const forwardedHost = await request('/api/health', {
+    headers: { origin: forwardedOrigin, 'x-forwarded-host': 'madar-proxy.example:8443' },
+  });
+  assert.equal(forwardedHost.response.headers.get('access-control-allow-origin'), forwardedOrigin);
+
+  const tailscaleOrigin = 'https://carlos-pc.tail852ef0.ts.net';
+  const tailscale = await request('/api/health', { headers: { origin: tailscaleOrigin } });
+  assert.equal(tailscale.response.headers.get('access-control-allow-origin'), tailscaleOrigin);
+
+  const impostor = await request('/api/health', { headers: { origin: 'https://carlos-pc.ts.net.attacker.invalid' } });
+  assert.equal(impostor.response.headers.get('access-control-allow-origin'), null);
+  const untrustedOrigin = await request('/api/health', { headers: { origin: 'https://untrusted.example' } });
+  assert.equal(untrustedOrigin.response.headers.get('access-control-allow-origin'), null);
 });
 
 test('five consecutive account failures lock for 15 minutes and a later valid login resets the counter', () => {

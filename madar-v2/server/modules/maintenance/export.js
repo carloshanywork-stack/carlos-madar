@@ -37,6 +37,9 @@ const FIXED_LOGO_CANDIDATES = [
   'server/assets/logo.jpg',
 ];
 const EXPORT_PROGRESS_TTL_MS = 10 * 60 * 1000;
+const PPTX_EXPORT_SOCKET_TIMEOUT_MS = 5 * 60 * 1000;
+const PPTX_IMAGE_MAX_DIMENSION = 1200;
+const PPTX_IMAGE_JPEG_QUALITY = 78;
 const exportProgressMap = new Map();
 
 function pruneExpiredExportProgress(now = Date.now()) {
@@ -78,8 +81,13 @@ async function loadImage(storedPath, { ensurePortrait = false } = {}) {
       pipeline = pipeline.rotate(90);
     }
     const { data, info } = await pipeline
-      .resize({ width: 800, withoutEnlargement: true })
-      .jpeg({ quality: 75 })
+      .resize({
+        width: PPTX_IMAGE_MAX_DIMENSION,
+        height: PPTX_IMAGE_MAX_DIMENSION,
+        fit: 'inside',
+        withoutEnlargement: true,
+      })
+      .jpeg({ quality: PPTX_IMAGE_JPEG_QUALITY, mozjpeg: true })
       .toBuffer({ resolveWithObject: true });
     return { contentType: 'image/jpeg', data, width: info.width, height: info.height };
   } catch {
@@ -565,6 +573,27 @@ function downloadReport(res, report) {
   res.send(report.buffer);
 }
 
+function extendPptxExportSocketTimeout(req, res) {
+  const socket = req.socket;
+  if (!socket) return;
+  const previousTimeout = Number.isFinite(socket.timeout) ? socket.timeout : 0;
+  const handleTimeout = () => {
+    if (res.destroyed || res.writableEnded) return;
+    if (res.headersSent) {
+      res.destroy(new Error('PowerPoint export socket timed out.'));
+      return;
+    }
+    res.status(504).json({ error: 'انتهت مهلة تجهيز عرض PowerPoint؛ قلّل نطاق الأرشيف ثم أعد المحاولة.' });
+  };
+  req.setTimeout(PPTX_EXPORT_SOCKET_TIMEOUT_MS, handleTimeout);
+  const restoreTimeout = () => {
+    socket.removeListener('timeout', handleTimeout);
+    if (!socket.destroyed) socket.setTimeout(previousTimeout);
+  };
+  res.once('finish', restoreTimeout);
+  res.once('close', restoreTimeout);
+}
+
 export async function buildMaintenancePptx(orderId, database, { showReasonFooter = false, useFixedLogoOnCover = false } = {}) {
   const order = getMaintenanceOrder(positiveId(orderId, 'orderId'), database);
   const report = await buildMaintenancePptxExport({
@@ -600,7 +629,7 @@ export async function buildMaintenancePptxExport(input, database = defaultDataba
       ORDER BY COALESCE(archived_at, updated_at, created_at) DESC, id DESC
     `).all().map((row) => row.id);
   }
-  if (!orderIds.length) throw new HttpError(404, 'No archived maintenance orders are available for export.');
+  if (!orderIds.length) throw new HttpError(404, 'لا توجد بطاقات صيانة تحتوي على صور للأوامر والفلاتر المحددة.');
 
   const orders = orderIds.map((orderId) => getMaintenanceOrder(orderId, database));
   let reasonName = null;
@@ -640,7 +669,7 @@ export async function buildMaintenancePptxExport(input, database = defaultDataba
     && (reasonId === null || card.reason_id === reasonId || (Array.isArray(card.reason_ids) && card.reason_ids.includes(reasonId)))
     && (normalizedArea === null || String(card.machine_area || order.area || '').trim().toLocaleLowerCase('ar-EG') === normalizedArea)
   ));
-  if (!cards.length) throw new HttpError(404, 'No maintenance cards with photos match the selected orders and filters.');
+  if (!cards.length) throw new HttpError(404, 'لا توجد بطاقات صيانة تحتوي على صور للأوامر والفلاتر المحددة.');
 
   const totalCards = cards.length;
   const startTime = Date.now();
@@ -978,16 +1007,25 @@ export async function buildMaintenanceDocx(orderId, database) {
 
 export async function exportMaintenanceReport(req, res, format, database) {
   if (!['pptx', 'docx'].includes(format)) throw new HttpError(400, 'Unsupported maintenance report format.');
-  const report = format === 'pptx'
-    ? await buildMaintenancePptx(req.params.id, database, {
-      showReasonFooter: req.query?.showReasonFooter,
-      useFixedLogoOnCover: req.query?.useFixedLogoOnCover,
-    })
-    : await buildMaintenanceDocx(req.params.id, database);
+  if (format === 'pptx') extendPptxExportSocketTimeout(req, res);
+  let report;
+  try {
+    report = format === 'pptx'
+      ? await buildMaintenancePptx(req.params.id, database, {
+        showReasonFooter: req.query?.showReasonFooter,
+        useFixedLogoOnCover: req.query?.useFixedLogoOnCover,
+      })
+      : await buildMaintenanceDocx(req.params.id, database);
+  } catch (error) {
+    if (res.destroyed || res.writableEnded) return;
+    throw error;
+  }
+  if (res.destroyed || res.writableEnded) return;
   downloadReport(res, report);
 }
 
 export async function exportMaintenancePptx(req, res, database = defaultDatabase) {
+  extendPptxExportSocketTimeout(req, res);
   const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
   const query = req.query ?? {};
   const input = { ...body };
@@ -1003,6 +1041,13 @@ export async function exportMaintenancePptx(req, res, database = defaultDatabase
     if (query[key] !== undefined) input[key] = query[key];
   }
   if (input.orderIds === undefined) input.orderIds = [];
-  const report = await buildMaintenancePptxExport(input, database);
+  let report;
+  try {
+    report = await buildMaintenancePptxExport(input, database);
+  } catch (error) {
+    if (res.destroyed || res.writableEnded) return;
+    throw error;
+  }
+  if (res.destroyed || res.writableEnded) return;
   downloadReport(res, report);
 }

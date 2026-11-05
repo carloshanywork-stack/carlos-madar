@@ -134,13 +134,19 @@ function pptxTextValues(xml) {
     .replaceAll('&apos;', "'"));
 }
 
-async function writePptxPhotoFixture(relativePath, background = '#d94841') {
+async function writePptxPhotoFixture(relativePath, background = '#d94841', { width = 60, height = 120 } = {}) {
   const absolutePath = join(storageRoot, ...relativePath.split('/'));
   mkdirSync(join(storageRoot, ...relativePath.split('/').slice(0, -1)), { recursive: true });
-  const buffer = await sharp({ create: { width: 60, height: 120, channels: 3, background } }).jpeg().toBuffer();
+  const buffer = await sharp({ create: { width, height, channels: 3, background } }).jpeg().toBuffer();
   writeFileSync(absolutePath, buffer);
   return { path: relativePath, buffer };
 }
+
+test('empty maintenance archive returns the localized no-photo export error', async () => {
+  const result = await request('/api/maintenance/export/pptx', json('POST', { orderIds: [] }));
+  assert.equal(result.response.status, 404);
+  assert.equal(result.body.error, 'لا توجد بطاقات صيانة تحتوي على صور للأوامر والفلاتر المحددة.');
+});
 
 test('maintenance Storage explorer browses safe Areas folders and reports direct photos', async () => {
   const areasRoot = join(storageRoot, 'Areas');
@@ -602,7 +608,7 @@ test('V2 parity operations cover imports, area maintenance, HR, exports, users, 
     orderIds: [noCardOrder.body.id],
   }));
   assert.equal(noCompletedPptx.response.status, 404);
-  assert.match(noCompletedPptx.body.error, /No maintenance cards with photos/);
+  assert.equal(noCompletedPptx.body.error, 'لا توجد بطاقات صيانة تحتوي على صور للأوامر والفلاتر المحددة.');
 
   const pptx = await request(`/api/maintenance/orders/${order.body.id}/export.pptx`);
   assert.equal(pptx.response.status, 200);
@@ -642,10 +648,15 @@ test('V2 parity operations cover imports, area maintenance, HR, exports, users, 
   const pageCounterShape = noReasonMachineSlide.split('<p:sp>').find((shape) => shape.includes('صفحة 4 من'));
   assert.match(pageCounterShape, /sz="1050"/, 'badge page text should use the larger 10.5 pt font');
   assert.match(pageCounterShape, /b="1"/, 'badge page text should be bold');
-  const bulkPptx = await request('/api/maintenance/export/pptx', json('POST', {
-    orderIds: [order.body.id], reasonId: reasonList.body[0].id, area: 'cairo', groupBy: 'area', showReasonFooter: true,
-  }));
+  const bulkPptx = await request('/api/maintenance/export/pptx', {
+    ...json('POST', {
+      orderIds: [order.body.id], reasonId: reasonList.body[0].id, area: 'cairo', groupBy: 'area', showReasonFooter: true,
+    }),
+    headers: { 'content-type': 'application/json', origin: 'http://localhost:3000' },
+  });
   assert.equal(bulkPptx.response.status, 200, JSON.stringify(bulkPptx.body));
+  assert.equal(bulkPptx.response.headers.get('access-control-allow-origin'), 'http://localhost:3000');
+  assert.match(bulkPptx.response.headers.get('access-control-expose-headers') ?? '', /Content-Disposition/i);
   assert.match(bulkPptx.response.headers.get('content-type'), /presentationml\.presentation/);
   assert.match(bulkPptx.response.headers.get('content-disposition'), /filename\*=UTF-8''Madar_Report_/);
   assert.equal(bulkPptx.body.subarray(0, 2).toString(), 'PK');
@@ -1261,7 +1272,7 @@ test('maintenance PowerPoint export exposes live machine progress and a final co
   assert.equal(order.response.status, 201, JSON.stringify(order.body));
   const orderCardCount = db.prepare('SELECT COUNT(*) AS count FROM maintenance_cards WHERE order_id = ?').get(order.body.id).count;
   assert.equal(orderCardCount, machineCount);
-  const progressPhoto = await writePptxPhotoFixture('Maintenance/Export Fixtures/progress-photo.jpg', '#9467bd');
+  const progressPhoto = await writePptxPhotoFixture('Maintenance/Export Fixtures/progress-photo.jpg', '#9467bd', { width: 2400, height: 1600 });
   db.prepare("UPDATE maintenance_cards SET status = 'completed', before_photos_json = ? WHERE order_id = ?")
     .run(JSON.stringify([progressPhoto.path]), order.body.id);
   db.prepare(`UPDATE maintenance_orders
@@ -1289,6 +1300,15 @@ test('maintenance PowerPoint export exposes live machine progress and a final co
   const exported = await exportTask;
   assert.equal(exported.response.status, 200, JSON.stringify(exported.body));
   assert.equal(exported.body.subarray(0, 2).toString(), 'PK');
+  const exportedMediaName = zipEntryNames(exported.body).find((name) => name.startsWith('ppt/media/') && name.toLowerCase().endsWith('.jpeg'));
+  assert.ok(exportedMediaName, 'large maintenance photos should be converted to JPEG for PPTX');
+  const exportedMedia = await readZipEntry(exported.body, exportedMediaName);
+  const exportedMediaMetadata = await sharp(exportedMedia).metadata();
+  assert.equal(exportedMediaMetadata.format, 'jpeg');
+  assert.ok(exportedMediaMetadata.width <= 1200 && exportedMediaMetadata.height <= 1200,
+    'PPTX media should be resized to fit within 1200x1200 pixels');
+  assert.deepEqual(readFileSync(join(storageRoot, ...progressPhoto.path.split('/'))), progressPhoto.buffer,
+    'PPTX optimization must not rewrite the archived source image');
   assert.ok(observedProgress.some((progress) => (
     progress.total === machineCount
     && progress.current >= 1
@@ -1379,8 +1399,8 @@ test('maintenance PPTX exports the latest edited card snapshot and never falls b
   const deriveExportPhoto = async (photo) => {
     const oriented = await sharp(photo.buffer, { failOn: 'none' }).rotate().toBuffer();
     return sharp(oriented, { failOn: 'none' })
-      .resize({ width: 800, withoutEnlargement: true })
-      .jpeg({ quality: 75 })
+      .resize({ width: 1200, height: 1200, fit: 'inside', withoutEnlargement: true })
+      .jpeg({ quality: 78, mozjpeg: true })
       .toBuffer();
   };
   const exportedPhotos = await Promise.all(mediaNames.map((name) => readZipEntry(exported.body, name)));

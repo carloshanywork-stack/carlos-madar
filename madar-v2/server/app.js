@@ -25,13 +25,60 @@ export const app = express();
 
 app.disable('x-powered-by');
 app.set('trust proxy', env.trustProxyHops);
-const corsOrigins = new Set([...env.corsOrigins, 'https://localhost']);
-app.use(cors({
+
+function canonicalHost(host, protocol) {
+  if (!host) return null;
+  try {
+    return new URL(`${protocol}//${host}`).host.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+function isCorsOriginAllowed(origin, req) {
+  if (!origin) return true;
+  if (env.corsOrigins.includes(origin)) return true;
+
+  let parsedOrigin;
+  try {
+    parsedOrigin = new URL(origin);
+  } catch {
+    return false;
+  }
+  if (!['http:', 'https:'].includes(parsedOrigin.protocol)
+      || parsedOrigin.username || parsedOrigin.password
+      || parsedOrigin.origin !== origin
+      || parsedOrigin.pathname !== '/' || parsedOrigin.search || parsedOrigin.hash) return false;
+
+  const originHost = parsedOrigin.host.toLowerCase();
+  if (originHost === canonicalHost(req.get('host'), parsedOrigin.protocol)) return true;
+
+  // Express only trusts X-Forwarded-* when the immediate peer is covered by
+  // TRUST_PROXY_HOPS. Do not let an arbitrary client opt itself into CORS.
+  const trustProxy = req.app.get('trust proxy fn');
+  const forwardedHostIsTrusted = typeof trustProxy === 'function'
+    && trustProxy(req.socket?.remoteAddress, 0);
+  if (forwardedHostIsTrusted) {
+    const forwardedHost = req.get('x-forwarded-host')?.split(',')[0]?.trim();
+    if (originHost === canonicalHost(forwardedHost, parsedOrigin.protocol)) return true;
+  }
+
+  if (parsedOrigin.protocol === 'https:') {
+    const hostname = parsedOrigin.hostname.toLowerCase();
+    if (env.corsTailscaleSuffixes.some((suffix) => hostname.length > suffix.length && hostname.endsWith(suffix))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+app.use((req, res, next) => cors({
   origin(origin, callback) {
-    callback(null, !origin || corsOrigins.has(origin));
+    callback(null, isCorsOriginAllowed(origin, req));
   },
   credentials: true,
-}));
+  exposedHeaders: ['Content-Disposition'],
+})(req, res, next));
 app.use(express.json({ limit: '1mb' }));
 app.use(requestLogger);
 
