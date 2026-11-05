@@ -35,6 +35,16 @@ export default function NativePermissionGate({ children }) {
           && Number(permissions.sdkInt) === 29 && !permissions.backgroundRequestMade) {
           permissions = await RepEngine.requestBackgroundPermission();
         }
+        if (active && requiredGranted(permissions)
+          && !permissions.batteryOptimizationIgnored
+          && !permissions.batteryExemptionRequested) {
+          try {
+            await RepEngine.requestBatteryExemption();
+            permissions = await RepEngine.getPermissionState();
+          } catch (batteryError) {
+            if (active) setError(batteryError.message || 'تعذر فتح إعدادات استثناء البطارية.');
+          }
+        }
         if (active) setState(permissions);
       } catch (requestError) {
         if (active) setError(requestError.message || 'تعذر فحص صلاحيات الهاتف.');

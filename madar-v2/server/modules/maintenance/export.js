@@ -1008,7 +1008,6 @@ export async function buildMaintenanceDocx(orderId, database) {
     content.push(rtlParagraph(`${card.machine_code} · ${card.machine_name_ar}`, { heading: HeadingLevel.HEADING_2, pageBreakBefore: true }));
     content.push(rtlParagraph(`المنطقة: ${card.machine_area || '—'}    ·    سبب العطل: ${card.reason_name || 'غير محدد'}`));
     content.push(rtlParagraph(`الفنيون: ${order.technicians.map((technician) => technician.name).join('، ') || 'غير معيّنين'}    ·    تاريخ الزيارة: ${String(order.created_at ?? '').slice(0, 10) || '—'}`));
-    if (card.notes) content.push(rtlParagraph(`ملاحظات فنية: ${card.notes}`));
     for (const [label, paths] of [['قبل الصيانة', card.before_photos], ['بعد الصيانة', card.after_photos]]) {
       content.push(rtlParagraph(label, { heading: HeadingLevel.HEADING_3 }));
       const images = await loadCardImages(paths);

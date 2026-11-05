@@ -16,6 +16,11 @@ const sections = [
 
 export default function Sidebar({ open, onNavigate, user }) {
   const location = useLocation();
+  const canViewFinance = ['admin', 'finance', 'accountant'].includes(user?.role);
+  const visibleSections = [...sections.slice(0, 3), ...(user?.role === 'admin' ? [{ path: '/supervisor', label: 'رادار المشرف', icon: 'map' }] : []), ...sections.slice(3)]
+    .filter((item) => item.path !== '/staff' || user?.role === 'admin')
+    .filter((item) => !['/finance', '/accounting'].includes(item.path) || canViewFinance)
+    .filter((item) => item.path !== '/settings' || user?.role === 'admin');
   return (
     <>
       <div className={`madar-mobile-scrim ${open ? 'visible' : ''}`} onClick={onNavigate} aria-hidden="true" />
@@ -29,8 +34,7 @@ export default function Sidebar({ open, onNavigate, user }) {
         </div>
         <div className="madar-sidebar-caption">مساحات العمل</div>
         <nav className="madar-nav" aria-label="التنقل الرئيسي">
-          {[...sections.slice(0, 3), ...(user?.role === 'admin' ? [{ path: '/supervisor', label: 'رادار المشرف', icon: 'map' }] : []), ...sections.slice(3)]
-            .filter((item) => item.path !== '/staff' || user?.role === 'admin').map((item) => {
+          {visibleSections.map((item) => {
             const nested = item.path !== '/' && location.pathname.startsWith(`${item.path}/`);
             return (
               <NavLink

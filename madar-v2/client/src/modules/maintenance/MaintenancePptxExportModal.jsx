@@ -246,7 +246,7 @@ export default function MaintenancePptxExportModal({
           </div>
           <label className="madar-export-radio-option madar-export-radio-inline madar-export-footer-option">
             <input type="checkbox" checked={showReasonFooter} onChange={(event) => setShowReasonFooter(event.target.checked)} />
-            <span><strong>إظهار سبب الصيانة فقط كتذييل لشريحة الماكينة</strong><small>عند التفعيل ينتقل السبب من بيانات الشريحة إلى التذييل، مع بقاء التاريخ والملاحظات في محتوى الشريحة.</small></span>
+            <span><strong>إظهار سبب الصيانة فقط كتذييل لشريحة الماكينة</strong><small>عند التفعيل ينتقل السبب من بيانات الشريحة إلى التذييل، مع بقاء الصور ومعلومات الماكينة في محتوى الشريحة.</small></span>
           </label>
           <label className="madar-export-radio-option madar-export-radio-inline madar-export-footer-option">
             <input type="checkbox" checked={useFixedLogoOnCover} onChange={(event) => setUseFixedLogoOnCover(event.target.checked)} />

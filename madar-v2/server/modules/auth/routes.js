@@ -53,7 +53,7 @@ router.post('/login', loginRateLimiter, asyncHandler(async (req, res) => {
     throw new HttpError(400, 'Username and password are required.');
   }
   const result = authenticateUser(username, password, undefined, {
-    allowedRoles: ['admin', 'sales', 'operations', 'purchasing'],
+    allowedRoles: ['admin', 'sales', 'operations', 'purchasing', 'finance', 'accountant'],
   });
   if (!result) {
     res.status(401).json({ error: 'اسم المستخدم أو كلمة المرور غير صحيحة' });

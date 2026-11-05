@@ -1,5 +1,7 @@
 import { Router } from 'express';
 import { requestActorId } from '../actor.js';
+import { requireFinanceOrAdmin, requireWarehouseMutationAccess } from '../auth/authorization.js';
+import { financeAware as roleAware } from '../visibility.js';
 import {
   createMaterial,
   createOffcut,
@@ -14,7 +16,7 @@ import { buildWarehouseWorkbook } from './export.js';
 
 const router = Router();
 
-router.get('/export.xlsx', (req, res) => {
+router.get('/export.xlsx', requireFinanceOrAdmin, (req, res) => {
   const buffer = buildWarehouseWorkbook();
   res.set({
     'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -25,39 +27,41 @@ router.get('/export.xlsx', (req, res) => {
 });
 
 router.get('/materials', (req, res) => {
-  res.json(listMaterials());
+  const materials = listMaterials();
+  res.json(roleAware(materials, req));
 });
 
-router.post('/materials', (req, res) => {
-  res.status(201).json(createMaterial(req.body, requestActorId(req)));
+router.post('/materials', requireWarehouseMutationAccess, (req, res) => {
+  res.status(201).json(roleAware(createMaterial(req.body, requestActorId(req)), req));
 });
 
 router.get('/movements', (req, res) => {
-  res.json(listMovements());
+  res.json(roleAware(listMovements(), req));
 });
 
-router.post('/issue', (req, res) => {
-  res.status(201).json(issueMaterial(req.body, requestActorId(req)));
+router.post('/issue', requireWarehouseMutationAccess, (req, res) => {
+  res.status(201).json(roleAware(issueMaterial(req.body, requestActorId(req)), req));
 });
 
 router.get('/offcuts', (req, res) => {
-  res.json(listOffcuts(req.query.status ?? 'available'));
+  const offcuts = listOffcuts(req.query.status ?? 'available');
+  res.json(roleAware(offcuts, req));
 });
 
-router.post('/offcuts', (req, res) => {
-  res.status(201).json(createOffcut(req.body, requestActorId(req)));
+router.post('/offcuts', requireWarehouseMutationAccess, (req, res) => {
+  res.status(201).json(roleAware(createOffcut(req.body, requestActorId(req)), req));
 });
 
-router.post('/offcuts/scrap-sales', (req, res) => {
-  res.status(201).json(sellScrap(req.body, requestActorId(req)));
+router.post('/offcuts/scrap-sales', requireWarehouseMutationAccess, (req, res) => {
+  res.status(201).json(roleAware(sellScrap(req.body, requestActorId(req)), req));
 });
 
-router.post('/stock-counts/start', (req, res) => {
-  res.status(201).json(startStockCount(req.body, requestActorId(req)));
+router.post('/stock-counts/start', requireWarehouseMutationAccess, (req, res) => {
+  res.status(201).json(roleAware(startStockCount(req.body, requestActorId(req)), req));
 });
 
-router.post('/stock-counts/:id/reconcile', (req, res) => {
-  res.json(reconcileStockCount(req.params.id, req.body, requestActorId(req)));
+router.post('/stock-counts/:id/reconcile', requireWarehouseMutationAccess, (req, res) => {
+  res.json(roleAware(reconcileStockCount(req.params.id, req.body, requestActorId(req)), req));
 });
 
 export default router;

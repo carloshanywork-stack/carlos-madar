@@ -9,6 +9,7 @@ import { requireAuthentication } from './modules/auth/service.js';
 import authRouter from './modules/auth/routes.js';
 import usersRouter from './modules/auth/users.js';
 import systemRouter from './modules/system/backup.js';
+import auditRouter from './modules/system/audit-routes.js';
 import { requestLogger } from './middleware/request-logger.js';
 import clientsRouter from './modules/clients/routes.js';
 import maintenanceRouter from './modules/maintenance/routes.js';
@@ -147,6 +148,7 @@ app.use('/api', (req, res, next) => {
 });
 app.use('/api/users', usersRouter);
 app.use('/api/auth/users', usersRouter);
+app.use('/api/system', auditRouter);
 app.use('/api/system', systemRouter);
 app.use('/api/clients', clientsRouter);
 app.use('/api/maintenance', maintenanceRouter);

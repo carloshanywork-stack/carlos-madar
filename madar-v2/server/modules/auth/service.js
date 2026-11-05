@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import { env } from '../../config/env.js';
 import { db } from '../../database/connection.js';
 import { HttpError, allowOnlyKeys, requireObject, requireText } from '../http.js';
+import { recordAudit } from '../audit.js';
 import { syncEmployeeForUser } from '../employees/user-sync.js';
 
 const sessionLifetimeSeconds = 7 * 24 * 60 * 60;
@@ -223,6 +224,14 @@ export function createSession(user, database = db) {
       database.prepare('UPDATE users SET is_online = 1 WHERE id = ? AND role = \'rep\' AND active = 1 AND deleted_at IS NULL')
         .run(user.id);
     }
+    recordAudit({
+      database,
+      actorId: user.id,
+      action: 'login',
+      entityType: 'user',
+      entityId: user.id,
+      newValues: { username: user.username, role: user.role },
+    });
   });
   create();
   return token;

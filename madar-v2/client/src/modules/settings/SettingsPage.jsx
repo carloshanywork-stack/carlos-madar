@@ -14,6 +14,8 @@ import LoadingState from '../../components/ui/LoadingState.jsx';
 import Modal from '../../components/ui/Modal.jsx';
 import PageHeader from '../../components/ui/PageHeader.jsx';
 import Toast from '../../components/ui/Toast.jsx';
+import Tabs from '../../components/ui/Tabs.jsx';
+import AuditLogPage from './AuditLogPage.jsx';
 
 function fileSize(value) {
   if (!Number.isFinite(value)) return '—';
@@ -43,6 +45,8 @@ function parseAssignedRegions(value) {
 function roleLabel(role) {
   return ({
     admin: 'مدير',
+    finance: 'محاسبة / مالية',
+    accountant: 'محاسب',
     sales: 'مبيعات',
     operations: 'عمليات',
     purchasing: 'مشتريات',
@@ -61,6 +65,7 @@ export default function SettingsPage() {
   const [userModal, setUserModal] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
   const [userRole, setUserRole] = useState('operations');
+  const [settingsTab, setSettingsTab] = useState('system');
   const [restoreModal, setRestoreModal] = useState(false);
   const [restoreFile, setRestoreFile] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -170,12 +175,18 @@ export default function SettingsPage() {
           </a>
         ) : null}
       />
+      {isAdmin && <div className="madar-section"><Tabs
+        items={[{ value: 'system', label: 'إعدادات النظام' }, { value: 'audit', label: 'سجل العمليات والرقابة' }]}
+        value={settingsTab}
+        onChange={setSettingsTab}
+        ariaLabel="إعدادات النظام والرقابة"
+      /></div>}
       <div className="madar-grid madar-grid-2 madar-section">
         <section className="madar-panel madar-panel-pad madar-runtime-card"><span className="madar-page-kicker">إصدار التطبيق</span><div className="madar-runtime-brand"><span className="madar-brand-mark light">M</span><div><strong>MADAR</strong><small>v2.0.0</small></div></div><p className="madar-page-description">نظام إدارة التشغيل والصيانة · نسخة محلية.</p>{isAdmin && <small className="madar-page-description">{apkStatusLoading && !apkStatus ? 'جارٍ فحص ملف APK…' : apkStatusError ? 'تعذر فحص ملف APK.' : apkStatus?.available ? `APK جاهز للتحميل · ${fileSize(apkStatus.sizeBytes)}${apkStatus.artifactType === 'fallback' ? ' · نسخة تجريبية / بانتظار الإصدار الجديد' : ''}` : 'لا يوجد ملف APK متاح حالياً.'}</small>}</section>
         <section className="madar-panel madar-panel-pad madar-runtime-card"><span className="madar-page-kicker">اتصال API</span>{loading && !health ? <LoadingState label="جارٍ فحص الخادم" /> : error ? <Alert tone="error">{error}</Alert> : <div className="madar-health-row"><span className="madar-health-pulse" /><div><strong>{health?.service ?? 'MADAR V2'}</strong><small>الخادم يستجيب للطلبات.</small></div><Badge tone="success">متصل</Badge></div>}<Button variant="secondary" size="small" onClick={reload}>إعادة الفحص</Button></section>
       </div>
 
-      {!isAdmin ? <div className="madar-section"><Alert tone="info">إدارة المستخدمين والنسخ الاحتياطية متاحة لحسابات المدير فقط.</Alert></div> : <>
+      {isAdmin && settingsTab === 'audit' ? <AuditLogPage /> : !isAdmin ? <div className="madar-section"><Alert tone="info">إدارة المستخدمين والنسخ الاحتياطية وسجل الرقابة متاحة لحسابات المدير فقط.</Alert></div> : <>
         <section className="madar-panel madar-section">
           <div className="madar-panel-header"><div><h2>صحة النظام والتخزين</h2><p>فحص SQLite ومدة تشغيل العملية والمساحة الحرة على وسيط التخزين.</p></div><Button variant="secondary" size="small" icon="refresh" disabled={systemHealthLoading} onClick={reloadSystemHealth}>إعادة الفحص</Button></div>
           {systemHealthError ? <div className="madar-panel-body"><Alert tone="error">{systemHealthError}</Alert></div> : systemHealthLoading && !systemHealth ? <LoadingState label="جارٍ فحص النظام والتخزين" /> : systemHealth && <div className="madar-panel-body madar-stack">
@@ -222,7 +233,7 @@ export default function SettingsPage() {
           <Input key={`username-${editingUser?.id ?? 'new'}`} label="اسم المستخدم *" name="username" defaultValue={editingUser?.username ?? ''} required minLength={3} maxLength={64} />
           <Input key={`fullname-${editingUser?.id ?? 'new'}`} label="الاسم الكامل *" name="full_name" defaultValue={editingUser?.full_name ?? ''} required minLength={2} maxLength={120} />
           {!editingUser && <Input label="كلمة المرور المؤقتة *" name="password" type="password" required minLength={4} maxLength={72} autoComplete="new-password" />}
-          <Select key={`role-${editingUser?.id ?? 'new'}`} label="الدور" name="role" value={userRole} onChange={(event) => setUserRole(event.target.value)}><option value="operations">عمليات</option><option value="sales">مبيعات</option><option value="purchasing">مشتريات</option><option value="rep">مندوب ميداني</option><option value="admin">مدير</option></Select>
+          <Select key={`role-${editingUser?.id ?? 'new'}`} label="الدور" name="role" value={userRole} onChange={(event) => setUserRole(event.target.value)}><option value="operations">عمليات</option><option value="sales">مبيعات</option><option value="purchasing">مشتريات</option><option value="finance">محاسبة / مالية</option><option value="accountant">محاسب</option><option value="rep">مندوب ميداني</option><option value="admin">مدير</option></Select>
           {userRole === 'rep' && <Input key={`regions-${editingUser?.id ?? 'new'}`} label="مناطق إضافية محددة (اختياري)" name="assignedRegions" defaultValue={hasUniversalRegionAccess(editingUser?.assignedRegions) ? '' : editingUser?.assignedRegions?.join('، ') ?? ''} hint="اتركه فارغاً لمنح المندوب وصولاً تلقائياً إلى كافة المناطق. أدرج مناطق فقط عند الحاجة لتقييد الوصول." />}
           {editingUser && <><Select key={`active-${editingUser.id}`} label="حالة الحساب" name="active" defaultValue={String(Boolean(editingUser.active))}><option value="true">نشط</option><option value="false">موقوف</option></Select><Input label="كلمة مرور جديدة (اختياري)" name="password" type="password" minLength={4} maxLength={72} autoComplete="new-password" /></>}
         </div>{actionError && <div className="madar-form-error"><Alert tone="error">{actionError}</Alert></div>}<div className="madar-form-actions"><Button variant="secondary" onClick={() => setUserModal(false)}>إلغاء</Button><Button type="submit" disabled={saving}>{saving ? 'جارٍ الحفظ…' : 'حفظ المستخدم'}</Button></div></form>

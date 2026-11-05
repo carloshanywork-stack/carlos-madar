@@ -1,27 +1,28 @@
 import { Router } from 'express';
 import { requestActorId } from '../actor.js';
+import { requireFinanceOrAdmin } from '../auth/authorization.js';
 import { createPurchaseInvoice, listInvoices, recordSalesReceipt } from './invoices.service.js';
 import { createTreasuryEntry, getTreasury } from './treasury.service.js';
 
 const router = Router();
 
-router.get('/treasury', (req, res) => {
+router.get('/treasury', requireFinanceOrAdmin, (req, res) => {
   res.json(getTreasury());
 });
 
-router.post('/treasury/entries', (req, res) => {
+router.post('/treasury/entries', requireFinanceOrAdmin, (req, res) => {
   res.status(201).json(createTreasuryEntry(req.body, requestActorId(req)));
 });
 
-router.get('/invoices', (req, res) => {
+router.get('/invoices', requireFinanceOrAdmin, (req, res) => {
   res.json(listInvoices(req.query.kind));
 });
 
-router.post('/invoices/purchase', (req, res) => {
+router.post('/invoices/purchase', requireFinanceOrAdmin, (req, res) => {
   res.status(201).json(createPurchaseInvoice(req.body, requestActorId(req)));
 });
 
-router.post('/invoices/:id/receipt', (req, res) => {
+router.post('/invoices/:id/receipt', requireFinanceOrAdmin, (req, res) => {
   res.status(201).json(recordSalesReceipt(req.params.id, req.body, requestActorId(req)));
 });
 

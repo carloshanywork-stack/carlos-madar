@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { requestActorId } from '../actor.js';
+import { isFinanceOrAdmin, requireFinanceOrAdmin } from '../auth/authorization.js';
 import { publishOperationsEvent } from '../operations-events.js';
 import { buildMonthlyAttendanceWorkbook } from './attendance-export.js';
 import {
@@ -23,28 +24,28 @@ import {
 
 const router = Router();
 
-function requireAdmin(req, res, next) {
-  if (req.user?.role !== 'admin') {
-    res.status(403).json({ error: 'Administrator access is required.' });
-    return;
-  }
-  next();
-}
-
-router.get('/', (req, res) => {
+router.get('/', (req, res, next) => {
   const includeAll = req.query.all === '1';
-  res.json(listEmployees(req.query.department, undefined, {
+  const employees = listEmployees(req.query.department, undefined, {
     includeInactive: includeAll,
     includeLoginUsers: includeAll,
+  });
+  if (isFinanceOrAdmin(req)) {
+    res.json(employees);
+    return;
+  }
+  res.json(employees.map((employee) => {
+    const { base_salary_cents, monthly_salary_cents, daily_rate_cents, ...publicEmployee } = employee;
+    return publicEmployee;
   }));
 });
-router.post('/', (req, res) => {
+router.post('/', requireFinanceOrAdmin, (req, res) => {
   res.status(201).json(createEmployee(req.body, requestActorId(req)));
 });
-router.patch('/:id', (req, res) => {
+router.patch('/:id', requireFinanceOrAdmin, (req, res) => {
   res.json(updateEmployee(req.params.id, req.body, requestActorId(req)));
 });
-router.delete('/:id', (req, res) => {
+router.delete('/:id', requireFinanceOrAdmin, (req, res) => {
   res.json(deactivateEmployee(req.params.id, requestActorId(req)));
 });
 
@@ -64,7 +65,7 @@ router.post('/attendance/mark-all-present', (req, res) => {
   publishOperationsEvent('attendance.changed', { workDate: result.date, actorId: requestActorId(req) });
   res.json(result);
 });
-router.get('/attendance/export-monthly', (req, res) => {
+router.get('/attendance/export-monthly', requireFinanceOrAdmin, (req, res) => {
   const month = req.query.month;
   const workbook = buildMonthlyAttendanceWorkbook(month);
   res.set({
@@ -79,18 +80,18 @@ router.post('/attendance', (req, res) => {
   res.json(result);
 });
 
-router.get('/payroll', (req, res) => {
+router.get('/payroll', requireFinanceOrAdmin, (req, res) => {
   res.json(getPayroll(req.query.month));
 });
-router.post('/payroll/finalize', requireAdmin, (req, res) => {
+router.post('/payroll/finalize', requireFinanceOrAdmin, (req, res) => {
   res.json(finalizePayroll(req.body, requestActorId(req)));
 });
-router.post('/:id/advances', requireAdmin, (req, res) => {
+router.post('/:id/advances', requireFinanceOrAdmin, (req, res) => {
   const advance = createEmployeeAdvance(req.params.id, req.body, requestActorId(req));
   publishOperationsEvent('payroll.changed', { employeeId: Number(req.params.id), month: advance.month_year, actorId: requestActorId(req) });
   res.status(201).json(advance);
 });
-router.post('/:id/payroll-adjustments', requireAdmin, (req, res) => {
+router.post('/:id/payroll-adjustments', requireFinanceOrAdmin, (req, res) => {
   const adjustment = createPayrollAdjustment(req.params.id, req.body, requestActorId(req));
   publishOperationsEvent('payroll.changed', { employeeId: Number(req.params.id), month: adjustment.month_year, actorId: requestActorId(req) });
   res.status(201).json(adjustment);

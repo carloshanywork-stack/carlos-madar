@@ -182,7 +182,7 @@ function findMaintenanceOrder(orderId, database = db) {
       order_record.petty_cash_refund_cents, order_record.archived_at,
       order_record.archived_by, order_record.created_by, order_record.created_at,
       order_record.updated_at, order_record.deleted_at,
-      client.code AS client_code, client.name AS client_name
+      client.code AS client_code, client.storage_code AS client_storage_code, client.name AS client_name
     FROM maintenance_orders AS order_record
     JOIN clients AS client ON client.id = order_record.client_id
     WHERE order_record.id = ? AND order_record.deleted_at IS NULL
@@ -732,7 +732,7 @@ async function collectMachineCorrectionRenamePlan(machine, database) {
   addMapping(storageDirectory('Machines', machine.old_code), storageDirectory('Machines', machine.new_code));
   const cards = database.prepare(`
     SELECT card.id, card.machine_id, card.before_photos_json, card.after_photos_json,
-      order_record.order_code, client.code AS client_code, order_record.area AS order_area
+      order_record.order_code, client.storage_code AS client_code, order_record.area AS order_area
     FROM maintenance_cards card
     JOIN maintenance_orders order_record ON order_record.id = card.order_id
     JOIN clients client ON client.id = order_record.client_id
@@ -1546,7 +1546,7 @@ function parseUnmatchedFolderPhotoPaths(value, label) {
 
 async function collectUnmatchedFolderDeletionTargets(order, folder, database) {
   const archiveDirectory = unmatchedFolderArchiveDirectory({
-    client_code: order.client_code,
+    client_code: order.client_storage_code,
     order_code: order.order_code,
     folder_name: folder.folder_name,
   });
@@ -1753,8 +1753,8 @@ function maintenanceCardPhotoPaths(card) {
 function maintenanceCardMachineDirectories(order, card) {
   return [
     storageDirectory('Machines', card.machine_code),
-    storageDirectory('clients', order.client_code, 'maintenance', order.order_code, card.machine_code),
-    storageDirectory('Clients', order.client_code, 'Archived_Orders', order.order_code, card.machine_code),
+    storageDirectory('clients', order.client_storage_code, 'maintenance', order.order_code, card.machine_code),
+    storageDirectory('Clients', order.client_storage_code, 'Archived_Orders', order.order_code, card.machine_code),
   ];
 }
 
@@ -1907,7 +1907,7 @@ function readMaintenanceCardDeletionContext(orderId, cardId, database) {
       machine.name_en AS machine_name_en, machine.area AS machine_area,
       machine.active AS machine_active, machine.deleted_at AS machine_deleted_at,
       order_record.order_code, order_record.area AS order_area, order_record.status AS order_status,
-      order_record.deleted_at AS order_deleted_at, client.code AS client_code
+      order_record.deleted_at AS order_deleted_at, client.storage_code AS client_code
     FROM maintenance_cards card
     JOIN machines machine ON machine.id = card.machine_id
     JOIN maintenance_orders order_record ON order_record.id = card.order_id
@@ -2045,7 +2045,7 @@ function readMaintenanceMachineDecommissionContext(orderId, machineId, database)
       machine.area AS machine_area, machine.active, machine.deleted_at,
       order_record.id AS order_id, order_record.order_code, order_record.area AS order_area,
       order_record.status AS order_status, order_record.deleted_at AS order_deleted_at,
-      order_record.client_id, client.code AS client_code
+      order_record.client_id, client.storage_code AS client_code
     FROM machines machine
     JOIN maintenance_orders order_record ON order_record.id = ?
     JOIN clients client ON client.id = order_record.client_id
@@ -2149,7 +2149,7 @@ async function recoverMaintenanceMachineDecommissionOperations(database) {
 }
 
 function maintenanceOrderDeletionPaths(order, operationId) {
-  const originalPath = storageDirectory('Clients', order.client_code, 'Archived_Orders', order.order_code);
+  const originalPath = storageDirectory('Clients', order.client_storage_code, 'Archived_Orders', order.order_code);
   const operationDirectoryPath = storageDirectory(...MAINTENANCE_ORDER_DELETION_STAGE_ROOT, operationId);
   return {
     originalPath,
@@ -2162,7 +2162,7 @@ function readActiveMaintenanceOrderForDeletion(orderId, database) {
   return database.prepare(`
     SELECT order_record.id, order_record.order_code, order_record.client_id,
       order_record.status, order_record.archived_at, order_record.deleted_at,
-      client.code AS client_code
+      client.code AS client_code, client.storage_code AS client_storage_code
     FROM maintenance_orders AS order_record
     JOIN clients AS client ON client.id = order_record.client_id
     WHERE order_record.id = ? AND order_record.deleted_at IS NULL
@@ -2174,7 +2174,7 @@ function softDeleteMaintenanceOrder(order, actorId, operationId, database) {
     const current = readActiveMaintenanceOrderForDeletion(order.id, database);
     if (!current) throw new HttpError(404, 'Maintenance order was not found.');
     if (current.status !== 'archived') throw new HttpError(409, 'Only archived maintenance orders can be removed from the archive.');
-    if (current.order_code !== order.order_code || current.client_code !== order.client_code) {
+    if (current.order_code !== order.order_code || current.client_storage_code !== order.client_storage_code) {
       throw new HttpError(409, 'Maintenance order changed while its archived files were being staged.');
     }
 
@@ -2247,7 +2247,7 @@ export async function deleteMaintenanceOrder(orderId, actorId = null, database =
         INSERT INTO maintenance_order_deletion_operations
           (operation_id, order_id, client_code, order_code, original_path, staged_path, state)
         VALUES (?, ?, ?, ?, ?, ?, 'prepared')
-      `).run(operationId, id, order.client_code, order.order_code, paths.originalPath, paths.stagedPath);
+      `).run(operationId, id, order.client_storage_code, order.order_code, paths.originalPath, paths.stagedPath);
     }).immediate();
 
     let stageDirectory = null;
@@ -2330,12 +2330,12 @@ export async function recoverMaintenanceOrderDeletions(database = db) {
       }
       const current = database.prepare(`
         SELECT order_record.id, order_record.order_code, order_record.deleted_at,
-          client.code AS client_code
+          client.storage_code AS client_storage_code
         FROM maintenance_orders AS order_record
         JOIN clients AS client ON client.id = order_record.client_id
         WHERE order_record.id = ?
       `).get(operation.order_id);
-      if (!current || current.order_code !== operation.order_code || current.client_code !== operation.client_code) {
+      if (!current || current.order_code !== operation.order_code || current.client_storage_code !== operation.client_code) {
         throw new HttpError(500, 'Maintenance photo recovery no longer matches its order record; startup was stopped for safety.');
       }
 
@@ -2443,7 +2443,7 @@ export async function deleteMaintenanceCard(orderId, cardId, actorId = null, dat
           || currentCard.machine_id !== card.machine_id
           || currentCard.machine_code !== card.machine_code
           || currentOrder.order_code !== order.order_code
-          || currentOrder.client_code !== order.client_code) {
+          || currentOrder.client_storage_code !== order.client_storage_code) {
           throw new HttpError(409, 'The maintenance card changed while its files were being staged.');
         }
 
@@ -3096,8 +3096,10 @@ export function getMaintenanceOrder(orderId, database = db) {
       ORDER BY machine.code COLLATE NOCASE, machine.id
     `).all(...orderAreas, order.id, order.id)
     : [];
+  const publicOrder = { ...order };
+  delete publicOrder.client_storage_code;
   return {
-    ...order,
+    ...publicOrder,
     client,
     technicians,
     representatives,
@@ -3419,7 +3421,7 @@ async function processMaintenanceTripFolderUnlocked(orderId, { folderPath, file 
       for (const [phase, photos] of [['Before', before], ['After', after]]) {
         for (const photo of photos) {
           filePlans.push({ photo, storedPath: storageDirectory(
-            'Clients', order.client_code, 'Archived_Orders', order.order_code, machine.code, phase,
+            'Clients', order.client_storage_code, 'Archived_Orders', order.order_code, machine.code, phase,
             `${randomUUID()}${extname(photo.name).toLowerCase()}`,
           ) });
         }
@@ -3429,7 +3431,7 @@ async function processMaintenanceTripFolderUnlocked(orderId, { folderPath, file 
       for (const [phase, photos] of [['Before', plan.before], ['After', plan.after]]) {
         for (const photo of photos) {
           filePlans.push({ photo, storedPath: storageDirectory(
-            'Clients', order.client_code, 'Archived_Orders', order.order_code, 'Unmatched', safeTripFolderSegment(plan.folderName), phase,
+            'Clients', order.client_storage_code, 'Archived_Orders', order.order_code, 'Unmatched', safeTripFolderSegment(plan.folderName), phase,
             `${randomUUID()}${extname(photo.name).toLowerCase()}`,
           ) });
         }
@@ -3596,7 +3598,7 @@ async function bindUnmatchedMaintenanceFolderUnlocked(orderId, folderId, input, 
     for (const sourcePath of photoPaths) {
       const absolutePath = await resolveStorageFile(sourcePath);
       destinationFiles.push({ sourcePath, phase, contents: await readFile(absolutePath), storedPath: storageDirectory(
-        'Clients', order.client_code, 'Archived_Orders', order.order_code, machine.code, phase,
+        'Clients', order.client_storage_code, 'Archived_Orders', order.order_code, machine.code, phase,
         `${randomUUID()}${extname(sourcePath).toLowerCase()}`,
       ) });
     }
@@ -3701,7 +3703,7 @@ export async function deleteUnmatchedMaintenanceFolder(orderId, folderId, actorI
 
     const targets = await collectUnmatchedFolderDeletionTargets(order, folder, database);
     const archiveDirectory = unmatchedFolderArchiveDirectory({
-      client_code: order.client_code,
+      client_code: order.client_storage_code,
       order_code: order.order_code,
       folder_name: folder.folder_name,
     });
@@ -3739,7 +3741,7 @@ export async function deleteUnmatchedMaintenanceFolder(orderId, folderId, actorI
         const currentOrder = findMaintenanceOrder(id, database);
         if (currentOrder.status === 'archived'
           || currentOrder.order_code !== order.order_code
-          || currentOrder.client_code !== order.client_code) {
+          || currentOrder.client_storage_code !== order.client_storage_code) {
           throw new HttpError(409, 'The maintenance order changed while the folder was being prepared.');
         }
         const currentFolder = database.prepare(`
@@ -3762,7 +3764,7 @@ export async function deleteUnmatchedMaintenanceFolder(orderId, folderId, actorI
           operationId,
           unmatchedId,
           id,
-          order.client_code,
+          order.client_storage_code,
           order.order_code,
           folder.folder_name,
           folder.source_name,
@@ -3792,7 +3794,7 @@ export async function deleteUnmatchedMaintenanceFolder(orderId, folderId, actorI
         if (currentOrder.status === 'archived') {
           throw new HttpError(409, 'Archived maintenance orders are read-only.');
         }
-        if (currentOrder.order_code !== order.order_code || currentOrder.client_code !== order.client_code) {
+        if (currentOrder.order_code !== order.order_code || currentOrder.client_storage_code !== order.client_storage_code) {
           throw new HttpError(409, 'The maintenance order changed while its files were being staged.');
         }
         const currentFolder = database.prepare(`
@@ -3997,7 +3999,7 @@ async function importMaintenanceServerFolderUnlocked(orderId, input, actorId = n
       : ['after', 'بعد', 'بعدالصيانة'].includes(phaseSegment) ? 'after' : null;
     if (!phase || !['.jpg', '.jpeg', '.png'].includes(extname(sourcePath).toLowerCase())) { skipped += 1; continue; }
     const machine = byCode.get(parts[machineIndex].toLocaleLowerCase('en'));
-    const storedPath = `${storageDirectory('clients', order.client_code, 'maintenance', order.order_code, machine.code, phase)}/${randomUUID()}${extname(sourcePath).toLowerCase()}`;
+    const storedPath = `${storageDirectory('clients', order.client_storage_code, 'maintenance', order.order_code, machine.code, phase)}/${randomUUID()}${extname(sourcePath).toLowerCase()}`;
     planned.push({ machine, phase, sourcePath, storedPath });
   }
   const cardsByMachine = new Map(database.prepare(`
@@ -4124,8 +4126,8 @@ async function updateMaintenanceCardUnlocked(orderId, cardId, input, actorId = n
     const normalizedPath = String(photoPath).replace(/\\/g, '/');
     const segments = normalizedPath.split('/').map((part) => part.toLocaleLowerCase('en'));
     const expectedPrefixes = [
-      ['clients', order.client_code, 'maintenance', order.order_code, card.machine_code],
-      ['clients', order.client_code, 'archived_orders', order.order_code, card.machine_code],
+      ['clients', order.client_storage_code, 'maintenance', order.order_code, card.machine_code],
+      ['clients', order.client_storage_code, 'archived_orders', order.order_code, card.machine_code],
     ].map((prefix) => prefix.map((part) => String(part).toLocaleLowerCase('en')));
     return expectedPrefixes.some((prefix) => prefix.every((part, index) => segments[index] === part))
       || isMaintenanceCardAreaPath(normalizedPath, order, card, database);
@@ -4421,7 +4423,7 @@ export async function moveCardPhoto(orderId, cardId, input, actorId = null, data
     const card = database.prepare(`
       SELECT card.id, card.order_id, card.before_photos_json, card.after_photos_json, card.status,
         order_record.status AS order_status, order_record.order_code,
-        client.code AS client_code, machine.code AS machine_code
+        client.storage_code AS client_code, machine.code AS machine_code
       FROM maintenance_cards card
       JOIN maintenance_orders order_record ON order_record.id = card.order_id
       JOIN clients client ON client.id = order_record.client_id
@@ -4507,7 +4509,7 @@ export async function getMaintenancePhoto(orderId, cardId, phase, filename, data
   const name = requireText(filename, 'filename', { maxLength: 200 });
   if (name.includes('/') || name.includes('\\')) throw new HttpError(400, 'Invalid photo filename.');
   const metadata = database.prepare(`
-    SELECT order_record.order_code, client.code AS client_code, machine.code AS machine_code,
+    SELECT order_record.order_code, client.storage_code AS client_code, machine.code AS machine_code,
       card.before_photos_json, card.after_photos_json
     FROM maintenance_cards card
     JOIN maintenance_orders order_record ON order_record.id = card.order_id

@@ -6,6 +6,8 @@ const ROLE_DEPARTMENTS = Object.freeze({
   rep: { department: 'Maintenance', departmentLabel: null },
   sales: { department: 'Finance', departmentLabel: 'Sales' },
   purchasing: { department: 'Warehouse', departmentLabel: null },
+  finance: { department: 'Finance', departmentLabel: null },
+  accountant: { department: 'Finance', departmentLabel: null },
 });
 
 /** Keep one HR row linked to each login account without overwriting salary/job details. */

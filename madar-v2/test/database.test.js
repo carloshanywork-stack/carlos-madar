@@ -14,6 +14,8 @@ const { schemaPath } = await import('../server/config/paths.js');
 const {
   initializeDatabase,
   migrateClientMachineDeployments,
+  migrateClientProfileCrud,
+  migrateFinanceAccountRoles,
   migrateOptionalOffcutMaterial,
 } = await import('../server/database/init.js');
 
@@ -45,6 +47,101 @@ test('transaction helper commits successful work and rolls back failures', () =>
     db.prepare('SELECT value FROM transaction_probe ORDER BY value').all().map((row) => row.value),
     [7],
   );
+});
+
+test('client profile migration adds fields without changing legacy client identity or code', () => {
+  const migrationDb = createConnection(join(temporaryDirectory, 'client-profile-migration.sqlite'));
+  try {
+    migrationDb.exec(`
+      CREATE TABLE schema_migrations (version TEXT PRIMARY KEY, applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+      CREATE TABLE clients (
+        id INTEGER PRIMARY KEY, code TEXT NOT NULL UNIQUE, name TEXT NOT NULL,
+        contact_name TEXT, phone TEXT, email TEXT, address TEXT,
+        primary_color TEXT, secondary_color TEXT, logo_path TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, deleted_at TEXT
+      );
+      INSERT INTO clients (id, code, name, address) VALUES (37, 'OLD-CLIENT-37', 'عميل سابق', 'مقر العميل');
+    `);
+    migrationDb.transaction(() => migrateClientProfileCrud(migrationDb)).immediate();
+
+    assert.deepEqual(migrationDb.prepare(`
+      SELECT id, code, name, name_ar, name_en, address, notes, storage_code
+      FROM clients WHERE id = 37
+    `).get(), {
+      id: 37,
+      code: 'OLD-CLIENT-37',
+      name: 'عميل سابق',
+      name_ar: null,
+      name_en: null,
+      address: 'مقر العميل',
+      notes: null,
+      storage_code: 'OLD-CLIENT-37',
+    });
+    assert.equal(migrationDb.prepare('SELECT COUNT(*) AS count FROM schema_migrations WHERE version = ?')
+      .get('20261105-client-profile-crud').count, 1);
+    migrationDb.prepare('INSERT INTO clients (code, name) VALUES (?, ?)')
+      .run('NEW-DIRECT-CLIENT', 'Direct Insert Client');
+    assert.equal(migrationDb.prepare('SELECT storage_code FROM clients WHERE code = ?')
+      .get('NEW-DIRECT-CLIENT').storage_code, 'NEW-DIRECT-CLIENT');
+    migrationDb.transaction(() => migrateClientProfileCrud(migrationDb)).immediate();
+    assert.equal(migrationDb.prepare('SELECT COUNT(*) AS count FROM clients').get().count, 2);
+  } finally {
+    migrationDb.close();
+  }
+});
+
+test('finance/accountant role migration preserves user IDs and foreign keys', () => {
+  const legacyDb = createConnection(join(temporaryDirectory, 'finance-role-migration.sqlite'));
+  try {
+    legacyDb.pragma('foreign_keys = ON');
+    legacyDb.exec(`
+      CREATE TABLE schema_migrations (version TEXT PRIMARY KEY, applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+      CREATE TABLE users (
+        id INTEGER PRIMARY KEY,
+        username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+        password_hash TEXT NOT NULL,
+        full_name TEXT NOT NULL,
+        role TEXT NOT NULL CHECK (role IN ('admin', 'sales', 'operations', 'purchasing', 'rep')),
+        active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
+        failed_login_attempts INTEGER NOT NULL DEFAULT 0 CHECK (failed_login_attempts >= 0),
+        locked_until TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        deleted_at TEXT,
+        assigned_regions_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(assigned_regions_json)),
+        is_online INTEGER NOT NULL DEFAULT 0 CHECK (is_online IN (0, 1)),
+        last_location_json TEXT CHECK (last_location_json IS NULL OR json_valid(last_location_json))
+      );
+      CREATE TABLE dependent_rows (
+        id INTEGER PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        label TEXT NOT NULL
+      );
+      INSERT INTO users (id, username, password_hash, full_name, role) VALUES
+        (41, 'legacy-admin', 'hash-admin', 'Legacy Admin', 'admin'),
+        (42, 'legacy-rep', 'hash-rep', 'Legacy Rep', 'rep');
+      INSERT INTO dependent_rows (id, user_id, label) VALUES (71, 42, 'rep assignments');
+    `);
+
+    migrateFinanceAccountRoles(legacyDb);
+
+    assert.deepEqual(legacyDb.prepare('SELECT id, username, role FROM users ORDER BY id').all(), [
+      { id: 41, username: 'legacy-admin', role: 'admin' },
+      { id: 42, username: 'legacy-rep', role: 'rep' },
+    ]);
+    assert.equal(legacyDb.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'users'")
+      .get().sql.includes("'finance'"), true);
+    assert.equal(legacyDb.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'users'")
+      .get().sql.includes("'accountant'"), true);
+    assert.deepEqual(legacyDb.pragma('foreign_key_check'), []);
+    assert.equal(legacyDb.prepare('SELECT COUNT(*) AS count FROM dependent_rows WHERE user_id = 42').get().count, 1);
+    assert.equal(legacyDb.pragma('foreign_keys', { simple: true }), 1);
+    assert.equal(legacyDb.prepare('SELECT COUNT(*) AS count FROM schema_migrations WHERE version = ?')
+      .get('20261105-finance-account-roles').count, 1);
+    migrateFinanceAccountRoles(legacyDb);
+    assert.equal(legacyDb.prepare('SELECT COUNT(*) AS count FROM dependent_rows').get().count, 1);
+  } finally {
+    legacyDb.close();
+  }
 });
 
 test('initializer can seed a bcrypt-hashed admin with an explicit password and remains idempotent', () => {

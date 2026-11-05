@@ -5,13 +5,16 @@ import { asyncHandler, positiveId } from '../http.js';
 import { resolveStorageFile } from '../storage.js';
 import { memoryUpload } from '../upload.js';
 import { requestActorId } from '../actor.js';
+import { requireFinanceOrAdmin } from '../auth/authorization.js';
 import {
   createClient,
+  deactivateClient,
   getClientLogo,
   getClientProfile,
   getClientStatement,
   listClients,
   saveClientLogo,
+  updateClient,
 } from './service.js';
 
 const router = Router();
@@ -26,6 +29,14 @@ router.get('/', (req, res) => {
 
 router.post('/', asyncHandler((req, res) => {
   res.status(201).json(createClient(req.body, requestActorId(req)));
+}));
+
+router.put('/:id', asyncHandler((req, res) => {
+  res.json(updateClient(req.params.id, req.body, requestActorId(req)));
+}));
+
+router.delete('/:id', asyncHandler((req, res) => {
+  res.json(deactivateClient(req.params.id, requestActorId(req)));
 }));
 
 router.get('/:id/logo', asyncHandler(async (req, res) => {
@@ -46,7 +57,7 @@ router.post('/:id/logo', logoUpload, asyncHandler(async (req, res) => {
   res.status(200).json(await saveClientLogo(req.params.id, req.file, requestActorId(req)));
 }));
 
-router.get('/:id/statement', (req, res, next) => {
+router.get('/:id/statement', requireFinanceOrAdmin, (req, res, next) => {
   try {
     res.json(getClientStatement(req.params.id));
   } catch (error) {

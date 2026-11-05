@@ -699,6 +699,7 @@ test('V2 parity operations cover imports, area maintenance, HR, exports, users, 
   assert.match(docxXml, /مجلدات الرحلة غير المطابقة \(تحتاج مراجعة\)/);
   assert.match(docxXml, /PARITY-PENDING/);
   assert.match(docxXml, /Mystery Side/);
+  assert.doesNotMatch(docxXml, /ملاحظة تُحفظ قبل إعادة التحميل/, 'customer-facing DOCX reports must exclude internal card notes');
   const warehouseExport = await request('/api/warehouse/export.xlsx');
   assert.equal(warehouseExport.response.status, 200);
   assert.equal(warehouseExport.body.subarray(0, 2).toString(), 'PK');

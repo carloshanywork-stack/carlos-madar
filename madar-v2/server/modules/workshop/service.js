@@ -24,7 +24,8 @@ const DESIGN_EXTENSIONS = new Set(['.dxf', '.cdr', '.ai', '.pdf']);
 function findWorkshopOrder(orderId, database = db) {
   const id = positiveId(orderId, 'orderId');
   const order = database.prepare(`
-    SELECT order_record.*, client.code AS client_code, client.name AS client_name
+    SELECT order_record.*, client.code AS client_code, client.storage_code AS client_storage_code,
+      client.name AS client_name
     FROM workshop_orders AS order_record
     JOIN clients AS client ON client.id = order_record.client_id
     WHERE order_record.id = ? AND order_record.deleted_at IS NULL
@@ -189,7 +190,9 @@ export function getWorkshopOrder(orderId, database = db) {
         payment_status, status, created_at
       FROM invoices WHERE id = ?
     `).get(order.sales_invoice_id);
-  return { ...order, client, technicians, designFiles, materialConsumption, offcuts, salesInvoice };
+  const publicOrder = { ...order };
+  delete publicOrder.client_storage_code;
+  return { ...publicOrder, client, technicians, designFiles, materialConsumption, offcuts, salesInvoice };
 }
 
 export async function saveWorkshopDesign(orderId, file, actorId = null, database = db) {
@@ -200,7 +203,7 @@ export async function saveWorkshopDesign(orderId, file, actorId = null, database
   const extension = extname(file.originalname).toLowerCase();
   if (!DESIGN_EXTENSIONS.has(extension)) throw new HttpError(400, 'Unsupported design extension.');
   const originalName = safeOriginalName(file.originalname);
-  const storedPath = `${storageDirectory('clients', order.client_code, 'workshop', order.order_code, 'designs')}/${randomUUID()}${extension}`;
+  const storedPath = `${storageDirectory('clients', order.client_storage_code, 'workshop', order.order_code, 'designs')}/${randomUUID()}${extension}`;
   const savedFile = await writeStorageFile(storedPath, file.buffer);
   try {
     const fileId = database.transaction(() => {
@@ -233,14 +236,15 @@ export function getWorkshopDesign(fileId, database = db) {
   const id = positiveId(fileId, 'fileId');
   const file = database.prepare(`
     SELECT design.id, design.order_id, design.original_name, design.stored_path,
-      design.extension, design.byte_size, order_record.order_code, client.code AS client_code
+      design.extension, design.byte_size, order_record.order_code,
+      client.storage_code AS client_storage_code
     FROM workshop_design_files design
     JOIN workshop_orders order_record ON order_record.id = design.order_id
     JOIN clients client ON client.id = order_record.client_id
     WHERE design.id = ? AND order_record.deleted_at IS NULL
   `).get(id);
   if (!file) throw new HttpError(404, 'Workshop design file was not found.');
-  const expectedPrefix = `${storageDirectory('clients', file.client_code, 'workshop', file.order_code, 'designs')}/`;
+  const expectedPrefix = `${storageDirectory('clients', file.client_storage_code, 'workshop', file.order_code, 'designs')}/`;
   if (!file.stored_path.startsWith(expectedPrefix)) {
     throw new HttpError(403, 'Workshop design is outside its order storage directory.');
   }

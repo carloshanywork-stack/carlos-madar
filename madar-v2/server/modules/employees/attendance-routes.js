@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { requestActorId } from '../actor.js';
 import { allowOnlyKeys, positiveId, requireObject } from '../http.js';
 import { publishOperationsEvent } from '../operations-events.js';
+import { requireFinanceOrAdmin } from '../auth/authorization.js';
 import {
   clockInForEmployee,
   clockOutForEmployee,
@@ -22,7 +23,7 @@ function requireAdmin(req, res, next) {
   next();
 }
 
-router.get('/pending-overtime', (_req, res) => {
+router.get('/pending-overtime', requireFinanceOrAdmin, (_req, res) => {
   res.set({ 'Cache-Control': 'private, no-store', Pragma: 'no-cache' });
   res.json({ records: listPendingOvertime() });
 });
@@ -73,13 +74,13 @@ router.post('/clock-out', requireAdmin, (req, res) => {
   res.json({ success: true, attendance });
 });
 
-router.post('/:id/approve-overtime', requireAdmin, (req, res) => {
+router.post('/:id/approve-overtime', requireFinanceOrAdmin, (req, res) => {
   const attendance = reviewOvertime(req.params.id, 'approved', requestActorId(req));
   publishOperationsEvent('overtime.reviewed', { attendanceId: attendance.id, decision: 'approved' });
   res.json({ success: true, attendance });
 });
 
-router.post('/:id/reject-overtime', requireAdmin, (req, res) => {
+router.post('/:id/reject-overtime', requireFinanceOrAdmin, (req, res) => {
   const attendance = reviewOvertime(req.params.id, 'rejected', requestActorId(req));
   publishOperationsEvent('overtime.reviewed', { attendanceId: attendance.id, decision: 'rejected' });
   res.json({ success: true, attendance });

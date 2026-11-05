@@ -43,10 +43,10 @@ after(async () => {
   rmSync(temporaryDirectory, { recursive: true, force: true });
 });
 
-async function request(path, options = {}) {
+async function request(path, options = {}, cookie = authCookie) {
   const response = await fetch(`${baseUrl}${path}`, {
     ...options,
-    headers: { ...(options.headers ?? {}), cookie: authCookie },
+    headers: { ...(options.headers ?? {}), ...(cookie ? { cookie } : {}) },
   });
   return { response, body: await response.json() };
 }
@@ -60,6 +60,79 @@ function jsonOptions(method, body) {
 }
 
 test('Phase 4 finance lifecycle keeps integer-cents, stock, custody, billing, and client debt coherent', async () => {
+  const createUser = async (username, role, fullName) => request('/api/users', jsonOptions('POST', {
+    username,
+    role,
+    full_name: fullName,
+    password: 'access-guard-test-password',
+  }));
+  const login = async (username) => {
+    const response = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ username, password: 'access-guard-test-password' }),
+    });
+    const cookie = response.headers.getSetCookie?.()[0] ?? response.headers.get('set-cookie');
+    return { response, cookie: cookie?.split(';', 1)[0] };
+  };
+
+  const salesUser = await createUser('finance-guard-sales', 'sales', 'Sales Guard User');
+  assert.equal(salesUser.response.status, 201, JSON.stringify(salesUser.body));
+  assert.deepEqual(
+    db.prepare('SELECT department, department_label FROM employees WHERE user_id = ?').get(salesUser.body.id),
+    { department: 'Finance', department_label: 'Sales' },
+    'sales HR records are labelled separately and must not gain treasury access from the shared department code',
+  );
+  const salesLogin = await login('finance-guard-sales');
+  assert.equal(salesLogin.response.status, 200);
+  assert.equal((await request('/api/finance/treasury', {}, salesLogin.cookie)).response.status, 403);
+  assert.equal((await request('/api/finance/treasury/entries', jsonOptions('POST', {
+    kind: 'income', category: 'Unauthorized', amountCents: 100,
+  }), salesLogin.cookie)).response.status, 403);
+  assert.equal((await request('/api/finance/invoices/purchase', jsonOptions('POST', {}), salesLogin.cookie)).response.status, 403);
+
+  const purchasingUser = await createUser('finance-guard-purchasing', 'purchasing', 'Purchasing Guard User');
+  assert.equal(purchasingUser.response.status, 201, JSON.stringify(purchasingUser.body));
+  const purchasingLogin = await login('finance-guard-purchasing');
+  assert.equal(purchasingLogin.response.status, 200);
+  assert.equal((await request('/api/finance/treasury', {}, purchasingLogin.cookie)).response.status, 403);
+  assert.equal((await request('/api/finance/invoices/1/receipt', jsonOptions('POST', { amountCents: 1 }), purchasingLogin.cookie)).response.status, 403);
+
+  const financeUser = await createUser('finance-guard-clerk', 'operations', 'Finance Department Guard User');
+  assert.equal(financeUser.response.status, 201, JSON.stringify(financeUser.body));
+  db.prepare(`UPDATE employees SET department = 'Finance', department_label = NULL WHERE user_id = ?`)
+    .run(financeUser.body.id);
+  const financeLogin = await login('finance-guard-clerk');
+  assert.equal(financeLogin.response.status, 200);
+  assert.equal((await request('/api/finance/treasury', {}, financeLogin.cookie)).response.status, 200);
+
+  const financeRole = await createUser('finance-guard-finance-role', 'finance', 'Finance Role User');
+  assert.equal(financeRole.response.status, 201, JSON.stringify(financeRole.body));
+  const financeRoleLogin = await login('finance-guard-finance-role');
+  assert.equal(financeRoleLogin.response.status, 200);
+  assert.equal((await request('/api/finance/treasury', {}, financeRoleLogin.cookie)).response.status, 200);
+
+  const accountantRole = await createUser('finance-guard-accountant-role', 'accountant', 'Accountant Role User');
+  assert.equal(accountantRole.response.status, 201, JSON.stringify(accountantRole.body));
+  const accountantLogin = await login('finance-guard-accountant-role');
+  assert.equal(accountantLogin.response.status, 200);
+  assert.equal((await request('/api/finance/treasury', {}, accountantLogin.cookie)).response.status, 200);
+
+  assert.equal((await request('/api/employees/payroll?month=2026-11', {}, salesLogin.cookie)).response.status, 403);
+  assert.equal((await request('/api/employees/payroll?month=2026-11', {}, purchasingLogin.cookie)).response.status, 403);
+  assert.equal((await request('/api/employees/payroll?month=2026-11', {}, financeRoleLogin.cookie)).response.status, 200);
+  assert.equal((await request('/api/employees/payroll?month=2026-11', {}, accountantLogin.cookie)).response.status, 200);
+
+  const auditAsAdmin = await request('/api/system/audit-log?page=1&limit=10&action=login&entityType=user');
+  assert.equal(auditAsAdmin.response.status, 200, JSON.stringify(auditAsAdmin.body));
+  assert.ok(auditAsAdmin.body.items.some((entry) => entry.action === 'login'), 'successful logins are audited');
+  assert.equal((await request('/api/system/audit-log?page=1&limit=10', {}, financeRoleLogin.cookie)).response.status, 403);
+  assert.equal((await request('/api/system/audit-log?page=0&limit=10')).response.status, 400);
+  assert.equal((await request('/api/system/audit-log?startDate=2026-02-31&endDate=2026-03-01')).response.status, 400);
+
+  assert.equal((await request('/api/warehouse/materials', jsonOptions('POST', {}), salesLogin.cookie)).response.status, 403);
+  assert.equal((await request('/api/workshop/orders', jsonOptions('POST', {}), purchasingLogin.cookie)).response.status, 403);
+
   const capitalized = await request('/api/finance/treasury/entries', jsonOptions('POST', {
     kind: 'income',
     category: 'Opening treasury balance',
@@ -164,10 +237,35 @@ test('Phase 4 finance lifecycle keeps integer-cents, stock, custody, billing, an
   assert.equal(delivered.body.invoice.client_id, client.id);
   assert.equal(delivered.body.invoice.workshop_order_id, workshopOrder.id);
   assert.equal(delivered.body.invoice.total_cents, 2_500_000);
-  assert.equal(delivered.body.invoice.paid_total_cents, 0);
-  assert.equal(delivered.body.invoice.remaining_cents, 2_500_000);
-  assert.equal(delivered.body.invoice.payment_status, 'unpaid');
+  assert.equal(delivered.body.invoice.paid_total_cents, 2_500_000);
+  assert.equal(delivered.body.invoice.remaining_cents, 0);
+  assert.equal(delivered.body.invoice.payment_status, 'paid');
   assert.equal(delivered.body.order.sales_invoice_id, delivered.body.invoice.id);
+  assert.equal((await request('/api/finance/treasury')).body.cashBalanceCents, 11_500_000);
+  const deliveryReceipt = db.prepare(`
+    SELECT kind, category, amount_cents, invoice_id, reference
+    FROM treasury_entries WHERE invoice_id = ?
+  `).get(delivered.body.invoice.id);
+  assert.deepEqual(deliveryReceipt, {
+    kind: 'income',
+    category: 'تحصيل مبيعات',
+    amount_cents: 2_500_000,
+    invoice_id: delivered.body.invoice.id,
+    reference: delivered.body.invoice.code,
+  });
+  const receiptWhilePaid = await request(
+    `/api/finance/invoices/${delivered.body.invoice.id}/receipt`,
+    jsonOptions('POST', { amountCents: 1 }),
+  );
+  assert.equal(receiptWhilePaid.response.status, 409);
+  assert.equal((await request('/api/finance/treasury')).body.cashBalanceCents, 11_500_000);
+
+  // Simulate a pre-cash-only invoice so partial-receipt and overdue-balance behavior remain covered.
+  db.transaction(() => {
+    db.prepare('DELETE FROM treasury_entries WHERE invoice_id = ?').run(delivered.body.invoice.id);
+    db.prepare("UPDATE invoices SET paid_total_cents = 0, remaining_cents = total_cents, payment_status = 'unpaid' WHERE id = ?")
+      .run(delivered.body.invoice.id);
+  }).immediate();
   assert.equal((await request('/api/finance/treasury')).body.cashBalanceCents, 9_000_000);
   const duplicateDelivery = await request(
     `/api/workshop/orders/${workshopOrder.id}/deliver`,

@@ -16,6 +16,7 @@ import android.location.LocationManager;
 import android.os.Build;
 import android.os.IBinder;
 import android.os.Looper;
+import android.os.PowerManager;
 import android.os.SystemClock;
 
 import androidx.core.app.NotificationCompat;
@@ -39,6 +40,7 @@ public class RepLocationService extends Service implements LocationListener {
 
     private LocationManager locationManager;
     private RepTrackStore trackStore;
+    private PowerManager.WakeLock wakeLock;
     private Location stationaryAnchor;
     private long stationarySinceMs;
     private boolean lowPowerUpdates;
@@ -76,6 +78,7 @@ public class RepLocationService extends Service implements LocationListener {
             return START_NOT_STICKY;
         }
 
+        acquireWakeLock();
         getPreferences().edit()
             .putBoolean("duty_active", true)
             .putBoolean("last_location_mocked", false)
@@ -204,6 +207,21 @@ public class RepLocationService extends Service implements LocationListener {
         // Kept for older Android releases; modern Android uses provider callbacks above.
     }
 
+    private void acquireWakeLock() {
+        if (wakeLock != null && wakeLock.isHeld()) return;
+        PowerManager powerManager = (PowerManager) getSystemService(Context.POWER_SERVICE);
+        if (powerManager == null) return;
+        wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "madar-rep:duty-location");
+        wakeLock.setReferenceCounted(false);
+        wakeLock.acquire();
+    }
+
+    private void releaseWakeLock() {
+        if (wakeLock == null) return;
+        if (wakeLock.isHeld()) wakeLock.release();
+        wakeLock = null;
+    }
+
     private void stopTracking() {
         getPreferences().edit().putBoolean("duty_active", false).apply();
         if (locationManager != null) locationManager.removeUpdates(this);
@@ -211,6 +229,7 @@ public class RepLocationService extends Service implements LocationListener {
         lowPowerUpdates = false;
         stationaryAnchor = null;
         stationarySinceMs = 0L;
+        releaseWakeLock();
         stopForeground(STOP_FOREGROUND_REMOVE);
         stopSelf();
     }
@@ -253,7 +272,7 @@ public class RepLocationService extends Service implements LocationListener {
         }
         String content = mocked
             ? "تم رصد موقع مزيف. أوقفنا تتبع الوردية."
-            : "مدار: نظام تسجيل خط السير يعمل في الخلفية.";
+            : "المدار يعمل أثناء الوردية؛ لا تُغلق التطبيق قبل تسجيل الانصراف.";
         NotificationCompat.Builder builder = new NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_menu_mylocation)
             .setContentTitle(mocked ? "تحذير أمان الموقع" : "مدار · تسجيل خط السير نشط")
@@ -275,6 +294,7 @@ public class RepLocationService extends Service implements LocationListener {
     public void onDestroy() {
         if (locationManager != null && hasForegroundPermission()) locationManager.removeUpdates(this);
         updatesRegistered = false;
+        releaseWakeLock();
         running = false;
         if (trackStore != null) {
             trackStore.close();

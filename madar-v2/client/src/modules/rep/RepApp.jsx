@@ -26,6 +26,7 @@ import {
   acknowledgeNativeDutyTracking,
   authenticateNativeAttendance,
   deleteNativePendingBackup,
+  exportPendingQueue,
   getNativeDutyTrackingState,
   getNativeRepCache,
   getNativeGpsLocation,
@@ -270,6 +271,7 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
   const [tutorialOpen, setTutorialOpen] = useState(false);
   const [storagePersistent, setStoragePersistent] = useState(null);
   const [storageError, setStorageError] = useState('');
+  const [pendingExportBusy, setPendingExportBusy] = useState(false);
   const syncingRef = useRef(false);
   const trackingSyncingRef = useRef(false);
   const gpsRef = useRef(null);
@@ -1215,6 +1217,34 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
   };
   const pendingQueueCount = pendingVisits.length + pendingMachineActions.length;
 
+  useEffect(() => {
+    if (!pendingQueueCount) return undefined;
+    const protectQueue = (event) => {
+      event.preventDefault();
+      event.returnValue = 'توجد عناصر بانتظار المزامنة؛ يمكن أن تضيع قبل خروجها.';
+      return event.returnValue;
+    };
+    window.addEventListener('beforeunload', protectQueue);
+    return () => window.removeEventListener('beforeunload', protectQueue);
+  }, [pendingQueueCount]);
+
+  const exportPending = async () => {
+    if (pendingExportBusy) return;
+    if (!pendingQueueCount) {
+      setToast('لا توجد عناصر بانتظار المزامنة لتصديرها.');
+      return;
+    }
+    setPendingExportBusy(true);
+    try {
+      const result = await exportPendingQueue(userId, user.username);
+      setToast(`أُنشئ ملف JSON يحمل ${result.visits + result.machineActions} عنصراً: ${result.path}`);
+    } catch (error) {
+      setToast(error.message || 'تعذر إنشاء نسخة JSON من العمل المعلق.');
+    } finally {
+      setPendingExportBusy(false);
+    }
+  };
+
   const finishTutorial = () => {
     try { window.localStorage.setItem(`tutorial_seen:${userId}`, '1'); } catch { /* Tutorial is dismissed for this session. */ }
     setTutorialOpen(false);
@@ -1224,6 +1254,10 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
     if (attendance?.clock_in_time && !attendance.clock_out_time) {
       setToast('سجّل الانصراف من بطاقة الحضور أولاً؛ يمكنك الخروج بعد إغلاق الوردية.');
       return;
+    }
+    if (pendingQueueCount) {
+      const exit = window.confirm(`لديك ${pendingQueueCount} عنصر(اً) بانتظار المزامنة. اضغط موافق للخروج على مسؤوليتك. اضغط إلغاء ثم "تصدير نسخة JSON" للحفاظ عليها قبل الخروج.`);
+      if (!exit) return;
     }
     if (nativeApp) {
       try {
@@ -1578,6 +1612,7 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
               ? <button type="button" className="rep-queue-retry" disabled={serverState !== 'online' || offlineOnly} onClick={async () => { if (nativeApp && visit.nativeStoragePath?.startsWith('internal://visits/')) await retryNativeVisit(visit.visitUuid, userId); else await updatePendingVisit(visit.visitUuid, { status: 'queued', lastError: '' }); await refreshPending(); void drainQueue(); }}>إعادة المحاولة</button>
              : <span className="rep-queue-local">محفوظة محلياً</span>}
          </li>)}</ul>}
+         <button type="button" className="rep-button rep-button-light rep-sync-now" disabled={!pendingQueueCount || pendingExportBusy} onClick={() => void exportPending()}>{pendingExportBusy ? 'جارٍ تجهيز نسخة JSON…' : 'تصدير نسخة JSON'}</button>
          <button type="button" className="rep-button rep-button-primary rep-sync-now" disabled={!pendingQueueCount || serverState !== 'online' || offlineOnly} onClick={() => void drainQueue()}>{serverState === 'online' ? 'مزامنة الآن ↻' : 'ستتم المزامنة عند الاتصال'}</button>
        </section>}
 

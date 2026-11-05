@@ -7,7 +7,7 @@ import { asyncHandler, allowOnlyKeys, HttpError, requireObject, requireText } fr
 import { syncEmployeeForUser } from '../employees/user-sync.js';
 
 const router = Router();
-const USER_ROLES = ['admin', 'sales', 'operations', 'purchasing', 'rep'];
+const USER_ROLES = ['admin', 'sales', 'operations', 'purchasing', 'finance', 'accountant', 'rep'];
 
 function requireAdmin(req, res, next) {
   if (req.user?.role !== 'admin') {

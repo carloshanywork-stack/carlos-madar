@@ -49,6 +49,7 @@
     <uses-permission android:name="android.permission.USE_FINGERPRINT" android:maxSdkVersion="27" />
     <uses-feature android:name="android.hardware.camera" android:required="true" />
 
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
     <!-- Foreground + while-in-use duty location; background access is separately granted in Android settings. -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />

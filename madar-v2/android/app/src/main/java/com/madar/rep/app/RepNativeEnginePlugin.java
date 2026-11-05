@@ -16,6 +16,7 @@ import android.os.Build;
 import android.os.PowerManager;
 import android.provider.Settings;
 import android.text.TextUtils;
+import android.util.Base64;
 
 import androidx.core.content.ContextCompat;
 import androidx.fragment.app.FragmentActivity;
@@ -35,6 +36,8 @@ import org.json.JSONObject;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.InputStream;
+import java.io.FileInputStream;
+import java.io.IOException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
@@ -121,6 +124,7 @@ public final class RepNativeEnginePlugin extends Plugin {
         android.content.SharedPreferences requested = getContext().getSharedPreferences("madar_rep_permissions", Context.MODE_PRIVATE);
         state.put("initialRequestMade", requested.getBoolean("initial_request_made", false));
         state.put("backgroundRequestMade", requested.getBoolean("background_request_made", false));
+        state.put("batteryExemptionRequested", requested.getBoolean("battery_exemption_requested", false));
         return state;
     }
 
@@ -212,6 +216,8 @@ public final class RepNativeEnginePlugin extends Plugin {
             call.resolve(new JSObject().put("ignored", true));
             return;
         }
+        getContext().getSharedPreferences("madar_rep_permissions", Context.MODE_PRIVATE)
+            .edit().putBoolean("battery_exemption_requested", true).apply();
         try {
             Intent intent = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
                 Uri.parse("package:" + getContext().getPackageName()));
@@ -375,6 +381,79 @@ public final class RepNativeEnginePlugin extends Plugin {
                 call.resolve(result);
             } catch (Exception error) { call.reject("تعذر قراءة الزيارات المحلية الأصلية.", "NATIVE_VISIT_READ_FAILED", error); }
         });
+    }
+
+    @PluginMethod
+    public void exportPendingVisits(PluginCall call) {
+        long repId = call.getData().optLong("repId", 0L);
+        if (repId < 1L) { call.reject("معرّف المندوب غير صالح."); return; }
+        IO.execute(() -> {
+            try (RepLocalStore store = new RepLocalStore(getContext())) {
+                JSONArray storedVisits = store.listVisits(repId);
+                JSONArray exportedVisits = new JSONArray();
+                for (int index = 0; index < storedVisits.length(); index += 1) {
+                    JSONObject source = storedVisits.getJSONObject(index);
+                    String visitUuid = source.getString("visitUuid");
+                    JSONObject exportedVisit = new JSONObject();
+                    exportedVisit.put("visitUuid", visitUuid);
+                    exportedVisit.put("repId", repId);
+                    exportedVisit.put("repUsername", source.optString("repUsername", ""));
+                    exportedVisit.put("createdAt", source.optString("createdAt", ""));
+                    exportedVisit.put("status", source.optString("status", "queued"));
+                    exportedVisit.put("attempts", source.optInt("attempts", 0));
+                    exportedVisit.put("lastError", source.optString("lastError", ""));
+                    exportedVisit.put("payload", source.optJSONObject("payload"));
+                    exportedVisit.put("beforePhotos", exportPhasePhotos(source.optJSONArray("beforePhotos"), "before", visitUuid));
+                    exportedVisit.put("afterPhotos", exportPhasePhotos(source.optJSONArray("afterPhotos"), "after", visitUuid));
+                    exportedVisits.put(exportedVisit);
+                }
+                JSONObject payload = new JSONObject();
+                payload.put("schemaVersion", 1);
+                payload.put("type", "madar-rep-pending-queue");
+                payload.put("exportedAt", isoTimestamp(new Date()));
+                payload.put("repId", repId);
+                payload.put("visits", exportedVisits);
+                call.resolve(new JSObject()
+                    .put("json", payload.toString())
+                    .put("visitCount", exportedVisits.length()));
+            } catch (Exception error) {
+                call.reject("تعذر تجهيز نسخة JSON من العمل المعلق.", "NATIVE_EXPORT_FAILED", error);
+            }
+        });
+    }
+
+    private JSONArray exportPhasePhotos(JSONArray entries, String phase, String visitUuid) throws Exception {
+        JSONArray exportedPhotos = new JSONArray();
+        if (entries == null) return exportedPhotos;
+        for (int position = 0; position < entries.length(); position += 1) {
+            JSONObject entry = entries.getJSONObject(position);
+            int index = entry.optInt("index", position);
+            File photo = resolveVisitPhotoForDeletion(visitUuid, phase, index, entry.optString("path"));
+            if (!photo.isFile() || photo.length() < 1L || photo.length() > MAX_PHOTO_BYTES) {
+                throw new IOException("ملف صورة معلقة غير صالح أو أكبر من الحد المسموح.");
+            }
+            byte[] bytes = readAllBytes(photo);
+            exportedPhotos.put(new JSONObject()
+                .put("phase", phase)
+                .put("index", index)
+                .put("capturedAt", entry.optString("capturedAt", ""))
+                .put("mimeType", "image/jpeg")
+                .put("byteSize", bytes.length)
+                .put("bytesBase64", Base64.encodeToString(bytes, Base64.NO_WRAP)));
+        }
+        return exportedPhotos;
+    }
+
+    private static byte[] readAllBytes(File file) throws IOException {
+        long length = file.length();
+        if (length <= 0L || length > MAX_PHOTO_BYTES) throw new IOException("حجم الملف خارج الحدود المسموح بها.");
+        try (FileInputStream input = new FileInputStream(file);
+             ByteArrayOutputStream output = new ByteArrayOutputStream((int) Math.min(length, 8192L))) {
+            byte[] buffer = new byte[8192];
+            int count = 0;
+            while ((count = input.read(buffer)) != -1) output.write(buffer, 0, count);
+            return output.toByteArray();
+        }
     }
 
     @PluginMethod

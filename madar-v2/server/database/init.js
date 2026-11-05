@@ -46,6 +46,8 @@ const attendanceClockLocationMigration = '20261105-attendance-clock-gps';
 const attendanceBiometricMigration = '20261105-attendance-biometric-confirmation';
 const machineVerificationCorrectionsMigration = '20261104-machine-verification-corrections';
 const machineCorrectionRenameRecoveryMigration = '20261104-machine-correction-rename-recovery';
+const clientProfileCrudMigration = '20261105-client-profile-crud';
+const financeAccountRolesMigration = '20261105-finance-account-roles';
 
 const repUsersTableSql = `
   CREATE TABLE users_rep_migration_v1 (
@@ -67,6 +69,36 @@ function tableExists(database, tableName) {
   return Boolean(database.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(tableName));
 }
 
+export function migrateClientProfileCrud(database) {
+  if (!tableExists(database, 'clients')) return;
+  const applied = database.prepare('SELECT 1 FROM schema_migrations WHERE version = ?')
+    .get(clientProfileCrudMigration);
+  if (applied) return;
+
+  const columns = new Set(database.pragma('table_info(clients)').map((column) => column.name));
+  const additions = [
+    ['name_ar', 'TEXT'],
+    ['name_en', 'TEXT'],
+    ['notes', 'TEXT'],
+    ['storage_code', 'TEXT'],
+  ];
+  for (const [column, declaration] of additions) {
+    if (!columns.has(column)) database.exec(`ALTER TABLE clients ADD COLUMN ${column} ${declaration}`);
+  }
+  database.exec(`
+    UPDATE clients SET storage_code = code
+    WHERE storage_code IS NULL OR trim(storage_code) = '';
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_storage_code ON clients(storage_code);
+    CREATE TRIGGER IF NOT EXISTS clients_storage_code_default_after_insert
+    AFTER INSERT ON clients
+    WHEN NEW.storage_code IS NULL OR trim(NEW.storage_code) = ''
+    BEGIN
+      UPDATE clients SET storage_code = NEW.code WHERE id = NEW.id;
+    END;
+  `);
+  database.prepare('INSERT INTO schema_migrations (version) VALUES (?)').run(clientProfileCrudMigration);
+}
+
 function hasRepUserProfileSchema(database) {
   const table = database.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'users'").get();
   if (!table) return false;
@@ -75,6 +107,84 @@ function hasRepUserProfileSchema(database) {
     && columns.has('assigned_regions_json')
     && columns.has('is_online')
     && columns.has('last_location_json');
+}
+
+function hasFinanceAccountRolesSchema(database) {
+  const table = database.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'users'").get();
+  return table?.sql?.includes("'finance'") && table.sql.includes("'accountant'");
+}
+
+/** Add Finance/Accountant login roles without changing existing user IDs or dependent foreign keys. */
+export function migrateFinanceAccountRoles(database) {
+  if (!tableExists(database, 'users')) return;
+  const migrationTable = 'users_finance_roles_migration_v1';
+  const applied = tableExists(database, 'schema_migrations')
+    && database.prepare('SELECT 1 FROM schema_migrations WHERE version = ?').get(financeAccountRolesMigration);
+  if (hasFinanceAccountRolesSchema(database)) {
+    if (!applied && tableExists(database, 'schema_migrations')) {
+      database.prepare('INSERT INTO schema_migrations (version) VALUES (?)').run(financeAccountRolesMigration);
+    }
+    return;
+  }
+  if (database.inTransaction) {
+    throw new Error('Finance role migration must run outside a transaction to preserve existing user foreign keys.');
+  }
+
+  const foreignKeysWereEnabled = database.pragma('foreign_keys', { simple: true }) === 1;
+  database.pragma('foreign_keys = OFF');
+  try {
+    const rebuild = database.transaction(() => {
+      if (tableExists(database, migrationTable)) {
+        throw new Error('A prior finance-role migration table exists; refusing to overwrite it.');
+      }
+      const columns = new Set(database.pragma('table_info(users)').map((column) => column.name));
+      const source = (column, fallback) => columns.has(column) ? column : fallback;
+      const failedAttempts = source('failed_login_attempts', '0');
+      const lockedUntil = source('locked_until', 'NULL');
+      const assignedRegions = source('assigned_regions_json', "'[]'");
+      const online = source('is_online', '0');
+      const location = source('last_location_json', 'NULL');
+
+      database.exec(`
+        CREATE TABLE ${migrationTable} (
+          id INTEGER PRIMARY KEY,
+          username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+          password_hash TEXT NOT NULL,
+          full_name TEXT NOT NULL,
+          role TEXT NOT NULL CHECK (role IN ('admin', 'sales', 'operations', 'purchasing', 'finance', 'accountant', 'rep')),
+          active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
+          failed_login_attempts INTEGER NOT NULL DEFAULT 0 CHECK (failed_login_attempts >= 0),
+          locked_until TEXT,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          deleted_at TEXT,
+          assigned_regions_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(assigned_regions_json)),
+          is_online INTEGER NOT NULL DEFAULT 0 CHECK (is_online IN (0, 1)),
+          last_location_json TEXT CHECK (last_location_json IS NULL OR json_valid(last_location_json))
+        );
+        INSERT INTO ${migrationTable} (
+          id, username, password_hash, full_name, role, active, failed_login_attempts, locked_until,
+          created_at, deleted_at, assigned_regions_json, is_online, last_location_json
+        )
+        SELECT id, username, password_hash, full_name, role, active, COALESCE(${failedAttempts}, 0), ${lockedUntil},
+          created_at, deleted_at, COALESCE(${assignedRegions}, '[]'), COALESCE(${online}, 0), ${location}
+        FROM users;
+        DROP TABLE users;
+        ALTER TABLE ${migrationTable} RENAME TO users;
+        CREATE INDEX IF NOT EXISTS idx_users_role_presence ON users(role, is_online, active, deleted_at);
+      `);
+
+      if (tableExists(database, 'schema_migrations') && !applied) {
+        database.prepare('INSERT INTO schema_migrations (version) VALUES (?)').run(financeAccountRolesMigration);
+      }
+      const violations = database.pragma('foreign_key_check').filter((violation) => violation.parent === 'users');
+      if (violations.length) {
+        throw new Error(`Finance role migration would leave foreign-key violations: ${JSON.stringify(violations.slice(0, 5))}`);
+      }
+    });
+    rebuild.immediate();
+  } finally {
+    if (foreignKeysWereEnabled) database.pragma('foreign_keys = ON');
+  }
 }
 
 /** Add rep role/profile fields without changing user IDs or dependent foreign keys. */
@@ -1167,10 +1277,12 @@ export function initializeDatabase({ database = db, initialAdminPassword = env.i
   // Rebuild an existing users table before the main transaction so SQLite can
   // safely preserve every table that references users(id).
   migrateRepUserProfiles(database);
+  migrateFinanceAccountRoles(database);
 
   const initialize = database.transaction(() => {
     database.exec(schema);
     migrateRepUserProfiles(database);
+    migrateFinanceAccountRoles(database);
     migrateAccountLoginProtection(database);
     migrateAuthenticationSessions(database);
     migrateOptionalOffcutMaterial(database);
@@ -1193,6 +1305,7 @@ export function initializeDatabase({ database = db, initialAdminPassword = env.i
     migrateAttendanceAdminClockOutNote(database);
     migrateAttendanceClockLocations(database);
     migrateAttendanceBiometricConfirmation(database);
+    migrateClientProfileCrud(database);
     migrateUserEmployeeLinks(database);
     migrateUserEmployeeProfileSync(database);
     migrateMaintenanceTripFolders(database);

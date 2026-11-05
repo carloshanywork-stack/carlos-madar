@@ -287,6 +287,7 @@ final class RepLocalStore extends SQLiteOpenHelper {
                 try (Cursor photos = database.rawQuery("SELECT phase, photo_index, path, captured_at FROM visit_photos WHERE visit_uuid = ? ORDER BY phase, photo_index", new String[] { uuid })) {
                     while (photos.moveToNext()) {
                         JSONObject photo = new JSONObject();
+                        photo.put("index", photos.getInt(1));
                         photo.put("path", photos.getString(2));
                         photo.put("capturedAt", photos.getString(3));
                         ("before".equals(photos.getString(0)) ? before : after).put(photo);

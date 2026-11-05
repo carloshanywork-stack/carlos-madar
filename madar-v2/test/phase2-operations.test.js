@@ -86,6 +86,19 @@ test('Phase 2 client, maintenance, and workshop flows remain isolated and transa
   assert.equal(clients.response.status, 200);
   assert.deepEqual(clients.body.map((entry) => entry.id), [client.id]);
 
+  const secondClient = await request('/api/clients', jsonOptions('POST', { name: 'Second Client' }));
+  assert.equal(secondClient.response.status, 201);
+  const duplicateCode = await request(`/api/clients/${secondClient.body.id}`, jsonOptions('PUT', {
+    code: client.code,
+  }));
+  assert.equal(duplicateCode.response.status, 409);
+  const invalidCode = await request(`/api/clients/${secondClient.body.id}`, jsonOptions('PUT', {
+    code: '../unsafe',
+  }));
+  assert.equal(invalidCode.response.status, 400);
+  const secondClientDeactivated = await request(`/api/clients/${secondClient.body.id}`, { method: 'DELETE' });
+  assert.equal(secondClientDeactivated.response.status, 200);
+
   const pettyCashFunding = await request('/api/finance/treasury/entries', jsonOptions('POST', {
     kind: 'income',
     category: 'Phase 2 test capitalization',
@@ -105,6 +118,43 @@ test('Phase 2 client, maintenance, and workshop flows remain isolated and transa
   const logoDownload = await request(uploadedLogo.body.logo_url);
   assert.equal(logoDownload.response.status, 200);
   assert.deepEqual(logoDownload.body, pngBytes);
+
+  const clientUpdated = await request(`/api/clients/${client.id}`, jsonOptions('PUT', {
+    code: 'ACRYLIC-CUSTOMER-01',
+    nameAr: 'عميل الأكريليك والصيانة',
+    nameEn: 'Acrylic & Maintenance Customer',
+    contactName: 'Updated Operations Contact',
+    phone: '+966500000002',
+    email: 'updated-ops@example.local',
+    address: 'Updated client headquarters',
+    notes: 'Updated account instructions.',
+  }));
+  assert.equal(clientUpdated.response.status, 200, JSON.stringify(clientUpdated.body));
+  assert.equal(clientUpdated.body.code, 'ACRYLIC-CUSTOMER-01');
+  assert.equal(clientUpdated.body.name, 'عميل الأكريليك والصيانة');
+  assert.equal(clientUpdated.body.name_ar, 'عميل الأكريليك والصيانة');
+  assert.equal(clientUpdated.body.name_en, 'Acrylic & Maintenance Customer');
+  assert.equal(clientUpdated.body.contact_name, 'Updated Operations Contact');
+  assert.equal(clientUpdated.body.phone, '+966500000002');
+  assert.equal(clientUpdated.body.email, 'updated-ops@example.local');
+  assert.equal(clientUpdated.body.address, 'Updated client headquarters');
+  assert.equal(clientUpdated.body.notes, 'Updated account instructions.');
+  assert.equal(db.prepare('SELECT storage_code FROM clients WHERE id = ?').get(client.id).storage_code, 'C-1001');
+  const logoAfterClientCodeChange = await request(uploadedLogo.body.logo_url);
+  assert.equal(logoAfterClientCodeChange.response.status, 200);
+  assert.deepEqual(logoAfterClientCodeChange.body, pngBytes);
+  const clearedOptionalClientFields = await request(`/api/clients/${client.id}`, jsonOptions('PUT', {
+    nameEn: '',
+    contactName: '',
+    phone: '',
+    email: '',
+    address: '',
+    notes: '',
+  }));
+  assert.equal(clearedOptionalClientFields.response.status, 200);
+  for (const field of ['name_en', 'contact_name', 'phone', 'email', 'address', 'notes']) {
+    assert.equal(clearedOptionalClientFields.body[field], null, `${field} should be clearable without sending an omitted field`);
+  }
 
   const machineCreated = await request('/api/maintenance/machines', jsonOptions('POST', {
     code: 'MACHINE-ACRYLIC-01',
@@ -143,6 +193,8 @@ test('Phase 2 client, maintenance, and workshop flows remain isolated and transa
   assert.equal('selling_price' in maintenanceOrder, false);
   assert.equal('cogs' in maintenanceOrder, false);
   assert.equal('profit' in maintenanceOrder, false);
+  const blockedClientDeactivation = await request(`/api/clients/${client.id}`, { method: 'DELETE' });
+  assert.equal(blockedClientDeactivation.response.status, 409);
 
   const cardCreated = await request(
     `/api/maintenance/orders/${maintenanceOrder.id}/cards`,
@@ -289,6 +341,7 @@ test('Phase 2 client, maintenance, and workshop flows remain isolated and transa
   assert.equal(workshopOrder.machine_type, 'cnc_router');
   assert.equal(workshopOrder.target_delivery_date, '2026-11-15');
   assert.equal(workshopOrder.technicians[0].id, workshopTechnicianId);
+  assert.equal((await request(`/api/clients/${client.id}`, { method: 'DELETE' })).response.status, 409);
 
   const dxfContents = Buffer.from('0\nSECTION\n2\nENTITIES\n0\nENDSEC\n0\nEOF\n', 'utf8');
   const rejectedDesignForm = new FormData();
@@ -368,9 +421,25 @@ test('Phase 2 client, maintenance, and workshop flows remain isolated and transa
     [workshopOrder.order_code],
   );
 
+  const clientDeactivated = await request(`/api/clients/${client.id}`, { method: 'DELETE' });
+  assert.equal(clientDeactivated.response.status, 200, JSON.stringify(clientDeactivated.body));
+  assert.ok(clientDeactivated.body.deleted_at);
+  assert.equal(db.prepare('SELECT id, code FROM clients WHERE id = ?').get(client.id).code, 'ACRYLIC-CUSTOMER-01');
+  assert.equal(db.prepare('SELECT client_id FROM workshop_orders WHERE id = ?').get(workshopOrder.id).client_id, client.id);
+  assert.equal((await request('/api/clients')).body.some((entry) => entry.id === client.id), false);
+  assert.equal((await request(`/api/clients/${client.id}`)).response.status, 404);
+
   const auditCount = db.prepare(`
     SELECT COUNT(*) AS count FROM audit_log
     WHERE entity_type IN ('maintenance_order', 'workshop_order', 'maintenance_card')
   `).get().count;
   assert.ok(auditCount >= 6);
+  const clientAudits = db.prepare(`
+    SELECT action, old_values_json, new_values_json FROM audit_log
+    WHERE entity_type = 'client' AND entity_id = ? ORDER BY id
+  `).all(client.id);
+  assert.ok(clientAudits.some((entry) => entry.action === 'update'
+    && JSON.parse(entry.old_values_json).code === 'C-1001'
+    && JSON.parse(entry.new_values_json).code === 'ACRYLIC-CUSTOMER-01'));
+  assert.ok(clientAudits.some((entry) => entry.action === 'delete'));
 });

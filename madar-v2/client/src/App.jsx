@@ -52,19 +52,23 @@ function clearCachedRepProfile() {
 }
 
 function BusinessRoutes({ user }) {
+  const role = user?.role;
+  const canViewFinance = ['admin', 'finance', 'accountant'].includes(role);
+  const canMutateWarehouse = ['admin', 'operations', 'purchasing'].includes(role);
+  const canMutateWorkshop = ['admin', 'operations'].includes(role);
   return (
     <Suspense fallback={<LoadingState label="جارٍ تحميل الصفحة" />}>
       <Routes>
         <Route path="/" element={<DashboardPage />} />
-        <Route path="/clients" element={<ClientsPage />} />
+        <Route path="/clients" element={<ClientsPage canViewFinancialDetails={canViewFinance} />} />
         <Route path="/maintenance" element={<MaintenancePage isAdmin={user?.role === 'admin'} />} />
         <Route path="/maintenance/:id" element={<MaintenanceOrderDetail />} />
         <Route path="/supervisor" element={user?.role === 'admin' ? <SupervisorRadarPage /> : <Navigate to="/" replace />} />
-        <Route path="/workshop" element={<WorkshopPage />} />
-        <Route path="/workshop/:id" element={<WorkshopOrderDetail />} />
-        <Route path="/warehouse" element={<WarehousePage />} />
-        <Route path="/finance" element={<FinancePage />} />
-        <Route path="/accounting" element={<AccountingPage isAdmin={user?.role === 'admin'} />} />
+        <Route path="/workshop" element={<WorkshopPage canMutate={canMutateWorkshop} canViewFinance={canViewFinance} />} />
+        <Route path="/workshop/:id" element={<WorkshopOrderDetail canMutate={canMutateWorkshop} canViewFinance={canViewFinance} />} />
+        <Route path="/warehouse" element={<WarehousePage canMutate={canMutateWarehouse} canViewFinancialDetails={canViewFinance} />} />
+        <Route path="/finance" element={canViewFinance ? <FinancePage /> : <Navigate to="/" replace />} />
+        <Route path="/accounting" element={canViewFinance ? <AccountingPage isAdmin={role === 'admin'} canViewPayroll /> : <Navigate to="/" replace />} />
         <Route path="/staff" element={user?.role === 'admin' ? <StaffDirectoryPage /> : <Navigate to="/" replace />} />
         <Route path="/archive" element={<ArchivePage isAdmin={user?.role === 'admin'} />} />
         <Route path="/settings" element={<SettingsPage />} />

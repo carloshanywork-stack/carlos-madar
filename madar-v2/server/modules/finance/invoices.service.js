@@ -259,7 +259,7 @@ export function insertSalesInvoiceForWorkshopOrder(workshopOrderId, actorId = nu
       (code, kind, client_id, workshop_order_id, subtotal_cents, tax_cents,
        total_cents, paid_total_cents, remaining_cents, payment_status,
        status, notes, created_by)
-    VALUES (?, 'sales', ?, ?, ?, 0, ?, 0, ?, ?, 'approved', ?, ?)
+    VALUES (?, 'sales', ?, ?, ?, 0, ?, ?, 0, 'paid', 'approved', ?, ?)
   `).run(
     code,
     order.client_id,
@@ -267,11 +267,22 @@ export function insertSalesInvoiceForWorkshopOrder(workshopOrderId, actorId = nu
     totalCents,
     totalCents,
     totalCents,
-    totalCents === 0 ? 'paid' : 'unpaid',
     `Automated invoice for workshop order ${order.order_code}`,
     actorId,
   );
   const invoiceId = Number(result.lastInsertRowid);
+  const treasuryEntryId = totalCents > 0
+    ? insertTreasuryEntry({
+      database,
+      kind: 'income',
+      category: RECEIPT_CATEGORY,
+      amountCents: totalCents,
+      invoiceId,
+      reference: code,
+      notes: `Cash sale for workshop order ${order.order_code}`,
+      actorId,
+    })
+    : null;
   recordAudit({
     database,
     actorId,
@@ -283,6 +294,10 @@ export function insertSalesInvoiceForWorkshopOrder(workshopOrderId, actorId = nu
       client_id: order.client_id,
       workshop_order_id: order.id,
       total_cents: totalCents,
+      paid_total_cents: totalCents,
+      remaining_cents: 0,
+      payment_status: 'paid',
+      treasury_entry_id: treasuryEntryId,
     },
   });
   return readInvoice(invoiceId, database);

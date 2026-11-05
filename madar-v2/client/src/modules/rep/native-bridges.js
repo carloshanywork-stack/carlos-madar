@@ -4,7 +4,13 @@ import { Capacitor, registerPlugin } from '@capacitor/core';
 import { Directory, Filesystem } from '@capacitor/filesystem';
 import { Geolocation } from '@capacitor/geolocation';
 import { Network } from '@capacitor/network';
-import { addPendingVisit, deletePendingVisit, getPendingVisit } from './offline-store.js';
+import {
+  addPendingVisit,
+  deletePendingVisit,
+  getPendingVisit,
+  listPendingMachineActions,
+  listPendingVisits,
+} from './offline-store.js';
 import { isNativeRepApp, RepEngine } from './native-session.js';
 
 const PENDING_ROOT = 'Pending';
@@ -311,4 +317,137 @@ export async function restoreNativePendingBackups(repId) {
     }
   }
   return restored;
+}
+
+async function serializePendingPhotoArray(photos, phase) {
+  if (!Array.isArray(photos)) return [];
+  const serialized = [];
+  for (const [index, photo] of photos.entries()) {
+    const blob = photo instanceof Blob ? photo : photo?.blob instanceof Blob ? photo.blob : null;
+    if (blob) {
+      serialized.push({
+        phase,
+        index,
+        capturedAt: photo?.capturedAt ?? '',
+        mimeType: blob.type || 'image/jpeg',
+        byteSize: blob.size,
+        bytesBase64: await blobToBase64(blob),
+      });
+      continue;
+    }
+    serialized.push({
+      phase,
+      index,
+      capturedAt: photo?.capturedAt ?? '',
+      mimeType: 'image/jpeg',
+      byteSize: Number(photo?.sizeBytes ?? 0) || null,
+      omitted: 'الصورة غير متاحة ككائن Blob في هذا التخزين.',
+    });
+  }
+  return serialized;
+}
+
+async function serializePendingVisit(visit) {
+  return {
+    visitUuid: visit.visitUuid,
+    repId: Number(visit.repId),
+    repUsername: visit.repUsername ?? '',
+    createdAt: visit.createdAt ?? '',
+    status: visit.status ?? 'queued',
+    attempts: Number(visit.attempts ?? 0),
+    lastError: visit.lastError ?? '',
+    payload: visit.payload ?? {},
+    beforePhotos: await serializePendingPhotoArray(visit.beforePhotos, 'before'),
+    afterPhotos: await serializePendingPhotoArray(visit.afterPhotos, 'after'),
+  };
+}
+
+async function serializeMachineAction(action) {
+  const { evidence, ...rest } = action;
+  let serializedEvidence = null;
+  if (evidence instanceof Blob) {
+    serializedEvidence = {
+      name: evidence.name || `${action.actionUuid || 'evidence'}.jpg`,
+      mimeType: evidence.type || 'application/octet-stream',
+      byteSize: evidence.size,
+      bytesBase64: await blobToBase64(evidence),
+    };
+  } else if (evidence) {
+    serializedEvidence = { omitted: 'نوع صورة الإثبات غير صالح أو غير متاح.' };
+  }
+  return { ...rest, evidence: serializedEvidence };
+}
+
+function exportTimestamp() {
+  return new Date().toISOString().replace(/[:.]/g, '-');
+}
+
+/** Write a self-contained JSON backup of every unsynchronized item, including image bytes when locally available. */
+export async function exportPendingQueue(repId, repUsername) {
+  const numericRepId = Number(repId);
+  const isNative = isNativeRepApp();
+  const [indexedVisits, indexedActions] = await Promise.all([
+    listPendingVisits(numericRepId),
+    listPendingMachineActions(numericRepId),
+  ]);
+
+  let nativeVisits = [];
+  if (isNative) {
+    try {
+      const result = await RepEngine.exportPendingVisits({ repId: numericRepId });
+      const parsed = JSON.parse(result?.json ?? '{}');
+      nativeVisits = Array.isArray(parsed.visits) ? parsed.visits : [];
+    } catch (error) {
+      throw new Error('تعذر تجهيز نسخة JSON من زيارات أندرويد المحلية. حاول مرة أخرى قبل الخروج.');
+    }
+  }
+
+  const nativeIds = new Set(nativeVisits.map((visit) => visit.visitUuid));
+  const visits = [...nativeVisits];
+  for (const visit of indexedVisits) {
+    if (nativeIds.has(visit.visitUuid)) continue;
+    visits.push(await serializePendingVisit(visit));
+  }
+  const machineActions = await Promise.all(indexedActions.map(serializeMachineAction));
+  const payload = {
+    schemaVersion: 1,
+    type: 'madar-rep-pending-queue',
+    exportedAt: new Date().toISOString(),
+    repId: numericRepId,
+    repUsername: repUsername ?? '',
+    source: isNative ? 'android-sqlite' : 'indexeddb',
+    visits,
+    machineActions,
+  };
+  return savePendingQueueExport(payload, exportTimestamp());
+}
+
+async function savePendingQueueExport(payload, stamp) {
+  const json = JSON.stringify(payload);
+  const filename = `madar-rep-pending-queue-${stamp}.json`;
+  if (isNativeRepApp()) {
+    try {
+      await Filesystem.mkdir({ path: 'MADAR/Exports', directory: Directory.Documents, recursive: true });
+    } catch {
+      // The export directory usually exists; writeFile reports a real failure below.
+    }
+    await Filesystem.writeFile({
+      path: `MADAR/Exports/${filename}`,
+      data: json,
+      directory: Directory.Documents,
+      encoding: 'utf8',
+    });
+    return { filename, path: `Documents/MADAR/Exports/${filename}`, visits: payload.visits.length, machineActions: payload.machineActions.length };
+  }
+
+  const blob = new Blob([json], { type: 'application/json;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+  return { filename, path: filename, visits: payload.visits.length, machineActions: payload.machineActions.length };
 }
