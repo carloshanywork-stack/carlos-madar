@@ -37,9 +37,9 @@ const FIXED_LOGO_CANDIDATES = [
   'server/assets/logo.jpg',
 ];
 const EXPORT_PROGRESS_TTL_MS = 10 * 60 * 1000;
-const PPTX_EXPORT_SOCKET_TIMEOUT_MS = 5 * 60 * 1000;
-const PPTX_IMAGE_MAX_DIMENSION = 1200;
-const PPTX_IMAGE_JPEG_QUALITY = 78;
+const PPTX_EXPORT_SOCKET_TIMEOUT_MS = 7 * 60 * 1000;
+const PPTX_IMAGE_MAX_DIMENSION = 680;
+const PPTX_IMAGE_JPEG_QUALITY = 70;
 const exportProgressMap = new Map();
 
 function pruneExpiredExportProgress(now = Date.now()) {
@@ -74,10 +74,12 @@ async function loadImage(storedPath, { ensurePortrait = false } = {}) {
   try {
     const absolutePath = await resolveStorageFile(storedPath);
     const source = await readFile(absolutePath);
-    const autoOrientedBuffer = await sharp(source, { failOn: 'none' }).rotate().toBuffer();
-    const metadata = await sharp(autoOrientedBuffer, { failOn: 'none' }).metadata();
-    let pipeline = sharp(autoOrientedBuffer, { failOn: 'none' });
-    if (ensurePortrait && metadata.width && metadata.height && metadata.width > metadata.height) {
+    const metadata = await sharp(source, { failOn: 'none', fastShrinkOnLoad: true }).metadata();
+    const orientationSwapsDimensions = [5, 6, 7, 8].includes(metadata.orientation);
+    const orientedWidth = orientationSwapsDimensions ? metadata.height : metadata.width;
+    const orientedHeight = orientationSwapsDimensions ? metadata.width : metadata.height;
+    let pipeline = sharp(source, { failOn: 'none', fastShrinkOnLoad: true }).rotate();
+    if (ensurePortrait && orientedWidth && orientedHeight && orientedWidth > orientedHeight) {
       pipeline = pipeline.rotate(90);
     }
     const { data, info } = await pipeline
@@ -87,7 +89,7 @@ async function loadImage(storedPath, { ensurePortrait = false } = {}) {
         fit: 'inside',
         withoutEnlargement: true,
       })
-      .jpeg({ quality: PPTX_IMAGE_JPEG_QUALITY, mozjpeg: true })
+      .jpeg({ quality: PPTX_IMAGE_JPEG_QUALITY })
       .toBuffer({ resolveWithObject: true });
     return { contentType: 'image/jpeg', data, width: info.width, height: info.height };
   } catch {
@@ -98,13 +100,14 @@ async function loadImage(storedPath, { ensurePortrait = false } = {}) {
 async function loadLocalImageFile(filePath) {
   try {
     const source = await readFile(filePath);
-    const { data, info } = await sharp(source, { failOn: 'none' })
+    const { data, info } = await sharp(source, { failOn: 'none', fastShrinkOnLoad: true })
       .rotate()
-      .resize({ width: 1600, height: 1600, fit: 'inside', withoutEnlargement: true })
-      .png({ compressionLevel: 9, adaptiveFiltering: true })
+      .resize({ width: 680, height: 680, fit: 'inside', withoutEnlargement: true })
+      .flatten({ background: '#FFFFFF' })
+      .jpeg({ quality: 70 })
       .toBuffer({ resolveWithObject: true });
     if (!info.width || !info.height) return null;
-    return { contentType: 'image/png', data, width: info.width, height: info.height };
+    return { contentType: 'image/jpeg', data, width: info.width, height: info.height };
   } catch {
     return null;
   }
@@ -812,7 +815,12 @@ export async function buildMaintenancePptxExport(input, database = defaultDataba
       addMaintenanceIndexSlide(pptx, rows, area, indexPage, areaPageCount, slideNumber, pageCount, primary);
     }
 
+    let renderedSlideCount = 0;
     for (const plannedSlide of presentationPlan) {
+      renderedSlideCount += 1;
+      if (renderedSlideCount % 10 === 0) {
+        await new Promise((resolve) => setImmediate(resolve));
+      }
       if (plannedSlide.type === 'area-divider') {
         addAreaDividerSlide(pptx, plannedSlide.area, plannedSlide.entries, plannedSlide.pageNumber, pageCount, primary, secondary);
         continue;
@@ -843,10 +851,6 @@ export async function buildMaintenancePptxExport(input, database = defaultDataba
             : Math.max(0, Math.round((remainingCards * avgMsPerCard) / 1000)),
           speedSecPerMachine: avgMsPerCard === null ? null : (avgMsPerCard / 1000).toFixed(1),
         });
-        if (exportId) {
-          // Let the progress endpoint and other requests run between synchronous slide-building steps.
-          await new Promise((resolve) => setImmediate(resolve));
-        }
         const clientLogo = logos.get(order.client.id);
         await addMaintenanceCardSlide(
           pptx,

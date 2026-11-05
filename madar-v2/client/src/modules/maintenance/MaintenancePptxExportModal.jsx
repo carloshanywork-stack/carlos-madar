@@ -61,7 +61,7 @@ function requestPptxExport(payload, { onDownloadStart, onDownloadProgress }) {
     if (payload.reasonId !== null && payload.reasonId !== undefined) query.set('reasonId', String(payload.reasonId));
     const queryString = query.toString();
     xhr.open('POST', `/api/maintenance/export/pptx${queryString ? `?${queryString}` : ''}`);
-    xhr.timeout = 240_000;
+    xhr.timeout = 360_000;
     xhr.withCredentials = true;
     xhr.responseType = 'blob';
     xhr.setRequestHeader('Content-Type', 'application/json');
@@ -77,7 +77,7 @@ function requestPptxExport(payload, { onDownloadStart, onDownloadProgress }) {
       reject(new Error(xhr.status ? message : 'تعذر الاتصال بالخادم أثناء إنشاء العرض. تحقق من الشبكة أو إعدادات الوصول ثم أعد المحاولة.'));
     });
     xhr.addEventListener('abort', () => reject(new Error('تم إلغاء إنشاء العرض.')));
-    xhr.addEventListener('timeout', () => reject(new Error('استغرق إنشاء وتنزيل العرض أكثر من 4 دقائق؛ قلّل نطاق الأرشيف ثم أعد المحاولة.')));
+    xhr.addEventListener('timeout', () => reject(new Error('استغرق إنشاء وتنزيل العرض أكثر من 6 دقائق؛ قلّل نطاق الأرشيف ثم أعد المحاولة.')));
     xhr.addEventListener('load', async () => {
       markDownloadStarted();
       if (xhr.status !== 200) {

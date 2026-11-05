@@ -670,12 +670,14 @@ test('V2 parity operations cover imports, area maintenance, HR, exports, users, 
   assert.match(coverSlideXml, /hlinkClick/, 'area page number on the cover should be clickable');
   const indexSlideXml = (await readZipEntry(bulkPptx.body, 'ppt/slides/slide2.xml')).toString('utf8');
   assert.match(indexSlideXml, /hlinkClick/, 'machine number and page number should link to the machine slide');
-  const exportedPhotoName = bulkPptxEntries.find((name) => name.startsWith('ppt/media/') && name.toLowerCase().endsWith('.jpeg'));
-  assert.ok(exportedPhotoName, 'PPTX should contain a derived JPEG photo');
-  const exportedPhoto = await readZipEntry(bulkPptx.body, exportedPhotoName);
-  const exportedPhotoInfo = await sharp(exportedPhoto).metadata();
-  assert.deepEqual({ width: exportedPhotoInfo.width, height: exportedPhotoInfo.height }, { width: 60, height: 120 },
-    'exported landscape photos are rotated 90 degrees clockwise in-memory');
+  const exportedMedia = await Promise.all(bulkPptxEntries
+    .filter((name) => name.startsWith('ppt/media/') && name.toLowerCase().endsWith('.jpeg'))
+    .map(async (name) => {
+      const buffer = await readZipEntry(bulkPptx.body, name);
+      return { buffer, metadata: await sharp(buffer).metadata() };
+    }));
+  assert.ok(exportedMedia.some(({ metadata }) => metadata.width === 60 && metadata.height === 120),
+    'PPTX should contain a derived JPEG photo with the expected portrait orientation');
   const noMatchingReason = await request('/api/maintenance/export/pptx', json('POST', {
     orderIds: [order.body.id], reasonId: reasonList.body[1].id, area: null, groupBy: 'none',
   }));
@@ -1252,7 +1254,7 @@ test('maintenance PPTX and Excel exports sort Arabic areas and machine codes nat
 test('maintenance PowerPoint export exposes live machine progress and a final completion state', async () => {
   const client = await request('/api/clients', json('POST', { name: 'PPTX Progress Test Client' }));
   assert.equal(client.response.status, 201, JSON.stringify(client.body));
-  const machineCount = 24;
+  const machineCount = 557;
   for (let index = 1; index <= machineCount; index += 1) {
     const created = await request('/api/maintenance/machines', json('POST', {
       code: `PROGRESS-${index}`,
@@ -1273,13 +1275,14 @@ test('maintenance PowerPoint export exposes live machine progress and a final co
   const orderCardCount = db.prepare('SELECT COUNT(*) AS count FROM maintenance_cards WHERE order_id = ?').get(order.body.id).count;
   assert.equal(orderCardCount, machineCount);
   const progressPhoto = await writePptxPhotoFixture('Maintenance/Export Fixtures/progress-photo.jpg', '#9467bd', { width: 2400, height: 1600 });
-  db.prepare("UPDATE maintenance_cards SET status = 'completed', before_photos_json = ? WHERE order_id = ?")
-    .run(JSON.stringify([progressPhoto.path]), order.body.id);
+  db.prepare(`UPDATE maintenance_cards
+    SET status = 'completed', before_photos_json = ?, after_photos_json = ? WHERE order_id = ?`)
+    .run(JSON.stringify([progressPhoto.path]), JSON.stringify([progressPhoto.path]), order.body.id);
   db.prepare(`UPDATE maintenance_orders
     SET status = 'archived', archived_at = '2031-04-06 12:00:00', updated_at = '2031-04-06 12:00:00'
     WHERE id = ?`).run(order.body.id);
 
-  const exportId = 'phase6-progress-24-machine-export';
+  const exportId = 'phase6-progress-557-machine-export';
   let exportFinished = false;
   const exportTask = request('/api/maintenance/export/pptx', json('POST', {
     orderIds: [order.body.id],
@@ -1289,12 +1292,12 @@ test('maintenance PowerPoint export exposes live machine progress and a final co
     return result;
   });
   const observedProgress = [];
-  const deadline = Date.now() + 20_000;
+  const deadline = Date.now() + 120_000;
   while (!exportFinished && Date.now() < deadline) {
     const progressResult = await request(`/api/maintenance/export/pptx/progress?exportId=${encodeURIComponent(exportId)}`);
     assert.equal(progressResult.response.status, 200, JSON.stringify(progressResult.body));
     if (progressResult.body?.active) observedProgress.push(progressResult.body);
-    if (!exportFinished) await new Promise((resolve) => setTimeout(resolve, 5));
+    if (!exportFinished) await new Promise((resolve) => setTimeout(resolve, 50));
   }
   assert.equal(exportFinished, true, 'the PPTX export should finish before the progress-test timeout');
   const exported = await exportTask;
@@ -1305,8 +1308,8 @@ test('maintenance PowerPoint export exposes live machine progress and a final co
   const exportedMedia = await readZipEntry(exported.body, exportedMediaName);
   const exportedMediaMetadata = await sharp(exportedMedia).metadata();
   assert.equal(exportedMediaMetadata.format, 'jpeg');
-  assert.ok(exportedMediaMetadata.width <= 1200 && exportedMediaMetadata.height <= 1200,
-    'PPTX media should be resized to fit within 1200x1200 pixels');
+  assert.ok(exportedMediaMetadata.width <= 680 && exportedMediaMetadata.height <= 680,
+    'PPTX media should be resized to fit within 680x680 pixels');
   assert.deepEqual(readFileSync(join(storageRoot, ...progressPhoto.path.split('/'))), progressPhoto.buffer,
     'PPTX optimization must not rewrite the archived source image');
   assert.ok(observedProgress.some((progress) => (
@@ -1318,6 +1321,8 @@ test('maintenance PowerPoint export exposes live machine progress and a final co
     && progress.machineCode
     && typeof progress.percent === 'number'
   )), 'active progress should include machine identity, count, and percent');
+  assert.ok(observedProgress.some((progress) => progress.current > 0 && progress.current < machineCount),
+    'the progress endpoint should remain responsive during the 557-card image export');
 
   const finalProgress = await request(`/api/maintenance/export/pptx/progress?exportId=${encodeURIComponent(exportId)}`);
   assert.equal(finalProgress.response.status, 200);
@@ -1390,20 +1395,28 @@ test('maintenance PPTX exports the latest edited card snapshot and never falls b
   assert.match(areaDivider, /1 ماكينة ATM/);
   assert.ok(areaDivider.includes(latestSnapshot.order.order_code), 'area divider should list the latest order code');
 
-  const mediaNames = zipEntryNames(exported.body).filter((name) => name.startsWith('ppt/media/'));
-  const logoMediaName = mediaNames.find((name) => name.toLowerCase().endsWith('.png'));
-  assert.ok(logoMediaName, 'the fixed corporate logo should be included as a PNG image');
-  const logoMedia = await readZipEntry(exported.body, logoMediaName);
-  const logoMetadata = await sharp(logoMedia).metadata();
-  assert.ok(logoMetadata.width > 0 && logoMetadata.height > 0, 'the fitted logo should retain valid image dimensions');
+  const mediaNames = zipEntryNames(exported.body).filter((name) => (
+    name.startsWith('ppt/media/') && name.toLowerCase().endsWith('.jpeg')
+  ));
+  const media = await Promise.all(mediaNames.map(async (name) => {
+    const buffer = await readZipEntry(exported.body, name);
+    return { name, buffer, metadata: await sharp(buffer).metadata() };
+  }));
+  const logoMedia = media.find(({ metadata }) => metadata.format === 'jpeg' && metadata.width > 120);
+  assert.ok(logoMedia, 'the fixed corporate logo should be included as a JPEG image');
+  const logoMetadata = logoMedia.metadata;
+  assert.equal(logoMetadata.format, 'jpeg');
+  assert.ok(logoMetadata.width > 0 && logoMetadata.height > 0
+    && logoMetadata.width <= 680 && logoMetadata.height <= 680,
+  'the fitted logo should retain valid dimensions within the PPTX image limit');
   const deriveExportPhoto = async (photo) => {
-    const oriented = await sharp(photo.buffer, { failOn: 'none' }).rotate().toBuffer();
-    return sharp(oriented, { failOn: 'none' })
-      .resize({ width: 1200, height: 1200, fit: 'inside', withoutEnlargement: true })
-      .jpeg({ quality: 78, mozjpeg: true })
+    return sharp(photo.buffer, { failOn: 'none', fastShrinkOnLoad: true })
+      .rotate()
+      .resize({ width: 680, height: 680, fit: 'inside', withoutEnlargement: true })
+      .jpeg({ quality: 70 })
       .toBuffer();
   };
-  const exportedPhotos = await Promise.all(mediaNames.map((name) => readZipEntry(exported.body, name)));
+  const exportedPhotos = media.map(({ buffer }) => buffer);
   const expectedEditedPhoto = await deriveExportPhoto(editedPhoto);
   const expectedOldPhoto = await deriveExportPhoto(oldPhoto);
   assert.ok(exportedPhotos.some((photo) => photo.equals(expectedEditedPhoto)), 'export should contain the edited latest card photo');
