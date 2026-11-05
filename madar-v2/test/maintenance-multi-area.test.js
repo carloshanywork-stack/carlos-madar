@@ -657,6 +657,7 @@ test('missing trip machine without a card is decommissioned with staged folder c
     `clients/${clientCode}/maintenance/${orderResponse.body.order_code}/${machineCode}`,
     `Clients/${clientCode}/Archived_Orders/${orderResponse.body.order_code}/${machineCode}`,
     `Areas/Missing North/${machineCode} — ماكينة غير موجودة بالموقع`,
+    `Areas/Missing North/2026/11/${machineCode}_ماكينة غير موجودة بالموقع`,
   ];
   for (const directory of directories) {
     const absolute = join(storageRoot, ...directory.split('/'));

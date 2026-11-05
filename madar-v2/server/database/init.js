@@ -43,6 +43,7 @@ const gpsRetentionIndexMigration = '20261103-gps-retention-index';
 const staffPayrollRulesMigration = '20261103-staff-payroll-shift-and-settlement';
 const adminClockOutNoteMigration = '20261104-attendance-admin-clockout-note';
 const attendanceClockLocationMigration = '20261105-attendance-clock-gps';
+const attendanceBiometricMigration = '20261105-attendance-biometric-confirmation';
 const machineVerificationCorrectionsMigration = '20261104-machine-verification-corrections';
 const machineCorrectionRenameRecoveryMigration = '20261104-machine-correction-rename-recovery';
 
@@ -623,6 +624,23 @@ export function migrateAttendanceClockLocations(database) {
   migrate.immediate();
 }
 
+export function migrateAttendanceBiometricConfirmation(database) {
+  const migrate = database.transaction(() => {
+    const applied = database.prepare('SELECT 1 FROM schema_migrations WHERE version = ?')
+      .get(attendanceBiometricMigration);
+    if (applied) return;
+
+    const columns = new Set(database.pragma('table_info(employee_daily_attendance)').map((column) => column.name));
+    for (const column of ['clock_in_biometric_verified', 'clock_out_biometric_verified']) {
+      if (!columns.has(column)) {
+        database.exec(`ALTER TABLE employee_daily_attendance ADD COLUMN ${column} INTEGER NOT NULL DEFAULT 0 CHECK (${column} IN (0, 1))`);
+      }
+    }
+    database.prepare('INSERT INTO schema_migrations (version) VALUES (?)').run(attendanceBiometricMigration);
+  });
+  migrate.immediate();
+}
+
 export function migrateUserEmployeeLinks(database) {
   const migrate = database.transaction(() => {
     const applied = database.prepare('SELECT 1 FROM schema_migrations WHERE version = ?')
@@ -1174,6 +1192,7 @@ export function initializeDatabase({ database = db, initialAdminPassword = env.i
     migrateNativeAttendance(database);
     migrateAttendanceAdminClockOutNote(database);
     migrateAttendanceClockLocations(database);
+    migrateAttendanceBiometricConfirmation(database);
     migrateUserEmployeeLinks(database);
     migrateUserEmployeeProfileSync(database);
     migrateMaintenanceTripFolders(database);

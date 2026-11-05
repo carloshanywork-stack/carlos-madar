@@ -239,7 +239,8 @@ function openAttendance(employeeId, database) {
     ORDER BY work_date DESC, id DESC LIMIT 1`).get(employeeId);
 }
 
-function clockIn(employeeIdValue, source, location, actorId, database = db, { now = new Date(), markOnTime = false } = {}) {
+function clockIn(employeeIdValue, source, location, actorId, database = db,
+  { now = new Date(), markOnTime = false, biometricVerified = false } = {}) {
   const employeeId = positiveId(employeeIdValue, 'employeeId');
   const employee = activeEmployee(employeeId, database);
   const timeZone = getTimeZone(database);
@@ -264,18 +265,21 @@ function clockIn(employeeIdValue, source, location, actorId, database = db, { no
         (employee_id, work_date, status, overtime_hours, notes, clock_in_time, clock_in_source,
          clock_in_lat, clock_in_lng, clock_in_accuracy, clock_in_location_at,
          clock_out_time, clock_out_source, total_hours, regular_hours,
-         overtime_status, overtime_approved_by)
-      VALUES (?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, 0, 0, 'none', NULL)
+         overtime_status, overtime_approved_by, clock_in_biometric_verified, clock_out_biometric_verified)
+      VALUES (?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, 0, 0, 'none', NULL, ?, 0)
       ON CONFLICT(employee_id, work_date) DO UPDATE SET
         status = excluded.status, overtime_hours = 0, normal_overtime_hours = 0, holiday_overtime_hours = 0,
         clock_in_time = excluded.clock_in_time,
         clock_in_source = excluded.clock_in_source, clock_in_lat = excluded.clock_in_lat,
         clock_in_lng = excluded.clock_in_lng, clock_in_accuracy = excluded.clock_in_accuracy,
+        clock_in_biometric_verified = excluded.clock_in_biometric_verified,
         clock_in_location_at = excluded.clock_in_location_at, clock_out_time = NULL, clock_out_source = NULL,
         clock_out_lat = NULL, clock_out_lng = NULL, clock_out_accuracy = NULL, clock_out_location_at = NULL,
+        clock_out_biometric_verified = 0,
         total_hours = 0, regular_hours = 0, overtime_status = 'none', overtime_approved_by = NULL`)
       .run(employee.id, date, status, previous?.notes ?? null, clockInTime, source,
-        location?.latitude ?? null, location?.longitude ?? null, location?.accuracy ?? null, location?.updatedAt ?? null);
+        location?.latitude ?? null, location?.longitude ?? null, location?.accuracy ?? null, location?.updatedAt ?? null,
+        biometricVerified ? 1 : 0);
     const current = getAttendanceRecord(employee.id, date, database);
     recordAudit({ database, actorId, action: 'clock_in', entityType: 'employee_attendance', entityId: current.id,
       oldValues: previous ? {
@@ -292,6 +296,7 @@ function clockIn(employeeIdValue, source, location, actorId, database = db, { no
         clock_in_lng: location?.longitude ?? null,
         clock_in_accuracy: location?.accuracy ?? null,
         clock_in_location_at: location?.updatedAt ?? null,
+        clock_in_biometric_verified: Boolean(biometricVerified),
         status,
       } });
     return current;
@@ -300,7 +305,7 @@ function clockIn(employeeIdValue, source, location, actorId, database = db, { no
 }
 
 function clockOut(employeeIdValue, source, location, actorId, database = db,
-  { now = new Date(), adminNote = null, customTime = false } = {}) {
+  { now = new Date(), adminNote = null, customTime = false, biometricVerified = false } = {}) {
   const employeeId = positiveId(employeeIdValue, 'employeeId');
   const employee = activeEmployee(employeeId, database);
   const current = openAttendance(employee.id, database);
@@ -319,12 +324,13 @@ function clockOut(employeeIdValue, source, location, actorId, database = db,
   const run = database.transaction(() => {
     const result = database.prepare(`UPDATE employee_daily_attendance
       SET clock_out_time = ?, clock_out_source = ?, clock_out_lat = ?, clock_out_lng = ?,
-        clock_out_accuracy = ?, clock_out_location_at = ?, total_hours = ?, regular_hours = ?,
+        clock_out_accuracy = ?, clock_out_location_at = ?, clock_out_biometric_verified = ?, total_hours = ?, regular_hours = ?,
         overtime_hours = ?, normal_overtime_hours = ?, holiday_overtime_hours = ?, clock_out_admin_note = ?,
         overtime_status = ?, overtime_approved_by = NULL
       WHERE id = ? AND clock_out_time IS NULL`)
       .run(clockOutTime, source, location?.latitude ?? null, location?.longitude ?? null,
-        location?.accuracy ?? null, location?.updatedAt ?? null, hours.totalHours, hours.regularHours, hours.overtimeHours,
+        location?.accuracy ?? null, location?.updatedAt ?? null, biometricVerified ? 1 : 0,
+        hours.totalHours, hours.regularHours, hours.overtimeHours,
         hours.normalOvertimeHours, hours.holidayOvertimeHours, source === 'admin' ? adminNote : null,
         overtimeStatus, current.id);
     if (!result.changes) throw new HttpError(409, 'This attendance record has already been clocked out.');
@@ -341,6 +347,7 @@ function clockOut(employeeIdValue, source, location, actorId, database = db,
         clock_out_lng: location?.longitude ?? null,
         clock_out_accuracy: location?.accuracy ?? null,
         clock_out_location_at: location?.updatedAt ?? null,
+        clock_out_biometric_verified: Boolean(biometricVerified),
         clock_out_admin_note: source === 'admin' ? adminNote : null,
         ...hours,
         overtime_status: overtimeStatus,
@@ -370,18 +377,24 @@ export function clockOutForEmployee(employeeId, actorId, database = db, options 
 
 export function clockInForRep(userId, input, database = db, options = {}) {
   const body = requireObject(input);
-  allowOnlyKeys(body, ['location']);
+  allowOnlyKeys(body, ['location', 'biometricVerified']);
+  if (body.biometricVerified !== true) {
+    throw new HttpError(400, 'يجب تأكيد المصادقة الحيوية قبل تسجيل الحضور.');
+  }
   const location = normalizeLocation(body.location);
   const employee = employeeForRep(positiveId(userId, 'userId'), database);
-  return clockIn(employee.id, 'app', location, userId, database, options);
+  return clockIn(employee.id, 'app', location, userId, database, { ...options, biometricVerified: true });
 }
 
 export function clockOutForRep(userId, input, database = db, options = {}) {
   const body = requireObject(input);
-  allowOnlyKeys(body, ['location']);
+  allowOnlyKeys(body, ['location', 'biometricVerified']);
+  if (body.biometricVerified !== true) {
+    throw new HttpError(400, 'يجب تأكيد المصادقة الحيوية قبل تسجيل الانصراف.');
+  }
   const location = body.location === undefined || body.location === null ? null : normalizeLocation(body.location);
   const employee = employeeForRep(positiveId(userId, 'userId'), database);
-  return clockOut(employee.id, 'app', location, userId, database, options);
+  return clockOut(employee.id, 'app', location, userId, database, { ...options, biometricVerified: true });
 }
 
 export function getTodayAttendanceForRep(userId, database = db, now = new Date()) {

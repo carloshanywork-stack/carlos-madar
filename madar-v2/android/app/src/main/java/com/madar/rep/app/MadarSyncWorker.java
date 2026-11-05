@@ -81,8 +81,14 @@ public final class MadarSyncWorker extends Worker {
                     }
                 }
                 if (visit == null) continue;
-                if (visit.photos.size() != 6) {
-                    store.markBlocked(visit.visitUuid, "حزمة الزيارة لا تحتوي على الصور الست المطلوبة؛ لم تُحذف البيانات المحلية.");
+                int expectedBeforeCount = 0;
+                int expectedAfterCount = 0;
+                for (RepLocalStore.Photo photo : visit.photos) {
+                    if ("before".equals(photo.phase)) expectedBeforeCount += 1;
+                    else if ("after".equals(photo.phase)) expectedAfterCount += 1;
+                }
+                if (expectedBeforeCount != 3 || expectedAfterCount > 3 || visit.photos.size() != expectedBeforeCount + expectedAfterCount) {
+                    store.markBlocked(visit.visitUuid, "يلزم وجود 3 صور قبل الصيانة؛ صور بعد الصيانة اختيارية (حتى 3). لم تُحذف البيانات المحلية.");
                     continue;
                 }
 
@@ -98,8 +104,8 @@ public final class MadarSyncWorker extends Worker {
                     if ("before".equals(photo.phase)) beforeCount += 1;
                     else if ("after".equals(photo.phase)) afterCount += 1;
                 }
-                if (beforeCount != 3 || afterCount != 3) {
-                    store.markBlocked(visit.visitUuid, "ترتيب صور قبل/بعد غير مكتمل؛ لم تُحذف البيانات المحلية.");
+                if (beforeCount != 3 || afterCount > 3) {
+                    store.markBlocked(visit.visitUuid, "ترتيب صور قبل/بعد غير صالح؛ لم تُحذف البيانات المحلية.");
                     continue;
                 }
 
@@ -120,8 +126,12 @@ public final class MadarSyncWorker extends Worker {
                         && visit.visitUuid.equalsIgnoreCase(result.optString("visitUuid", ""))
                         && isCommittedStatus(result.optString("status", ""))) {
                         List<String> paths = store.markSynced(visit.visitUuid);
-                        for (String path : paths) new File(path).delete();
-                        new File(new File(context.getFilesDir(), "visits"), visit.visitUuid).delete();
+                        for (String path : paths) {
+                            File photo = new File(path);
+                            File parent = photo.getParentFile();
+                            photo.delete();
+                            if (parent != null) parent.delete();
+                        }
                         continue;
                     }
 
@@ -139,7 +149,7 @@ public final class MadarSyncWorker extends Worker {
                     store.markRetry(visit.visitUuid, "لم يؤكد الخادم اكتمال الزيارة؛ ستظل الصور محفوظة على الهاتف.");
                     return Result.retry();
                 } catch (IOException error) {
-                    store.markRetry(visit.visitUuid, "انقطع الاتصال أثناء رفع الحزمة؛ ستُعاد الصور الست كاملة بنفس UUID.");
+                    store.markRetry(visit.visitUuid, "انقطع الاتصال أثناء رفع الحزمة؛ ستُعاد الصور كاملة بنفس UUID.");
                     return Result.retry();
                 }
             }

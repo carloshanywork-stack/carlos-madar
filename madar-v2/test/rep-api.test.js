@@ -561,7 +561,7 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
     geofence_radius_meters: 50,
     area_name: 'محافظة القاهرة - الدقي',
   });
-  assert.match(storedVisit.before_path, /^Areas\/.*\/1434_.*\/\d{4}-\d{2}-\d{2}_\d+\/[0-9a-f-]{8}-[0-9a-f-]{4}-[1-8][0-9a-f-]{3}-[89ab][0-9a-f-]{3}-[0-9a-f-]{12}\/before_0\.jpg$/i);
+  assert.match(storedVisit.before_path, /^Areas\/.*\/\d{4}\/\d{2}\/1434_.*\/Before\/[0-9a-f-]{8}-[0-9a-f-]{4}-[1-8][0-9a-f-]{3}-[89ab][0-9a-f-]{3}-[0-9a-f-]{12}_0001\.jpg$/i);
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM rep_visit_photos WHERE visit_id = (SELECT id FROM rep_visits WHERE visit_uuid = ?)').get(visitUuid).count, 6);
   const compressedBeforeMetadata = await sharp(readFileSync(beforePath)).metadata();
   assert.equal(compressedBeforeMetadata.format, 'jpeg');
@@ -1003,11 +1003,12 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
     AND action = 'rename_from_machine_correction'`).get(targetMachineId));
 
   const renamedVisit = db.prepare('SELECT final_path, before_path, after_path FROM rep_visits WHERE visit_uuid = ?').get(visitUuid);
-  const oldAreaMachineFolder = storedVisit.final_path.split('/')[2];
+  const storedPathSegments = storedVisit.final_path.split('/');
+  const oldAreaMachineFolder = storedPathSegments[4];
   const newAreaMachineFolder = `${correctedMachineCode}_${correctedMachineName.normalize('NFKC').trim()
     .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_').replace(/[. ]+$/g, '')}`;
-  const expectedAreaRoot = [...storedVisit.final_path.split('/').slice(0, 2), newAreaMachineFolder].join('/');
-  const expectedVisitFinalPath = storedVisit.final_path.replace(`/${oldAreaMachineFolder}/`, `/${newAreaMachineFolder}/`);
+  const expectedAreaRoot = [...storedPathSegments.slice(0, 4), newAreaMachineFolder].join('/');
+  const expectedVisitFinalPath = [...storedPathSegments.slice(0, 4), newAreaMachineFolder].join('/');
   assert.equal(renamedVisit.final_path, expectedVisitFinalPath);
   assert.equal(renamedVisit.before_path, storedVisit.before_path.replace(`/${oldAreaMachineFolder}/`, `/${newAreaMachineFolder}/`));
   assert.equal(renamedVisit.after_path, storedVisit.after_path.replace(`/${oldAreaMachineFolder}/`, `/${newAreaMachineFolder}/`));
@@ -1015,7 +1016,8 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
     'rep visit image bytes are preserved during area-folder rename');
   assert.deepEqual(readFileSync(await resolveStorageFile(renamedVisit.after_path)), originalVisitAfterBytes);
   assert.ok(existsSync(join(temporaryDirectory, 'storage', ...expectedAreaRoot.split('/'))));
-  assert.equal(existsSync(join(temporaryDirectory, 'storage', ...storedVisit.final_path.split('/').slice(0, 3))), false);
+  assert.equal(existsSync(join(temporaryDirectory, 'storage', ...storedPathSegments)), false,
+    'the old area/year/month machine directory is renamed, not retained');
   assert.deepEqual(readFileSync(await resolveStorageFile(storageDirectory('Machines', correctedMachineCode, 'catalog.txt'))), machineFileBytes);
   assert.equal(existsSync(join(temporaryDirectory, 'storage', 'Machines', '1434')), false);
   const renamedClientPhotoPath = storageDirectory('clients', 'REP-CLIENT', 'maintenance', 'REP-ROUTE-1', correctedMachineCode, 'before', 'legacy.jpg');
@@ -1086,6 +1088,53 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
     action: 'rejected', note: 'اختبار الاستعادة للعملية المعدّة دون اعتماد التغيير.',
   }), adminCookie);
   assert.equal(rejectRecoveryReport.response.status, 200, JSON.stringify(rejectRecoveryReport.body));
+
+  const optionalAfterMachineId = Number(db.prepare(`
+    INSERT INTO machines (code, name_ar, area, latitude, longitude, is_location_locked, geofence_radius_meters)
+    VALUES ('1436', 'ماكينة اختبار بلا صور بعد', 'التجمع', ?, ?, 1, 50)
+  `).run(visitPayload.location.latitude, visitPayload.location.longitude).lastInsertRowid);
+  const optionalAfterCardId = Number(db.prepare(`
+    INSERT INTO maintenance_cards (order_id, machine_id, before_photos_json, after_photos_json)
+    VALUES (?, ?, '[]', '[]')
+  `).run(orderId, optionalAfterMachineId).lastInsertRowid);
+  const noAfterTimestamp = new Date().toISOString();
+  const noAfterPayload = {
+    ...visitPayload,
+    visitUuid: randomUUID(),
+    cardId: optionalAfterCardId,
+    machineCode: '1436',
+    capturedAt: noAfterTimestamp,
+    beforeCapturedAt: Array.from({ length: 3 }, (_, index) => new Date(Date.now() - (3 - index) * 60 * 1000).toISOString()),
+    afterCapturedAt: [],
+    location: { ...visitPayload.location, updatedAt: noAfterTimestamp },
+  };
+  const noAfterVisit = await request('/api/rep/sync-visit', {
+    method: 'POST', body: buildVisitForm(noAfterPayload, 3, 0),
+  }, login.cookie);
+  assert.equal(noAfterVisit.response.status, 200, JSON.stringify(noAfterVisit.body));
+  assert.equal(noAfterVisit.body.status, 'pending_review');
+  assert.equal(noAfterVisit.body.beforePhotoCount, 3);
+  assert.equal(noAfterVisit.body.afterPhotoCount, 0);
+  const noAfterVisitRow = db.prepare('SELECT id, before_path, after_path FROM rep_visits WHERE visit_uuid = ?').get(noAfterPayload.visitUuid);
+  assert.ok(noAfterVisitRow.before_path);
+  assert.equal(noAfterVisitRow.after_path, null);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM rep_visit_photos WHERE visit_id = ? AND phase = 'before'").get(noAfterVisitRow.id).count, 3);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM rep_visit_photos WHERE visit_id = ? AND phase = 'after'").get(noAfterVisitRow.id).count, 0);
+  const noAfterQueue = await request('/api/supervisor/qa/queue', {}, adminCookie);
+  const noAfterReview = noAfterQueue.body.visits.find((visit) => visit.visitUuid === noAfterPayload.visitUuid);
+  assert.ok(noAfterReview);
+  assert.equal(noAfterReview.beforePhotos.length, 3);
+  assert.deepEqual(noAfterReview.afterPhotos, []);
+  assert.equal(noAfterReview.afterPhotoUrl, null);
+  const missingAfterPhoto = await fetch(`${baseUrl}/api/supervisor/visits/${noAfterVisitRow.id}/photos/after/1`, { headers: { cookie: adminCookie } });
+  assert.equal(missingAfterPhoto.status, 404);
+  const approveNoAfterVisit = await request(`/api/supervisor/visits/${noAfterVisitRow.id}/review`, jsonOptions('POST', { action: 'approve' }), adminCookie);
+  assert.equal(approveNoAfterVisit.response.status, 200, JSON.stringify(approveNoAfterVisit.body));
+  assert.equal(approveNoAfterVisit.body.status, 'approved');
+  const routeAfterNoAfterApproval = await request('/api/rep/today-route?username=rep-nour', {}, login.cookie);
+  const noAfterMachineRoute = routeAfterNoAfterApproval.body.regions.flatMap((region) => region.machines)
+    .find((machine) => machine.cardId === optionalAfterCardId);
+  assert.equal(noAfterMachineRoute.isCompleted, true, 'an approved visit does not require an After photo to complete the route');
 
   const disabledRep = await request(`/api/users/${repId}`, jsonOptions('PUT', { isActive: 0 }), adminCookie);
   assert.equal(disabledRep.response.status, 200);

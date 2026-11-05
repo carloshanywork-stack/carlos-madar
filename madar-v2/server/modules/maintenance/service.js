@@ -570,9 +570,17 @@ function machineCorrectionRenameTargets(operation) {
         && source[1].toLocaleLowerCase('en') === operation.old_code.toLocaleLowerCase('en')
         && destination[1].toLocaleLowerCase('en') === operation.new_code.toLocaleLowerCase('en');
     } else if (source[0] === 'Areas' && destination[0] === 'Areas') {
-      valid = source.length === 3 && destination.length === 3 && source[1] === destination[1]
-        && source[2].toLocaleLowerCase('en').startsWith(`${safeMachineStorageSegment(operation.old_code)}_`.toLocaleLowerCase('en'))
+      const oldFolderPrefix = `${safeMachineStorageSegment(operation.old_code)}_`.toLocaleLowerCase('en');
+      const directAreaFolder = source.length === 3 && destination.length === 3
+        && source[1] === destination[1]
+        && source[2].toLocaleLowerCase('en').startsWith(oldFolderPrefix)
         && destination[2] === newMachineFolder;
+      const yearMonthMachineFolder = source.length === 5 && destination.length === 5
+        && source.slice(1, 4).every((segment, index) => segment === destination[index + 1])
+        && /^\d{4}$/.test(source[2]) && /^(0[1-9]|1[0-2])$/.test(source[3])
+        && source[4].toLocaleLowerCase('en').startsWith(oldFolderPrefix)
+        && destination[4] === newMachineFolder;
+      valid = directAreaFolder || yearMonthMachineFolder;
     } else if (source[0]?.toLocaleLowerCase('en') === 'clients'
       && destination[0]?.toLocaleLowerCase('en') === 'clients') {
       const section = source[2]?.toLocaleLowerCase('en');
@@ -709,10 +717,16 @@ async function collectMachineCorrectionRenamePlan(machine, database) {
   const areaFolderMapping = (storedPath) => {
     if (typeof storedPath !== 'string' || storedPath.includes('\\')) return;
     const segments = storedPath.split('/');
-    if (segments[0] !== 'Areas' || segments.length < 4
+    if (segments[0] !== 'Areas') return;
+    if (segments.length >= 5 && /^\d{4}$/.test(segments[2]) && /^(0[1-9]|1[0-2])$/.test(segments[3])
+        && segments[4].toLocaleLowerCase('en').startsWith(`${oldCodeFolder}_`.toLocaleLowerCase('en'))) {
+      const sourcePath = segments.slice(0, 5).join('/');
+      addMapping(sourcePath, storageDirectory('Areas', segments[1], segments[2], segments[3], newMachineFolder));
+      return;
+    }
+    if (segments.length < 4
         || !segments[2].toLocaleLowerCase('en').startsWith(`${oldCodeFolder}_`.toLocaleLowerCase('en'))) return;
-    const sourcePath = segments.slice(0, 3).join('/');
-    addMapping(sourcePath, storageDirectory('Areas', segments[1], newMachineFolder));
+    addMapping(segments.slice(0, 3).join('/'), storageDirectory('Areas', segments[1], newMachineFolder));
   };
 
   addMapping(storageDirectory('Machines', machine.old_code), storageDirectory('Machines', machine.new_code));
@@ -747,13 +761,9 @@ async function collectMachineCorrectionRenamePlan(machine, database) {
   for (const area of areas) {
     if (!area) continue;
     const areaDirectory = storageDirectory('Areas', safeStorageFolderName(area));
-    const absoluteAreaDirectory = await resolveStorageDirectoryIfPresent(areaDirectory);
-    if (!absoluteAreaDirectory) continue;
-    for (const entry of await readdir(absoluteAreaDirectory, { withFileTypes: true })) {
-      if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
-      if (findMachineForAreaFolder(entry.name, area, machine.id, database)) {
-        addMapping(storageDirectory(areaDirectory, entry.name), storageDirectory(areaDirectory, newMachineFolder));
-      }
+    for (const sourcePath of await maintenanceMachineAreaDirectoryPaths(areaDirectory, area, machine.id, database)) {
+      const segments = sourcePath.split('/');
+      addMapping(sourcePath, storageDirectory(...segments.slice(0, -1), newMachineFolder));
     }
   }
 
@@ -1758,20 +1768,57 @@ function findMachineForAreaFolder(folderName, area, machineId, database) {
   return matchMachineFolder(folderName, machines)?.id === machineId;
 }
 
+async function maintenanceMachineAreaDirectoryPaths(relativeAreaDirectory, area, machineId, database) {
+  const absoluteAreaDirectory = await resolveStorageDirectoryIfPresent(relativeAreaDirectory);
+  if (!absoluteAreaDirectory) return [];
+  const paths = [];
+  for (const areaEntry of await readdir(absoluteAreaDirectory, { withFileTypes: true })) {
+    if (!areaEntry.isDirectory() || areaEntry.name.startsWith('.')) continue;
+    if (!/^\d{4}$/.test(areaEntry.name)) {
+      if (findMachineForAreaFolder(areaEntry.name, area, machineId, database)) {
+        paths.push(storageDirectory(relativeAreaDirectory, areaEntry.name));
+      }
+      continue;
+    }
+
+    const yearPath = storageDirectory(relativeAreaDirectory, areaEntry.name);
+    const yearDirectory = await resolveStorageDirectoryIfPresent(yearPath);
+    if (!yearDirectory) continue;
+    for (const monthEntry of await readdir(yearDirectory, { withFileTypes: true })) {
+      if (!monthEntry.isDirectory() || !/^(0[1-9]|1[0-2])$/.test(monthEntry.name)) continue;
+      const monthPath = storageDirectory(yearPath, monthEntry.name);
+      const monthDirectory = await resolveStorageDirectoryIfPresent(monthPath);
+      if (!monthDirectory) continue;
+      for (const machineEntry of await readdir(monthDirectory, { withFileTypes: true })) {
+        if (!machineEntry.isDirectory() || machineEntry.name.startsWith('.')) continue;
+        if (findMachineForAreaFolder(machineEntry.name, area, machineId, database)) {
+          paths.push(storageDirectory(monthPath, machineEntry.name));
+        }
+      }
+    }
+  }
+  return paths;
+}
+
 function isMaintenanceCardAreaPath(storedPath, order, card, database) {
   const segments = storedPath.split('/');
   if (segments.length < 4 || segments[0] !== 'Areas') return false;
   const area = parseMaintenanceOrderAreas(order.area)
     .find((candidate) => safeStorageFolderName(candidate) === segments[1]);
-  return Boolean(area && findMachineForAreaFolder(segments[2], area, card.machine_id, database));
+  const machineFolder = segments.length >= 5 && /^\d{4}$/.test(segments[2]) && /^\d{2}$/.test(segments[3])
+    ? segments[4]
+    : segments[2];
+  return Boolean(area && findMachineForAreaFolder(machineFolder, area, card.machine_id, database));
 }
 
 function isMaintenanceMachineAreaDirectory(path, order, machine, database) {
   const segments = path.split('/');
-  if (segments.length !== 3 || segments[0] !== 'Areas') return false;
+  if (segments[0] !== 'Areas') return false;
   const area = parseMaintenanceOrderAreas(order.area)
     .find((candidate) => safeStorageFolderName(candidate) === segments[1]);
-  return Boolean(area && findMachineForAreaFolder(segments[2], area, machine.id, database));
+  const isNestedPath = segments.length === 5 && /^\d{4}$/.test(segments[2]) && /^(0[1-9]|1[0-2])$/.test(segments[3]);
+  const machineFolder = segments.length === 3 ? segments[2] : isNestedPath ? segments[4] : null;
+  return Boolean(area && machineFolder && findMachineForAreaFolder(machineFolder, area, machine.id, database));
 }
 
 function isMaintenanceCardPhotoPath(storedPath, order, card, database) {
@@ -1786,14 +1833,8 @@ async function collectMaintenanceMachineFolderTargets(order, machine, database) 
   const targets = maintenanceCardMachineDirectories(order, machine).map((path) => ({ path, kind: 'directory' }));
   for (const area of parseMaintenanceOrderAreas(order.area)) {
     const relativeAreaDirectory = storageDirectory('Areas', safeStorageFolderName(area));
-    const absoluteAreaDirectory = await resolveStorageDirectoryIfPresent(relativeAreaDirectory);
-    if (!absoluteAreaDirectory) continue;
-    const entries = await readdir(absoluteAreaDirectory, { withFileTypes: true });
-    for (const entry of entries) {
-      if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
-      if (!findMachineForAreaFolder(entry.name, area, machineId, database)) continue;
-      targets.push({ path: storageDirectory(relativeAreaDirectory, entry.name), kind: 'directory' });
-    }
+    const areaMachineDirectories = await maintenanceMachineAreaDirectoryPaths(relativeAreaDirectory, area, machineId, database);
+    for (const path of areaMachineDirectories) targets.push({ path, kind: 'directory' });
   }
 
   const uniqueTargets = new Map();

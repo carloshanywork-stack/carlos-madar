@@ -35,7 +35,7 @@ test('Android application ID, namespace, Capacitor ID, and native packages are a
 
   for (const source of [
     'MainActivity.java', 'RepLocationPlugin.java', 'RepLocationService.java', 'RepTrackStore.java',
-    'RepNativeEnginePlugin.java', 'RepLocalStore.java', 'RepAuthStore.java', 'MadarSyncScheduler.java', 'MadarSyncWorker.java',
+    'RepNativeEnginePlugin.java', 'RepBiometricAuth.java', 'RepLocalStore.java', 'RepAuthStore.java', 'MadarSyncScheduler.java', 'MadarSyncWorker.java',
   ]) {
     const path = `android/app/src/main/java/com/madar/rep/app/${source}`;
     assert.ok(existsSync(resolve(projectRoot, path)), `${path} should be in the app namespace package`);
@@ -51,6 +51,7 @@ test('native rep gate, private SQLite queue, and WorkManager upload contract are
   const worker = read('android/app/src/main/java/com/madar/rep/app/MadarSyncWorker.java');
   const scheduler = read('android/app/src/main/java/com/madar/rep/app/MadarSyncScheduler.java');
   const secureStore = read('android/app/src/main/java/com/madar/rep/app/RepAuthStore.java');
+  const biometric = read('android/app/src/main/java/com/madar/rep/app/RepBiometricAuth.java');
   const gradle = read('android/app/build.gradle');
   const gate = read('client/src/NativePermissionGate.jsx');
   const nativeBridges = read('client/src/modules/rep/native-bridges.js');
@@ -66,12 +67,20 @@ test('native rep gate, private SQLite queue, and WorkManager upload contract are
     assert.match(manifest, new RegExp(`android.permission.${permission}`));
   }
   assert.match(secureStore, /EncryptedSharedPreferences\.create/);
+  assert.match(gradle, /androidx\.biometric:biometric/);
+  assert.match(biometric, /BiometricManager\.from\(context\)\.canAuthenticate/);
+  assert.match(engine, /authenticateAttendance/);
+  assert.match(engine, /\.put\("verified", true\)/);
+  assert.match(engine, /isoTimestamp\(new Date\(\)\)/);
+  assert.doesNotMatch(manifest, /android\.permission\.(?:BLUETOOTH|BLUETOOTH_SCAN|BLUETOOTH_CONNECT|READ_EXTERNAL_STORAGE|WRITE_EXTERNAL_STORAGE|READ_MEDIA_IMAGES)/);
   assert.match(gradle, /androidx\.work:work-runtime/);
   assert.match(gradle, /security-crypto/);
   assert.match(store, /CREATE TABLE machines/);
   assert.match(store, /CREATE TABLE fault_reasons/);
   assert.match(store, /CREATE TABLE pending_visits/);
   assert.match(store, /CREATE TABLE visit_photos/);
+  assert.match(store, /seenPaths\.add\(photoFile\.getPath\(\)\)/);
+  assert.match(store, /validNewFilename/);
   const trackStore = read('android/app/src/main/java/com/madar/rep/app/RepTrackStore.java');
   assert.match(trackStore, /TABLE = "breadcrumbs"/);
   assert.match(trackStore, /CREATE TABLE IF NOT EXISTS/);
@@ -87,6 +96,8 @@ test('native rep gate, private SQLite queue, and WorkManager upload contract are
   assert.doesNotMatch(nativeBridges.match(/export async function captureNativeCameraPhoto\(\)[\s\S]*?\n\}/)?.[0] ?? '', /fetch\(|\.blob\(/);
   assert.match(visitSheet, /processNativeVisitPhoto/);
   assert.match(visitSheet, /path: saved\.path/);
+  assert.match(visitSheet, /await deleteNativeVisitPhoto/);
+  assert.match(visitSheet, /result\?\.deleted === false/);
 });
 
 test('FileProvider authority is application-specific and only exposes app-owned camera files', () => {
@@ -126,7 +137,7 @@ test('representative Android bundle stays local in standalone mode and lazy-load
   assert.match(rep, /lazy\(\(\) => import\('\.\/MachineVisitSheet\.jsx'\)\)/);
   assert.match(rep, /lazy\(\(\) => import\('\.\/OfflineMapPanel\.jsx'\)\)/);
   assert.match(rep, /await saveGpsSample\(userId, location\)/);
-  assert.match(rep, /clock-\$\{action\}.*timeoutMs: 15000/);
+  assert.match(rep, /clock-\$\{action\}[\s\S]*?timeoutMs: 15000/);
   assert.doesNotMatch(rep, /from ['"].*modules\/(?:finance|warehouse|workshop|accounting)\//);
   assert.match(rep, /MAX_CLOCK_ACCURACY_METERS = 250/);
   assert.match(rep, /lastLocation: location/);

@@ -45,6 +45,8 @@
 
     <!-- Native camera only; the rep capture UI never exposes a gallery picker. -->
     <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+    <uses-permission android:name="android.permission.USE_FINGERPRINT" android:maxSdkVersion="27" />
     <uses-feature android:name="android.hardware.camera" android:required="true" />
 
     <!-- Foreground + while-in-use duty location; background access is separately granted in Android settings. -->

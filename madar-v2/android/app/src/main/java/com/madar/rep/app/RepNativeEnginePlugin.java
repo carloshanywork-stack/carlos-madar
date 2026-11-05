@@ -18,6 +18,8 @@ import android.provider.Settings;
 import android.text.TextUtils;
 
 import androidx.core.content.ContextCompat;
+import androidx.fragment.app.FragmentActivity;
+import androidx.biometric.BiometricPrompt;
 import androidx.exifinterface.media.ExifInterface;
 
 import com.getcapacitor.JSArray;
@@ -45,6 +47,7 @@ import java.util.concurrent.Executors;
 @CapacitorPlugin(name = "RepEngine")
 public final class RepNativeEnginePlugin extends Plugin {
     private static final ExecutorService IO = Executors.newFixedThreadPool(2);
+    private BiometricPrompt activeBiometricPrompt;
     private static final String[] INITIAL_PERMISSIONS = new String[] {
         Manifest.permission.CAMERA,
         Manifest.permission.ACCESS_FINE_LOCATION,
@@ -111,6 +114,8 @@ public final class RepNativeEnginePlugin extends Plugin {
         state.put("coarseLocation", hasPermission(Manifest.permission.ACCESS_COARSE_LOCATION));
         state.put("backgroundLocation", Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || hasPermission(Manifest.permission.ACCESS_BACKGROUND_LOCATION));
         state.put("notifications", Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU || hasPermission(Manifest.permission.POST_NOTIFICATIONS));
+        state.put("biometricAvailable", RepBiometricAuth.isAvailable(getContext()));
+        state.put("biometricStatus", RepBiometricAuth.availability(getContext()));
         state.put("sdkInt", Build.VERSION.SDK_INT);
         state.put("batteryOptimizationIgnored", isBatteryOptimizationIgnored());
         android.content.SharedPreferences requested = getContext().getSharedPreferences("madar_rep_permissions", Context.MODE_PRIVATE);
@@ -134,6 +139,71 @@ public final class RepNativeEnginePlugin extends Plugin {
         } catch (Exception error) {
             call.reject("تعذر فتح إعدادات التطبيق.", "APP_SETTINGS_FAILED", error);
         }
+    }
+
+    @PluginMethod
+    public void openBiometricSettings(PluginCall call) {
+        try {
+            Intent intent;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                intent = new Intent(Settings.ACTION_BIOMETRIC_ENROLL)
+                    .putExtra(Settings.EXTRA_BIOMETRIC_AUTHENTICATORS_ALLOWED, RepBiometricAuth.ALLOWED_AUTHENTICATORS);
+            } else {
+                intent = new Intent(Settings.ACTION_SECURITY_SETTINGS);
+            }
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(intent);
+            call.resolve(new JSObject().put("opened", true));
+        } catch (Exception error) {
+            call.reject("تعذر فتح إعداد البصمة أو المصادقة الحيوية.", "BIOMETRIC_SETTINGS_FAILED", error);
+        }
+    }
+
+    @PluginMethod
+    public void authenticateAttendance(PluginCall call) {
+        String action = call.getString("action");
+        if (!"in".equals(action) && !"out".equals(action)) {
+            call.reject("نوع تسجيل الحضور غير صالح.", "INVALID_ATTENDANCE_ACTION");
+            return;
+        }
+        if (!RepBiometricAuth.isAvailable(getContext())) {
+            call.reject("لا توجد بصمة أو مصادقة حيوية جاهزة على هذا الهاتف. أعد إعدادها من الإعدادات.", "BIOMETRIC_NOT_ENROLLED");
+            return;
+        }
+        if (!(getActivity() instanceof FragmentActivity)) {
+            call.reject("تعذر فتح نافذة المصادقة الحيوية.", "BIOMETRIC_PROMPT_UNAVAILABLE");
+            return;
+        }
+        if (activeBiometricPrompt != null) {
+            call.reject("هناك عملية مصادقة حيوية قيد التنفيذ.", "BIOMETRIC_PROMPT_BUSY");
+            return;
+        }
+
+        call.setKeepAlive(true);
+        String title = "in".equals(action) ? "تأكيد تسجيل الحضور" : "تأكيد تسجيل الانصراف";
+        activeBiometricPrompt = RepBiometricAuth.authenticate((FragmentActivity) getActivity(), title,
+            new RepBiometricAuth.Callback() {
+                @Override
+                public void onSuccess(int authenticationType) {
+                    activeBiometricPrompt = null;
+                    call.setKeepAlive(false);
+                    call.resolve(new JSObject()
+                        .put("verified", true)
+                        .put("verifiedAt", isoTimestamp(new Date()))
+                        .put("authenticationType", authenticationType));
+                }
+
+                @Override
+                public void onError(int errorCode) {
+                    activeBiometricPrompt = null;
+                    call.setKeepAlive(false);
+                    String message = errorCode == BiometricPrompt.ERROR_USER_CANCELED
+                        || errorCode == BiometricPrompt.ERROR_NEGATIVE_BUTTON
+                        ? "أُلغيت المصادقة الحيوية؛ لم يتم تسجيل الحضور."
+                        : "تعذرت المصادقة الحيوية؛ لم يتم تسجيل الحضور. حاول مجدداً أو أعد إعداد البصمة.";
+                    call.reject(message, "BIOMETRIC_AUTH_FAILED");
+                }
+            });
     }
 
     @PluginMethod
@@ -264,7 +334,13 @@ public final class RepNativeEnginePlugin extends Plugin {
         String phase = call.getString("phase");
         int index = call.getInt("index", -1);
         if (!validPhotoTarget(visitUuid, phase, index)) { call.reject("مسار صورة الزيارة غير صالح."); return; }
-        File image = new File(new File(new File(getContext().getFilesDir(), "visits"), visitUuid), phase + "_" + index + ".jpg");
+        File image;
+        try {
+            image = resolveVisitPhotoForDeletion(visitUuid, phase, index, call.getString("path"));
+        } catch (Exception error) {
+            call.reject("مسار صورة الزيارة خارج مجلد MADAR المحلي.", "INVALID_VISIT_PHOTO_PATH", error);
+            return;
+        }
         boolean deleted = !image.exists() || image.delete();
         call.resolve(new JSObject().put("deleted", deleted));
     }
@@ -366,10 +442,11 @@ public final class RepNativeEnginePlugin extends Plugin {
         Bitmap stamped = drawWatermark(scaled, watermark, location, phase);
         if (stamped != scaled) scaled.recycle();
 
-        File directory = new File(new File(getContext().getFilesDir(), "visits"), visitUuid);
+        File directory = visitPhotoDirectory(visitUuid, phase, watermark);
         if (!directory.exists() && !directory.mkdirs()) throw new IllegalStateException("تعذر إنشاء مجلد الزيارة الداخلي.");
-        File target = new File(directory, phase + "_" + index + ".jpg");
-        File temporary = new File(directory, phase + "_" + index + ".jpg.tmp");
+        String filename = visitPhotoFilename(visitUuid, index);
+        File target = new File(directory, filename);
+        File temporary = new File(directory, filename + ".tmp");
         boolean written = false;
         try {
             for (int quality : new int[] { 82, 76, 70 }) {
@@ -392,6 +469,70 @@ public final class RepNativeEnginePlugin extends Plugin {
             if (!written) temporary.delete();
         }
         return target;
+    }
+
+    private File visitPhotoDirectory(String visitUuid, String phase, JSONObject watermark) throws Exception {
+        String region = safeStorageSegment(watermark.optString("regionName", ""));
+        String machine = safeStorageSegment(watermark.optString("machineCode", "") + "_" + watermark.optString("machineName", ""));
+        Date capturedAt = parseCapturedAt(watermark.optString("capturedAt", ""));
+        SimpleDateFormat yearFormat = new SimpleDateFormat("yyyy", Locale.US);
+        SimpleDateFormat monthFormat = new SimpleDateFormat("MM", Locale.US);
+        TimeZone cairo = TimeZone.getTimeZone("Africa/Cairo");
+        yearFormat.setTimeZone(cairo);
+        monthFormat.setTimeZone(cairo);
+        File uploadsRoot = new File(new File(getContext().getFilesDir(), "MADAR"), "uploads").getCanonicalFile();
+        File machineDirectory = new File(new File(new File(new File(uploadsRoot, region), yearFormat.format(capturedAt)),
+            monthFormat.format(capturedAt)), machine).getCanonicalFile();
+        if (!machineDirectory.getPath().startsWith(uploadsRoot.getPath() + File.separator)) {
+            throw new IllegalArgumentException("مسار المنطقة أو الماكينة غير آمن.");
+        }
+        return new File(machineDirectory, "before".equals(phase) ? "Before" : "After");
+    }
+
+    private static String safeStorageSegment(String value) {
+        String cleaned = value == null ? "" : java.text.Normalizer.normalize(value.trim(), java.text.Normalizer.Form.NFKC)
+            .replaceAll("[<>:/\\\\|?*\\x00-\\x1F]", "_")
+            .replace('"', '_')
+            .replaceAll("[. ]+$", "");
+        if (cleaned.length() > 120) cleaned = cleaned.substring(0, 120);
+        return cleaned.isEmpty() ? "unknown" : cleaned;
+    }
+
+    private static String visitPhotoFilename(String visitUuid, int index) {
+        return visitUuid + "_" + String.format(Locale.US, "%04d", index + 1) + ".jpg";
+    }
+
+    private File resolveVisitPhotoForDeletion(String visitUuid, String phase, int index, String path) throws Exception {
+        File image = path == null || path.trim().isEmpty()
+            ? new File(new File(new File(getContext().getFilesDir(), "visits"), visitUuid), phase + "_" + index + ".jpg")
+            : new File(path);
+        image = image.getCanonicalFile();
+        File uploadsRoot = new File(new File(getContext().getFilesDir(), "MADAR"), "uploads").getCanonicalFile();
+        File legacyRoot = new File(getContext().getFilesDir(), "visits").getCanonicalFile();
+        String expectedPhase = "before".equals(phase) ? "Before" : "After";
+        String expectedName = visitPhotoFilename(visitUuid, index);
+        boolean newLayout = image.getPath().startsWith(uploadsRoot.getPath() + File.separator)
+            && expectedPhase.equals(image.getParentFile().getName()) && expectedName.equals(image.getName());
+        File legacyVisit = new File(legacyRoot, visitUuid).getCanonicalFile();
+        boolean legacyLayout = image.getPath().startsWith(legacyVisit.getPath() + File.separator)
+            && legacyVisit.equals(image.getParentFile()) && (phase + "_" + index + ".jpg").equals(image.getName());
+        if (!newLayout && !legacyLayout) throw new IllegalArgumentException("مسار صورة غير مطابق للزيارة.");
+        return image;
+    }
+
+    private static Date parseCapturedAt(String capturedAt) throws Exception {
+        for (String pattern : new String[] { "yyyy-MM-dd'T'HH:mm:ss.SSSX", "yyyy-MM-dd'T'HH:mm:ssX" }) {
+            try {
+                return new SimpleDateFormat(pattern, Locale.US).parse(capturedAt);
+            } catch (Exception ignored) { /* Try the next supported ISO timestamp form. */ }
+        }
+        throw new IllegalArgumentException("وقت التقاط الصورة غير صالح.");
+    }
+
+    private static String isoTimestamp(Date value) {
+        SimpleDateFormat format = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US);
+        format.setTimeZone(TimeZone.getTimeZone("UTC"));
+        return format.format(value);
     }
 
     private static Bitmap orient(Bitmap source, int orientation) {

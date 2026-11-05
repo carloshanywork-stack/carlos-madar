@@ -290,7 +290,7 @@ export function getPendingVisitReviews(database = defaultDatabase) {
         url: photoUrl('after', photo, index), capturedAt: photo.captured_at ?? visit.after_captured_at ?? visit.captured_at,
       })),
       beforePhotoUrl: photoUrl('before', beforePhotos[0], 0),
-      afterPhotoUrl: photoUrl('after', afterPhotos[0], 0),
+      afterPhotoUrl: afterPhotos.length ? photoUrl('after', afterPhotos[0], 0) : null,
       createdAt: visit.created_at,
     };
   });

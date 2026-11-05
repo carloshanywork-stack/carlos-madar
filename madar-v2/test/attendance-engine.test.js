@@ -305,25 +305,32 @@ test('rep and admin clock actions persist source/GPS, guard duplicate punches, a
   assert.equal(today.body.attendance, null);
 
   const location = { latitude: 30.0444, longitude: 31.2357, accuracy: 12, updatedAt: new Date().toISOString() };
-  const clockIn = await request('/api/rep/attendance/clock-in', jsonOptions('POST', { location }), repCookie);
+  const unverifiedClockIn = await request('/api/rep/attendance/clock-in', jsonOptions('POST', { location }), repCookie);
+  assert.equal(unverifiedClockIn.response.status, 400);
+  assert.match(unverifiedClockIn.body.error, /المصادقة الحيوية/);
+  const clockIn = await request('/api/rep/attendance/clock-in', jsonOptions('POST', { location, biometricVerified: true }), repCookie);
   assert.equal(clockIn.response.status, 201, JSON.stringify(clockIn.body));
   assert.equal(clockIn.body.attendance.clock_in_source, 'app');
   assert.equal(clockIn.body.attendance.clock_in_lat, location.latitude);
   assert.equal(clockIn.body.attendance.clock_in_lng, location.longitude);
   assert.equal(clockIn.body.attendance.clock_in_accuracy, location.accuracy);
   assert.equal(clockIn.body.attendance.clock_in_location_at, location.updatedAt);
+  assert.equal(clockIn.body.attendance.clock_in_biometric_verified, 1);
   assert.equal(clockIn.body.attendance.clock_out_time, null);
-  const duplicateClockIn = await request('/api/rep/attendance/clock-in', jsonOptions('POST', { location }), repCookie);
+  const duplicateClockIn = await request('/api/rep/attendance/clock-in', jsonOptions('POST', { location, biometricVerified: true }), repCookie);
   assert.equal(duplicateClockIn.response.status, 409);
-  const clockOut = await request('/api/rep/attendance/clock-out', jsonOptions('POST', { location }), repCookie);
+  const unverifiedClockOut = await request('/api/rep/attendance/clock-out', jsonOptions('POST', { location }), repCookie);
+  assert.equal(unverifiedClockOut.response.status, 400);
+  const clockOut = await request('/api/rep/attendance/clock-out', jsonOptions('POST', { location, biometricVerified: true }), repCookie);
   assert.equal(clockOut.response.status, 200, JSON.stringify(clockOut.body));
   assert.equal(clockOut.body.attendance.clock_out_source, 'app');
   assert.equal(clockOut.body.attendance.clock_out_lat, location.latitude);
   assert.equal(clockOut.body.attendance.clock_out_lng, location.longitude);
   assert.equal(clockOut.body.attendance.clock_out_accuracy, location.accuracy);
   assert.equal(clockOut.body.attendance.clock_out_location_at, location.updatedAt);
+  assert.equal(clockOut.body.attendance.clock_out_biometric_verified, 1);
   assert.ok(Number.isFinite(clockOut.body.attendance.total_hours));
-  const duplicateClockOut = await request('/api/rep/attendance/clock-out', jsonOptions('POST', {}), repCookie);
+  const duplicateClockOut = await request('/api/rep/attendance/clock-out', jsonOptions('POST', { biometricVerified: true }), repCookie);
   assert.equal(duplicateClockOut.response.status, 409);
 
   const adminEmployeeId = db.prepare('SELECT id FROM employees WHERE user_id = ?').get(adminLogin.body.user.id).id;

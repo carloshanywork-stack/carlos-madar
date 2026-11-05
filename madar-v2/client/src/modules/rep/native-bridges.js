@@ -41,6 +41,13 @@ export async function requestNativeInitialPermissions() {
   return RepEngine.requestInitialPermissions();
 }
 
+export async function authenticateNativeAttendance(action) {
+  if (!isNativeRepApp()) throw new Error('تسجيل الحضور بالبصمة متاح من تطبيق MADAR على أندرويد فقط.');
+  const result = await RepEngine.authenticateAttendance({ action });
+  if (result?.verified !== true) throw new Error('لم تكتمل المصادقة الحيوية.');
+  return result;
+}
+
 export async function requestNativeBackgroundPermission() {
   if (!isNativeRepApp()) return null;
   return RepEngine.requestBackgroundPermission();
@@ -61,9 +68,9 @@ export async function processNativeVisitPhoto({ visitUuid, phase, index, sourceU
   return RepEngine.processVisitPhoto({ visitUuid, phase, index, sourceUri, watermark });
 }
 
-export async function deleteNativeVisitPhoto(visitUuid, phase, index) {
+export async function deleteNativeVisitPhoto(visitUuid, phase, index, path) {
   if (!isNativeRepApp()) return null;
-  return RepEngine.deleteVisitPhoto({ visitUuid, phase, index });
+  return RepEngine.deleteVisitPhoto({ visitUuid, phase, index, path });
 }
 
 export function nativeFilePreviewUrl(path) {
@@ -283,7 +290,7 @@ export async function restoreNativePendingBackups(repId) {
         return photos;
       };
       const [beforePhotos, afterPhotos] = await Promise.all([readPhotos('before'), readPhotos('after')]);
-      if (!beforePhotos.length || !afterPhotos.length) throw new Error('صور الزيارة الاحتياطية غير مكتملة.');
+      if (beforePhotos.length !== 3 || afterPhotos.length > 3) throw new Error('صور الزيارة الاحتياطية غير مكتملة.');
       await addPendingVisit({
         visitUuid: metadata.visitUuid,
         repId: Number(metadata.repId),

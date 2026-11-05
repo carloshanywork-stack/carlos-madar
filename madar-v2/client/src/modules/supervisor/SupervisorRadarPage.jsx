@@ -387,14 +387,19 @@ export default function SupervisorRadarPage() {
           </div>
           {!visits.length ? <div className="supervisor-qa-empty"><span>✓</span><strong>لا توجد زيارات تنتظر المراجعة</strong><small>ستظهر هنا الزيارات بعد مزامنتها من تطبيق المندوب.</small></div> : (
             <div className="qa-visit-list">
-              {visits.map((visit) => <article className="qa-visit-card" key={visit.id}>
+              {visits.map((visit) => {
+                const beforePhotos = visit.beforePhotos ?? (visit.beforePhotoUrl ? [{ url: visit.beforePhotoUrl }] : []);
+                const afterPhotos = visit.afterPhotos ?? (visit.afterPhotoUrl ? [{ url: visit.afterPhotoUrl }] : []);
+                return <article className="qa-visit-card" key={visit.id}>
                 <div className="qa-visit-heading">
                   <div><span className="qa-machine-code" dir="ltr">{visit.machineCode}</span><h3>{visit.machineName}</h3><p>{visit.regionName} · {visit.orderCode}</p></div>
                   <span className="qa-pending-badge">بانتظار الاعتماد</span>
                 </div>
                 <div className="qa-photo-pair">
-                  {(visit.beforePhotos ?? [{ url: visit.beforePhotoUrl }]).map((photo, index) => <button key={`before-${index}`} type="button" onClick={() => setSelectedVisit({ ...visit, zoomPhoto: 'before', zoomPhotoIndex: index })} aria-label={`تكبير صورة قبل الصيانة ${index + 1}`}><img src={photo.url} alt={`قبل الصيانة ${visit.machineCode} ${index + 1}`} /><span>قبل الصيانة · {index + 1} ↗</span></button>)}
-                  {(visit.afterPhotos ?? [{ url: visit.afterPhotoUrl }]).map((photo, index) => <button key={`after-${index}`} type="button" onClick={() => setSelectedVisit({ ...visit, zoomPhoto: 'after', zoomPhotoIndex: index })} aria-label={`تكبير صورة بعد الصيانة ${index + 1}`}><img src={photo.url} alt={`بعد الصيانة ${visit.machineCode} ${index + 1}`} /><span>بعد الصيانة · {index + 1} ↗</span></button>)}
+                  {beforePhotos.map((photo, index) => <button key={`before-${index}`} type="button" onClick={() => setSelectedVisit({ ...visit, zoomPhoto: 'before', zoomPhotoIndex: index })} aria-label={`تكبير صورة قبل الصيانة ${index + 1}`}><img src={photo.url} alt={`قبل الصيانة ${visit.machineCode} ${index + 1}`} /><span>قبل الصيانة · {index + 1} ↗</span></button>)}
+                  {afterPhotos.length
+                    ? afterPhotos.map((photo, index) => <button key={`after-${index}`} type="button" onClick={() => setSelectedVisit({ ...visit, zoomPhoto: 'after', zoomPhotoIndex: index })} aria-label={`تكبير صورة بعد الصيانة ${index + 1}`}><img src={photo.url} alt={`بعد الصيانة ${visit.machineCode} ${index + 1}`} /><span>بعد الصيانة · {index + 1} ↗</span></button>)
+                    : <div className="qa-photo-missing" role="note"><strong>لا توجد صور بعد الصيانة</strong><small>توثيق هذه المرحلة اختياري للمندوب.</small></div>}
                 </div>
                 <div className="qa-visit-meta">
                   <span>المندوب <b>{visit.repName}</b></span>
@@ -409,7 +414,8 @@ export default function SupervisorRadarPage() {
                   <button type="button" className="qa-approve" disabled={busyVisit === visit.id} onClick={() => void review(visit, 'approve')}>اعتماد الزيارة ✓</button>
                   <button type="button" className="qa-reshoot" disabled={busyVisit === visit.id || !(reviewNotes[visit.id] ?? '').trim()} onClick={() => void review(visit, 'reshoot')}>طلب إعادة تصوير ↻</button>
                 </div>
-              </article>)}
+                </article>;
+              })}
             </div>
           )}
         </section>
@@ -420,10 +426,12 @@ export default function SupervisorRadarPage() {
           <header><strong>ماكينة {selectedVisit.machineCode} · {selectedVisit.zoomPhoto === 'before' ? 'قبل الصيانة' : 'بعد الصيانة'}</strong><button type="button" onClick={() => setSelectedVisit(null)} aria-label="إغلاق">×</button></header>
           {(() => {
             const photos = selectedVisit.zoomPhoto === 'before'
-              ? (selectedVisit.beforePhotos ?? [{ url: selectedVisit.beforePhotoUrl }])
-              : (selectedVisit.afterPhotos ?? [{ url: selectedVisit.afterPhotoUrl }]);
+              ? (selectedVisit.beforePhotos ?? (selectedVisit.beforePhotoUrl ? [{ url: selectedVisit.beforePhotoUrl }] : []))
+              : (selectedVisit.afterPhotos ?? (selectedVisit.afterPhotoUrl ? [{ url: selectedVisit.afterPhotoUrl }] : []));
             const photo = photos[selectedVisit.zoomPhotoIndex ?? 0] ?? photos[0];
-            return <><img src={photo?.url} alt={`صورة ${selectedVisit.zoomPhoto} للماكينة ${selectedVisit.machineCode}`} /><small>{formatTime(photo?.capturedAt)} · {selectedVisit.repName}</small></>;
+            return photo
+              ? <><img src={photo.url} alt={`صورة ${selectedVisit.zoomPhoto} للماكينة ${selectedVisit.machineCode}`} /><small>{formatTime(photo.capturedAt)} · {selectedVisit.repName}</small></>
+              : <p className="qa-photo-missing">لا توجد صور بعد الصيانة؛ هذه المرحلة اختيارية.</p>;
           })()}
         </section>
       </div>}

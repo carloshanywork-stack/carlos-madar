@@ -80,11 +80,11 @@ export function diskUpload({ maxBytes, extensions, destination }) {
 }
 
 /** Disk-backed multipart upload with no file-count cap; every file remains individually size-limited. */
-export function diskUploadMany({ maxBytes, extensions, destination, fields = 1, fieldSize = 64 * 1024 }) {
+export function diskUploadMany({ maxBytes, extensions, destination, files = 100, fields = 1, fieldSize = 64 * 1024 }) {
   return createDiskUpload({
     maxBytes,
     extensions,
     destination,
-    limits: { fileSize: maxBytes, fields, fieldSize },
+    limits: { fileSize: maxBytes, files, fields, fieldSize },
   });
 }

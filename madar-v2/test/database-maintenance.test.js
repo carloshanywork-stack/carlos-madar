@@ -10,7 +10,7 @@ process.env.MADAR_V2_STORAGE_ROOT = join(temporaryDirectory, 'storage');
 process.env.NODE_ENV = 'test';
 process.env.COOKIE_SECURE = 'false';
 
-const [{ db, createConnection }, { initializeDatabase, migrateAccountLoginProtection, migrateAttendanceAdminClockOutNote, migrateAttendanceClockLocations, migrateCairoTimezone }, { runDatabaseMaintenance }] = await Promise.all([
+const [{ db, createConnection }, { initializeDatabase, migrateAccountLoginProtection, migrateAttendanceAdminClockOutNote, migrateAttendanceBiometricConfirmation, migrateAttendanceClockLocations, migrateCairoTimezone }, { runDatabaseMaintenance }] = await Promise.all([
   import('../server/database/connection.js'),
   import('../server/database/init.js'),
   import('../server/database/maintenance.js'),
@@ -44,6 +44,11 @@ test('database initialization sets Cairo and adds account lockout fields', () =>
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE version = '20261105-attendance-clock-gps'").get().count, 1);
   assert.deepEqual(db.pragma('index_xinfo(idx_rep_breadcrumbs_recorded_at)').filter((column) => column.key)
     .map((column) => column.name), [null], 'retention pruning indexes the julianday expression');
+  const biometricColumns = new Set(db.pragma('table_info(employee_daily_attendance)').map((column) => column.name));
+  assert.ok(biometricColumns.has('clock_in_biometric_verified'));
+  assert.ok(biometricColumns.has('clock_out_biometric_verified'));
+  migrateAttendanceBiometricConfirmation(db);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE version = '20261105-attendance-biometric-confirmation'").get().count, 1);
 });
 
 test('attendance GPS migration is additive, preserves existing records, and is idempotent', () => {
@@ -63,6 +68,28 @@ test('attendance GPS migration is additive, preserves existing records, and is i
     assert.equal(record.clock_out_accuracy, null);
     assert.equal(legacy.prepare('SELECT COUNT(*) AS count FROM employee_daily_attendance').get().count, 1);
     assert.equal(legacy.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE version = '20261105-attendance-clock-gps'").get().count, 1);
+  } finally {
+    legacy.close();
+  }
+});
+
+test('attendance biometric migration is additive, preserves existing rows, and is idempotent', () => {
+  const legacy = createConnection(':memory:');
+  try {
+    legacy.exec(`CREATE TABLE schema_migrations (version TEXT PRIMARY KEY);
+      CREATE TABLE employee_daily_attendance (
+        id INTEGER PRIMARY KEY, work_date TEXT NOT NULL, clock_in_time TEXT
+      );
+      INSERT INTO employee_daily_attendance (id, work_date, clock_in_time)
+        VALUES (92, '2026-11-05', '2026-11-05T06:00:00.000Z');`);
+    migrateAttendanceBiometricConfirmation(legacy);
+    migrateAttendanceBiometricConfirmation(legacy);
+    const record = legacy.prepare('SELECT * FROM employee_daily_attendance WHERE id = 92').get();
+    assert.equal(record.clock_in_time, '2026-11-05T06:00:00.000Z');
+    assert.equal(record.clock_in_biometric_verified, 0);
+    assert.equal(record.clock_out_biometric_verified, 0);
+    assert.equal(legacy.prepare('SELECT COUNT(*) AS count FROM employee_daily_attendance').get().count, 1);
+    assert.equal(legacy.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE version = '20261105-attendance-biometric-confirmation'").get().count, 1);
   } finally {
     legacy.close();
   }

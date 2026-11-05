@@ -24,6 +24,7 @@ import {
   addNativeBackListener,
   addNativeNetworkListener,
   acknowledgeNativeDutyTracking,
+  authenticateNativeAttendance,
   deleteNativePendingBackup,
   getNativeDutyTrackingState,
   getNativeRepCache,
@@ -64,8 +65,8 @@ const tutorials = [
     number: '03',
     icon: '✓',
     title: 'صورة بعد الصيانة',
-    body: 'بعد الانتهاء، التقط صورة واضحة من زاوية قريبة من صورة «قبل». أضف سبب الصيانة والملاحظة التي يحتاجها المشرف.',
-    tip: 'لا تُرسل الزيارة حتى تتوفر صورة قبل وصورة بعد.',
+    body: 'بعد الانتهاء، التقط صورة واضحة من زاوية قريبة من صورة «قبل» إن أمكن. أضف سبب الصيانة والملاحظة التي يحتاجها المشرف.',
+    tip: 'صور ما بعد الصيانة اختيارية؛ الصور الثلاث قبل الصيانة مطلوبة.',
   },
   {
     number: '04',
@@ -558,6 +559,9 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
     setAttendanceSaving(true);
     let nativeTrackingStarted = false;
     try {
+      if (!nativeApp) throw new Error('تسجيل الحضور والانصراف بالبصمة متاح من تطبيق MADAR على أندرويد فقط.');
+      const biometric = await authenticateNativeAttendance(action);
+      if (biometric?.verified !== true) throw new Error('لم تكتمل المصادقة الحيوية.');
       const location = await captureVisitLocation();
       if (!location) throw new Error('يلزم تفعيل GPS لتسجيل الحضور أو الانصراف.');
       try {
@@ -572,7 +576,10 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
         await startNativeDutyTracking();
         nativeTrackingStarted = true;
       }
-      const result = await api.post(`/api/rep/attendance/clock-${action}`, { location }, { timeoutMs: 15000 });
+      const result = await api.post(`/api/rep/attendance/clock-${action}`, {
+        location,
+        biometricVerified: true,
+      }, { timeoutMs: 15000 });
       const currentAttendance = result.attendance ?? null;
       setAttendance(currentAttendance);
       setOnDuty(action === 'in');
@@ -607,7 +614,7 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
     } finally {
       setAttendanceSaving(false);
     }
-  }, [captureVisitLocation, nativeApp, offlineOnly, refreshAttendance, serverState, syncTracking, userId]);
+  }, [authenticateNativeAttendance, captureVisitLocation, nativeApp, offlineOnly, refreshAttendance, serverState, syncTracking, userId]);
 
   const checkServer = useCallback(async () => {
     const online = navigator.onLine;

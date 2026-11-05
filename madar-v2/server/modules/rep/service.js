@@ -65,8 +65,7 @@ function normalizeRepLocation(value, label = 'location') {
 function safeStorageSegment(value, fallback = 'unknown') {
   const cleaned = String(value ?? '').normalize('NFKC').trim()
     .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_')
-    .replace(/\s+/g, '_')
-    .replace(/\.+$/g, '')
+    .replace(/[. ]+$/g, '')
     .slice(0, 120);
   return cleaned || fallback;
 }
@@ -234,6 +233,8 @@ export function getRepTodayRoute(rep, database = db) {
     const correctionPending = correctionPendingMachineIds.has(Number(row.machine_id));
     const isCompleted = latestVisit
       ? latestVisit.review_status === 'approved'
+      // Legacy card photo uploads have no visit/review record; keep those complete only when both phases exist.
+      // New visits use the supervisor-approved review above, where After photos are optional.
       : uploadedToday.has(Number(row.card_id)) && beforePhotos.length > 0 && afterPhotos.length > 0;
     const isSubmitted = Boolean(latestVisit && latestVisit.review_status !== 'reshoot');
     const regionName = assignedByKey.get(key);
@@ -329,15 +330,16 @@ function normalizeVisitInput(input) {
     notes,
     capturedAt: capturedDate.toISOString(),
     beforeCapturedAt: parseCapturedTimestamps(body.beforeCapturedAt, capturedDate, 'beforeCapturedAt'),
-    afterCapturedAt: parseCapturedTimestamps(body.afterCapturedAt, capturedDate, 'afterCapturedAt'),
+    afterCapturedAt: parseCapturedTimestamps(body.afterCapturedAt, capturedDate, 'afterCapturedAt', { optional: true }),
     location,
   };
 }
 
-function parseCapturedTimestamps(value, fallback, field) {
-  const values = value === undefined || value === null || value === '' ? [fallback.toISOString()]
+function parseCapturedTimestamps(value, fallback, field, { optional = false } = {}) {
+  const values = value === undefined || value === null || value === ''
+    ? (optional ? [] : [fallback.toISOString()])
     : Array.isArray(value) ? value : [value];
-  if (!values.length) throw new HttpError(400, `${field} must include a timestamp for every photo.`);
+  if (!values.length && !optional) throw new HttpError(400, `${field} must include a timestamp for every photo.`);
   return values.map((item, index) => {
     const text = requireText(item, `${field}[${index}]`, { maxLength: 64 });
     const date = new Date(text);
@@ -751,15 +753,15 @@ async function cleanupVisitFiles(row) {
     await removeStorageDirectory(row.final_path);
     return;
   }
-  for (const phase of ['before', 'after']) {
-    const phasePath = storageDirectory(row.final_path, phase);
+  for (const [phase, directoryName] of [['before', 'Before'], ['after', 'After']]) {
+    const phasePath = storageDirectory(row.final_path, directoryName);
     let storedFiles = [];
     try {
       storedFiles = await listStorageFiles(phasePath, { maxFiles: 10000 });
     } catch (error) {
       if (error.status !== 404) throw error;
     }
-    const expectedName = new RegExp(`^${row.visit_uuid}-${phase}-\\d{4}\\.jpg$`, 'i');
+    const expectedName = new RegExp(`^${row.visit_uuid}_\\d{4}\\.jpg$`, 'i');
     for (const storedPath of storedFiles) {
       if (!expectedName.test(storedPath.split('/').at(-1))) continue;
       const absolutePath = await resolveStorageFile(storedPath);
@@ -793,7 +795,7 @@ function createVisitReservation(rep, visit, payloadHash, card, stagingPath, fina
     `).run(
       visit.visitUuid, rep.id, card.order_id, card.card_id, card.machine_id, card.order_code,
        card.machine_code, card.machine_area, payloadHash, visit.machineCondition, JSON.stringify(visit.reasonIds),
-       visit.notes, visit.capturedAt, visit.beforeCapturedAt[0], visit.afterCapturedAt[0],
+        visit.notes, visit.capturedAt, visit.beforeCapturedAt[0], visit.afterCapturedAt[0] ?? null,
       visit.location ? JSON.stringify(visit.location) : null,
       stagingPath, finalPath,
     );
@@ -811,14 +813,14 @@ function recordReceivedVisit(rep, visit, visitId, photoRows, database) {
     validateMachineGeofence(machine, visit.location);
     const beforePhotos = photoRows.filter((photo) => photo.phase === 'before');
     const afterPhotos = photoRows.filter((photo) => photo.phase === 'after');
-    const beforePath = beforePhotos[0].storedPath;
-    const afterPath = afterPhotos[0].storedPath;
+    const beforePath = beforePhotos[0]?.storedPath ?? null;
+    const afterPath = afterPhotos[0]?.storedPath ?? null;
     database.prepare(`
       UPDATE rep_visits SET status = 'completed', before_path = ?, after_path = ?,
         before_captured_at = ?, after_captured_at = ?,
         failure_message = NULL, updated_at = CURRENT_TIMESTAMP, completed_at = CURRENT_TIMESTAMP
       WHERE id = ? AND status = 'receiving'
-    `).run(beforePath, afterPath, beforePhotos[0].capturedAt, afterPhotos[0].capturedAt, visitId);
+    `).run(beforePath, afterPath, beforePhotos[0]?.capturedAt ?? null, afterPhotos[0]?.capturedAt ?? null, visitId);
     const insertPhoto = database.prepare(`
       INSERT INTO rep_visit_photos (visit_id, phase, ordinal, stored_path, captured_at)
       VALUES (?, ?, ?, ?, ?)
@@ -881,17 +883,17 @@ function recordReceivedVisit(rep, visit, visitId, photoRows, database) {
   }).immediate();
 }
 
-/** Receive an immutable bundle of three before/after photos; UUID + content hash makes retries safe. */
+/** Receive one immutable bundle with three required Before photos and optional After photos. */
 export async function syncRepVisit(rep, input, files, database = db) {
   if (rep?.role !== 'rep') throw new HttpError(403, 'Field representative access is required.');
   const visit = normalizeVisitInput(input);
   const beforeFiles = visitPhotoFiles(files, 'before');
   const afterFiles = visitPhotoFiles(files, 'after');
-  if (beforeFiles.length !== 3 || afterFiles.length !== 3) {
-    throw new HttpError(400, 'A visit must contain exactly three before and three after photos.');
+  if (beforeFiles.length !== 3 || afterFiles.length > 3) {
+    throw new HttpError(400, 'A visit must contain exactly three before photos and no more than three optional after photos.');
   }
   if (visit.beforeCapturedAt.length !== beforeFiles.length || visit.afterCapturedAt.length !== afterFiles.length) {
-    throw new HttpError(400, 'Each before and after photo must have a matching capture timestamp.');
+    throw new HttpError(400, 'Each uploaded photo must have a matching capture timestamp.');
   }
   const payloadHash = await visitPayloadHash(rep.id, visit, beforeFiles, afterFiles);
   assertNoPendingMachineCorrectionRename(database);
@@ -917,13 +919,13 @@ export async function syncRepVisit(rep, input, files, database = db) {
     const card = findRepVisitCard(rep, visit, database);
     const workDay = getLocalDateParts(new Date(visit.capturedAt), getTimeZone(database));
     const workDate = `${workDay.year}-${String(workDay.month).padStart(2, '0')}-${String(workDay.day).padStart(2, '0')}`;
-    const machineArea = safeStorageSegment(card.area_name || card.machine_area);
+    const machineArea = safeStorageSegment(card.machine_area);
     const machineFolder = safeStorageSegment(`${card.machine_code}_${card.machine_name_ar}`);
-    const orderFolder = safeStorageSegment(`${workDate}_${card.order_id}`);
+    const yearFolder = workDate.slice(0, 4);
+    const monthFolder = workDate.slice(5, 7);
     const stagingPath = storageDirectory('.madar-recovery', 'rep-visits', visit.visitUuid);
-    // Keep the six standardized filenames inside a UUID directory so repeat visits never
-    // overwrite an earlier immutable evidence bundle for the same machine/order/day.
-    const finalPath = storageDirectory('Areas', machineArea, machineFolder, orderFolder, visit.visitUuid);
+    // UUID-based names keep each visit immutable while the hierarchy is area/year/month/machine/phase.
+    const finalPath = storageDirectory('Areas', machineArea, yearFolder, monthFolder, machineFolder);
     const reservation = createVisitReservation(rep, visit, payloadHash, card, stagingPath, finalPath, database);
     if (reservation.kind === 'completed') return visitResult(reservation.row, database, { idempotent: true });
     if (reservation.kind === 'processing') return visitResult(reservation.row, database, { processing: true });
@@ -937,14 +939,16 @@ export async function syncRepVisit(rep, input, files, database = db) {
       ]) {
         for (const [ordinal, file] of phaseFiles.entries()) {
           const buffer = await prepareVisitImage(file, `${phase} ${ordinal + 1}`);
-          const filename = `${phase}_${ordinal}.jpg`;
+          const filename = `${visit.visitUuid}_${String(ordinal + 1).padStart(4, '0')}.jpg`;
           const stagedPath = storageDirectory(stagingPath, phase, filename);
-          const storedPath = storageDirectory(finalPath, filename);
+          const phaseDirectory = phase === 'before' ? 'Before' : 'After';
+          const storedPath = storageDirectory(finalPath, phaseDirectory, filename);
           await writeStorageFile(stagedPath, buffer);
           photoRows.push({ phase, ordinal, stagedPath, storedPath, capturedAt: capturedAtList[ordinal] });
         }
       }
-      await ensureStorageDirectory(finalPath);
+      await ensureStorageDirectory(finalPath, 'Before');
+      if (afterFiles.length) await ensureStorageDirectory(finalPath, 'After');
       for (const photo of photoRows) await moveStorageFile(photo.stagedPath, photo.storedPath);
       await removeStorageDirectory(stagingPath);
 

@@ -11,9 +11,11 @@ import org.json.JSONObject;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
-/** Native SQLite cache and durable queue. Source photos live under filesDir/visits. */
+/** Native SQLite cache and durable queue. Source photos live under filesDir/MADAR/uploads. */
 final class RepLocalStore extends SQLiteOpenHelper {
     private static final String DATABASE_NAME = "madar_rep_local.db";
     private static final int DATABASE_VERSION = 1;
@@ -121,8 +123,8 @@ final class RepLocalStore extends SQLiteOpenHelper {
         JSONObject payload = visit.getJSONObject("payload");
         JSONArray before = visit.optJSONArray("beforePhotos");
         JSONArray after = visit.optJSONArray("afterPhotos");
-        if (before == null || before.length() != 3 || after == null || after.length() != 3) {
-            throw new IllegalArgumentException("Exactly three before and three after photos are required.");
+        if (before == null || before.length() != 3 || after == null || after.length() > 3) {
+            throw new IllegalArgumentException("Exactly three before photos and up to three optional after photos are allowed.");
         }
 
         List<Photo> photos = new ArrayList<>();
@@ -165,14 +167,30 @@ final class RepLocalStore extends SQLiteOpenHelper {
     }
 
     private static void collectPhotos(Context context, String visitUuid, String phase, JSONArray entries, List<Photo> output) throws Exception {
-        File expectedDirectory = new File(new File(context.getFilesDir(), "visits"), visitUuid).getCanonicalFile();
+        File uploadsRoot = new File(new File(context.getFilesDir(), "MADAR"), "uploads").getCanonicalFile();
+        File legacyDirectory = new File(new File(context.getFilesDir(), "visits"), visitUuid).getCanonicalFile();
+        String phaseDirectory = "before".equals(phase) ? "Before" : "After";
+        Set<String> seenPaths = new HashSet<>();
         for (int index = 0; index < entries.length(); index += 1) {
             JSONObject entry = entries.getJSONObject(index);
             File photoFile = new File(entry.getString("path")).getCanonicalFile();
-            if (!photoFile.getPath().startsWith(expectedDirectory.getPath() + File.separator)
-                || !photoFile.isFile() || photoFile.length() < 1L || photoFile.length() > 3L * 1024L * 1024L) {
+            boolean validNewFilename = false;
+            for (int slot = 1; slot <= 3; slot += 1) {
+                String slotFilename = visitUuid + "_" + String.format(java.util.Locale.US, "%04d", slot) + ".jpg";
+                if (slotFilename.equals(photoFile.getName())) validNewFilename = true;
+            }
+            boolean newLayout = photoFile.getPath().startsWith(uploadsRoot.getPath() + File.separator)
+                && phaseDirectory.equals(photoFile.getParentFile().getName())
+                && validNewFilename;
+            boolean legacyLayout = legacyDirectory.equals(photoFile.getParentFile())
+                && photoFile.getPath().startsWith(legacyDirectory.getPath() + File.separator)
+                && (phase + "_" + index + ".jpg").equals(photoFile.getName());
+            if ((!newLayout && !legacyLayout) || !photoFile.isFile()
+                || photoFile.length() < 1L || photoFile.length() > 3L * 1024L * 1024L
+                || !seenPaths.add(photoFile.getPath())) {
                 throw new IllegalArgumentException("A visit image is missing, outside app storage, or exceeds 3 MiB.");
             }
+            // The array order is the rep's visible order; filenames identify stable local slots only.
             output.add(new Photo(phase, index, photoFile.getAbsolutePath(), entry.optString("capturedAt", "")));
         }
     }

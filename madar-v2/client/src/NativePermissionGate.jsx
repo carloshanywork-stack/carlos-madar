@@ -3,7 +3,7 @@ import { isNativeRepApp, RepEngine } from './modules/rep/native-session.js';
 
 function requiredGranted(state) {
   return Boolean(state?.camera && state?.fineLocation && state?.coarseLocation
-    && state?.notifications && state?.backgroundLocation);
+    && state?.notifications && state?.backgroundLocation && state?.biometricAvailable);
 }
 
 export default function NativePermissionGate({ children }) {
@@ -72,6 +72,7 @@ export default function NativePermissionGate({ children }) {
   if (!state?.fineLocation || !state?.coarseLocation) missing.push('الموقع الدقيق لتأكيد الماكينة وتسجيل GPS');
   if (!state?.notifications) missing.push('الإشعارات لعرض حالة التتبع أثناء الوردية');
   if (!state?.backgroundLocation) missing.push('الموقع طوال الوقت لتسجيل المسار والشاشة مغلقة');
+  if (!state?.biometricAvailable) missing.push('إعداد بصمة أو مصادقة حيوية على الهاتف لتأكيد الحضور والانصراف');
 
   return (
     <main dir="rtl" style={{ minHeight: '100dvh', display: 'grid', placeItems: 'center', padding: 24, background: '#f2f6f4', color: '#18352e', fontFamily: 'Arial, sans-serif' }}>
@@ -95,8 +96,13 @@ export default function NativePermissionGate({ children }) {
               تفعيل «السماح طوال الوقت» للموقع
             </button>
           )}
+          {!state?.biometricAvailable && (
+            <button type="button" disabled={busy} onClick={() => void run(() => RepEngine.openBiometricSettings())} style={primaryButton}>
+              إعداد البصمة أو المصادقة الحيوية
+            </button>
+          )}
           <button type="button" disabled={busy} onClick={() => void run(() => RepEngine.openAppSettings())} style={secondaryButton}>
-            فتح إعدادات الهاتف للتفعيل
+            تفعيل الصلاحيات من إعدادات الهاتف
           </button>
           {state && !state.batteryOptimizationIgnored && (
             <button type="button" disabled={busy} onClick={() => void run(() => RepEngine.requestBatteryExemption())} style={secondaryButton}>
