@@ -17,10 +17,11 @@ This packages the existing field-representative UI in a Capacitor Android shell.
 
 ## Local USB/emulator build
 
-1. For USB/emulator testing, temporarily override the default HTTPS host in `.env`:
+1. Android debug/release APKs bundle the UI and use the HTTPS API by default. For intentional USB live-reload development only, set both values in `.env`:
 
    ```dotenv
    MADAR_REP_SERVER_URL=http://localhost:3000
+   MADAR_REP_LIVE_RELOAD=true
    ```
 
    `capacitor.config.ts` loads this value on each Capacitor sync, validates the URL, and allows cleartext only for `localhost`. `localhost` on Android means the Android device itself, so keep the device attached and run this from a terminal with Android platform-tools:
@@ -57,7 +58,7 @@ keyPassword=<key password>
 
 Then increment `versionCode` in `android/app/build.gradle` for every update and run `npm run android:release`. The script refuses to launch Gradle if `android/key.properties` is absent; Gradle requires non-empty signing properties and an existing keystore, and validates the credentials during signing. The release APK is written to the ignored `madar-rep-release.apk`. The Settings → System screen reports whether the current download is a signed release or a fallback/test artifact, and its APK download button uses `/download/apk`.
 
-Release APKs are standalone/offline-first: the WebView loads packaged assets from `public/rep`, not the live UI. The default API host is `https://carlos-pc.tail852ef0.ts.net`; set `MADAR_REP_SERVER_URL` in `.env` to override it before building. Capacitor embeds the host as the API base URL and Android WorkManager uses the same value. Capacitor's native HTTP/cookie bridges carry foreground requests and uploads. The server allows the fixed Android WebView origin `https://localhost`; its session cookie is `Secure; SameSite=None` only for that origin and remains `SameSite=Strict` elsewhere.
+Android APKs bundle the UI by default (debug and release): the WebView never navigates to `localhost` or a remote UI URL. The default API host is `https://carlos-pc.tail852ef0.ts.net`; set `MADAR_REP_SERVER_URL` in `.env` to override it before building. Capacitor embeds the host as the API base URL and Android WorkManager uses the same value. Capacitor's native HTTP/cookie bridges carry foreground requests and uploads. The server allows the fixed Android WebView origin `https://localhost`; its session cookie is `Secure; SameSite=None` only for that origin and remains `SameSite=Strict` elsewhere. `MADAR_REP_LIVE_RELOAD=true` is the only opt-in that makes the WebView navigate to the configured server URL; use it only for local development with `adb reverse`.
 
 ## Package identity, storage isolation, and compatibility
 
@@ -65,7 +66,7 @@ Release APKs are standalone/offline-first: the WebView loads packaged assets fro
 - Camera sharing is restricted to this app's `Pictures/` external-files directory and its private cache. It does not expose the entire device external-storage tree. The manifest disables Android backup (`allowBackup=false`); native SQLite, visit photos, and encrypted session preferences use app-private storage.
 - Changing from the previous ID `com.madar.rep` to `com.madar.rep.app` intentionally creates a separate Android app identity. It can be installed beside the old app without package/provider collision, but it is **not** an in-place update: Android will not transfer the old app's private database, preferences, IndexedDB, or pending files. Keep the old app installed until any needed data has been synchronized or otherwise handled. Updates to the new package require both a monotonically increasing `versionCode` and the same release signing certificate.
 
-Debug builds load the configured server URL and require the API while operating. Release/standalone builds open their packaged UI offline; login, server synchronization, and uploads still require the configured MADAR API. Keep `adb reverse` active when testing the debug build over USB. Cleartext is permitted only for the local debug server; standalone/release requires HTTPS. An authenticated Admin or representative can download the latest available APK from `/download/apk`; release artifacts take precedence, with the existing debug APK retained as a clearly identified fallback.
+Debug and release builds open the packaged UI offline; login, server synchronization, and uploads still require the configured MADAR API. Only explicit `MADAR_REP_LIVE_RELOAD=true` development uses `adb reverse` and cleartext localhost. Normal Android builds require HTTPS and reject localhost configuration. An authenticated Admin or representative can download the latest available APK from `/download/apk`; release artifacts take precedence, with the existing debug APK retained as a clearly identified fallback.
 
 ## Later Cloudflare Tunnel configuration
 
@@ -75,7 +76,7 @@ When the deployment URL is ready, set the full HTTPS origin in `madar-v2/.env`, 
 MADAR_REP_SERVER_URL=https://rep.example.com
 ```
 
-Then run `npm run android:sync` before building. The app loads UI/API from that host, so web UI changes can be served without rebuilding the APK. Changes to native Android code or Capacitor plugins still require a new APK. Do not put credentials or customer data in the URL.
+Then run `npm run android:sync` before building. The host is embedded as the API origin while the UI remains packaged in the APK; UI changes require rebuilding/reinstalling the APK. Changes to native Android code or Capacitor plugins also require a new APK. Do not put credentials or customer data in the URL.
 
 ## Native behavior and limits
 

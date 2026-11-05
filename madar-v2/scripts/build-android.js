@@ -13,6 +13,7 @@ if (releaseBuild && !existsSync(resolve(projectRoot, 'android/key.properties')))
   throw new Error('Release signing is not configured. Copy android/key.properties.example to android/key.properties and fill it with the approved keystore values.');
 }
 process.env.MADAR_ANDROID_BUILD_TYPE = releaseBuild ? 'release' : 'debug';
+if (releaseBuild) process.env.MADAR_REP_LIVE_RELOAD = 'false';
 
 function run(command, args, options = {}) {
   console.log(`> ${command} ${args.join(' ')}`);

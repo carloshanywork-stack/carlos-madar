@@ -19,7 +19,14 @@ if (serverUrl.protocol === 'http:' && serverUrl.hostname !== 'localhost') {
 }
 
 const releaseBuild = process.env.MADAR_ANDROID_BUILD_TYPE === 'release';
-const standaloneBuild = releaseBuild || process.env.MADAR_REP_STANDALONE === 'true';
+const liveReloadBuild = !releaseBuild && process.env.MADAR_REP_LIVE_RELOAD === 'true';
+// Package the UI for every normal Android build; only explicit live reload
+// should navigate the WebView to a network host such as localhost.
+const standaloneBuild = !liveReloadBuild;
+
+if (serverUrl.protocol === 'http:' && !liveReloadBuild) {
+  throw new Error('Android builds require HTTPS by default. For localhost testing only, set MADAR_REP_LIVE_RELOAD=true and use adb reverse.');
+}
 
 if (standaloneBuild && serverUrl.protocol !== 'https:') {
   throw new Error('Standalone Android builds require MADAR_REP_SERVER_URL to use HTTPS for API requests.');
@@ -29,13 +36,13 @@ const config: CapacitorConfig = {
   appId: 'com.madar.rep.app',
   appName: 'مدار - متابعة المناديب',
   webDir: 'public/rep',
-  ...(standaloneBuild ? {} : {
+  ...(liveReloadBuild ? {
     server: {
       url: serverUrl.toString(),
       cleartext: serverUrl.protocol === 'http:',
       allowNavigation: [serverUrl.hostname],
     },
-  }),
+  } : {}),
   android: {
     backgroundColor: '#f1f4f5',
     loggingBehavior: releaseBuild ? 'none' : 'debug',

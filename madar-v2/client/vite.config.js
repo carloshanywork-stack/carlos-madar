@@ -9,10 +9,9 @@ const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 export default defineConfig(({ mode }) => {
   const capacitorBuild = mode === 'capacitor';
   const projectEnv = loadEnv(mode, projectRoot, ['VITE_', 'MADAR_REP_']);
-  const standaloneBuild = capacitorBuild && (
-    process.env.MADAR_ANDROID_BUILD_TYPE === 'release'
-    || process.env.MADAR_REP_STANDALONE === 'true'
-  );
+  const releaseBuild = process.env.MADAR_ANDROID_BUILD_TYPE === 'release';
+  const liveReloadBuild = capacitorBuild && !releaseBuild && process.env.MADAR_REP_LIVE_RELOAD === 'true';
+  const standaloneBuild = capacitorBuild && !liveReloadBuild;
   const apiServerUrl = projectEnv.VITE_MADAR_API_BASE_URL
     || projectEnv.MADAR_REP_SERVER_URL
     || process.env.MADAR_REP_SERVER_URL
