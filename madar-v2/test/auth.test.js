@@ -133,6 +133,30 @@ test('auth status, one-time setup, protected APIs, login and revocable sessions'
   assert.ok(loginCookie);
   assert.equal(decodeURIComponent(loginCookie.slice('madar_token='.length)), login.body.token);
 
+  const mobileLogin = await request('/api/auth/login', {
+    ...jsonOptions('POST', { username: 'root', password: '1234' }),
+    headers: { 'content-type': 'application/json', origin: 'https://localhost' },
+  });
+  assert.equal(mobileLogin.response.status, 200);
+  assert.equal(mobileLogin.response.headers.get('access-control-allow-origin'), 'https://localhost');
+  assert.equal(mobileLogin.response.headers.get('access-control-allow-credentials'), 'true');
+  assert.match(mobileLogin.setCookie, /SameSite=None/i);
+  assert.match(mobileLogin.setCookie, /Secure/i);
+  const rejectedMobileOrigin = await request('/api/auth/status', {
+    headers: { origin: 'https://untrusted.example' },
+  });
+  assert.equal(rejectedMobileOrigin.response.headers.get('access-control-allow-origin'), null);
+  const mobileStatus = await request('/api/auth/status', {
+    headers: { origin: 'https://localhost' },
+  }, cookieValue(mobileLogin.setCookie));
+  assert.equal(mobileStatus.body.authenticated, true);
+  const mobileLogout = await request('/api/auth/logout', {
+    method: 'POST',
+    headers: { origin: 'https://localhost' },
+  }, cookieValue(mobileLogin.setCookie));
+  assert.equal(mobileLogout.response.status, 200);
+  assert.match(mobileLogout.setCookie, /SameSite=None/i);
+
   const bearerStatus = await request('/api/auth/status', {
     headers: { authorization: `Bearer ${login.body.token}` },
   });

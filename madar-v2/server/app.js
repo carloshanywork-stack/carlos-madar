@@ -25,7 +25,13 @@ export const app = express();
 
 app.disable('x-powered-by');
 app.set('trust proxy', env.trustProxyHops);
-app.use(cors({ origin: env.corsOrigins, credentials: true }));
+const corsOrigins = new Set([...env.corsOrigins, 'https://localhost']);
+app.use(cors({
+  origin(origin, callback) {
+    callback(null, !origin || corsOrigins.has(origin));
+  },
+  credentials: true,
+}));
 app.use(express.json({ limit: '1mb' }));
 app.use(requestLogger);
 

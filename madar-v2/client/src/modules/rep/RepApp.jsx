@@ -1,7 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { api } from '../../lib/api.js';
-import MachineVisitSheet from './MachineVisitSheet.jsx';
-import OfflineMapPanel from './OfflineMapPanel.jsx';
+import { lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { api, apiUrl } from '../../lib/api.js';
 import { distanceBetweenGpsPointsMeters, getAdaptiveGpsInterval, GPS_POLLING } from './gps-adaptive.js';
 import { googleMapsNavigationUrl } from './map-utils.js';
 import {
@@ -37,6 +35,9 @@ import {
   stopNativeDutyTracking,
 } from './native-bridges.js';
 import './rep.css';
+
+const MachineVisitSheet = lazy(() => import('./MachineVisitSheet.jsx'));
+const OfflineMapPanel = lazy(() => import('./OfflineMapPanel.jsx'));
 
 const tutorials = [
   {
@@ -90,6 +91,8 @@ function attendanceHours(record, now = Date.now()) {
     ? Math.round((end - start) / 36000) / 100
     : 0;
 }
+
+const MAX_CLOCK_ACCURACY_METERS = 250;
 
 function currentBusinessDate() {
   const date = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
@@ -377,14 +380,20 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
           updatedAt: new Date(position.timestamp).toISOString(),
         };
       } else {
-        return gpsRef.current;
+        location = gpsRef.current;
+      }
+      const timestamp = Date.parse(location?.updatedAt ?? '');
+      if (!location || !Number.isFinite(location.latitude) || !Number.isFinite(location.longitude)
+          || !Number.isFinite(location.accuracy) || location.accuracy > MAX_CLOCK_ACCURACY_METERS
+          || !Number.isFinite(timestamp) || Date.now() - timestamp > 5 * 60 * 1000 || timestamp - Date.now() > 60 * 1000) {
+        throw new Error('تعذر الحصول على موقع حديث بدقة مناسبة؛ فعّل GPS وانتقل إلى مكان مفتوح ثم حاول مجدداً.');
       }
       setGps(location);
       setGpsError('');
       return location;
     } catch (error) {
       setGpsError(error.message || 'تعذر تحديث GPS عند حفظ الزيارة.');
-      return gpsRef.current;
+      return null;
     }
   }, [nativeApp]);
 
@@ -513,6 +522,7 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
         await saveSnapshot('attendance_snapshots', userId, {
           date: currentAttendance?.work_date,
           attendance: currentAttendance,
+          lastLocation: location,
           cachedAt: new Date().toISOString(),
         });
       } catch {
@@ -586,8 +596,10 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
   }, [checkServer, refreshAttendance, refreshData, syncTracking]);
 
   useEffect(() => {
-    if (offlineOnly || serverState !== 'online') return undefined;
-    const events = new EventSource('/api/rep/events', { withCredentials: true });
+    // Standalone Android uses CapacitorHttp for credentialed API calls. Its native
+    // transport does not proxy EventSource, and periodic refresh already covers it.
+    if (offlineOnly || serverState !== 'online' || (nativeApp && apiUrl('/api').startsWith('https://'))) return undefined;
+    const events = new EventSource(apiUrl('/api/rep/events'), { withCredentials: true });
     const onOperationsEvent = (message) => {
       try {
         const event = JSON.parse(message.data);
@@ -618,7 +630,7 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
       events.removeEventListener('operations', onOperationsEvent);
       events.close();
     };
-  }, [offlineOnly, refreshAttendance, refreshData, serverState]);
+  }, [nativeApp, offlineOnly, refreshAttendance, refreshData, serverState]);
 
   useEffect(() => {
     if (!nativeApp) return undefined;

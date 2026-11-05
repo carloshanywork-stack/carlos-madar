@@ -19,20 +19,31 @@ if (serverUrl.protocol === 'http:' && serverUrl.hostname !== 'localhost') {
 }
 
 const releaseBuild = process.env.MADAR_ANDROID_BUILD_TYPE === 'release';
+const standaloneBuild = releaseBuild || process.env.MADAR_REP_STANDALONE === 'true';
+
+if (standaloneBuild && serverUrl.protocol !== 'https:') {
+  throw new Error('Standalone Android builds require MADAR_REP_SERVER_URL to use HTTPS for API requests.');
+}
 
 const config: CapacitorConfig = {
   appId: 'com.madar.rep.app',
   appName: 'مدار - متابعة المناديب',
   webDir: 'public/rep',
-  server: {
-    url: serverUrl.toString(),
-    cleartext: serverUrl.protocol === 'http:',
-    allowNavigation: [serverUrl.hostname],
-  },
+  ...(standaloneBuild ? {} : {
+    server: {
+      url: serverUrl.toString(),
+      cleartext: serverUrl.protocol === 'http:',
+      allowNavigation: [serverUrl.hostname],
+    },
+  }),
   android: {
     backgroundColor: '#f1f4f5',
     loggingBehavior: releaseBuild ? 'none' : 'debug',
     webContentsDebuggingEnabled: !releaseBuild,
+  },
+  plugins: {
+    CapacitorHttp: { enabled: standaloneBuild },
+    CapacitorCookies: { enabled: standaloneBuild },
   },
 };
 

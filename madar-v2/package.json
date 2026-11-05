@@ -9,7 +9,7 @@
   "type": "module",
   "scripts": {
     "start": "node --max-old-space-size=4096 server/index.js",
-    "test": "node --test test/*.test.js",
+    "test": "node --test --test-concurrency=1 test/*.test.js",
     "android:add": "npx cap add android",
     "android:sync": "node scripts/build-android.js --sync-only",
     "android:debug": "node scripts/build-android.js",

@@ -19,9 +19,9 @@ import { loginRateLimiter } from './login-rate-limit.js';
 
 const router = Router();
 
-function setSessionCookie(res, token) {
+function setSessionCookie(req, res, token) {
   res.cookie(env.authCookieName, token, {
-    ...authCookieOptions(),
+    ...authCookieOptions(req),
     maxAge: 7 * 24 * 60 * 60 * 1000,
   });
 }
@@ -40,7 +40,7 @@ router.get('/status', (req, res) => {
 router.post('/setup', asyncHandler(async (req, res) => {
   const user = await createFirstAdmin(req.body);
   const token = createSession(user);
-  setSessionCookie(res, token);
+  setSessionCookie(req, res, token);
   res.status(201).json({ authenticated: true, user, setupRequired: false });
 }));
 
@@ -60,7 +60,7 @@ router.post('/login', loginRateLimiter, asyncHandler(async (req, res) => {
     return;
   }
   const { user, token } = result;
-  setSessionCookie(res, token);
+  setSessionCookie(req, res, token);
   res.json({ ok: true, user, token });
 }));
 
@@ -69,7 +69,7 @@ router.post('/logout', (req, res) => {
   if (user?.role === 'rep') syncRepTracking(user, { onDuty: false });
   revokeSession(getTokenFromRequest(req));
   if (user?.role === 'rep') refreshRepPresence(user.id);
-  res.clearCookie(env.authCookieName, authCookieOptions());
+  res.clearCookie(env.authCookieName, authCookieOptions(req));
   res.json({ ok: true });
 });
 

@@ -323,7 +323,7 @@ export function requireActiveRep(req, res, next) {
     return;
   }
   if (session.active !== 1 || session.deletedAt) {
-    res.clearCookie(env.authCookieName, authCookieOptions());
+    res.clearCookie(env.authCookieName, authCookieOptions(req));
     res.status(403).json({ success: false, message: REP_ACCOUNT_DISABLED_MESSAGE });
     return;
   }
@@ -371,11 +371,12 @@ export function requireAuthentication(req, res, next) {
   next();
 }
 
-export function authCookieOptions() {
+export function authCookieOptions(req) {
+  const standaloneAndroid = req?.get?.('origin') === 'https://localhost';
   return {
     httpOnly: true,
-    secure: env.authCookieSecure,
-    sameSite: 'strict',
+    secure: standaloneAndroid || env.authCookieSecure,
+    sameSite: standaloneAndroid ? 'none' : 'strict',
     path: '/',
   };
 }

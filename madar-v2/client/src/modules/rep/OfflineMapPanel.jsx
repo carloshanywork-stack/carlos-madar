@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { apiUrl } from '../../lib/api.js';
 import { deleteOfflineMapPack, listOfflineMapPacks, listOfflineMapTileKeys, saveOfflineMapPack, saveOfflineMapTiles } from './offline-store.js';
 import { OFFLINE_MAP_PACKS } from './map-utils.js';
 import OfflineRouteMap from './OfflineRouteMap.jsx';
@@ -17,7 +18,7 @@ async function fetchWithTimeout(path, { signal, binary = false } = {}) {
   else signal?.addEventListener('abort', abort, { once: true });
   const timeout = window.setTimeout(() => controller.abort(), 4000);
   try {
-    const response = await fetch(path, { credentials: 'include', cache: 'no-store', signal: controller.signal });
+    const response = await fetch(apiUrl(path), { credentials: 'include', cache: 'no-store', signal: controller.signal });
     if (!response.ok) {
       let message = `تعذر تنزيل بيانات الخريطة (${response.status}).`;
       try {

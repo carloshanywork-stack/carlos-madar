@@ -44,7 +44,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class RepLocationPlugin extends Plugin {
 
     private static final String MOCK_WARNING = "تم رصد تطبيق لتزييف الموقع، يرجى إغلاقه للمتابعة.";
-    private static final long LOCATION_TIMEOUT_MS = 20000;
+    private static final long LOCATION_TIMEOUT_MS = 12000;
+    private static final float MAX_CLOCK_ACCURACY_METERS = 120f;
+    private static final float MAX_FALLBACK_ACCURACY_METERS = 250f;
 
     @PluginMethod
     public void requestDutyPermissions(PluginCall call) {
@@ -90,25 +92,57 @@ public class RepLocationPlugin extends Plugin {
             return;
         }
 
+        try {
+            Location lastKnown = locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER);
+            if (lastKnown != null
+                && System.currentTimeMillis() - lastKnown.getTime() <= 120000
+                && lastKnown.hasAccuracy()
+                && lastKnown.getAccuracy() <= MAX_CLOCK_ACCURACY_METERS) {
+                if (isMockLocation(lastKnown)) {
+                    call.reject(MOCK_WARNING, "MOCK_LOCATION_DETECTED");
+                    return;
+                }
+                call.resolve(locationToJson(lastKnown, false));
+                return;
+            }
+        } catch (SecurityException error) {
+            call.reject("تعذر الوصول إلى شريحة GPS. تحقق من أذونات الموقع الدقيقة.", "LOCATION_PERMISSION_REQUIRED", error);
+            return;
+        }
+
         Handler handler = new Handler(Looper.getMainLooper());
         AtomicBoolean settled = new AtomicBoolean(false);
         LocationListener[] listenerRef = new LocationListener[1];
+        Location[] bestLocationRef = new Location[1];
         Runnable timeout = () -> {
             if (!settled.compareAndSet(false, true)) return;
             if (listenerRef[0] != null) locationManager.removeUpdates(listenerRef[0]);
-            call.reject("انتهت مهلة GPS؛ انتقل إلى مكان مفتوح وحاول مجدداً.", "GPS_TIMEOUT");
+            Location best = bestLocationRef[0];
+            if (best != null && best.hasAccuracy() && best.getAccuracy() <= MAX_FALLBACK_ACCURACY_METERS) {
+                call.resolve(locationToJson(best, false));
+            } else {
+                call.reject("إشارة GPS ضعيفة؛ انتقل إلى مكان مفتوح وحاول مجدداً.", "GPS_TIMEOUT");
+            }
         };
 
         listenerRef[0] = new LocationListener() {
             @Override
             public void onLocationChanged(Location location) {
-                if (!settled.compareAndSet(false, true)) return;
-                handler.removeCallbacks(timeout);
-                locationManager.removeUpdates(this);
                 if (isMockLocation(location)) {
+                    if (!settled.compareAndSet(false, true)) return;
+                    handler.removeCallbacks(timeout);
+                    locationManager.removeUpdates(this);
                     call.reject(MOCK_WARNING, "MOCK_LOCATION_DETECTED");
                     return;
                 }
+                if (location.hasAccuracy()
+                    && (bestLocationRef[0] == null || location.getAccuracy() < bestLocationRef[0].getAccuracy())) {
+                    bestLocationRef[0] = location;
+                }
+                if (!location.hasAccuracy() || location.getAccuracy() > MAX_CLOCK_ACCURACY_METERS
+                    || !settled.compareAndSet(false, true)) return;
+                handler.removeCallbacks(timeout);
+                locationManager.removeUpdates(this);
                 call.resolve(locationToJson(location, false));
             }
 

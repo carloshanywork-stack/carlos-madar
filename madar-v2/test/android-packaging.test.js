@@ -19,6 +19,9 @@ test('Android application ID, namespace, Capacitor ID, and native packages are a
   assert.match(capacitor, /appId:\s*'com\.madar\.rep\.app'/);
   assert.match(capacitor, /MADAR_REP_SERVER_URL/);
   assert.match(capacitor, /Non-local MADAR_REP_SERVER_URL must use HTTPS/);
+  assert.match(capacitor, /standaloneBuild \? \{\} :/);
+  assert.match(capacitor, /CapacitorHttp: \{ enabled: standaloneBuild \}/);
+  assert.match(capacitor, /CapacitorCookies: \{ enabled: standaloneBuild \}/);
   assert.match(capacitor, /loggingBehavior: releaseBuild \? 'none' : 'debug'/);
   assert.equal(generatedCapacitor.appId, 'com.madar.rep.app');
   assert.match(generatedCapacitor.server.url, /^https?:\/\//);
@@ -48,6 +51,20 @@ test('FileProvider authority is application-specific and only exposes app-owned 
   assert.match(paths, /<cache-path\b[^>]*name="rep_camera_cache"/);
   assert.doesNotMatch(paths, /<external-path\b/);
   assert.match(manifest, /android:allowBackup="false"/);
+  assert.match(manifest, /android:hardwareAccelerated="true"/);
+});
+
+test('representative Android bundle stays local in standalone mode and lazy-loads capture and map modules', () => {
+  const vite = read('client/vite.config.js');
+  const api = read('client/src/lib/api.js');
+  const rep = read('client/src/modules/rep/RepApp.jsx');
+  assert.match(vite, /__MADAR_API_BASE_URL__/);
+  assert.match(vite, /Standalone Android build needs a valid HTTPS MADAR_REP_SERVER_URL/);
+  assert.match(api, /new URL\(path, `\$\{API_BASE_URL\}\/`\)/);
+  assert.match(rep, /lazy\(\(\) => import\('\.\/MachineVisitSheet\.jsx'\)\)/);
+  assert.match(rep, /lazy\(\(\) => import\('\.\/OfflineMapPanel\.jsx'\)\)/);
+  assert.match(rep, /MAX_CLOCK_ACCURACY_METERS = 250/);
+  assert.match(rep, /lastLocation: location/);
 });
 
 test('release signing credentials are loaded locally and missing signing blocks release builds', () => {

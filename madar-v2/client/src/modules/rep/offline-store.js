@@ -1,47 +1,97 @@
 const DATABASE_NAME = 'madar-rep-offline';
-const DATABASE_VERSION = 4;
+export const DATABASE_VERSION = 5;
+export const REQUIRED_OFFLINE_STORES = Object.freeze([
+  'route_snapshots',
+  'reason_snapshots',
+  'pending_visits',
+  'pending_machine_actions',
+  'gps_samples',
+  'offline_map_packs',
+  'offline_map_tiles',
+  'attendance_snapshots',
+]);
+const REQUIRED_OFFLINE_INDEXES = Object.freeze({
+  pending_visits: ['by_rep_created'],
+  pending_machine_actions: ['by_rep_created', 'by_machine_created'],
+  gps_samples: ['by_rep_captured'],
+  offline_map_tiles: ['by_pack', 'by_pack_zoom'],
+});
 let databasePromise;
+
+function createStore(database, transaction, name, keyPath, indexes = []) {
+  const store = database.objectStoreNames.contains(name)
+    ? transaction.objectStore(name)
+    : database.createObjectStore(name, { keyPath });
+  for (const [indexName, path] of indexes) {
+    if (!store.indexNames.contains(indexName)) store.createIndex(indexName, path, { unique: false });
+  }
+}
+
+function migrateDatabase(request) {
+  const database = request.result;
+  const transaction = request.transaction;
+  createStore(database, transaction, 'route_snapshots', 'repId');
+  createStore(database, transaction, 'reason_snapshots', 'repId');
+  createStore(database, transaction, 'pending_visits', 'visitUuid', [['by_rep_created', ['repId', 'createdAt']]]);
+  createStore(database, transaction, 'pending_machine_actions', 'actionUuid', [
+    ['by_rep_created', ['repId', 'createdAt']],
+    ['by_machine_created', ['machineId', 'createdAt']],
+  ]);
+  createStore(database, transaction, 'gps_samples', 'sampleId', [['by_rep_captured', ['repId', 'capturedAt']]]);
+  createStore(database, transaction, 'offline_map_packs', 'packId');
+  createStore(database, transaction, 'offline_map_tiles', 'key', [
+    ['by_pack', 'packId'],
+    ['by_pack_zoom', ['packId', 'z']],
+  ]);
+  // RepApp has always cached attendance through getSnapshot/saveSnapshot; older
+  // DB versions omitted this store, causing NotFoundError on first attendance use.
+  createStore(database, transaction, 'attendance_snapshots', 'repId');
+}
+
+function openDatabaseAtVersion(version) {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DATABASE_NAME, version);
+    request.onupgradeneeded = () => migrateDatabase(request);
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error ?? new Error('تعذر فتح التخزين المحلي.'));
+    request.onblocked = () => reject(new Error('أغلق نسخة MADAR الأخرى لإكمال إصلاح قاعدة البيانات المحلية.'));
+  });
+}
+
+async function openAndRepairDatabase() {
+  let database = await openDatabaseAtVersion(DATABASE_VERSION);
+  const hasRequiredSchema = () => {
+    if (REQUIRED_OFFLINE_STORES.some((name) => !database.objectStoreNames.contains(name))) return false;
+    const indexStores = Object.keys(REQUIRED_OFFLINE_INDEXES);
+    const transaction = database.transaction(indexStores, 'readonly');
+    return Object.entries(REQUIRED_OFFLINE_INDEXES).every(([storeName, indexes]) => {
+      const store = transaction.objectStore(storeName);
+      return indexes.every((indexName) => store.indexNames.contains(indexName));
+    });
+  };
+  if (!hasRequiredSchema()) {
+    // Repair in-place with an additive version bump. This preserves queued visits,
+    // machine corrections, GPS breadcrumbs, and downloaded maps (unlike deleteDatabase).
+    const repairVersion = database.version + 1;
+    database.close();
+    database = await openDatabaseAtVersion(repairVersion);
+    if (!hasRequiredSchema()) {
+      database.close();
+      throw new Error('تعذر إصلاح مخازن وفهارس قاعدة البيانات المحلية.');
+    }
+  }
+  database.onversionchange = () => {
+    database.close();
+    databasePromise = null;
+  };
+  return database;
+}
 
 function openDatabase() {
   if (!('indexedDB' in window)) return Promise.reject(new Error('التخزين المحلي غير متاح في هذا المتصفح.'));
   if (databasePromise) return databasePromise;
 
-  databasePromise = new Promise((resolve, reject) => {
-    const request = indexedDB.open(DATABASE_NAME, DATABASE_VERSION);
-    request.onupgradeneeded = () => {
-      const database = request.result;
-      if (!database.objectStoreNames.contains('route_snapshots')) {
-        database.createObjectStore('route_snapshots', { keyPath: 'repId' });
-      }
-      if (!database.objectStoreNames.contains('reason_snapshots')) {
-        database.createObjectStore('reason_snapshots', { keyPath: 'repId' });
-      }
-      if (!database.objectStoreNames.contains('pending_visits')) {
-        const visits = database.createObjectStore('pending_visits', { keyPath: 'visitUuid' });
-        visits.createIndex('by_rep_created', ['repId', 'createdAt'], { unique: false });
-      }
-      if (!database.objectStoreNames.contains('pending_machine_actions')) {
-        const actions = database.createObjectStore('pending_machine_actions', { keyPath: 'actionUuid' });
-        actions.createIndex('by_rep_created', ['repId', 'createdAt'], { unique: false });
-        actions.createIndex('by_machine_created', ['machineId', 'createdAt'], { unique: false });
-      }
-      if (!database.objectStoreNames.contains('gps_samples')) {
-        const gps = database.createObjectStore('gps_samples', { keyPath: 'sampleId' });
-        gps.createIndex('by_rep_captured', ['repId', 'capturedAt'], { unique: false });
-      }
-      if (!database.objectStoreNames.contains('offline_map_packs')) {
-        database.createObjectStore('offline_map_packs', { keyPath: 'packId' });
-      }
-      if (!database.objectStoreNames.contains('offline_map_tiles')) {
-        const tiles = database.createObjectStore('offline_map_tiles', { keyPath: 'key' });
-        tiles.createIndex('by_pack', 'packId', { unique: false });
-        tiles.createIndex('by_pack_zoom', ['packId', 'z'], { unique: false });
-      }
-    };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error ?? new Error('تعذر فتح التخزين المحلي.'));
-    request.onblocked = () => reject(new Error('أغلق نسخة MADAR الأخرى ثم حاول مجدداً.'));
-  }).catch((error) => {
+  databasePromise = openAndRepairDatabase().catch((error) => {
     databasePromise = null;
     throw error;
   });

@@ -36,9 +36,9 @@ const machineCorrectionUpload = memoryUpload({
   extensions: ['.jpg', '.jpeg', '.png', '.webp'],
 }).single('evidence');
 
-function setSessionCookie(res, token) {
+function setSessionCookie(req, res, token) {
   res.cookie(env.authCookieName, token, {
-    ...authCookieOptions(),
+    ...authCookieOptions(req),
     maxAge: 7 * 24 * 60 * 60 * 1000,
   });
 }
@@ -53,7 +53,7 @@ router.post('/login', loginRateLimiter, asyncHandler(async (req, res) => {
 
   const result = authenticateRepUser(username, body.password, db);
   if (result?.disabled) {
-    res.clearCookie(env.authCookieName, authCookieOptions());
+    res.clearCookie(env.authCookieName, authCookieOptions(req));
     res.status(403).json({ success: false, message: REP_ACCOUNT_DISABLED_MESSAGE });
     return;
   }
@@ -62,7 +62,7 @@ router.post('/login', loginRateLimiter, asyncHandler(async (req, res) => {
     return;
   }
 
-  setSessionCookie(res, result.token);
+  setSessionCookie(req, res, result.token);
   res.json({ success: true, rep: result.user });
 }));
 

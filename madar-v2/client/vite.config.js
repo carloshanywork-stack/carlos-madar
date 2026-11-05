@@ -1,13 +1,38 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { loadEnv } from 'vite';
+
+const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 export default defineConfig(({ mode }) => {
   const capacitorBuild = mode === 'capacitor';
+  const projectEnv = loadEnv(mode, projectRoot, ['VITE_', 'MADAR_REP_']);
+  const standaloneBuild = capacitorBuild && (
+    process.env.MADAR_ANDROID_BUILD_TYPE === 'release'
+    || process.env.MADAR_REP_STANDALONE === 'true'
+  );
+  const apiServerUrl = projectEnv.VITE_MADAR_API_BASE_URL
+    || projectEnv.MADAR_REP_SERVER_URL
+    || process.env.MADAR_REP_SERVER_URL
+    || '';
+  let apiBaseUrl = '';
+  if (standaloneBuild) {
+    try {
+      const parsedApiUrl = new URL(apiServerUrl);
+      if (parsedApiUrl.protocol !== 'https:' || parsedApiUrl.username || parsedApiUrl.password) throw new Error();
+      apiBaseUrl = parsedApiUrl.origin;
+    } catch {
+      throw new Error('Standalone Android build needs a valid HTTPS MADAR_REP_SERVER_URL for API sync.');
+    }
+  }
   return {
     plugins: [react()],
     base: capacitorBuild ? './' : '/',
     define: {
       __MADAR_BUILD_VERSION__: JSON.stringify(new Date().toISOString()),
+      __MADAR_API_BASE_URL__: JSON.stringify(apiBaseUrl),
     },
     build: {
       chunkSizeWarningLimit: 200,

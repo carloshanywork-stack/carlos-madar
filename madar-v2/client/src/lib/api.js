@@ -8,6 +8,12 @@ export class ApiError extends Error {
 }
 
 const REP_ACCOUNT_DISABLED_MESSAGE = 'تم تعطيل حسابك من قبل الإدارة';
+const API_BASE_URL = typeof __MADAR_API_BASE_URL__ === 'undefined' ? '' : __MADAR_API_BASE_URL__;
+
+export function apiUrl(path) {
+  if (!API_BASE_URL || /^[a-z][a-z\d+.-]*:/i.test(path)) return path;
+  return new URL(path, `${API_BASE_URL}/`).toString();
+}
 
 function notifyDisabledRep(payload) {
   if (payload?.message !== REP_ACCOUNT_DISABLED_MESSAGE || typeof window === 'undefined') return;
@@ -36,7 +42,7 @@ async function request(path, options = {}) {
   }
   let response;
   try {
-    response = await fetch(path, {
+    response = await fetch(apiUrl(path), {
       credentials: 'include',
       ...fetchOptions,
       cache: 'no-store',
@@ -67,7 +73,7 @@ async function request(path, options = {}) {
 function uploadWithProgress(path, formData, onProgress) {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
-    xhr.open('POST', path);
+    xhr.open('POST', apiUrl(path));
     xhr.withCredentials = true;
     xhr.upload.addEventListener('progress', (event) => {
       if (event.lengthComputable) onProgress?.(Math.round((event.loaded / event.total) * 100));
