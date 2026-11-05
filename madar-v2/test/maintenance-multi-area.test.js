@@ -562,18 +562,17 @@ test('maintenance card photos can be moved or deleted without losing files on DB
     filename: retainedFilename,
   }));
   const archivedMovedPath = retainedPhoto.path.replace(/\\/g, '/').replace(/\/before\//i, '/after/');
-  assert.equal(archivedMove.response.status, 200, JSON.stringify(archivedMove.body));
-  assert.equal(archivedMove.body.path, archivedMovedPath);
-  assert.equal(existsSync(join(storageRoot, ...retainedPhoto.path.split('/'))), false, 'archived move removes the original phase path');
-  assert.equal(existsSync(join(storageRoot, ...archivedMovedPath.split('/'))), true, 'archived move keeps the photo in the destination phase');
-  assert.ok(JSON.parse(db.prepare('SELECT after_photos_json FROM maintenance_cards WHERE id = ?').get(card.id).after_photos_json).includes(archivedMovedPath));
+  assert.equal(archivedMove.response.status, 409);
+  assert.equal(existsSync(join(storageRoot, ...retainedPhoto.path.split('/'))), true, 'archived move keeps the source photo in place');
+  assert.equal(existsSync(join(storageRoot, ...archivedMovedPath.split('/'))), false, 'archived move must not create a destination photo');
+  assert.ok(JSON.parse(db.prepare('SELECT before_photos_json FROM maintenance_cards WHERE id = ?').get(card.id).before_photos_json).includes(retainedPhoto.path));
 
-  const archivedDelete = await request(`/api/maintenance/orders/${orderResponse.body.id}/cards/${card.id}/photos/after/${encodeURIComponent(retainedFilename)}`, {
+  const archivedDelete = await request(`/api/maintenance/orders/${orderResponse.body.id}/cards/${card.id}/photos/before/${encodeURIComponent(retainedFilename)}`, {
     method: 'DELETE',
   });
-  assert.equal(archivedDelete.response.status, 200, JSON.stringify(archivedDelete.body));
-  assert.equal(existsSync(join(storageRoot, ...archivedMovedPath.split('/'))), false, 'archived deletion removes the stored photo');
-  assert.ok(!JSON.parse(db.prepare('SELECT after_photos_json FROM maintenance_cards WHERE id = ?').get(card.id).after_photos_json).includes(archivedMovedPath));
+  assert.equal(archivedDelete.response.status, 409);
+  assert.equal(existsSync(join(storageRoot, ...retainedPhoto.path.split('/'))), true, 'archived deletion must preserve the original photo');
+  assert.ok(JSON.parse(db.prepare('SELECT before_photos_json FROM maintenance_cards WHERE id = ?').get(card.id).before_photos_json).includes(retainedPhoto.path));
 
   const moveAudit = db.prepare(`
     SELECT action, old_values_json, new_values_json
@@ -590,7 +589,7 @@ test('maintenance card photos can be moved or deleted without losing files on DB
   `).get(card.id);
   assert.equal(deleteAudit.action, 'photo_delete');
   assert.equal(JSON.parse(deleteAudit.old_values_json).phase, 'after');
-  assert.equal(JSON.parse(deleteAudit.old_values_json).photo, archivedMovedPath);
+  assert.equal(JSON.parse(deleteAudit.old_values_json).photo, afterPhoto.path);
 });
 
 test('maintenance card startup recovery restores staged folders for an uncommitted deletion', async () => {

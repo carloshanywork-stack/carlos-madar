@@ -1003,7 +1003,7 @@ export default function MaintenanceOrderDetail() {
                 thumbnailUrls={card.before_thumbnail_urls}
                 photoMetadata={card.rep_photo_metadata}
                 card={card}
-                disabled={saving}
+                disabled={saving || order.status === 'archived'}
                 canUpload={order.status !== 'archived'}
                 onUpload={(event) => uploadPhotos(card, 'before', event)}
                 onDeletePhoto={handleDeletePhoto}
@@ -1017,7 +1017,7 @@ export default function MaintenanceOrderDetail() {
                 thumbnailUrls={card.after_thumbnail_urls}
                 photoMetadata={card.rep_photo_metadata}
                 card={card}
-                disabled={saving}
+                disabled={saving || order.status === 'archived'}
                 canUpload={order.status !== 'archived'}
                 onUpload={(event) => uploadPhotos(card, 'after', event)}
                 onDeletePhoto={handleDeletePhoto}
@@ -1585,7 +1585,7 @@ export default function MaintenanceOrderDetail() {
           onDeletePhoto={handleDeletePhoto}
           onEditMachineCode={openMachineCodeEditor}
           machineCodeEditorOpen={Boolean(machineCodeCard)}
-          disabled={saving}
+          disabled={saving || order.status === 'archived'}
           canEditMachineCode={order.status !== 'archived'}
         />
       )}

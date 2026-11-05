@@ -4304,6 +4304,9 @@ export async function deleteCardPhoto(orderId, cardId, phase, filename, actorId 
       `).get(id, targetCardId);
 
       if (!card) throw new HttpError(404, 'Active inspection card was not found.');
+      if (card.order_status === 'archived') {
+        throw new HttpError(409, 'Archived maintenance orders do not allow photo changes.');
+      }
 
       const beforePaths = parsePhotoJson(card.before_photos_json);
       const afterPaths = parsePhotoJson(card.after_photos_json);
@@ -4380,6 +4383,9 @@ export async function moveCardPhoto(orderId, cardId, input, actorId = null, data
     `).get(id, targetCardId);
 
     if (!card) throw new HttpError(404, 'Active inspection card was not found.');
+    if (card.order_status === 'archived') {
+      throw new HttpError(409, 'Archived maintenance orders do not allow photo changes.');
+    }
 
     const beforePaths = parsePhotoJson(card.before_photos_json);
     const afterPaths = parsePhotoJson(card.after_photos_json);
