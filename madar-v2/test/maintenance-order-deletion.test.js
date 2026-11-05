@@ -187,3 +187,101 @@ test('Admin archive removal soft-deletes, audits, safely stages photos, and reco
   assert.equal(existsSync(committedStageDirectory), false);
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM maintenance_order_deletion_operations WHERE operation_id = ?').get(committedId).count, 0);
 });
+
+test('Admin can reopen archived maintenance and rearchive without duplicating or misposting the cash refund', async () => {
+  const clientId = Number(db.prepare('INSERT INTO clients (code, name) VALUES (?, ?)')
+    .run('C-REOPEN-1', 'Reopen Test Client').lastInsertRowid);
+  const machineId = Number(db.prepare('INSERT INTO machines (code, name_ar, area) VALUES (?, ?, ?)')
+    .run('REOPEN-01', 'ماكينة إعادة فتح', 'Reopen Area').lastInsertRowid);
+  const adminId = Number(db.prepare("SELECT id FROM users WHERE username = 'admin'").get().id);
+  const orderId = Number(db.prepare(`
+    INSERT INTO maintenance_orders (
+      order_code, client_id, status, archived_at, archived_by,
+      petty_cash_disbursed_cents, actual_expenses_cents, petty_cash_refund_cents, warranty_period_months
+    ) VALUES (?, ?, 'archived', '2026-11-05 10:00:00', ?, 1000, 400, 600, 3)
+  `).run('MN-REOPEN-1', clientId, adminId).lastInsertRowid);
+  const cardId = Number(db.prepare('INSERT INTO maintenance_cards (order_id, machine_id) VALUES (?, ?)')
+    .run(orderId, machineId).lastInsertRowid);
+  db.prepare(`
+    INSERT INTO treasury_entries (kind, category, amount_cents, maintenance_order_id, reference, created_by)
+    VALUES ('income', 'رد عهدة صيانة', 600, ?, 'MN-REOPEN-1', ?)
+  `).run(orderId, adminId);
+
+  const operationsPassword = 'order-reopen-operator-password';
+  db.prepare(`
+    INSERT INTO users (username, password_hash, full_name, role)
+    VALUES (?, ?, ?, 'operations')
+  `).run('order-reopen-operator', bcrypt.hashSync(operationsPassword, 10), 'Reopen Operator');
+  const operationsLogin = await fetch(`${baseUrl}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ username: 'order-reopen-operator', password: operationsPassword }),
+  });
+  assert.equal(operationsLogin.status, 200);
+  cookie = (operationsLogin.headers.getSetCookie?.()[0] ?? operationsLogin.headers.get('set-cookie'))?.split(';', 1)[0];
+  assert.ok(cookie);
+  const deniedArchivedEdit = await request(`/api/maintenance/orders/${orderId}/cards/${cardId}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ notes: 'محاولة تعديل بدون صلاحية' }),
+  });
+  assert.equal(deniedArchivedEdit.response.status, 403);
+  const denied = await request(`/api/maintenance/orders/${orderId}/unarchive`, { method: 'POST' });
+  assert.equal(denied.response.status, 403);
+  assert.equal(db.prepare('SELECT status FROM maintenance_orders WHERE id = ?').get(orderId).status, 'archived');
+
+  cookie = adminCookie;
+  const reopened = await request(`/api/maintenance/orders/${orderId}/unarchive`, { method: 'POST' });
+  assert.equal(reopened.response.status, 200, JSON.stringify(reopened.body));
+  assert.equal(reopened.body.status, 'in_progress');
+  assert.equal(reopened.body.archived_at, null);
+  assert.equal(reopened.body.archived_by, null);
+  assert.equal(reopened.body.petty_cash_refund_cents, 600, 'the original settlement stays on record while the order is reopened');
+  assert.equal((await request(`/api/maintenance/orders/${orderId}/unarchive`, { method: 'POST' })).response.status, 409);
+
+  const reopenedAudit = db.prepare(`
+    SELECT actor_id, old_values_json, new_values_json FROM audit_log
+    WHERE action = 'unarchive_order' AND entity_id = ? ORDER BY id DESC LIMIT 1
+  `).get(orderId);
+  assert.equal(reopenedAudit.actor_id, adminId);
+  assert.equal(JSON.parse(reopenedAudit.old_values_json).status, 'archived');
+  assert.equal(JSON.parse(reopenedAudit.new_values_json).status, 'in_progress');
+
+  assert.equal((await request(`/api/maintenance/orders/${orderId}/status`, {
+    method: 'PATCH', headers: { 'content-type': 'application/json' }, body: '{}',
+  })).response.status, 200);
+  const archivedAgain = await request(`/api/maintenance/orders/${orderId}/archive`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ actualExpensesCents: 400, warrantyPeriodMonths: 3 }),
+  });
+  assert.equal(archivedAgain.response.status, 200, JSON.stringify(archivedAgain.body));
+  assert.equal(archivedAgain.body.refundCents, 600);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM treasury_entries WHERE maintenance_order_id = ?').get(orderId).count, 1,
+    'repeating the original settlement must not duplicate the treasury refund');
+
+  assert.equal((await request(`/api/maintenance/orders/${orderId}/unarchive`, { method: 'POST' })).response.status, 200);
+  assert.equal((await request(`/api/maintenance/orders/${orderId}/status`, {
+    method: 'PATCH', headers: { 'content-type': 'application/json' }, body: '{}',
+  })).response.status, 200);
+  const adjustedArchive = await request(`/api/maintenance/orders/${orderId}/archive`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ actualExpensesCents: 500, warrantyPeriodMonths: 6 }),
+  });
+  assert.equal(adjustedArchive.response.status, 200, JSON.stringify(adjustedArchive.body));
+  assert.equal(adjustedArchive.body.refundCents, 500);
+  assert.deepEqual(db.prepare(`
+    SELECT kind, category, amount_cents FROM treasury_entries
+    WHERE maintenance_order_id = ? ORDER BY id
+  `).all(orderId), [
+    { kind: 'income', category: 'رد عهدة صيانة', amount_cents: 600 },
+    { kind: 'expense', category: 'تسوية رد عهدة صيانة بعد إعادة الفتح', amount_cents: 100 },
+  ]);
+  assert.equal(db.prepare(`
+    SELECT COALESCE(SUM(CASE kind WHEN 'income' THEN amount_cents ELSE -amount_cents END), 0) AS balance
+    FROM treasury_entries WHERE maintenance_order_id = ?
+  `).get(orderId).balance, 500);
+  assert.equal(db.prepare('SELECT id FROM maintenance_cards WHERE id = ? AND order_id = ?').get(cardId, orderId).id, cardId);
+  cookie = adminCookie;
+});

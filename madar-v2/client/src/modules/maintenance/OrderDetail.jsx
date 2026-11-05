@@ -452,6 +452,39 @@ export default function MaintenanceOrderDetail() {
     finally { setSaving(false); }
   }
 
+  async function handleDeleteArchivedOrder() {
+    const confirmed = window.confirm(
+      `هل أنت متأكد من حذف أمر الصيانة (${order.order_code}) نهائياً؟\n\n- ستُزال صور وفولدرات الأمر من الأرشيف.\n- سيُحذف الأمر من القوائم مع الاحتفاظ بسجل تاريخي آمن.\n- لا يمكن التراجع عن هذه الخطوة من الواجهة.`,
+    );
+    if (!confirmed) return;
+    setSaving(true);
+    try {
+      await api.delete(`/api/maintenance/orders/${id}`);
+      showToast(`تم حذف أمر الصيانة ${order.order_code} من الأرشيف.`);
+      navigate('/maintenance');
+    } catch (caught) {
+      showToast(errorMessage(caught), 'error');
+      setSaving(false);
+    }
+  }
+
+  async function handleUnarchiveOrder() {
+    const confirmed = window.confirm(
+      `هل تريد إلغاء أرشفة أمر الصيانة (${order.order_code}) وإعادة فتحه؟\n\n- سيعود الأمر لحالة (قيد التنفيذ).\n- ستتمكن من تعديل البطاقات وإضافة أو حذف ماكينات ورفع أو نقل الصور.`,
+    );
+    if (!confirmed) return;
+    setSaving(true);
+    try {
+      await api.post(`/api/maintenance/orders/${id}/unarchive`);
+      await reload();
+      showToast(`تم إلغاء أرشفة الأمر ${order.order_code} وإعادة فتحه بنجاح.`);
+    } catch (caught) {
+      showToast(errorMessage(caught), 'error');
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function advanceCustody(event) {
     event.preventDefault();
     setSaving(true);
@@ -856,7 +889,7 @@ export default function MaintenanceOrderDetail() {
           </button>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', flex: '0 0 auto', flexWrap: 'wrap' }}>
             <small><span className="madar-code">{card.machine_code}</span> · {card.machine_area}</small>
-            {order.status !== 'archived' && (
+            {(order.status !== 'archived' || order.canAssignRepresentatives) && (
               <button
                 type="button"
                 className="madar-button-ghost"
@@ -866,6 +899,7 @@ export default function MaintenanceOrderDetail() {
                   borderRadius: '5px', cursor: 'pointer', marginInlineStart: '8px',
                 }}
                 title="تعديل كود هذه الماكينة"
+                disabled={saving}
                 onClick={(event) => { event.stopPropagation(); openMachineCodeEditor(card); }}
               >✏️ تعديل الكود</button>
             )}
@@ -904,7 +938,7 @@ export default function MaintenanceOrderDetail() {
                 <Select
                   label="أوامر / أسباب الصيانة *"
                   value=""
-                  disabled={saving}
+                  disabled={saving || (order.status === 'archived' && !order.canAssignRepresentatives)}
                   onChange={(event) => {
                     addCardReason(card, event.target.value);
                     event.target.value = '';
@@ -959,7 +993,7 @@ export default function MaintenanceOrderDetail() {
                         <button
                           type="button"
                           onClick={() => removeCardReason(card, rid)}
-                          disabled={saving}
+                          disabled={saving || (order.status === 'archived' && !order.canAssignRepresentatives)}
                           style={{
                             background: 'transparent',
                             border: 'none',
@@ -990,7 +1024,7 @@ export default function MaintenanceOrderDetail() {
                 value={getCardDraft(card).notes}
                 placeholder="اكتب الملاحظات الفنية الخاصة بهذه الماكينة..."
                 maxLength={10000}
-                disabled={saving}
+                disabled={saving || (order.status === 'archived' && !order.canAssignRepresentatives)}
                 onChange={(event) => updateCardNotesDraft(card, event.target.value)}
                 onBlur={(event) => { void setCardNotes(card, event.target.value); }}
               />
@@ -1083,6 +1117,23 @@ export default function MaintenanceOrderDetail() {
           {order.status === 'in_progress' && <Button icon="check" disabled={saving} onClick={transitionToReview}>إرسال للمراجعة</Button>}
           {order.status === 'review' && <Button icon="archive" onClick={() => { setExpenseError(''); setArchiveOpen(true); }}>أرشفة وتسوية العهدة</Button>}
           <Button variant="secondary" icon="file" onClick={() => { window.location.href = `/api/maintenance/orders/${id}/export.docx`; }}>تقرير Word</Button>
+          {order.status === 'archived' && order.canAssignRepresentatives && <>
+            <Button
+              variant="secondary"
+              icon="refresh"
+              disabled={saving}
+              onClick={handleUnarchiveOrder}
+              title="إعادة فتح الأمر للتعديل الشامل ورفع أو تعديل الصور"
+            >🔄 إعادة فتح للتعديل</Button>
+            <Button
+              variant="danger"
+              icon="trash"
+              disabled={saving}
+              onClick={handleDeleteArchivedOrder}
+              style={{ background: 'rgba(239, 68, 68, 0.2)', color: '#f87171', border: '1px solid #b91c1c' }}
+              title="حذف هذا الأمر المؤرشف وجميع ملفاته من الأرشيف"
+            >🗑️ حذف أمر الصيانة</Button>
+          </>}
         </div>
       </section>
       {actionError && <div className="madar-section"><Alert tone="error">{actionError}</Alert></div>}

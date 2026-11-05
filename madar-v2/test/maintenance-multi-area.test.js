@@ -211,7 +211,7 @@ test('maintenance orders accept multiple areas and use every selected area for p
   assert.equal(storageCompletedProgress.body.processed, storageCompletedProgress.body.total);
 });
 
-test('archived maintenance cards allow reason and note updates but reject machine and photo changes', async () => {
+test('admins can edit archived card reasons, notes, and machine codes while photo edits stay blocked', async () => {
   const clientCode = 'ARCHIVED-CARD-EDIT-CLIENT';
   const clientId = Number(db.prepare('INSERT INTO clients (code, name) VALUES (?, ?)')
     .run(clientCode, 'Archived Card Edit Client').lastInsertRowid);
@@ -256,10 +256,11 @@ test('archived maintenance cards allow reason and note updates but reject machin
   assert.equal(archivedUpdate.body.notes, 'ملاحظة فنية محدّثة بعد الأرشفة');
   assert.equal(archivedUpdate.body.reason_id, keptReasonId);
 
-  const rejectedMachineCode = await request(`/api/maintenance/orders/${orderResponse.body.id}/cards/${card.id}`, json('PATCH', {
-    machineCode: 'ARCHIVED-CARD-EDIT-REPLACEMENT',
+  const updatedMachineCode = await request(`/api/maintenance/orders/${orderResponse.body.id}/cards/${card.id}`, json('PATCH', {
+    machineCode: 'ARCHIVED-CARD-EDIT-01-RENAMED',
   }));
-  assert.equal(rejectedMachineCode.response.status, 409);
+  assert.equal(updatedMachineCode.response.status, 200, JSON.stringify(updatedMachineCode.body));
+  assert.equal(updatedMachineCode.body.machine_code, 'ARCHIVED-CARD-EDIT-01-RENAMED');
   const rejectedBeforePhotos = await request(`/api/maintenance/orders/${orderResponse.body.id}/cards/${card.id}`, json('PATCH', {
     beforePhotos: [],
   }));
@@ -269,7 +270,7 @@ test('archived maintenance cards allow reason and note updates but reject machin
   }));
   assert.equal(rejectedAfterPhotos.response.status, 409);
 
-  assert.equal(db.prepare('SELECT code FROM machines WHERE id = ?').get(machineResponse.body.id).code, 'ARCHIVED-CARD-EDIT-01');
+  assert.equal(db.prepare('SELECT code FROM machines WHERE id = ?').get(machineResponse.body.id).code, 'ARCHIVED-CARD-EDIT-01-RENAMED');
   const storedCard = db.prepare('SELECT reason_id, reason_ids_json, notes FROM maintenance_cards WHERE id = ?').get(card.id);
   assert.equal(storedCard.reason_id, keptReasonId);
   assert.deepEqual(JSON.parse(storedCard.reason_ids_json), [keptReasonId, addedReasonId]);

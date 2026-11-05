@@ -54,6 +54,7 @@ import {
   updateMaintenanceCard,
   updateMaintenanceReason,
   updateMachine,
+  unarchiveMaintenanceOrder,
   uploadMaintenancePhoto,
 } from './service.js';
 
@@ -336,6 +337,10 @@ router.put('/orders/:id/representatives', requireRole('admin'), (req, res, next)
 
 router.delete('/orders/:id', requireRole('admin'), asyncHandler(async (req, res) => {
   res.json(await deleteMaintenanceOrder(req.params.id, requestActorId(req)));
+}));
+
+router.post('/orders/:id/unarchive', requireRole('admin'), asyncHandler(async (req, res) => {
+  res.json(unarchiveMaintenanceOrder(req.params.id, requestActorId(req)));
 }));
 
 router.post('/orders/:id/cards', (req, res, next) => {

@@ -4035,9 +4035,15 @@ async function updateMaintenanceCardUnlocked(orderId, cardId, input, actorId = n
 
   const order = findMaintenanceOrder(id, database);
   if (order.status === 'archived') {
-    const hasDisallowedFields = ['beforePhotos', 'afterPhotos', 'machineCode'].some((key) => body[key] !== undefined);
+    const actor = actorId === null ? null : database.prepare(`
+      SELECT role FROM users WHERE id = ? AND active = 1 AND deleted_at IS NULL
+    `).get(actorId);
+    if (actor?.role !== 'admin') {
+      throw new HttpError(403, 'Administrator access is required to edit archived maintenance orders.');
+    }
+    const hasDisallowedFields = ['beforePhotos', 'afterPhotos'].some((key) => body[key] !== undefined);
     if (hasDisallowedFields) {
-      throw new HttpError(409, 'Archived maintenance orders are read-only except for reasons and notes.');
+      throw new HttpError(409, 'Archived maintenance orders do not allow direct photo changes without unarchiving.');
     }
   }
   const card = database.prepare(`
@@ -4528,6 +4534,8 @@ export function archiveMaintenanceOrder(orderId, input, actorId = null, database
     if (refundCents < 0) {
       throw new HttpError(400, 'actualExpensesCents cannot exceed the petty cash disbursed to this order.');
     }
+    const refundAdjustmentCents = refundCents - (order.petty_cash_refund_cents ?? 0);
+    if (refundAdjustmentCents < 0) assertCashAvailable(-refundAdjustmentCents, database);
     const oldValues = {
       status: order.status,
       warranty_period_months: order.warranty_period_months,
@@ -4542,15 +4550,18 @@ export function archiveMaintenanceOrder(orderId, input, actorId = null, database
       WHERE id = ?
     `).run(body.warrantyPeriodMonths, actualExpensesCents, refundCents, actorId, id);
     let treasuryEntryId = null;
-    if (refundCents > 0) {
+    if (refundAdjustmentCents !== 0) {
+      const isAdditionalRefund = refundAdjustmentCents > 0;
       treasuryEntryId = insertTreasuryEntry({
         database,
-        kind: 'income',
-        category: 'رد عهدة صيانة',
-        amountCents: refundCents,
+        kind: isAdditionalRefund ? 'income' : 'expense',
+        category: isAdditionalRefund ? 'رد عهدة صيانة' : 'تسوية رد عهدة صيانة بعد إعادة الفتح',
+        amountCents: Math.abs(refundAdjustmentCents),
         maintenanceOrderId: id,
         reference: order.order_code,
-        notes: 'Refund from maintenance petty cash custody',
+        notes: isAdditionalRefund
+          ? 'Maintenance petty cash refund or post-reopen adjustment'
+          : 'Reversal of excess maintenance petty cash refund after reopening',
         actorId,
       });
     }
@@ -4567,10 +4578,47 @@ export function archiveMaintenanceOrder(orderId, input, actorId = null, database
         actual_expenses_cents: actualExpensesCents,
         petty_cash_refund_cents: refundCents,
         treasury_entry_id: treasuryEntryId,
+        refund_adjustment_cents: refundAdjustmentCents,
       },
     });
     return refundCents;
   }).immediate();
 
   return { order: getMaintenanceOrder(id, database), refundCents };
+}
+
+export function unarchiveMaintenanceOrder(orderId, actorId = null, database = db) {
+  const id = positiveId(orderId, 'orderId');
+  const unarchive = database.transaction(() => {
+    const order = findMaintenanceOrder(id, database);
+    if (order.status !== 'archived') {
+      throw new HttpError(409, 'Only archived maintenance orders can be unarchived.');
+    }
+    database.prepare(`
+      UPDATE maintenance_orders
+      SET status = 'in_progress', archived_at = NULL, archived_by = NULL, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ? AND deleted_at IS NULL
+    `).run(id);
+    recordAudit({
+      database,
+      actorId,
+      action: 'unarchive_order',
+      entityType: 'maintenance_order',
+      entityId: id,
+      oldValues: {
+        status: 'archived',
+        archived_at: order.archived_at,
+        archived_by: order.archived_by,
+        petty_cash_refund_cents: order.petty_cash_refund_cents,
+      },
+      newValues: {
+        status: 'in_progress',
+        archived_at: null,
+        archived_by: null,
+        petty_cash_refund_cents: order.petty_cash_refund_cents,
+      },
+    });
+  });
+  unarchive.immediate();
+  return getMaintenanceOrder(id, database);
 }

@@ -91,6 +91,20 @@ export default function MaintenancePage({ isAdmin = false }) {
     }
   }
 
+  async function deleteArchivedOrder(order) {
+    if (!window.confirm(`هل تريد حذف أمر الصيانة ${order.order_code} نهائياً من الأرشيف؟ ستُزال ملفاته ويُحفظ سجل تاريخي آمن.`)) return;
+    setSaving(true);
+    try {
+      await api.delete(`/api/maintenance/orders/${order.id}`);
+      await reload();
+      showToast(`تم حذف أمر الصيانة ${order.order_code} من الأرشيف.`);
+    } catch (caught) {
+      showToast(errorMessage(caught), 'error');
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <>
       <PageHeader
@@ -136,7 +150,23 @@ export default function MaintenancePage({ isAdmin = false }) {
                 </td>
                 <td>{order.card_count}</td><td>{order.technician_count}</td><td>{order.representative_names || '—'}</td><td>{formatDate(order.created_at)}</td>
                 <td><Badge status={order.status} /></td>
-                <td><Link className="madar-button madar-button-ghost madar-button-small" to={`/maintenance/${order.id}`} aria-label="فتح أمر الصيانة"><Icon name="chevron" size={13} /></Link></td>
+                <td>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Link className="madar-button madar-button-ghost madar-button-small" to={`/maintenance/${order.id}`} aria-label="فتح أمر الصيانة"><Icon name="chevron" size={13} /></Link>
+                    {status === 'archived' && isAdmin && <button
+                      type="button"
+                      className="madar-button madar-button-ghost madar-button-small"
+                      style={{ color: '#f87171', padding: '4px 6px' }}
+                      title="حذف هذا الأمر المؤرشف نهائياً"
+                      aria-label={`حذف أمر الصيانة ${order.order_code}`}
+                      disabled={saving}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void deleteArchivedOrder(order);
+                      }}
+                    >🗑️</button>}
+                  </div>
+                </td>
               </tr>
             ))}</tbody>
           </table></div>
