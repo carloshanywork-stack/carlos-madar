@@ -357,7 +357,7 @@ function addMaintenanceCoverSlide(pptx, client, logo, primary, secondary, areaIn
   slide.addShape(pptx.ShapeType.roundRect, {
     x: 1.25, y: 4.6, w: 4.2, h: 0.45, rectRadius: 0.08, line: { color: 'BAE6FD' }, fill: { color: 'F0F9FF' },
   });
-  slide.addText(`فترة التقرير: ${reportPeriod || 'أكتوبر 2026'}`, {
+  slide.addText(`فترة التقرير: ${reportPeriod || 'غير محددة'}`, {
     x: 1.35, y: 4.68, w: 4.0, h: 0.28, fontFace: 'Arial', fontSize: 11, bold: true, color: primary, align: 'center',
   });
 
@@ -721,7 +721,6 @@ export async function buildMaintenancePptxExport(input, database = defaultDataba
       areaRows.entries.push(entry);
       rowsByArea.set(key, areaRows);
     }
-    const indexPagePlans = [];
     const orderedAreas = [...rowsByArea.values()].sort((left, right) => compareMaintenanceAreas(left.area, right.area));
     for (const areaRows of orderedAreas) {
       areaRows.entries.sort((left, right) => (
@@ -729,19 +728,8 @@ export async function buildMaintenancePptxExport(input, database = defaultDataba
         || String(left.order.order_code).localeCompare(String(right.order.order_code), undefined, { numeric: true, sensitivity: 'base' })
         || left.card.id - right.card.id
       ));
-      const pageCountForArea = Math.ceil(areaRows.entries.length / INDEX_ROWS_PER_SLIDE);
-      for (let page = 0; page < pageCountForArea; page += 1) {
-        indexPagePlans.push({
-          area: areaRows.area,
-          indexPage: page + 1,
-          indexPageCount: pageCountForArea,
-          slideNumber: 2 + indexPagePlans.length,
-          entries: areaRows.entries.slice(page * INDEX_ROWS_PER_SLIDE, (page + 1) * INDEX_ROWS_PER_SLIDE),
-        });
-      }
     }
-    const indexPageCount = indexPagePlans.length;
-    let slideCursor = 1 + indexPageCount;
+    let slideCursor = 1;
     let machineIndex = 0;
     const presentedRowsByKey = new Map();
     const presentationPlan = [];
@@ -756,6 +744,17 @@ export async function buildMaintenancePptxExport(input, database = defaultDataba
         entries: areaRows.entries,
         pageNumber: areaDividerPage,
       });
+      const indexPageCount = Math.ceil(areaRows.entries.length / INDEX_ROWS_PER_SLIDE);
+      for (let page = 0; page < indexPageCount; page += 1) {
+        presentationPlan.push({
+          type: 'area-index',
+          area: areaRows.area,
+          indexPage: page + 1,
+          indexPageCount,
+          pageNumber: ++slideCursor,
+          entries: areaRows.entries.slice(page * INDEX_ROWS_PER_SLIDE, (page + 1) * INDEX_ROWS_PER_SLIDE),
+        });
+      }
 
       let cardGroups = [{ groupName: '', entries: areaRows.entries }];
       if (groupBy === 'reason') {
@@ -786,10 +785,6 @@ export async function buildMaintenancePptxExport(input, database = defaultDataba
       }
     }
     const pageCount = slideCursor;
-    const indexPages = indexPagePlans.map((plan) => ({
-      ...plan,
-      rows: plan.entries.map((entry) => presentedRowsByKey.get(`${entry.order.id}:${entry.card.id}`)),
-    }));
     const areaIndex = orderedAreas.map((areaRows) => {
       const firstRow = presentedRowsByKey.get(`${areaRows.entries[0].order.id}:${areaRows.entries[0].card.id}`);
       return {
@@ -811,10 +806,6 @@ export async function buildMaintenancePptxExport(input, database = defaultDataba
       pageCount,
     );
 
-    for (const { rows, area, indexPage, indexPageCount: areaPageCount, slideNumber } of indexPages) {
-      addMaintenanceIndexSlide(pptx, rows, area, indexPage, areaPageCount, slideNumber, pageCount, primary);
-    }
-
     let renderedSlideCount = 0;
     for (const plannedSlide of presentationPlan) {
       renderedSlideCount += 1;
@@ -823,6 +814,20 @@ export async function buildMaintenancePptxExport(input, database = defaultDataba
       }
       if (plannedSlide.type === 'area-divider') {
         addAreaDividerSlide(pptx, plannedSlide.area, plannedSlide.entries, plannedSlide.pageNumber, pageCount, primary, secondary);
+        continue;
+      }
+      if (plannedSlide.type === 'area-index') {
+        const rows = plannedSlide.entries.map((entry) => presentedRowsByKey.get(`${entry.order.id}:${entry.card.id}`));
+        addMaintenanceIndexSlide(
+          pptx,
+          rows,
+          plannedSlide.area,
+          plannedSlide.indexPage,
+          plannedSlide.indexPageCount,
+          plannedSlide.pageNumber,
+          pageCount,
+          primary,
+        );
         continue;
       }
       if (plannedSlide.type === 'reason-divider') {

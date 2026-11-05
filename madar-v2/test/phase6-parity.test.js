@@ -623,7 +623,9 @@ test('V2 parity operations cover imports, area maintenance, HR, exports, users, 
   const coverSlide = (await readZipEntry(pptx.body, 'ppt/slides/slide1.xml')).toString('utf8');
   assert.match(coverSlide, new RegExp(`إجمالي الماكينات المشمولة: ${completedCardCount} ماكينة ATM`));
   assert.doesNotMatch(coverSlide, /PARITY-PENDING|ماكينة معلقة بدون صور/);
-  const perOrderIndex = (await readZipEntry(pptx.body, 'ppt/slides/slide2.xml')).toString('utf8');
+  const perOrderDivider = (await readZipEntry(pptx.body, 'ppt/slides/slide2.xml')).toString('utf8');
+  assert.match(perOrderDivider, /Cairo/);
+  const perOrderIndex = (await readZipEntry(pptx.body, 'ppt/slides/slide3.xml')).toString('utf8');
   assert.match(perOrderIndex, /فهرس الماكينات/);
   assert.match(perOrderIndex, /Cairo/);
   assert.match(perOrderIndex, /hlinkClick/, 'machine index numbers and slide numbers should be clickable');
@@ -668,7 +670,7 @@ test('V2 parity operations cover imports, area maintenance, HR, exports, users, 
   assert.ok(machineSlide.includes(reasonList.body[0].name), 'the filtered machine slide should show its maintenance reason under the machine name');
   const coverSlideXml = (await readZipEntry(bulkPptx.body, 'ppt/slides/slide1.xml')).toString('utf8');
   assert.match(coverSlideXml, /hlinkClick/, 'area page number on the cover should be clickable');
-  const indexSlideXml = (await readZipEntry(bulkPptx.body, 'ppt/slides/slide2.xml')).toString('utf8');
+  const indexSlideXml = (await readZipEntry(bulkPptx.body, 'ppt/slides/slide3.xml')).toString('utf8');
   assert.match(indexSlideXml, /hlinkClick/, 'machine number and page number should link to the machine slide');
   const exportedMedia = await Promise.all(bulkPptxEntries
     .filter((name) => name.startsWith('ppt/media/') && name.toLowerCase().endsWith('.jpeg'))
@@ -745,17 +747,17 @@ test('V2 parity operations cover imports, area maintenance, HR, exports, users, 
   const indexClient = await request('/api/clients', json('POST', { name: 'Index Pagination Client' }));
   assert.equal(indexClient.response.status, 201, JSON.stringify(indexClient.body));
   const indexOrder = await request('/api/maintenance/orders', json('POST', {
-    clientId: indexClient.body.id, area: 'Area Alpha', employeeIds: [], autoPopulateAreaMachines: false,
+    clientId: indexClient.body.id, area: 'الإسكندرية', employeeIds: [], autoPopulateAreaMachines: false,
   }));
   assert.equal(indexOrder.response.status, 201);
   const indexBetaOrder = await request('/api/maintenance/orders', json('POST', {
-    clientId: indexClient.body.id, area: 'Area Beta', employeeIds: [], autoPopulateAreaMachines: false,
+    clientId: indexClient.body.id, area: 'القاهرة الكبرى', employeeIds: [], autoPopulateAreaMachines: false,
   }));
   assert.equal(indexBetaOrder.response.status, 201);
   const indexPhoto = await writePptxPhotoFixture('Maintenance/Export Fixtures/index-photo.jpg');
   const indexFixtureCards = [];
-  for (const [area, count, prefix] of [['Area Alpha', 16, 'INDEX-ALPHA'], ['Area Beta', 1, 'INDEX-BETA']]) {
-    const areaOrder = area === 'Area Alpha' ? indexOrder : indexBetaOrder;
+  for (const [area, count, prefix] of [['الإسكندرية', 16, 'INDEX-ALEX'], ['القاهرة الكبرى', 1, 'INDEX-CAIRO']]) {
+    const areaOrder = area === 'الإسكندرية' ? indexOrder : indexBetaOrder;
     for (let index = 1; index <= count; index += 1) {
       const suffix = String(index).padStart(2, '0');
       const machine = await request('/api/maintenance/machines', json('POST', {
@@ -775,30 +777,35 @@ test('V2 parity operations cover imports, area maintenance, HR, exports, users, 
   assert.equal(areaPaginatedPptx.response.status, 200, JSON.stringify(areaPaginatedPptx.body));
   const areaPaginatedNames = zipEntryNames(areaPaginatedPptx.body);
   const areaPaginatedSlideNames = areaPaginatedNames.filter((name) => /^ppt\/slides\/slide\d+\.xml$/.test(name));
-  assert.equal(areaPaginatedSlideNames.length, 23, 'areas receive isolated index pages and machine slides');
-  const alphaIndexFirst = (await readZipEntry(areaPaginatedPptx.body, 'ppt/slides/slide2.xml')).toString('utf8');
-  const alphaIndexSecond = (await readZipEntry(areaPaginatedPptx.body, 'ppt/slides/slide3.xml')).toString('utf8');
-  const betaIndex = (await readZipEntry(areaPaginatedPptx.body, 'ppt/slides/slide4.xml')).toString('utf8');
-  assert.match(alphaIndexFirst, /Area Alpha/);
-  assert.match(alphaIndexFirst, /صفحة 1 من 2/);
-  assert.doesNotMatch(alphaIndexFirst, /INDEX-BETA/);
-  assert.match(alphaIndexSecond, /Area Alpha/);
-  assert.match(alphaIndexSecond, /صفحة 2 من 2/);
-  assert.doesNotMatch(alphaIndexSecond, /INDEX-BETA/);
-  assert.match(betaIndex, /Area Beta/);
-  assert.match(betaIndex, /صفحة 1 من 1/);
-  assert.doesNotMatch(betaIndex, /INDEX-ALPHA/);
-  const alphaIndexRels = (await readZipEntry(areaPaginatedPptx.body, 'ppt/slides/_rels/slide2.xml.rels')).toString('utf8');
-  assert.match(alphaIndexRels, /slide6\.xml/, 'machine index hyperlinks target the corresponding machine slide');
+  assert.equal(areaPaginatedSlideNames.length, 23, 'each region should contain a divider, its own index pages, and its machine slides');
+  const alexandriaDivider = (await readZipEntry(areaPaginatedPptx.body, 'ppt/slides/slide2.xml')).toString('utf8');
+  assert.match(alexandriaDivider, /الإسكندرية/);
+  assert.match(alexandriaDivider, /16 ماكينة ATM/);
+  assert.match(alexandriaDivider, /صفحة 2 من 23/);
+  const alexandriaIndexFirst = (await readZipEntry(areaPaginatedPptx.body, 'ppt/slides/slide3.xml')).toString('utf8');
+  const alexandriaIndexSecond = (await readZipEntry(areaPaginatedPptx.body, 'ppt/slides/slide4.xml')).toString('utf8');
+  assert.match(alexandriaIndexFirst, /الإسكندرية/);
+  assert.match(alexandriaIndexFirst, /صفحة 1 من 2/);
+  assert.doesNotMatch(alexandriaIndexFirst, /INDEX-CAIRO/);
+  assert.match(alexandriaIndexSecond, /الإسكندرية/);
+  assert.match(alexandriaIndexSecond, /صفحة 2 من 2/);
+  assert.doesNotMatch(alexandriaIndexSecond, /INDEX-CAIRO/);
+  const alexandriaIndexRels = (await readZipEntry(areaPaginatedPptx.body, 'ppt/slides/_rels/slide3.xml.rels')).toString('utf8');
+  assert.match(alexandriaIndexRels, /slide5\.xml/, 'machine index hyperlinks target machine slides after the region index');
   const areaCoverLinks = (await readZipEntry(areaPaginatedPptx.body, 'ppt/slides/_rels/slide1.xml.rels')).toString('utf8');
-  assert.match(areaCoverLinks, /slide5\.xml/, 'cover area navigation targets the mandatory area divider');
-  const alphaDivider = (await readZipEntry(areaPaginatedPptx.body, 'ppt/slides/slide5.xml')).toString('utf8');
-  assert.match(alphaDivider, /Area Alpha/);
-  assert.match(alphaDivider, /16 ماكينة ATM/);
-  assert.match(alphaDivider, /أوامر التشغيل/);
-  assert.match(alphaDivider, /صفحة 5 من 23/);
-  const alphaMachine = (await readZipEntry(areaPaginatedPptx.body, 'ppt/slides/slide6.xml')).toString('utf8');
-  assert.match(alphaMachine, /صفحة 6 من 23/);
+  assert.match(areaCoverLinks, /slide2\.xml/, 'cover navigation should target the first geographic area divider');
+  const cairoDivider = (await readZipEntry(areaPaginatedPptx.body, 'ppt/slides/slide21.xml')).toString('utf8');
+  assert.match(cairoDivider, /القاهرة الكبرى/);
+  assert.match(cairoDivider, /1 ماكينة ATM/);
+  assert.match(cairoDivider, /صفحة 21 من 23/);
+  const cairoIndex = (await readZipEntry(areaPaginatedPptx.body, 'ppt/slides/slide22.xml')).toString('utf8');
+  assert.match(cairoIndex, /القاهرة الكبرى/);
+  assert.match(cairoIndex, /صفحة 1 من 1/);
+  assert.doesNotMatch(cairoIndex, /INDEX-ALEX/);
+  const lastAlexandriaMachine = (await readZipEntry(areaPaginatedPptx.body, 'ppt/slides/slide20.xml')).toString('utf8');
+  assert.match(lastAlexandriaMachine, /صفحة 20 من 23/);
+  const cairoMachine = (await readZipEntry(areaPaginatedPptx.body, 'ppt/slides/slide23.xml')).toString('utf8');
+  assert.match(cairoMachine, /صفحة 23 من 23/);
   assert.equal(indexFixtureCards.length, 17);
 });
 
@@ -869,17 +876,17 @@ test('maintenance reasons support audited soft deactivation and area analysis ex
   assert.match(coverSlide, /Index of Covered Service Areas/);
   assert.match(coverSlide, /مدينة التحليل/);
   assert.match(coverSlide, /1 ماكينة/);
-  assert.match(coverSlide, /ص 3/);
+  assert.match(coverSlide, /ص 2/);
   assert.match(coverSlide, /البنك التجاري الدولي \(CIB\)/);
   assert.doesNotMatch(coverSlide, /MADAR|FIELD MAINTENANCE|رقم الأمر|عدد أوامر الصيانة|عدد الماكينات في التقرير|شهر التقرير/);
-  const indexSlide = (await readZipEntry(queryPptx.body, 'ppt/slides/slide2.xml')).toString('utf8');
+  const areaDividerSlide = (await readZipEntry(queryPptx.body, 'ppt/slides/slide2.xml')).toString('utf8');
+  assert.match(areaDividerSlide, /مدينة التحليل/);
+  assert.match(areaDividerSlide, /صفحة 2 من 5/);
+  const indexSlide = (await readZipEntry(queryPptx.body, 'ppt/slides/slide3.xml')).toString('utf8');
   assert.match(indexSlide, /فهرس الماكينات/);
   assert.match(indexSlide, /ANALYSIS-01/);
   assert.match(indexSlide, /صفحة/);
   assert.doesNotMatch(indexSlide, /سبب الصيانة/);
-  const areaDividerSlide = (await readZipEntry(queryPptx.body, 'ppt/slides/slide3.xml')).toString('utf8');
-  assert.match(areaDividerSlide, /مدينة التحليل/);
-  assert.match(areaDividerSlide, /صفحة 3 من 5/);
   const reasonDividerSlide = (await readZipEntry(queryPptx.body, 'ppt/slides/slide4.xml')).toString('utf8');
   assert.match(reasonDividerSlide, /الأسباب/);
   assert.match(reasonDividerSlide, /صفحة 4 من 5/);
@@ -1146,8 +1153,16 @@ test('area maintenance workbook paginates A4 pages and repeats banners and heade
 
 test('maintenance PPTX and Excel exports sort Arabic areas and machine codes naturally', async () => {
   assert.deepEqual(['1', '10', '2', '1045', '3'].sort(compareMachineCodes), ['1', '2', '3', '10', '1045']);
+  const geographicRoute = [
+    'الإسكندرية', 'الساحل الشمالي', 'مطروح', 'مدينة السادات',
+    'المنصورة', 'بورسعيد', 'دمياط', 'رأس البر', 'العاشر من رمضان', 'الإسماعيلية', 'السويس', 'العين السخنة',
+    'شبرا', 'مدينة نصر', 'التجمع الخامس', 'الدقي', 'الشيخ زايد',
+    'دهب', 'الغردقة', 'شمال الصعيد', 'جنوب الصعيد', 'مكان متفرق',
+  ];
+  assert.deepEqual([...geographicRoute].reverse().sort(compareMaintenanceAreas), geographicRoute,
+    'recognized service areas should follow the Egypt north-to-south route and unknown locations should come last');
 
-  const expectedAreas = ['إسكندرية', 'تجمع', 'سويس'];
+  const expectedAreas = ['إسكندرية', 'سويس', 'تجمع'];
   const sortedCodes = ['SORT-1', 'SORT-2', 'SORT-3', 'SORT-10', 'SORT-1045'];
   const machineFixtures = [
     { code: 'SORT-10', area: 'سويس' },
@@ -1213,8 +1228,8 @@ test('maintenance PPTX and Excel exports sort Arabic areas and machine codes nat
   const fixtureAnalysisRows = analysisRows.slice(1).filter((row) => machineFixtures.some((fixture) => fixture.code === row[1]));
   assert.deepEqual(fixtureAnalysisRows.map((row) => [row[0], row[1]]), [
     ['إسكندرية', 'ALEX-1'],
-    ['تجمع', 'TAJAMO-1'],
     ...sortedCodes.map((code) => ['سويس', code]),
+    ['تجمع', 'TAJAMO-1'],
   ]);
 
   const pptxResponse = await request('/api/maintenance/export/pptx', json('POST', {
@@ -1225,6 +1240,8 @@ test('maintenance PPTX and Excel exports sort Arabic areas and machine codes nat
   const slideNames = zipEntryNames(pptxResponse.body)
     .filter((name) => /^ppt\/slides\/slide\d+\.xml$/u.test(name))
     .sort((left, right) => Number(left.match(/slide(\d+)/u)[1]) - Number(right.match(/slide(\d+)/u)[1]));
+  const singleMonthCover = (await readZipEntry(pptxResponse.body, 'ppt/slides/slide1.xml')).toString('utf8');
+  assert.match(singleMonthCover, /فترة التقرير: أبريل 2031/);
   const indexPages = [];
   for (const slideName of slideNames) {
     const slideXml = (await readZipEntry(pptxResponse.body, slideName)).toString('utf8');
@@ -1247,8 +1264,31 @@ test('maintenance PPTX and Excel exports sort Arabic areas and machine codes nat
     const match = title?.match(/^Sorter (.+) • /u);
     if (match) pptxMachineCodes.push(match[1]);
   }
-  assert.deepEqual(pptxMachineCodes, ['ALEX-1', 'TAJAMO-1', ...sortedCodes]);
+  assert.deepEqual(pptxMachineCodes, ['ALEX-1', ...sortedCodes, 'TAJAMO-1']);
   assert.deepEqual([...machineIdsByCode.keys()].sort(compareMachineCodes).filter((code) => sortedCodes.includes(code)), sortedCodes);
+
+  const mayOrder = await request('/api/maintenance/orders', json('POST', {
+    clientId: client.body.id,
+    areas: ['تجمع'],
+    employeeIds: [],
+    autoPopulateAreaMachines: true,
+  }));
+  assert.equal(mayOrder.response.status, 201, JSON.stringify(mayOrder.body));
+  const mayCard = mayOrder.body.cards.find((card) => card.machine_id === machineIdsByCode.get('TAJAMO-1'));
+  assert.ok(mayCard, 'the second selected order should include its Cairo-area machine');
+  db.prepare("UPDATE maintenance_cards SET status = 'completed', before_photos_json = ? WHERE id = ?")
+    .run(JSON.stringify([sortingPhoto.path]), mayCard.id);
+  db.prepare(`UPDATE maintenance_orders
+    SET status = 'archived', archived_at = '2031-05-02 12:00:00', updated_at = '2031-05-02 12:00:00'
+    WHERE id = ?`).run(mayOrder.body.id);
+  const multiMonthPptx = await request('/api/maintenance/export/pptx', json('POST', {
+    orderIds: [order.body.id, mayOrder.body.id],
+    groupBy: 'area',
+  }));
+  assert.equal(multiMonthPptx.response.status, 200, JSON.stringify(multiMonthPptx.body));
+  const multiMonthCover = (await readZipEntry(multiMonthPptx.body, 'ppt/slides/slide1.xml')).toString('utf8');
+  assert.match(multiMonthCover, /فترة التقرير: أبريل 2031 – مايو 2031/,
+    'the cover should show the actual distinct selected-order months as a range');
 });
 
 test('maintenance PowerPoint export exposes live machine progress and a final completion state', async () => {
