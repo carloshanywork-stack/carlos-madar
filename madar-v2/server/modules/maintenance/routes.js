@@ -1,11 +1,12 @@
 import { Router } from 'express';
 import { readFile } from 'node:fs/promises';
 import { extname } from 'node:path';
-import { asyncHandler, HttpError } from '../http.js';
+import { allowOnlyKeys, asyncHandler, HttpError, requireObject, requireText } from '../http.js';
 import { diskUpload, memoryUpload } from '../upload.js';
 import { requestActorId } from '../actor.js';
 import { publishOperationsEvent } from '../operations-events.js';
 import { getMaintenanceThumbnail } from './thumbnails.js';
+import { applyPhotoRotation } from './photo-images.js';
 import { ensureStorageDirectory, listStorageDirectories, removeStorageFile } from '../storage.js';
 import {
   downloadReport,
@@ -39,8 +40,9 @@ import {
   getMachineCorrectionEvidence,
   getMachineCorrectionCodeCandidates,
   getMachineCorrectionRequests,
+  getMachineNotesHistory,
   getMachineMap,
-  getMaintenancePhoto,
+  getMaintenancePhotoDetails,
   getUnmatchedMaintenancePhoto,
   importMachines,
   importMaintenanceServerFolder,
@@ -52,7 +54,9 @@ import {
   moveCardPhoto,
   populateMaintenanceOrderArea,
   replaceMaintenanceOrderRepresentatives,
+  rotateMaintenanceCardPhoto,
   setMachineGeofenceLocation,
+  recordMachineNote,
   resolveMachineCorrection,
   processMaintenanceTripFolder,
   previewMachineImport,
@@ -103,6 +107,14 @@ function requireRole(role) {
   };
 }
 
+function requireAdminOrOperations(req, res, next) {
+  if (!['admin', 'operations'].includes(req.user?.role)) {
+    res.status(403).json({ error: 'Administrator or Operations access is required.' });
+    return;
+  }
+  next();
+}
+
 function explorerPath(value) {
   if (value === undefined || value === '') return '';
   if (typeof value !== 'string' || value.length > 1024 || value.includes('\\') || value.includes('\0')) {
@@ -120,7 +132,27 @@ router.get('/areas', (req, res) => {
 });
 
 router.get('/area-notes/export.xlsx', asyncHandler(async (req, res) => {
-  const workbook = await buildAreaMaintenanceNotesWorkbook({ area: req.query.area });
+  const onlyNotesParameter = req.query.onlyNotes;
+  const allMachinesParameter = req.query.allMachines;
+  const historyMode = req.query.historyMode ?? 'latest';
+  if (onlyNotesParameter !== undefined && !['true', 'false'].includes(onlyNotesParameter)) {
+    throw new HttpError(400, 'onlyNotes must be true or false.');
+  }
+  if (allMachinesParameter !== undefined && !['true', 'false'].includes(allMachinesParameter)) {
+    throw new HttpError(400, 'allMachines must be true or false.');
+  }
+  if (!['latest', 'all'].includes(historyMode)) {
+    throw new HttpError(400, 'historyMode must be latest or all.');
+  }
+  const onlyNotes = allMachinesParameter === 'true'
+    ? false
+    : onlyNotesParameter === undefined || onlyNotesParameter === 'true';
+  const workbook = await buildAreaMaintenanceNotesWorkbook({
+    area: req.query.area,
+    machineId: req.query.machineId,
+    onlyNotes,
+    historyMode,
+  });
   res.set({
     'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     'Content-Disposition': 'attachment; filename="Madar-Area-Maintenance.xlsx"',
@@ -129,7 +161,7 @@ router.get('/area-notes/export.xlsx', asyncHandler(async (req, res) => {
 }));
 
 router.get('/area-notes', (req, res, next) => {
-  try { res.json(getAreaMaintenanceNotes()); }
+  try { res.json(getAreaMaintenanceNotes(req.query)); }
   catch (error) { next(error); }
 });
 
@@ -246,8 +278,27 @@ router.delete('/machines/:id', (req, res, next) => {
   catch (error) { next(error); }
 });
 
-router.delete('/machines/:id/maintenance-note', (req, res, next) => {
+router.delete('/machines/:id/maintenance-note', requireRole('admin'), (req, res, next) => {
   try { res.json(clearMachineMaintenanceNotes(req.params.id, requestActorId(req))); }
+  catch (error) { next(error); }
+});
+
+router.put('/machines/:id/maintenance-note', requireRole('admin'), (req, res, next) => {
+  try {
+    const body = requireObject(req.body);
+    allowOnlyKeys(body, ['notes']);
+    const note = requireText(body.notes, 'notes', { maxLength: 2000 });
+    res.json(recordMachineNote({ machineId: req.params.id, note, actorId: requestActorId(req) }));
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/machines/:id/notes-history', (req, res, next) => {
+  try {
+    res.set(NO_CACHE_HEADERS);
+    res.json(getMachineNotesHistory(req.params.id));
+  }
   catch (error) { next(error); }
 });
 
@@ -483,6 +534,15 @@ router.post('/orders/:id/cards/:cardId/photos/move', asyncHandler(async (req, re
   ));
 }));
 
+router.post('/orders/:id/cards/:cardId/photos/rotate', requireAdminOrOperations, asyncHandler(async (req, res) => {
+  res.json(await rotateMaintenanceCardPhoto(
+    req.params.id,
+    req.params.cardId,
+    req.body,
+    requestActorId(req),
+  ));
+}));
+
 router.post('/orders/:id/cards/:cardId/photos/:phase', photoUpload, asyncHandler(async (req, res) => {
   res.status(201).json(await uploadMaintenancePhoto(
     req.params.id,
@@ -504,13 +564,13 @@ router.delete('/orders/:id/cards/:cardId/photos/:phase/:filename', asyncHandler(
 }));
 
 router.get('/orders/:id/cards/:cardId/photos/:phase/:filename', asyncHandler(async (req, res) => {
-  const absolutePath = await getMaintenancePhoto(
+  const photo = await getMaintenancePhotoDetails(
     req.params.id,
     req.params.cardId,
     req.params.phase,
     req.params.filename,
   );
-  const type = {
+  let type = {
     '.jpg': 'image/jpeg',
     '.jpeg': 'image/jpeg',
     '.png': 'image/png',
@@ -518,18 +578,23 @@ router.get('/orders/:id/cards/:cardId/photos/:phase/:filename', asyncHandler(asy
     '.heic': 'image/heic',
     '.heif': 'image/heif',
   }[extname(req.params.filename).toLowerCase()];
+  let content = await readFile(photo.absolutePath);
+  if (photo.rotation) {
+    content = await applyPhotoRotation(content, photo.rotation);
+    type = 'image/jpeg';
+  }
   res.set({ ...NO_CACHE_HEADERS, 'Content-Type': type, 'X-Content-Type-Options': 'nosniff' });
-  res.send(await readFile(absolutePath));
+  res.send(content);
 }));
 
 router.get('/orders/:id/cards/:cardId/photos/:phase/:filename/thumbnail', asyncHandler(async (req, res) => {
-  const absolutePath = await getMaintenancePhoto(
+  const photo = await getMaintenancePhotoDetails(
     req.params.id,
     req.params.cardId,
     req.params.phase,
     req.params.filename,
   );
-  const thumbnail = await getMaintenanceThumbnail(absolutePath);
+  const thumbnail = await getMaintenanceThumbnail(photo.absolutePath, photo.rotation);
   res.set({
     'Content-Type': 'image/webp',
     ...NO_CACHE_HEADERS,
@@ -538,6 +603,10 @@ router.get('/orders/:id/cards/:cardId/photos/:phase/:filename/thumbnail', asyncH
 }));
 
 router.patch('/orders/:id/cards/:cardId', asyncHandler(async (req, res) => {
+  if ((req.body?.reasonId !== undefined || req.body?.reasonIds !== undefined)
+    && !['admin', 'operations'].includes(req.user?.role)) {
+    throw new HttpError(403, 'Administrator or Operations access is required to edit maintenance reasons.');
+  }
   res.json(await updateMaintenanceCard(
     req.params.id,
     req.params.cardId,
@@ -565,7 +634,16 @@ router.post('/orders/:id/archive', (req, res, next) => {
 router.get('/orders/:id', (req, res, next) => {
   try {
     res.set(NO_CACHE_HEADERS);
-    res.json({ ...getMaintenanceOrder(req.params.id), canAssignRepresentatives: req.user?.role === 'admin' });
+    const order = getMaintenanceOrder(req.params.id);
+    res.json({
+      ...order,
+      canAssignRepresentatives: req.user?.role === 'admin',
+      canDelete: req.user?.role === 'admin' && order.status === 'review',
+      canEditReasons: ['admin', 'operations'].includes(req.user?.role)
+        && (order.status !== 'archived' || req.user?.role === 'admin'),
+      canRotatePhotos: ['admin', 'operations'].includes(req.user?.role)
+        && (order.status !== 'archived' || req.user?.role === 'admin'),
+    });
   } catch (error) {
     next(error);
   }

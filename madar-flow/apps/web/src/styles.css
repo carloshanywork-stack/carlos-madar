@@ -1,0 +1,90 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family:
+    "IBM Plex Sans Arabic",
+    "Noto Sans Arabic",
+    "Segoe UI",
+    system-ui,
+    sans-serif;
+  background-color: #020617;
+  color: #e2e8f0;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+::selection {
+  background: rgb(56 189 248 / 0.3);
+}
+
+/* React Flow — dark theme integration */
+.react-flow {
+  --xy-background-color: #020617;
+  --xy-edge-stroke: #64748b;
+  --xy-edge-stroke-selected: #38bdf8;
+  --xy-connectionline-stroke: #38bdf8;
+  --xy-attribution-background-color: transparent;
+}
+
+.react-flow__attribution {
+  display: none;
+}
+
+.react-flow__controls button {
+  background: #0f172a;
+  border-bottom: 1px solid rgb(255 255 255 / 0.08);
+  color: #cbd5e1;
+}
+
+.react-flow__controls button:hover {
+  background: #1e293b;
+}
+
+.react-flow__controls button svg {
+  fill: currentColor;
+}
+
+.react-flow__minimap {
+  background: #0f172a !important;
+}
+
+.react-flow__handle {
+  transition: transform 120ms ease;
+}
+
+.react-flow__handle:hover {
+  transform: scale(1.25);
+}
+
+.react-flow__edge.selected .react-flow__edge-path {
+  stroke: #38bdf8;
+}
+
+/* Scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #1e293b transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: #1e293b;
+  border-radius: 999px;
+}

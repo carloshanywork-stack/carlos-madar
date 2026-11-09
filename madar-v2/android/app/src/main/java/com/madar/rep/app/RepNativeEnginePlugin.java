@@ -82,7 +82,7 @@ public final class RepNativeEnginePlugin extends Plugin {
     public void requestBackgroundPermission(PluginCall call) {
         getContext().getSharedPreferences("madar_rep_permissions", Context.MODE_PRIVATE)
             .edit().putBoolean("background_request_made", true).apply();
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || hasPermission(Manifest.permission.ACCESS_BACKGROUND_LOCATION)) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || isGranted(Manifest.permission.ACCESS_BACKGROUND_LOCATION)) {
             call.resolve(permissionState());
             return;
         }
@@ -112,11 +112,11 @@ public final class RepNativeEnginePlugin extends Plugin {
 
     private JSObject permissionState() {
         JSObject state = new JSObject();
-        state.put("camera", hasPermission(Manifest.permission.CAMERA));
-        state.put("fineLocation", hasPermission(Manifest.permission.ACCESS_FINE_LOCATION));
-        state.put("coarseLocation", hasPermission(Manifest.permission.ACCESS_COARSE_LOCATION));
-        state.put("backgroundLocation", Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || hasPermission(Manifest.permission.ACCESS_BACKGROUND_LOCATION));
-        state.put("notifications", Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU || hasPermission(Manifest.permission.POST_NOTIFICATIONS));
+        state.put("camera", isGranted(Manifest.permission.CAMERA));
+        state.put("fineLocation", isGranted(Manifest.permission.ACCESS_FINE_LOCATION));
+        state.put("coarseLocation", isGranted(Manifest.permission.ACCESS_COARSE_LOCATION));
+        state.put("backgroundLocation", Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || isGranted(Manifest.permission.ACCESS_BACKGROUND_LOCATION));
+        state.put("notifications", Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU || isGranted(Manifest.permission.POST_NOTIFICATIONS));
         state.put("biometricAvailable", RepBiometricAuth.isAvailable(getContext()));
         state.put("biometricStatus", RepBiometricAuth.availability(getContext()));
         state.put("sdkInt", Build.VERSION.SDK_INT);
@@ -128,7 +128,7 @@ public final class RepNativeEnginePlugin extends Plugin {
         return state;
     }
 
-    private boolean hasPermission(String permission) {
+    private boolean isGranted(String permission) {
         return ContextCompat.checkSelfPermission(getContext(), permission) == PackageManager.PERMISSION_GRANTED;
     }
 

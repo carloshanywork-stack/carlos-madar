@@ -853,6 +853,7 @@ function recordReceivedVisit(rep, visit, visitId, photoRows, database) {
         machine_condition: visit.machineCondition,
         card_id: visit.cardId,
         reason_ids: visit.reasonIds,
+        notes: visit.notes,
         captured_at: visit.capturedAt,
         before_captured_at: visit.beforeCapturedAt,
         after_captured_at: visit.afterCapturedAt,
@@ -862,17 +863,44 @@ function recordReceivedVisit(rep, visit, visitId, photoRows, database) {
         review_status: 'pending',
       },
     });
+    const receivedVisit = findVisit(visit.visitUuid, database);
     const card = database.prepare(`
-      SELECT before_photos_json, after_photos_json FROM maintenance_cards WHERE id = ? AND order_id = ?
-    `).get(visit.cardId, findVisit(visit.visitUuid, database).order_id);
+      SELECT before_photos_json, after_photos_json, notes FROM maintenance_cards
+      WHERE id = ? AND order_id = ? AND machine_id = ? AND deleted_at IS NULL
+    `).get(receivedVisit.card_id, receivedVisit.order_id, receivedVisit.machine_id);
     if (!card) throw new HttpError(409, 'The maintenance card was removed while the visit was uploading.');
-    database.prepare('UPDATE maintenance_cards SET updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(visit.cardId);
+    const submittedNote = String(visit.notes ?? '').trim();
+    if (submittedNote) {
+      const user = database.prepare('SELECT full_name FROM users WHERE id = ? AND role = \'rep\'').get(rep.id);
+      const noteUpdate = database.prepare(`
+        UPDATE maintenance_cards SET notes = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ? AND order_id = ? AND machine_id = ? AND deleted_at IS NULL
+      `).run(submittedNote, receivedVisit.card_id, receivedVisit.order_id, receivedVisit.machine_id);
+      if (noteUpdate.changes !== 1) throw new HttpError(409, 'The maintenance card changed while the visit was uploading.');
+      database.prepare(`
+        INSERT INTO machine_notes_history
+          (machine_id, card_id, order_id, author_id, author_name, author_role, note)
+        VALUES (?, ?, ?, ?, ?, 'rep', ?)
+      `).run(receivedVisit.machine_id, receivedVisit.card_id, receivedVisit.order_id, rep.id,
+        user?.full_name ?? 'مندوب ميداني', submittedNote);
+      recordAudit({
+        database,
+        actorId: rep.id,
+        action: 'update_notes',
+        entityType: 'maintenance_card',
+        entityId: receivedVisit.card_id,
+        oldValues: { notes: card.notes ?? '' },
+        newValues: { notes: submittedNote, visit_uuid: visit.visitUuid },
+      });
+    } else {
+      database.prepare('UPDATE maintenance_cards SET updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(receivedVisit.card_id);
+    }
     recordAudit({
       database,
       actorId: rep.id,
       action: 'rep_photos_attached',
       entityType: 'maintenance_card',
-      entityId: visit.cardId,
+      entityId: receivedVisit.card_id,
       oldValues: {
         before_photo_count: parsePhotoList(card.before_photos_json).length,
         after_photo_count: parsePhotoList(card.after_photos_json).length,

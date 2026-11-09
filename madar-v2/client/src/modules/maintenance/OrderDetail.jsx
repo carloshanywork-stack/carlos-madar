@@ -125,7 +125,7 @@ export default function MaintenanceOrderDetail() {
   const [selectedAreaFilter, setSelectedAreaFilter] = useState('all');
   const [matchedSearch, setMatchedSearch] = useState('');
   const [cardSort, setCardSort] = useState('name_asc');
-  const [, setCardDrafts] = useState({});
+  const [cardDrafts, setCardDrafts] = useState({});
   const [expandedFolderIds, setExpandedFolderIds] = useState(() => new Set());
   const [expandedCardIds, setExpandedCardIds] = useState(() => new Set());
   const [actionError, setActionError] = useState('');
@@ -453,18 +453,24 @@ export default function MaintenanceOrderDetail() {
     finally { setSaving(false); }
   }
 
-  async function handleDeleteArchivedOrder() {
+  async function handleDeleteReviewOrder() {
     const confirmed = window.confirm(
-      `هل أنت متأكد من حذف أمر الصيانة (${order.order_code}) نهائياً؟\n\n- ستُزال صور وفولدرات الأمر من الأرشيف.\n- سيُحذف الأمر من القوائم مع الاحتفاظ بسجل تاريخي آمن.\n- لا يمكن التراجع عن هذه الخطوة من الواجهة.`,
+      `هل تريد حذف طلب الصيانة ${order.order_code} من الطلبات النشطة؟\n\nسيتم إخفاء الطلب فقط، مع الاحتفاظ بسجل التدقيق والبطاقات والصور والقيود المرتبطة به. الطلبات المؤرشفة لا يمكن حذفها.`,
     );
     if (!confirmed) return;
     setSaving(true);
     try {
+      const failedCardIds = await flushPendingCardSaves();
+      if (failedCardIds.size) {
+        showToast('تعذر حفظ بعض تعديلات بطاقات الفحص؛ لم يتم حذف الطلب.', 'error');
+        return;
+      }
       await api.delete(`/api/maintenance/orders/${id}`);
-      showToast(`تم حذف أمر الصيانة ${order.order_code} من الأرشيف.`);
+      showToast(`تم حذف طلب الصيانة ${order.order_code} مع الاحتفاظ بسجله وملفاته.`);
       navigate('/maintenance');
     } catch (caught) {
       showToast(errorMessage(caught), 'error');
+    } finally {
       setSaving(false);
     }
   }
@@ -939,7 +945,7 @@ export default function MaintenanceOrderDetail() {
                 <Select
                   label="أوامر / أسباب الصيانة *"
                   value=""
-                  disabled={saving || (order.status === 'archived' && !order.canAssignRepresentatives)}
+                  disabled={saving || !order.canEditReasons}
                   onChange={(event) => {
                     addCardReason(card, event.target.value);
                     event.target.value = '';
@@ -991,10 +997,10 @@ export default function MaintenanceOrderDetail() {
                         }}
                       >
                         <span>{name}</span>
-                        <button
+                        {order.canEditReasons && <button
                           type="button"
                           onClick={() => removeCardReason(card, rid)}
-                          disabled={saving || (order.status === 'archived' && !order.canAssignRepresentatives)}
+                          disabled={saving}
                           style={{
                             background: 'transparent',
                             border: 'none',
@@ -1009,7 +1015,7 @@ export default function MaintenanceOrderDetail() {
                           title="إزالة هذا الأمر"
                         >
                           ×
-                        </button>
+                        </button>}
                       </span>
                     );
                   })}
@@ -1117,6 +1123,13 @@ export default function MaintenanceOrderDetail() {
           {order.canAssignRepresentatives && order.status !== 'archived' && <Button variant="secondary" icon="users" onClick={() => { setRepresentativeError(''); setRepresentativesOpen(true); }}>تعيين المندوبين</Button>}
           {order.status === 'in_progress' && <Button icon="check" disabled={saving} onClick={transitionToReview}>إرسال للمراجعة</Button>}
           {order.status === 'review' && <Button icon="archive" onClick={() => { setExpenseError(''); setArchiveOpen(true); }}>أرشفة وتسوية العهدة</Button>}
+          {order.canDelete && <Button
+            variant="danger"
+            icon="trash"
+            disabled={saving}
+            onClick={handleDeleteReviewOrder}
+            title="حذف الطلب من القائمة مع الاحتفاظ بسجله وملفاته"
+          >حذف الطلب</Button>}
           <Button variant="secondary" icon="file" onClick={() => { window.location.href = `/api/maintenance/orders/${id}/export.docx`; }}>تقرير Word</Button>
           {order.status === 'archived' && order.canAssignRepresentatives && <>
             <Button
@@ -1126,14 +1139,6 @@ export default function MaintenanceOrderDetail() {
               onClick={handleUnarchiveOrder}
               title="إعادة فتح الأمر للتعديل الشامل ورفع أو تعديل الصور"
             >🔄 إعادة فتح للتعديل</Button>
-            <Button
-              variant="danger"
-              icon="trash"
-              disabled={saving}
-              onClick={handleDeleteArchivedOrder}
-              style={{ background: 'rgba(239, 68, 68, 0.2)', color: '#f87171', border: '1px solid #b91c1c' }}
-              title="حذف هذا الأمر المؤرشف وجميع ملفاته من الأرشيف"
-            >🗑️ حذف أمر الصيانة</Button>
           </>}
         </div>
       </section>
@@ -1636,9 +1641,20 @@ export default function MaintenanceOrderDetail() {
           onMovePhoto={handleMovePhoto}
           onDeletePhoto={handleDeletePhoto}
           onEditMachineCode={openMachineCodeEditor}
+          orderId={id}
+          reasons={reasons}
+          cardDrafts={cardDrafts}
+          onUpdateReasons={(card, reasonIds) => {
+            const draft = getCardDraft(card);
+            return saveCardFields(card, reasonIds, draft.notes);
+          }}
+          onShowToast={showToast}
           machineCodeEditorOpen={Boolean(machineCodeCard)}
           disabled={saving || order.status === 'archived'}
           canEditMachineCode={order.status !== 'archived'}
+          canEditReasons={order.canEditReasons === true}
+          canRotatePhotos={order.canRotatePhotos === true}
+          rotationBusy={saving}
         />
       )}
       <Toast notice={notice} onClose={clearToast} />
@@ -1798,7 +1814,28 @@ function PhotoPhase({ title, phase, urls, thumbnailUrls, photoMetadata = {}, car
   );
 }
 
-function PhotoLightboxModal({ lightboxState, onClose, cards, onMovePhoto, onDeletePhoto, onEditMachineCode, machineCodeEditorOpen, disabled, canEditMachineCode = true }) {
+function PhotoLightboxModal({
+  lightboxState,
+  onClose,
+  cards,
+  onMovePhoto,
+  onDeletePhoto,
+  onEditMachineCode,
+  onUpdateReasons,
+  onShowToast,
+  machineCodeEditorOpen,
+  disabled,
+  canEditMachineCode = true,
+  canEditReasons = false,
+  canRotatePhotos = false,
+  rotationBusy = false,
+  orderId,
+  reasons = [],
+  cardDrafts = {},
+}) {
+  const [rotationAngle, setRotationAngle] = useState(0);
+  const [isRotating, setIsRotating] = useState(false);
+  const [photoCacheBuster, setPhotoCacheBuster] = useState(0);
   const currentCardIndex = lightboxState
     ? cards.findIndex((card) => card.id === lightboxState.cardId)
     : -1;
@@ -1815,6 +1852,16 @@ function PhotoLightboxModal({ lightboxState, onClose, cards, onMovePhoto, onDele
     photo.phase === lightboxState?.phase && photo.index === lightboxState?.photoIndex
   ));
   const currentPhoto = currentPhotoIndex >= 0 ? allPhotos[currentPhotoIndex] : allPhotos[0] ?? null;
+  const currentPhotoKey = currentPhoto
+    ? `${currentCard?.id}:${currentPhoto.phase}:${currentPhoto.url}`
+    : '';
+  const currentReasonIds = cardDrafts[currentCard?.id]?.reasonIds
+    ?? currentCard?.reason_ids
+    ?? (currentCard?.reason_id ? [currentCard.reason_id] : []);
+
+  useEffect(() => {
+    setRotationAngle(0);
+  }, [currentPhotoKey]);
 
   function goToMachine(targetCard) {
     if (!targetCard) return;
@@ -1894,6 +1941,25 @@ function PhotoLightboxModal({ lightboxState, onClose, cards, onMovePhoto, onDele
     onClose({ cardId: currentCard.id, phase: nextPhoto.phase, photoIndex: indexAfterRemoval });
   }
 
+  async function saveCurrentPhotoRotation() {
+    if (!currentPhoto || !rotationAngle || !canRotatePhotos || isRotating) return;
+    setIsRotating(true);
+    try {
+      await api.post(`/api/maintenance/orders/${orderId}/cards/${currentCard.id}/photos/rotate`, {
+        phase: currentPhoto.phase,
+        filename: currentFilename,
+        angle: rotationAngle,
+      });
+      setRotationAngle(0);
+      setPhotoCacheBuster(Date.now());
+      onShowToast?.('تم حفظ اتجاه الصورة بالطول بنجاح.');
+    } catch (caught) {
+      onShowToast?.(errorMessage(caught), 'error');
+    } finally {
+      setIsRotating(false);
+    }
+  }
+
   return (
     <div
       className="madar-lightbox-backdrop"
@@ -1959,6 +2025,57 @@ function PhotoLightboxModal({ lightboxState, onClose, cards, onMovePhoto, onDele
           >
             {currentPhoto.phaseLabel} ({currentPhoto.index + 1} من {phasePhotoCount})
           </span>
+          <div
+            style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}
+            aria-label="أوامر وأسباب الصيانة"
+          >
+            <strong style={{ fontSize: '11px', color: '#cbd5e1' }}>أسباب الصيانة:</strong>
+            {canEditReasons && (
+              <select
+                aria-label="إضافة أمر أو سبب صيانة"
+                value=""
+                onChange={(event) => {
+                  const reasonId = Number(event.target.value);
+                  if (reasonId && !currentReasonIds.includes(reasonId)) {
+                    onUpdateReasons?.(currentCard, [...currentReasonIds, reasonId]);
+                  }
+                }}
+                style={{ minWidth: '180px', maxWidth: 'min(300px, 70vw)', fontSize: '12px', padding: '4px 8px' }}
+              >
+                <option value="">+ إضافة أمر / سبب صيانة...</option>
+                {(reasons ?? []).filter((reason) => !currentReasonIds.includes(Number(reason.id))).map((reason) => (
+                  <option key={reason.id} value={reason.id}>{reason.name}</option>
+                ))}
+              </select>
+            )}
+            <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+              {currentReasonIds.map((reasonId) => {
+                const reasonName = (reasons ?? []).find((reason) => Number(reason.id) === Number(reasonId))?.name
+                  ?? `أمر صيانة #${reasonId}`;
+                return (
+                  <span
+                    key={reasonId}
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '2px 8px',
+                      borderRadius: '12px', fontSize: '11px', background: 'rgba(56, 189, 248, 0.15)',
+                      color: '#38bdf8', border: '1px solid rgba(56, 189, 248, 0.3)',
+                    }}
+                  >
+                    {reasonName}
+                    {canEditReasons && (
+                      <button
+                        type="button"
+                        onClick={() => onUpdateReasons?.(currentCard, currentReasonIds.filter((id) => Number(id) !== Number(reasonId)))}
+                        title="إزالة هذا السبب"
+                        aria-label={`إزالة سبب الصيانة ${reasonName}`}
+                        style={{ background: 'none', border: 'none', color: '#f87171', cursor: 'pointer', padding: 0 }}
+                      >✕</button>
+                    )}
+                  </span>
+                );
+              })}
+            </div>
+          </div>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
@@ -2006,6 +2123,44 @@ function PhotoLightboxModal({ lightboxState, onClose, cards, onMovePhoto, onDele
             </>
           )}
 
+          {canRotatePhotos && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className="madar-button madar-button-small madar-button-secondary"
+                disabled={isRotating || rotationBusy}
+                onClick={() => setRotationAngle((previous) => (previous + 270) % 360)}
+                title="تدوير يسار 90 درجة"
+                aria-label="تدوير يسار 90 درجة"
+              >⟲ 90°</button>
+              <button
+                type="button"
+                className="madar-button madar-button-small madar-button-secondary"
+                disabled={isRotating || rotationBusy}
+                onClick={() => setRotationAngle((previous) => (previous + 90) % 360)}
+                title="تدوير يمين 90 درجة"
+                aria-label="تدوير يمين 90 درجة"
+              >⟳ 90°</button>
+              <button
+                type="button"
+                className="madar-button madar-button-small madar-button-secondary"
+                disabled={isRotating || rotationBusy}
+                onClick={() => setRotationAngle((previous) => (previous + 180) % 360)}
+                title="تدوير 180 درجة"
+                aria-label="تدوير 180 درجة"
+              >⇅ 180°</button>
+              {rotationAngle !== 0 && (
+                <button
+                  type="button"
+                  className="madar-button madar-button-small"
+                  disabled={isRotating || rotationBusy}
+                  onClick={() => { void saveCurrentPhotoRotation(); }}
+                  title="حفظ اتجاه الصورة"
+                >{isRotating ? 'جارٍ الحفظ…' : '💾 حفظ الاتجاه'}</button>
+              )}
+            </div>
+          )}
+
           <button
             type="button"
             className="madar-button-icon"
@@ -2031,9 +2186,13 @@ function PhotoLightboxModal({ lightboxState, onClose, cards, onMovePhoto, onDele
         </button>
         <div style={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', minWidth: 0 }}>
           <img
-            src={currentPhoto.url}
+            src={`${currentPhoto.url}${photoCacheBuster ? `${currentPhoto.url.includes('?') ? '&' : '?'}t=${photoCacheBuster}` : ''}`}
             alt={`${currentCard.machine_name_ar} - ${currentPhoto.phaseLabel}`}
-            style={{ maxWidth: '85vw', maxHeight: '70vh', objectFit: 'contain', borderRadius: '12px', boxShadow: '0 20px 40px rgba(0, 0, 0, 0.7)', border: '1px solid rgba(255, 255, 255, 0.1)' }}
+            style={{
+              maxWidth: '85vw', maxHeight: '70vh', objectFit: 'contain', borderRadius: '12px',
+              boxShadow: '0 20px 40px rgba(0, 0, 0, 0.7)', border: '1px solid rgba(255, 255, 255, 0.1)',
+              transform: `rotate(${rotationAngle}deg)`, transition: 'transform 0.25s ease-in-out',
+            }}
           />
         </div>
         <button

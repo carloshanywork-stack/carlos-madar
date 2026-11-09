@@ -584,11 +584,34 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   assert.equal(JSON.parse(savedCard.before_photos_json).length, 1);
   assert.equal(JSON.parse(savedCard.after_photos_json).length, 0);
   assert.deepEqual(JSON.parse(savedCard.reason_ids_json), []);
-  assert.equal(savedCard.notes, null);
+  assert.equal(savedCard.notes, visitPayload.notes, 'rep comments become the current card note at successful sync');
   const storedVisit = db.prepare('SELECT * FROM rep_visits WHERE visit_uuid = ?').get(visitUuid);
   assert.equal(storedVisit.status, 'completed');
   assert.equal(storedVisit.machine_condition, 'faulty');
   assert.equal(storedVisit.rep_user_id, repId);
+  const syncedNoteHistory = db.prepare(`
+    SELECT machine_id, card_id, order_id, author_id, author_name, author_role, note
+    FROM machine_notes_history WHERE card_id = ? ORDER BY id DESC
+  `).all(missingAfterCardId);
+  assert.equal(syncedNoteHistory.length, 1);
+  assert.deepEqual(syncedNoteHistory[0], {
+    machine_id: storedVisit.machine_id,
+    card_id: missingAfterCardId,
+    order_id: storedVisit.order_id,
+    author_id: repId,
+    author_name: db.prepare('SELECT full_name FROM users WHERE id = ?').get(repId).full_name,
+    author_role: 'rep',
+    note: visitPayload.notes,
+  });
+  const repHistoryApi = await request(`/api/maintenance/machines/${storedVisit.machine_id}/notes-history`, {}, adminCookie);
+  assert.equal(repHistoryApi.response.status, 200);
+  assert.equal(repHistoryApi.body.length, 1);
+  assert.equal(repHistoryApi.body[0].author_role, 'rep');
+  assert.equal(repHistoryApi.body[0].order_code, storedVisit.order_code);
+  const repCannotWriteAdminNote = await request(`/api/maintenance/machines/${storedVisit.machine_id}/maintenance-note`, jsonOptions('PUT', {
+    notes: 'تعليق من حساب المندوب غير مصرح به',
+  }), login.cookie);
+  assert.equal(repCannotWriteAdminNote.response.status, 403);
   const beforePath = await resolveStorageFile(storedVisit.before_path);
   const afterPath = await resolveStorageFile(storedVisit.after_path);
   assert.ok(existsSync(beforePath));
@@ -709,6 +732,8 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   assert.equal(retryAfterReshoot.body.idempotent, true);
   assert.equal(retryAfterReshoot.body.status, 'reshoot_requested');
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM rep_visits WHERE visit_uuid = ?').get(visitUuid).count, 1);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM machine_notes_history WHERE card_id = ?').get(missingAfterCardId).count, 1,
+    'an idempotent visit retry must not duplicate the historical note');
 
   const changedPayloadRetry = await request('/api/rep/sync-visit', {
     method: 'POST',
@@ -736,6 +761,8 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   }, login.cookie);
   assert.equal(replacementSync.response.status, 200);
   assert.equal(replacementSync.body.status, 'pending_review');
+  assert.equal(db.prepare('SELECT notes FROM maintenance_cards WHERE id = ?').get(missingAfterCardId).notes, replacementPayload.notes);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM machine_notes_history WHERE card_id = ?').get(missingAfterCardId).count, 2);
   const replacementId = db.prepare('SELECT id FROM rep_visits WHERE visit_uuid = ?').get(replacementPayload.visitUuid).id;
   const approval = await request(`/api/supervisor/visits/${replacementId}/review`, jsonOptions('POST', { action: 'approve' }), adminCookie);
   assert.equal(approval.response.status, 200);
@@ -747,6 +774,7 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   assert.equal(JSON.parse(approvedCard.after_photos_json).length, 3);
   assert.ok(JSON.parse(approvedCard.reason_ids_json).includes(faultReasons.body.reasons[0].id));
   assert.match(approvedCard.notes, /إعادة تصوير واضحة/);
+  assert.equal(approvedCard.notes, replacementPayload.notes, 'approval must not append a duplicate visit note or replace the latest submitted comment');
 
   const completedRoute = await request('/api/rep/today-route?username=rep-nour', {}, login.cookie);
   const completedMachine = completedRoute.body.regions.flatMap((region) => region.machines)

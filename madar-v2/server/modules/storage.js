@@ -1,5 +1,5 @@
 import { createReadStream, createWriteStream } from 'node:fs';
-import { lstat, mkdir, readdir, realpath, rename, rm, unlink, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readdir, realpath, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
 import { extname, isAbsolute, join, relative, sep } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { storageRoot } from '../config/paths.js';
@@ -19,10 +19,18 @@ function parseRelativePath(value) {
 async function getStorageRoot() {
   await mkdir(storageRoot, { recursive: true });
   const metadata = await lstat(storageRoot);
-  if (metadata.isSymbolicLink() || !metadata.isDirectory()) {
-    throw new HttpError(500, 'Configured storage root must be a real directory.');
+  // The configured root may itself be a symlink (e.g. a transparent bridge to a
+  // dedicated data drive). Resolve it once here; every path *inside* the root is
+  // still checked segment by segment and may not contain symbolic links.
+  if (!metadata.isSymbolicLink() && !metadata.isDirectory()) {
+    throw new HttpError(500, 'Configured storage root must be a directory.');
   }
-  return realpath(storageRoot);
+  const resolved = await realpath(storageRoot);
+  const resolvedMetadata = await stat(resolved);
+  if (!resolvedMetadata.isDirectory()) {
+    throw new HttpError(500, 'Configured storage root must resolve to a directory.');
+  }
+  return resolved;
 }
 
 async function ensureDirectorySegments(root, segments) {

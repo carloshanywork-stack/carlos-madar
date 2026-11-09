@@ -1,0 +1,27 @@
+{
+  "name": "@madar/scheduler",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "test": "node --test --import tsx test/*.test.ts",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@madar/db": "workspace:*",
+    "@madar/shared": "workspace:*",
+    "bullmq": "^5.56.0",
+    "dotenv": "^16.5.0",
+    "drizzle-orm": "^0.44.2",
+    "ioredis": "^5.6.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.3"
+  }
+}

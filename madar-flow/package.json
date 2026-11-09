@@ -1,0 +1,23 @@
+{
+  "name": "madar-flow",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Madar Flow — Arabic-first visual workflow automation platform",
+  "packageManager": "pnpm@12.11.2",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev --parallel",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "clean": "turbo run clean",
+    "db:migrate": "pnpm --filter @madar/db db:migrate",
+    "db:status": "pnpm --filter @madar/db db:status"
+  },
+  "devDependencies": {
+    "turbo": "^2.5.0",
+    "typescript": "^5.8.3"
+  }
+}

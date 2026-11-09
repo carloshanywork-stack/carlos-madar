@@ -1,6 +1,6 @@
 import { ZipArchive } from 'archiver';
 import { closeSync, createWriteStream, existsSync, openSync, readSync } from 'node:fs';
-import { access, lstat, mkdir, mkdtemp, readdir, realpath, rename, rm, stat } from 'node:fs/promises';
+import { access, cp, lstat, mkdir, mkdtemp, readdir, realpath, rename, rm, stat } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { pipeline } from 'node:stream/promises';
@@ -100,10 +100,16 @@ function inside(parent, candidate) {
   return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
 }
 
-async function ensureRealDirectory(directory) {
+async function ensureRealDirectory(directory, { allowRootSymlink = false } = {}) {
   await mkdir(directory, { recursive: true });
   const metadata = await lstat(directory);
-  if (metadata.isSymbolicLink() || !metadata.isDirectory()) throw new HttpError(500, 'Backup and storage roots must be real directories.');
+  if (metadata.isSymbolicLink()) {
+    if (!allowRootSymlink) throw new HttpError(500, 'Backup and storage roots must be real directories.');
+    const target = await stat(await realpath(directory));
+    if (!target.isDirectory()) throw new HttpError(500, 'Storage root must resolve to a directory.');
+    return;
+  }
+  if (!metadata.isDirectory()) throw new HttpError(500, 'Backup and storage roots must be real directories.');
 }
 
 async function ensureBackupDirectory() {
@@ -112,7 +118,7 @@ async function ensureBackupDirectory() {
 }
 
 async function safeStorageTree(root) {
-  await ensureRealDirectory(root);
+  await ensureRealDirectory(root, { allowRootSymlink: true });
   const realRoot = await realpath(root);
   const files = [];
   const directories = [];
@@ -309,29 +315,48 @@ async function replaceDatabaseFromSnapshot(snapshotPath, actorId) {
 async function restoreStorageFromStage(stagedStorage, actorId) {
   await safeStorageTree(stagedStorage);
   await ensureRealDirectory(dirname(storageRoot));
-  let existing = false;
+  let rootMetadata = null;
   try {
-    const metadata = await lstat(storageRoot);
-    if (metadata.isSymbolicLink() || !metadata.isDirectory()) throw new HttpError(400, 'Current storage root is not a real directory.');
-    existing = true;
+    rootMetadata = await lstat(storageRoot);
   } catch (error) {
     if (error.code !== 'ENOENT') throw error;
   }
-  const oldStoragePath = join(dirname(storageRoot), `.madar-v2-storage-old-${randomUUID()}`);
-  if (existing) await rename(storageRoot, oldStoragePath);
+  let restorePath = storageRoot;
+  if (rootMetadata) {
+    if (rootMetadata.isSymbolicLink()) {
+      // Keep the configured bridge intact: restore into the directory behind
+      // the symlink instead of replacing the symlink with a real directory.
+      restorePath = await realpath(storageRoot);
+    } else if (!rootMetadata.isDirectory()) {
+      throw new HttpError(400, 'Current storage root is not a directory.');
+    }
+  }
+  const existing = Boolean(rootMetadata);
+  const oldStoragePath = join(dirname(restorePath), `.madar-v2-storage-old-${randomUUID()}`);
+  if (existing) await rename(restorePath, oldStoragePath);
   try {
-    await rename(stagedStorage, storageRoot);
+    try {
+      await rename(stagedStorage, restorePath);
+    } catch (error) {
+      if (error.code !== 'EXDEV') throw error;
+      await cp(stagedStorage, restorePath, { recursive: true, errorOnExist: true, force: false });
+      await rm(stagedStorage, { recursive: true, force: true });
+    }
     try {
       await replaceDatabaseFromSnapshot(actorId.snapshotPath, actorId.actorId);
     } catch (error) {
-      await rm(storageRoot, { recursive: true, force: true });
-      if (existing) await rename(oldStoragePath, storageRoot);
+      await rm(restorePath, { recursive: true, force: true });
+      if (existing) await rename(oldStoragePath, restorePath);
       throw error;
     }
     if (existing) await rm(oldStoragePath, { recursive: true, force: true });
   } catch (error) {
     if (existing) {
-      try { await access(oldStoragePath); await rename(oldStoragePath, storageRoot); } catch { /* already restored */ }
+      try {
+        await access(oldStoragePath);
+        await rm(restorePath, { recursive: true, force: true });
+        await rename(oldStoragePath, restorePath);
+      } catch { /* already restored */ }
     }
     throw error;
   }

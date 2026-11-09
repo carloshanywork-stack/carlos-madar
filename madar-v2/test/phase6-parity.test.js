@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as XLSX from 'xlsx';
@@ -9,7 +9,12 @@ import yauzl from 'yauzl';
 import test, { after } from 'node:test';
 
 const temporaryDirectory = mkdtempSync(join(tmpdir(), 'madar-v2-parity-'));
+// Exercise the production transparent-bridge layout: the configured storage
+// root is a symlink to the real data directory on another location.
 const storageRoot = join(temporaryDirectory, 'storage');
+const storageDrive = join(temporaryDirectory, 'drive-d');
+mkdirSync(storageDrive, { recursive: true });
+symlinkSync(storageDrive, storageRoot);
 process.env.MADAR_V2_DATABASE_PATH = join(temporaryDirectory, 'data', 'parity.sqlite');
 process.env.MADAR_V2_DATA_DIR = join(temporaryDirectory, 'data');
 process.env.MADAR_V2_STORAGE_ROOT = storageRoot;
@@ -1109,6 +1114,11 @@ test('area maintenance notes show the latest eligible note, export styled area g
     'area machine lists should use Arabic name order instead of machine-code order');
   assert.equal(group.machines.at(-1).notes, 'الملاحظة الأحدث', 'archived_at wins over a later updated_at, and deleted/blank-note orders are excluded');
   assert.equal(group.machines[0].notes, '');
+  const notesOnlyListing = await request('/api/maintenance/area-notes?onlyNotes=true');
+  assert.equal(notesOnlyListing.response.status, 200);
+  const notesOnlyEast = notesOnlyListing.body.find((item) => item.area === 'Area Notes East');
+  assert.deepEqual(notesOnlyEast.machines.map((item) => item.id), [machine.id]);
+  assert.ok(notesOnlyListing.body.every((item) => item.machines.length > 0 && item.machines.every((itemMachine) => itemMachine.notes.trim())));
   assert.ok(compareMachineNames('ماكينة 2', 'ماكينة 10') < 0, 'Arabic machine names should use natural numeric comparison');
   assert.ok(compareMachineNames('اسكندرية', 'البوادي') < 0);
   assert.ok(compareMachineNames('البوادي', 'الزامل') < 0);
@@ -1130,50 +1140,46 @@ test('area maintenance notes show the latest eligible note, export styled area g
   assert.ok(compareMaintenanceAreas('الخليجية', 'بالم هيلز') < 0);
   assert.equal(listing.body.flatMap((item) => item.machines).some((item) => item.id === inactiveMachine.id), false);
 
-  const allExport = await request('/api/maintenance/area-notes/export.xlsx');
+  const allExport = await request('/api/maintenance/area-notes/export.xlsx?allMachines=true');
   assert.equal(allExport.response.status, 200);
   assert.match(allExport.response.headers.get('content-type'), /spreadsheetml\.sheet/);
   assert.match(allExport.response.headers.get('content-disposition'), /Madar-Area-Maintenance\.xlsx/);
   assert.equal(allExport.body.subarray(0, 2).toString(), 'PK');
   const allWorkbook = XLSX.read(allExport.body, { type: 'buffer', cellStyles: true });
-  const allSheet = allWorkbook.Sheets[allWorkbook.SheetNames[0]];
-  assert.equal(allSheet['!merges'].length, listing.body.length);
+  assert.equal(allWorkbook.SheetNames.length, listing.body.length);
+  assert.ok(allWorkbook.SheetNames.every((sheetName) => allWorkbook.Sheets[sheetName]['!merges'].length === 1));
   const styleXml = (await readZipEntry(allExport.body, 'xl/styles.xml')).toString('utf8');
-  const sheetXml = (await readZipEntry(allExport.body, 'xl/worksheets/sheet1.xml')).toString('utf8');
+  const eastSheetIndex = allWorkbook.SheetNames.indexOf('Area Notes East') + 1;
+  assert.ok(eastSheetIndex > 0);
+  const sheetXml = (await readZipEntry(allExport.body, `xl/worksheets/sheet${eastSheetIndex}.xml`)).toString('utf8');
   assert.match(styleXml, /174F63/, 'area banner fill color should be written into the workbook styles');
   assert.match(styleXml, /DCEBF0/, 'table header fill color should be written into the workbook styles');
   assert.match(styleXml, /<sz val="15"\s*\/>/, 'area banner font should be enlarged');
-  assert.match(styleXml, /<sz val="13"\s*\/>/, 'column header font should be enlarged');
+  assert.match(styleXml, /<sz val="12"\s*\/>/, 'column header font should be readable');
   assert.match(styleXml, /<sz val="12"\s*\/>/, 'machine and note fonts should be readable');
   assert.match(styleXml, /readingOrder="2"/, 'cell styles should force right-to-left reading order');
-  assert.match(sheetXml, /mergeCell ref="A\d+:D\d+"/);
+  assert.match(sheetXml, /mergeCell ref="A1:D1"/);
   assert.match(sheetXml, /<sheetView\b[^>]*\brightToLeft="1"/, 'the worksheet view should open right-to-left');
   assert.match(sheetXml, /r="A1" s="\d+"/, 'the merged area banner cell should have a style');
 
-  const filteredExport = await request(`/api/maintenance/area-notes/export.xlsx?area=${encodeURIComponent('Area Notes East')}`);
+  const filteredExport = await request(`/api/maintenance/area-notes/export.xlsx?area=${encodeURIComponent('Area Notes East')}&onlyNotes=true`);
   assert.equal(filteredExport.response.status, 200);
   const filteredWorkbook = XLSX.read(filteredExport.body, { type: 'buffer' });
   const filteredSheet = filteredWorkbook.Sheets[filteredWorkbook.SheetNames[0]];
   const exportRows = XLSX.utils.sheet_to_json(filteredSheet, { header: 1, defval: '' });
   assert.deepEqual(filteredSheet['!merges'], [{ s: { r: 0, c: 0 }, e: { r: 0, c: 3 } }]);
-  assert.deepEqual(exportRows[0], ['المنطقة: Area Notes East', '', '', '']);
+  assert.deepEqual(exportRows[0], ['المنطقة: Area Notes East - 1 ملاحظة', '', '', '']);
   assert.deepEqual(exportRows[1], ['كود الماكينة', 'الاسم بالعربي', 'الاسم بالإنجليزي', 'الملاحظات']);
-  assert.deepEqual(exportRows[2], ['AREA-NOTES-02', 'اسبانيا مول', '', '']);
-  assert.deepEqual(exportRows.slice(3, 5).map((row) => row[1]), ['الخليجية', 'الشرق']);
-  assert.deepEqual(exportRows.slice(5, 7).map((row) => row[1]), ['بالم هيلز', '2 كونكت ستور']);
-  assert.deepEqual(exportRows[7], ['AREA-NOTES-01', 'ياسمين', 'Area Notes Machine', 'الملاحظة الأحدث']);
+  assert.deepEqual(exportRows[2], ['AREA-NOTES-01', 'ياسمين', 'Area Notes Machine', 'الملاحظة الأحدث']);
+  assert.equal(exportRows.length, 3, 'the notes-only workbook should contain only actual commented rows');
   const filteredSheetXml = (await readZipEntry(filteredExport.body, 'xl/worksheets/sheet1.xml')).toString('utf8');
-  assert.match(filteredSheetXml, /<autoFilter ref="A2:D24"\/>/, 'the worksheet should enable an Excel AutoFilter through its padded A4 page rows');
+  assert.match(filteredSheetXml, /<autoFilter ref="A2:D3"\/>/, 'the worksheet AutoFilter should cover only headers and actual rows');
   assert.match(filteredSheetXml, /<pageSetup[^>]*paperSize="9"[^>]*orientation="portrait"/,
     'the async export route should return an A4 portrait workbook');
-  assert.match(filteredSheetXml, /<pageMargins[^>]*left="0.5"[^>]*right="0.5"/);
-  for (let row = 9; row <= 24; row += 1) {
-    for (const column of ['A', 'B', 'C', 'D']) {
-      assert.match(filteredSheetXml, new RegExp(`<c\\b[^>]*\\br="${column}${row}"[^>]*\\bs="\\d+"`),
-        `padded A4 cell ${column}${row} should retain its table border style`);
-    }
-  }
+  assert.match(filteredSheetXml, /<pageMargins[^>]*left="0.35"[^>]*right="0.35"/);
+  assert.doesNotMatch(filteredSheetXml, /<rowBreaks\b/, 'clean tables should not use artificial page-padding breaks');
   assert.equal((await request('/api/maintenance/area-notes/export.xlsx?area=%20')).response.status, 400);
+  assert.equal((await request('/api/maintenance/area-notes/export.xlsx?onlyNotes=invalid')).response.status, 400);
 
   const cleared = await request(`/api/maintenance/machines/${machine.id}/maintenance-note`, { method: 'DELETE' });
   assert.equal(cleared.response.status, 200, JSON.stringify(cleared.body));
@@ -1191,7 +1197,7 @@ test('area maintenance notes show the latest eligible note, export styled area g
   assert.equal((await request('/api/maintenance/machines/999999/maintenance-note', { method: 'DELETE' })).response.status, 404);
 });
 
-test('area maintenance workbook paginates A4 pages and repeats banners and headers on overflow', async () => {
+test('area maintenance workbook keeps actual rows only and gives each area a filterable RTL sheet', async () => {
   const machines = [];
   for (let index = 1; index <= 23; index += 1) {
     machines.push({
@@ -1215,20 +1221,17 @@ test('area maintenance workbook paginates A4 pages and repeats banners and heade
     prepare: () => ({ all: () => machines }),
   });
   const workbook = XLSX.read(workbookBuffer, { type: 'buffer' });
+  assert.deepEqual(workbook.SheetNames, ['A4 Pagination A', 'A4 Pagination B']);
   const worksheet = workbook.Sheets[workbook.SheetNames[0]];
   const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
   const headers = ['كود الماكينة', 'الاسم بالعربي', 'الاسم بالإنجليزي', 'الملاحظات'];
 
-  assert.equal(rows[0][0], 'المنطقة: A4 Pagination A');
+  assert.equal(rows[0][0], 'المنطقة: A4 Pagination A - 0 ملاحظة');
   assert.deepEqual(rows[1], headers);
-  assert.equal(rows.slice(2, 24).filter((row) => row[0]).length, 22, 'the first A4 page should contain exactly 22 machines');
-  assert.equal(rows[24][0], 'المنطقة: A4 Pagination A (تابع)');
-  assert.deepEqual(rows[25], headers, 'the overflow page should repeat the four column headers');
-  assert.equal(rows[26][0], 'A4-OVERFLOW-23');
-  assert.ok(rows.slice(27, 48).every((row) => row.every((cell) => cell === '')),
-    'the remainder of the continuation page should be padded before the next area');
-  assert.equal(rows[48][0], 'المنطقة: A4 Pagination B', 'the next area should start after a complete 24-row page block');
-  assert.deepEqual(rows[49], headers);
+  assert.equal(rows.length, 25, 'the sheet should contain a banner, headers, and 23 actual machine rows');
+  assert.equal(rows.slice(2).filter((row) => row[0]).length, 23);
+  assert.equal(rows[24][0], 'A4-OVERFLOW-23');
+  assert.ok(rows.slice(2).every((row) => row[0]), 'no dummy blank rows should be emitted');
 
   const worksheetXml = (await readZipEntry(workbookBuffer, 'xl/worksheets/sheet1.xml')).toString('utf8');
   assert.match(worksheetXml, /<pageSetup[^>]*paperSize="9"[^>]*orientation="portrait"/,
@@ -1236,15 +1239,104 @@ test('area maintenance workbook paginates A4 pages and repeats banners and heade
   assert.match(worksheetXml, /fitToWidth="1"/);
   assert.match(worksheetXml, /fitToHeight="0"/);
   assert.match(worksheetXml, /<sheetView\b[^>]*\brightToLeft="1"/, 'every exported worksheet should open right-to-left');
-  assert.match(worksheetXml, /<rowBreaks count="2" manualBreakCount="2"><brk id="24" max="16383" man="1"\/><brk id="48" max="16383" man="1"\/><\/rowBreaks>/,
-    'each 24-row page block should have an explicit manual page break');
-  assert.match(worksheetXml, /<autoFilter ref="A2:D72"\/>/);
-  for (let row = 28; row <= 48; row += 1) {
-    for (const column of ['A', 'B', 'C', 'D']) {
-      assert.match(worksheetXml, new RegExp(`<c\\b[^>]*\\br="${column}${row}"[^>]*\\bs="\\d+"`),
-        `overflow-page padding cell ${column}${row} should retain its table border style`);
-    }
-  }
+  assert.doesNotMatch(worksheetXml, /<rowBreaks\b/, 'the export should not add synthetic page breaks');
+  assert.match(worksheetXml, /<autoFilter ref="A2:D25"\/>/);
+});
+
+test('area maintenance comments can be created without a card, edited on the latest card, and audited', async () => {
+  const machineResponse = await request('/api/maintenance/machines', json('POST', {
+    code: 'AREA-NOTE-EDIT-01',
+    name_ar: 'ماكينة تعديل الملاحظة',
+    area: 'Area Note Edit',
+  }));
+  assert.equal(machineResponse.response.status, 201, JSON.stringify(machineResponse.body));
+
+  const initialSave = await request(`/api/maintenance/machines/${machineResponse.body.id}/maintenance-note`, json('PUT', {
+    notes: '  ملاحظة محفوظة بدون بطاقة  ',
+  }));
+  assert.equal(initialSave.response.status, 200, JSON.stringify(initialSave.body));
+  assert.equal(initialSave.body.success, true);
+  assert.equal(initialSave.body.machineId, machineResponse.body.id);
+  assert.equal(initialSave.body.cardId, null);
+  assert.equal(initialSave.body.notes, 'ملاحظة محفوظة بدون بطاقة');
+  assert.ok(Number.isSafeInteger(initialSave.body.historyId));
+  assert.equal(db.prepare('SELECT maintenance_note FROM machines WHERE id = ?').get(machineResponse.body.id).maintenance_note,
+    'ملاحظة محفوظة بدون بطاقة');
+  const notesOnly = await request('/api/maintenance/area-notes?area=Area%20Note%20Edit&onlyNotes=true');
+  assert.equal(notesOnly.body[0].machines[0].notes, 'ملاحظة محفوظة بدون بطاقة');
+
+  assert.equal((await request(`/api/maintenance/machines/${machineResponse.body.id}/maintenance-note`, json('PUT', {
+    notes: 'note', extra: true,
+  }))).response.status, 400);
+  assert.equal((await request(`/api/maintenance/machines/${machineResponse.body.id}/maintenance-note`, json('PUT', {
+    notes: 42,
+  }))).response.status, 400);
+  assert.equal((await request('/api/maintenance/machines/999999/maintenance-note', json('PUT', { notes: 'missing' }))).response.status, 404);
+  assert.equal((await request('/api/maintenance/machines/999999/notes-history')).response.status, 404);
+  assert.equal((await request(`/api/maintenance/area-notes/export.xlsx?machineId=${machineResponse.body.id}&historyMode=invalid`)).response.status, 400);
+
+  const client = await request('/api/clients', json('POST', { name: 'Area Note Edit Client' }));
+  assert.equal(client.response.status, 201, JSON.stringify(client.body));
+  const order = await request('/api/maintenance/orders', json('POST', {
+    clientId: client.body.id,
+    area: 'Area Note Edit',
+    employeeIds: [],
+    autoPopulateAreaMachines: false,
+  }));
+  assert.equal(order.response.status, 201, JSON.stringify(order.body));
+  const card = await request(`/api/maintenance/orders/${order.body.id}/cards`, json('POST', {
+    machineId: machineResponse.body.id,
+    notes: 'ملاحظة البطاقة القديمة',
+  }));
+  assert.equal(card.response.status, 201, JSON.stringify(card.body));
+  const cardEdit = await request(`/api/maintenance/machines/${machineResponse.body.id}/maintenance-note`, json('PUT', {
+    notes: '  ملاحظة البطاقة المعدلة  ',
+  }));
+  assert.equal(cardEdit.response.status, 200, JSON.stringify(cardEdit.body));
+  assert.equal(cardEdit.body.cardId, card.body.id);
+  assert.equal(cardEdit.body.notes, 'ملاحظة البطاقة المعدلة');
+  assert.equal(db.prepare('SELECT notes FROM maintenance_cards WHERE id = ?').get(card.body.id).notes, 'ملاحظة البطاقة المعدلة');
+  assert.equal(db.prepare('SELECT maintenance_note FROM machines WHERE id = ?').get(machineResponse.body.id).maintenance_note, '');
+  const updatedList = await request('/api/maintenance/area-notes?area=Area%20Note%20Edit&onlyNotes=true');
+  assert.equal(updatedList.body[0].machines[0].notes, 'ملاحظة البطاقة المعدلة');
+
+  const historyResponse = await request(`/api/maintenance/machines/${machineResponse.body.id}/notes-history`);
+  assert.equal(historyResponse.response.status, 200);
+  assert.equal(historyResponse.body.length, 3);
+  assert.deepEqual(historyResponse.body.map((entry) => entry.note), [
+    'ملاحظة البطاقة المعدلة', 'ملاحظة البطاقة القديمة', 'ملاحظة محفوظة بدون بطاقة',
+  ]);
+  assert.ok(historyResponse.body.every((entry) => entry.author_role === 'admin' && entry.author_name === 'System Administrator'));
+  assert.equal(historyResponse.body[0].order_code, order.body.order_code);
+  assert.ok(historyResponse.body[0].formatted_date);
+
+  const machineWorkbook = await request(`/api/maintenance/area-notes/export.xlsx?machineId=${machineResponse.body.id}&area=Area%20Note%20Edit&onlyNotes=true&historyMode=all`);
+  assert.equal(machineWorkbook.response.status, 200);
+  const singleWorkbook = XLSX.read(machineWorkbook.body, { type: 'buffer' });
+  assert.deepEqual(singleWorkbook.SheetNames, ['AREA-NOTE-EDIT-01']);
+  const machineRows = XLSX.utils.sheet_to_json(singleWorkbook.Sheets[singleWorkbook.SheetNames[0]], { header: 1, defval: '' });
+  assert.equal(machineRows[0][0], 'سجل ملاحظات الماكينة: AREA-NOTE-EDIT-01');
+  assert.equal(machineRows[4][0], 'التاريخ والوقت');
+  assert.equal(machineRows.length, 8, 'the single-machine history export should contain details and all three notes');
+
+  const machineId = Number(db.prepare("SELECT id FROM users WHERE username = 'admin'").get().id);
+  const updateAudit = db.prepare(`
+    SELECT actor_id, action, entity_type, entity_id, old_values_json, new_values_json
+    FROM audit_log
+    WHERE action = 'update_notes' AND entity_type = 'maintenance_card' AND entity_id = ?
+    ORDER BY id DESC LIMIT 1
+  `).get(card.body.id);
+  assert.equal(updateAudit.actor_id, machineId);
+  assert.deepEqual(JSON.parse(updateAudit.old_values_json), { notes: 'ملاحظة البطاقة القديمة' });
+  assert.deepEqual(JSON.parse(updateAudit.new_values_json), { notes: 'ملاحظة البطاقة المعدلة' });
+
+  const cleared = await request(`/api/maintenance/machines/${machineResponse.body.id}/maintenance-note`, { method: 'DELETE' });
+  assert.equal(cleared.response.status, 200);
+  assert.equal(cleared.body.clearedCount, 1);
+  const clearedList = await request('/api/maintenance/area-notes?area=Area%20Note%20Edit&onlyNotes=true');
+  assert.deepEqual(clearedList.body, []);
+  const preservedHistory = await request(`/api/maintenance/machines/${machineResponse.body.id}/notes-history`);
+  assert.equal(preservedHistory.body.length, 3, 'clearing the current note must not erase the append-only comment history');
 });
 
 test('maintenance PPTX and Excel exports sort Arabic areas and machine codes naturally', async () => {
@@ -1305,16 +1397,16 @@ test('maintenance PPTX and Excel exports sort Arabic areas and machine codes nat
   const switzerlandArea = listing.body.find((group) => group.area === 'سويس');
   assert.deepEqual(switzerlandArea.machines.filter((machine) => sortedCodes.includes(machine.code)).map((machine) => machine.code), sortedCodes);
 
-  const areaNotesResponse = await request('/api/maintenance/area-notes/export.xlsx');
+  const areaNotesResponse = await request('/api/maintenance/area-notes/export.xlsx?allMachines=true');
   assert.equal(areaNotesResponse.response.status, 200, JSON.stringify(areaNotesResponse.body));
   const notesWorkbook = XLSX.read(areaNotesResponse.body, { type: 'buffer' });
-  const notesRows = XLSX.utils.sheet_to_json(notesWorkbook.Sheets[notesWorkbook.SheetNames[0]], { header: 1, defval: '' });
-  const noteBanners = notesRows.map((row) => row[0]).filter((value) => typeof value === 'string' && value.startsWith('المنطقة: '));
-  assert.deepEqual(noteBanners.filter((banner) => expectedAreas.some((area) => banner === `المنطقة: ${area}`)), expectedAreas.map((area) => `المنطقة: ${area}`));
-  const suezBannerIndex = notesRows.findIndex((row) => row[0] === 'المنطقة: سويس');
-  const nextBannerIndex = notesRows.findIndex((row, index) => index > suezBannerIndex && String(row[0]).startsWith('المنطقة: '));
-  const suezCodesInWorkbook = notesRows.slice(suezBannerIndex + 2, nextBannerIndex < 0 ? notesRows.length : nextBannerIndex)
-    .map((row) => row[0]).filter((code) => sortedCodes.includes(code));
+  const noteBanners = notesWorkbook.SheetNames.map((sheetName) => (
+    XLSX.utils.sheet_to_json(notesWorkbook.Sheets[sheetName], { header: 1, defval: '' })[0][0]
+  ));
+  assert.deepEqual(noteBanners.filter((banner) => expectedAreas.some((area) => String(banner).startsWith(`المنطقة: ${area} -`)))
+    .map((banner) => banner.match(/^المنطقة: (.+?) -/)[1]), expectedAreas);
+  const suezRows = XLSX.utils.sheet_to_json(notesWorkbook.Sheets['سويس'], { header: 1, defval: '' });
+  const suezCodesInWorkbook = suezRows.slice(2).map((row) => row[0]).filter((code) => sortedCodes.includes(code));
   assert.deepEqual(suezCodesInWorkbook, sortedCodes);
 
   const analysisResponse = await request('/api/maintenance/analysis/export.xlsx?from=2031-04-05&to=2031-04-05');
