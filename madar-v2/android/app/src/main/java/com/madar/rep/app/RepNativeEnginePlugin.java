@@ -185,29 +185,37 @@ public final class RepNativeEnginePlugin extends Plugin {
 
         call.setKeepAlive(true);
         String title = "in".equals(action) ? "تأكيد تسجيل الحضور" : "تأكيد تسجيل الانصراف";
-        activeBiometricPrompt = RepBiometricAuth.authenticate((FragmentActivity) getActivity(), title,
-            new RepBiometricAuth.Callback() {
-                @Override
-                public void onSuccess(int authenticationType) {
-                    activeBiometricPrompt = null;
-                    call.setKeepAlive(false);
-                    call.resolve(new JSObject()
-                        .put("verified", true)
-                        .put("verifiedAt", isoTimestamp(new Date()))
-                        .put("authenticationType", authenticationType));
-                }
+        getActivity().runOnUiThread(() -> {
+            try {
+                activeBiometricPrompt = RepBiometricAuth.authenticate((FragmentActivity) getActivity(), title,
+                    new RepBiometricAuth.Callback() {
+                        @Override
+                        public void onSuccess(int authenticationType) {
+                            activeBiometricPrompt = null;
+                            call.setKeepAlive(false);
+                            call.resolve(new JSObject()
+                                .put("verified", true)
+                                .put("verifiedAt", isoTimestamp(new Date()))
+                                .put("authenticationType", authenticationType));
+                        }
 
-                @Override
-                public void onError(int errorCode) {
-                    activeBiometricPrompt = null;
-                    call.setKeepAlive(false);
-                    String message = errorCode == BiometricPrompt.ERROR_USER_CANCELED
-                        || errorCode == BiometricPrompt.ERROR_NEGATIVE_BUTTON
-                        ? "أُلغيت المصادقة الحيوية؛ لم يتم تسجيل الحضور."
-                        : "تعذرت المصادقة الحيوية؛ لم يتم تسجيل الحضور. حاول مجدداً أو أعد إعداد البصمة.";
-                    call.reject(message, "BIOMETRIC_AUTH_FAILED");
-                }
-            });
+                        @Override
+                        public void onError(int errorCode) {
+                            activeBiometricPrompt = null;
+                            call.setKeepAlive(false);
+                            String message = errorCode == BiometricPrompt.ERROR_USER_CANCELED
+                                || errorCode == BiometricPrompt.ERROR_NEGATIVE_BUTTON
+                                ? "أُلغيت المصادقة الحيوية؛ لم يتم تسجيل الحضور."
+                                : "تعذرت المصادقة الحيوية؛ لم يتم تسجيل الحضور. حاول مجدداً أو أعد إعداد البصمة.";
+                            call.reject(message, "BIOMETRIC_AUTH_FAILED");
+                        }
+                    });
+            } catch (Exception error) {
+                activeBiometricPrompt = null;
+                call.setKeepAlive(false);
+                call.reject("تعذر فتح نافذة المصادقة الحيوية: " + error.getMessage(), "BIOMETRIC_PROMPT_ERROR");
+            }
+        });
     }
 
     @PluginMethod
