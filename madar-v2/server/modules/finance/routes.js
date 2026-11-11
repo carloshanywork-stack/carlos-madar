@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { requestActorId } from '../actor.js';
 import { requireFinanceOrAdmin } from '../auth/authorization.js';
-import { createPurchaseInvoice, listInvoices, recordSalesReceipt } from './invoices.service.js';
+import { createPurchaseInvoice, listInvoices, recordPurchasePayment, recordSalesReceipt } from './invoices.service.js';
 import { createTreasuryEntry, getTreasury } from './treasury.service.js';
 
 const router = Router();
@@ -24,6 +24,10 @@ router.post('/invoices/purchase', requireFinanceOrAdmin, (req, res) => {
 
 router.post('/invoices/:id/receipt', requireFinanceOrAdmin, (req, res) => {
   res.status(201).json(recordSalesReceipt(req.params.id, req.body, requestActorId(req)));
+});
+
+router.post('/invoices/:id/payment', requireFinanceOrAdmin, (req, res) => {
+  res.status(201).json(recordPurchasePayment(req.params.id, req.body, requestActorId(req)));
 });
 
 export default router;

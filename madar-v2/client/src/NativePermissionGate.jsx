@@ -82,7 +82,7 @@ export default function NativePermissionGate({ children }) {
   if (!state?.fineLocation || !state?.coarseLocation) missing.push('الموقع الدقيق لتأكيد الماكينة وتسجيل GPS');
   if (!state?.notifications) missing.push('الإشعارات لعرض حالة التتبع أثناء الوردية');
   if (!state?.backgroundLocation) missing.push('الموقع طوال الوقت لتسجيل المسار والشاشة مغلقة');
-  if (!state?.biometricAvailable) missing.push('إعداد بصمة أو مصادقة حيوية على الهاتف لتأكيد الحضور والانصراف');
+   if (!state?.biometricAvailable) missing.push('إعداد بصمة أو قفل شاشة (رقم سري/نمط) لتأكيد الحضور والانصراف');
 
   return (
     <main dir="rtl" style={{ minHeight: '100dvh', display: 'grid', placeItems: 'center', padding: 24, background: '#f2f6f4', color: '#18352e', fontFamily: 'Arial, sans-serif' }}>
@@ -108,7 +108,7 @@ export default function NativePermissionGate({ children }) {
           )}
           {!state?.biometricAvailable && (
             <button type="button" disabled={busy} onClick={() => void run(() => RepEngine.openBiometricSettings())} style={primaryButton}>
-              إعداد البصمة أو المصادقة الحيوية
+              إعداد البصمة أو قفل الشاشة
             </button>
           )}
           <button type="button" disabled={busy} onClick={() => void run(() => RepEngine.openAppSettings())} style={secondaryButton}>

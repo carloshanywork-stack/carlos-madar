@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { apiUrl } from '../../lib/api.js';
 import { deleteOfflineMapPack, listOfflineMapPacks, listOfflineMapTileKeys, saveOfflineMapPack, saveOfflineMapTiles } from './offline-store.js';
 import { OFFLINE_MAP_PACKS } from './map-utils.js';
+import { getNativeAuthorizationHeaders } from './native-session.js';
 import OfflineRouteMap from './OfflineRouteMap.jsx';
 
 function formatSize(bytes) {
@@ -11,14 +12,19 @@ function formatSize(bytes) {
     : `${Math.ceil(value / 1024)} KB`;
 }
 
-async function fetchWithTimeout(path, { signal, binary = false } = {}) {
+async function fetchWithTimeout(path, { signal, binary = false, timeoutMs = 6000 } = {}) {
   const controller = new AbortController();
   const abort = () => controller.abort(signal?.reason);
   if (signal?.aborted) abort();
   else signal?.addEventListener('abort', abort, { once: true });
-  const timeout = window.setTimeout(() => controller.abort(), 4000);
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetch(apiUrl(path), { credentials: 'include', cache: 'no-store', signal: controller.signal });
+    const response = await fetch(apiUrl(path), {
+      credentials: 'include',
+      cache: 'no-store',
+      headers: await getNativeAuthorizationHeaders(),
+      signal: controller.signal,
+    });
     if (!response.ok) {
       let message = `تعذر تنزيل بيانات الخريطة (${response.status}).`;
       try {
@@ -27,15 +33,37 @@ async function fetchWithTimeout(path, { signal, binary = false } = {}) {
       } catch { /* Keep the status-based message for non-JSON responses. */ }
       throw new Error(message);
     }
-    return binary ? await response.blob() : await response.json();
+    const result = binary ? await response.blob() : await response.json();
+    if (binary && (!result.size || result.size < 1)) throw new Error('أعاد الخادم بلاطة خريطة فارغة.');
+    return result;
   } catch (error) {
-    if (controller.signal.aborted && !signal?.aborted) throw new Error('انتهت مهلة تنزيل بلاطة الخريطة بعد 4 ثوانٍ.');
+    if (controller.signal.aborted && !signal?.aborted) throw new Error(`انتهت مهلة تنزيل بلاطة الخريطة بعد ${Math.round(timeoutMs / 1000)} ثوانٍ.`);
     if (signal?.aborted) throw new Error('تم إيقاف تنزيل الخريطة؛ يمكن استكمالها لاحقاً.');
     throw error;
   } finally {
     window.clearTimeout(timeout);
     signal?.removeEventListener('abort', abort);
   }
+}
+
+async function fetchTileWithRetries(packId, tile, signal) {
+  let lastError;
+  for (let attempt = 0; attempt <= 3; attempt += 1) {
+    if (signal.aborted) throw new Error('تم إيقاف تنزيل الخريطة؛ يمكن استكمالها لاحقاً.');
+    try {
+      const blob = await fetchWithTimeout(`/api/rep/map/tiles/${packId}/${tile.z}/${tile.x}/${tile.y}`, {
+        signal,
+        binary: true,
+        timeoutMs: 6000,
+      });
+      return { ...tile, blob };
+    } catch (error) {
+      lastError = error;
+      if (signal.aborted || attempt === 3) break;
+      await new Promise((resolve) => window.setTimeout(resolve, 250 * (2 ** attempt)));
+    }
+  }
+  throw lastError ?? new Error('تعذر تنزيل بلاطة الخريطة بعد إعادة المحاولة.');
 }
 
 export default function OfflineMapPanel({ route, gps, online, offlineOnly, onMachineSelect }) {
@@ -104,35 +132,40 @@ export default function OfflineMapPanel({ route, gps, online, offlineOnly, onMac
       const allTileKeys = new Set(pack.tiles.map((tile) => `${tile.z}/${tile.x}/${tile.y}`));
       const savedTileKeys = new Set((await listOfflineMapTileKeys(selectedId)).filter((key) => allTileKeys.has(key)));
       let completed = savedTileKeys.size;
+      let downloadedBytes = pack.tiles
+        .filter((tile) => savedTileKeys.has(`${tile.z}/${tile.x}/${tile.y}`))
+        .reduce((total, tile) => total + (Number(tile.sizeBytes) || 0), 0);
       setProgress({ completed, total: pack.tiles.length });
       const localPack = {
         ...pack,
         packId: selectedId,
         status: 'downloading',
         downloadedCount: completed,
-        downloadedBytes: 0,
+        downloadedBytes,
       };
       await saveOfflineMapPack(localPack);
       await refreshInstalled();
 
       const remainingTiles = pack.tiles.filter((tile) => !savedTileKeys.has(`${tile.z}/${tile.x}/${tile.y}`));
-      for (let index = 0; index < remainingTiles.length; index += 4) {
+      let failedTiles = 0;
+      for (let index = 0; index < remainingTiles.length; index += 6) {
         if (controller.signal.aborted) throw new Error('تم إيقاف تنزيل الخريطة. يمكنك استكمال الحزمة لاحقاً.');
-        const batch = remainingTiles.slice(index, index + 4);
-        const downloaded = await Promise.all(batch.map(async (tile) => {
-          const blob = await fetchWithTimeout(`/api/rep/map/tiles/${selectedId}/${tile.z}/${tile.x}/${tile.y}`, {
-            signal: controller.signal,
-            binary: true,
-          });
-          return { ...tile, blob };
-        }));
+        const batch = remainingTiles.slice(index, index + 6);
+        const settled = await Promise.allSettled(batch.map((tile) => fetchTileWithRetries(selectedId, tile, controller.signal)));
+        const downloaded = settled.filter((result) => result.status === 'fulfilled').map((result) => result.value);
+        failedTiles += settled.filter((result) => result.status === 'rejected').length;
         await saveOfflineMapTiles(selectedId, downloaded);
         completed += downloaded.length;
+        downloadedBytes += downloaded.reduce((total, tile) => total + tile.blob.size, 0);
         setProgress({ completed, total: pack.tiles.length });
-        await saveOfflineMapPack({ ...localPack, downloadedCount: completed, status: 'downloading' });
+        await saveOfflineMapPack({ ...localPack, downloadedCount: completed, downloadedBytes, status: 'downloading' });
+        if (controller.signal.aborted) throw new Error('تم إيقاف تنزيل الخريطة. يمكنك استكمال الحزمة لاحقاً.');
       }
-      await saveOfflineMapPack({ ...localPack, status: 'ready', downloadedCount: completed, downloadedBytes: pack.sizeBytes });
+      const complete = completed === pack.tiles.length && failedTiles === 0;
+      const finalStatus = complete ? 'ready' : 'partial';
+      await saveOfflineMapPack({ ...localPack, status: finalStatus, downloadedCount: completed, downloadedBytes });
       await refreshInstalled();
+      if (!complete) setError(`حُفظت الحزمة جزئياً؛ تعذر تنزيل ${failedTiles} بلاطة بعد 3 محاولات. اضغط «استكمال التنزيل» عند استقرار الاتصال.`);
     } catch (caught) {
       const message = caught.message || 'تعذر تنزيل حزمة الخريطة.';
       setError(message);
@@ -195,7 +228,7 @@ export default function OfflineMapPanel({ route, gps, online, offlineOnly, onMac
                 : selectedCatalogPack?.reason || (online ? 'تعذر التحقق من حزمة المنطقة.' : 'لا توجد نسخة محلية من هذه المنطقة بعد؛ اتصل بالخادم لتنزيلها أولاً.')}
       </div>
       {!catalog.length && !online && <p className="rep-map-warning">لا يمكن تنزيل خرائط جديدة أثناء انقطاع الاتصال. نزّل الحزمة المطلوبة مسبقاً عبر شبكة MADAR المحلية.</p>}
-      {selectedInstalledPack?.status === 'ready' && <OfflineRouteMap
+      {['ready', 'partial'].includes(selectedInstalledPack?.status) && <OfflineRouteMap
         pack={selectedInstalledPack}
         machines={routeMachines}
         gps={gps}

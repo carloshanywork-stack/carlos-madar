@@ -90,6 +90,7 @@ test('Phase 4 finance lifecycle keeps integer-cents, stock, custody, billing, an
     kind: 'income', category: 'Unauthorized', amountCents: 100,
   }), salesLogin.cookie)).response.status, 403);
   assert.equal((await request('/api/finance/invoices/purchase', jsonOptions('POST', {}), salesLogin.cookie)).response.status, 403);
+  assert.equal((await request('/api/finance/invoices/1/payment', jsonOptions('POST', { amountCents: 1 }), salesLogin.cookie)).response.status, 403);
 
   const purchasingUser = await createUser('finance-guard-purchasing', 'purchasing', 'Purchasing Guard User');
   assert.equal(purchasingUser.response.status, 201, JSON.stringify(purchasingUser.body));
@@ -164,24 +165,65 @@ test('Phase 4 finance lifecycle keeps integer-cents, stock, custody, billing, an
   assert.match(purchase.body.code, /^PUR-\d{4,}$/);
   assert.equal(purchase.body.kind, 'purchase');
   assert.equal(purchase.body.total_cents, 1_000_000);
-  assert.equal(purchase.body.paid_total_cents, 1_000_000);
-  assert.equal(purchase.body.remaining_cents, 0);
-  assert.equal(purchase.body.payment_status, 'paid');
+  assert.equal(purchase.body.paid_total_cents, 0);
+  assert.equal(purchase.body.remaining_cents, 1_000_000);
+  assert.equal(purchase.body.payment_status, 'unpaid');
   assert.equal(purchase.body.items[0].line_total_cents, 1_000_000);
-  assert.equal((await request('/api/finance/treasury')).body.cashBalanceCents, 9_000_000);
+  assert.equal((await request('/api/finance/treasury')).body.cashBalanceCents, 10_000_000);
   assert.equal((await request('/api/warehouse/materials')).body.find((row) => row.id === material.id).stock, 5);
+  assert.equal(
+    db.prepare('SELECT COUNT(*) AS count FROM treasury_entries WHERE invoice_id = ?').get(purchase.body.id).count,
+    0,
+    'creating a purchase invoice records a liability but must not move treasury cash',
+  );
+  const partialPurchasePayment = await request(
+    `/api/finance/invoices/${purchase.body.id}/payment`,
+    jsonOptions('POST', { amountCents: 600_000, notes: 'First supplier installment.' }),
+  );
+  assert.equal(partialPurchasePayment.response.status, 201, JSON.stringify(partialPurchasePayment.body));
+  assert.equal(partialPurchasePayment.body.invoice.paid_total_cents, 600_000);
+  assert.equal(partialPurchasePayment.body.invoice.remaining_cents, 400_000);
+  assert.equal(partialPurchasePayment.body.invoice.payment_status, 'partial');
+  assert.equal(partialPurchasePayment.body.treasuryEntry.kind, 'expense');
+  assert.equal(partialPurchasePayment.body.treasuryEntry.category, 'مشتريات خامات ومواد');
+  assert.equal(partialPurchasePayment.body.treasuryEntry.invoice_id, purchase.body.id);
+  assert.equal((await request('/api/finance/treasury')).body.cashBalanceCents, 9_400_000);
+  const overpayPurchase = await request(
+    `/api/finance/invoices/${purchase.body.id}/payment`,
+    jsonOptions('POST', { amountCents: 400_001 }),
+  );
+  assert.equal(overpayPurchase.response.status, 409);
+  assert.equal((await request('/api/finance/treasury')).body.cashBalanceCents, 9_400_000);
+  const finalPurchasePayment = await request(
+    `/api/finance/invoices/${purchase.body.id}/payment`,
+    jsonOptions('POST', { amountCents: 400_000 }),
+  );
+  assert.equal(finalPurchasePayment.response.status, 201, JSON.stringify(finalPurchasePayment.body));
+  assert.equal(finalPurchasePayment.body.invoice.paid_total_cents, 1_000_000);
+  assert.equal(finalPurchasePayment.body.invoice.remaining_cents, 0);
+  assert.equal(finalPurchasePayment.body.invoice.payment_status, 'paid');
+  assert.equal((await request('/api/finance/treasury')).body.cashBalanceCents, 9_000_000);
   assert.deepEqual(
     db.prepare(`
       SELECT kind, category, amount_cents, invoice_id, reference
-      FROM treasury_entries WHERE invoice_id = ?
-    `).get(purchase.body.id),
-    {
-      kind: 'expense',
-      category: 'مشتريات خامات ومواد',
-      amount_cents: 1_000_000,
-      invoice_id: purchase.body.id,
-      reference: purchase.body.code,
-    },
+      FROM treasury_entries WHERE invoice_id = ? ORDER BY id
+    `).all(purchase.body.id),
+    [
+      {
+        kind: 'expense',
+        category: 'مشتريات خامات ومواد',
+        amount_cents: 600_000,
+        invoice_id: purchase.body.id,
+        reference: purchase.body.code,
+      },
+      {
+        kind: 'expense',
+        category: 'مشتريات خامات ومواد',
+        amount_cents: 400_000,
+        invoice_id: purchase.body.id,
+        reference: purchase.body.code,
+      },
+    ],
   );
   assert.equal(
     db.prepare(`
@@ -237,36 +279,16 @@ test('Phase 4 finance lifecycle keeps integer-cents, stock, custody, billing, an
   assert.equal(delivered.body.invoice.client_id, client.id);
   assert.equal(delivered.body.invoice.workshop_order_id, workshopOrder.id);
   assert.equal(delivered.body.invoice.total_cents, 2_500_000);
-  assert.equal(delivered.body.invoice.paid_total_cents, 2_500_000);
-  assert.equal(delivered.body.invoice.remaining_cents, 0);
-  assert.equal(delivered.body.invoice.payment_status, 'paid');
+  assert.equal(delivered.body.invoice.paid_total_cents, 0);
+  assert.equal(delivered.body.invoice.remaining_cents, 2_500_000);
+  assert.equal(delivered.body.invoice.payment_status, 'unpaid');
   assert.equal(delivered.body.order.sales_invoice_id, delivered.body.invoice.id);
-  assert.equal((await request('/api/finance/treasury')).body.cashBalanceCents, 11_500_000);
-  const deliveryReceipt = db.prepare(`
-    SELECT kind, category, amount_cents, invoice_id, reference
-    FROM treasury_entries WHERE invoice_id = ?
-  `).get(delivered.body.invoice.id);
-  assert.deepEqual(deliveryReceipt, {
-    kind: 'income',
-    category: 'تحصيل مبيعات',
-    amount_cents: 2_500_000,
-    invoice_id: delivered.body.invoice.id,
-    reference: delivered.body.invoice.code,
-  });
-  const receiptWhilePaid = await request(
-    `/api/finance/invoices/${delivered.body.invoice.id}/receipt`,
-    jsonOptions('POST', { amountCents: 1 }),
-  );
-  assert.equal(receiptWhilePaid.response.status, 409);
-  assert.equal((await request('/api/finance/treasury')).body.cashBalanceCents, 11_500_000);
-
-  // Simulate a pre-cash-only invoice so partial-receipt and overdue-balance behavior remain covered.
-  db.transaction(() => {
-    db.prepare('DELETE FROM treasury_entries WHERE invoice_id = ?').run(delivered.body.invoice.id);
-    db.prepare("UPDATE invoices SET paid_total_cents = 0, remaining_cents = total_cents, payment_status = 'unpaid' WHERE id = ?")
-      .run(delivered.body.invoice.id);
-  }).immediate();
   assert.equal((await request('/api/finance/treasury')).body.cashBalanceCents, 9_000_000);
+  assert.equal(
+    db.prepare('SELECT COUNT(*) AS count FROM treasury_entries WHERE invoice_id = ?').get(delivered.body.invoice.id).count,
+    0,
+    'workshop delivery creates the sales invoice before any separate receipt is recorded',
+  );
   const duplicateDelivery = await request(
     `/api/workshop/orders/${workshopOrder.id}/deliver`,
     jsonOptions('POST', {}),

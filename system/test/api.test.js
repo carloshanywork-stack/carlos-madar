@@ -314,6 +314,11 @@ test('purchase, fractional issue, sales and treasury stay in sync in SQLite', as
   const maintenanceEmployees = await request('/employees?department=Maintenance')
   assert.equal(maintenanceEmployees.response.status, 200)
   assert.deepEqual(maintenanceEmployees.data.map((employee) => employee.department), ['Maintenance'])
+  const salesEmployees = await request('/employees', { authCookie: salesCookie })
+  assert.equal(salesEmployees.response.status, 200)
+  assert.ok(salesEmployees.data.length > 0)
+  assert.ok(salesEmployees.data.every((employee) => !Object.hasOwn(employee, 'monthlySalaryCents')))
+  assert.ok(maintenanceEmployees.data.every((employee) => Object.hasOwn(employee, 'monthlySalaryCents')))
   assert.equal((await request('/employees?department=Unknown')).response.status, 400)
   assert.equal((await request('/employees', {
     method: 'POST', authCookie: salesCookie, body: { name: 'Unauthorized employee', department: 'Maintenance' },
@@ -1977,6 +1982,9 @@ test('purchase, fractional issue, sales and treasury stay in sync in SQLite', as
   assert.equal(pptx.response.status, 200)
   assert.match(pptx.response.headers.get('content-type'), /presentationml/)
   assert.ok(pptx.data.byteLength > 1000)
+  const oversizedPptx = await request(`/reports/export.pptx?ids=${Array.from({ length: 50 }, (_, index) => index + 1).join(',')}`)
+  assert.equal(oversizedPptx.response.status, 400)
+  assert.equal(oversizedPptx.data.error, 'يرجى تحديد 20 أمر صيانة كحد أقصى للتصدير الواحد')
   const clientReportPptx = await JSZip.loadAsync(Buffer.from(pptx.data))
   const clientReportPptxText = (await Promise.all(Object.values(clientReportPptx.files)
     .filter((file) => !file.dir && file.name.startsWith('ppt/') && file.name.endsWith('.xml'))

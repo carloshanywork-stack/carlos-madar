@@ -9,6 +9,18 @@ const syncOnly = process.argv.includes('--sync-only');
 const releaseBuild = process.argv.includes('--release');
 const liveReloadBuild = process.argv.includes('--live-reload');
 const isWindows = process.platform === 'win32';
+const versionProperties = Object.fromEntries(
+  readFileSync(resolve(projectRoot, 'android/version.properties'), 'utf8')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith('#') && line.includes('='))
+    .map((line) => line.split('=').map((part) => part.trim())),
+);
+const versionCode = Number(versionProperties.versionCode ?? 0);
+const versionName = versionProperties.versionName ?? '';
+if (!Number.isInteger(versionCode) || versionCode < 1 || !versionName) {
+  throw new Error('android/version.properties must define a positive versionCode and a versionName.');
+}
 
 if (releaseBuild && liveReloadBuild) {
   throw new Error('Live reload is for local development only and cannot be used for a release APK.');
@@ -103,4 +115,5 @@ if (!syncOnly) {
   }
   console.log(`${releaseBuild ? 'Release' : 'Debug'} APK: ${builtApk}`);
   console.log(`Published APK: ${publishedApk}`);
+  console.log(`Android version: ${versionName} (versionCode ${versionCode})`);
 }

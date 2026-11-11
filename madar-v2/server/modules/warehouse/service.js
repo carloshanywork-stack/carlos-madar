@@ -13,6 +13,7 @@ import {
 
 const SCRAP_SALE_CATEGORY = 'إيرادات بيع خردة ومخلفات تشغيل';
 const SCRAP_SALE_REFERENCE = 'بيع خردة بواقي ورشة';
+const MAX_SCRAP_SALE_CENTS = 5_000_000;
 const MAX_QUANTITY = 1_000_000_000_000;
 
 function quantity(value, label, { allowZero = false } = {}) {
@@ -102,6 +103,9 @@ export function createMaterial(input, actorId = null, database = db) {
   const initialStock = body.initialStock === undefined
     ? 0
     : quantity(body.initialStock, 'initialStock', { allowZero: true });
+  if (!Number.isInteger(initialStock)) {
+    throw new HttpError(400, 'Initial main-warehouse stock must be a whole-unit quantity.');
+  }
 
   try {
     const materialId = database.transaction(() => {
@@ -160,7 +164,10 @@ export function listMovements(database = db) {
 
 export function issueMaterial(input, actorId = null, database = db) {
   const body = requireObject(input);
-  allowOnlyKeys(body, ['workshopOrderId', 'sourceWarehouse', 'materialId', 'offcutId', 'quantity', 'notes']);
+  allowOnlyKeys(body, [
+    'workshopOrderId', 'sourceWarehouse', 'materialId', 'offcutId', 'quantity', 'notes',
+    'mainWithdrawalMode', 'offcutName', 'offcutDimensions',
+  ]);
   const workshopOrderId = positiveId(body.workshopOrderId, 'workshopOrderId');
   const sourceWarehouse = body.sourceWarehouse;
   if (!['main', 'secondary'].includes(sourceWarehouse)) {
@@ -168,15 +175,29 @@ export function issueMaterial(input, actorId = null, database = db) {
   }
   const requestedQuantity = quantity(body.quantity, 'quantity');
   const notes = optionalText(body.notes, 'notes', { maxLength: 2000 });
+  const fractionalMainWithdrawal = sourceWarehouse === 'main' && !Number.isInteger(requestedQuantity);
   if (sourceWarehouse === 'main') {
     if (body.materialId === undefined || body.offcutId !== undefined) {
       throw new HttpError(400, 'Main-warehouse issues require materialId and cannot include offcutId.');
     }
+    if (fractionalMainWithdrawal) {
+      if (body.mainWithdrawalMode !== 'round_up') {
+        throw new HttpError(400, 'Choose a whole-unit main-warehouse withdrawal or issue the fractional quantity from a secondary offcut.');
+      }
+      requireText(body.offcutName, 'offcutName', { maxLength: 200 });
+      requireText(body.offcutDimensions, 'offcutDimensions', { maxLength: 200 });
+    } else if (body.mainWithdrawalMode !== undefined || body.offcutName !== undefined || body.offcutDimensions !== undefined) {
+      throw new HttpError(400, 'Offcut details are only accepted when a fractional main-warehouse issue rounds up.');
+    }
   } else if (body.offcutId === undefined || body.materialId !== undefined) {
     throw new HttpError(400, 'Secondary-warehouse issues require offcutId and cannot include materialId.');
+  } else if (body.mainWithdrawalMode !== undefined || body.offcutName !== undefined || body.offcutDimensions !== undefined) {
+    throw new HttpError(400, 'Main-warehouse rounding fields cannot be used for a secondary-offcut issue.');
   }
   const materialId = sourceWarehouse === 'main' ? positiveId(body.materialId, 'materialId') : null;
   const offcutId = sourceWarehouse === 'secondary' ? positiveId(body.offcutId, 'offcutId') : null;
+  const mainWithdrawalQuantity = sourceWarehouse === 'main' ? Math.ceil(requestedQuantity) : requestedQuantity;
+  const remainderQuantity = sourceWarehouse === 'main' ? mainWithdrawalQuantity - requestedQuantity : 0;
 
   const result = database.transaction(() => {
     const order = activeWorkshopOrder(workshopOrderId, database);
@@ -184,11 +205,32 @@ export function issueMaterial(input, actorId = null, database = db) {
     let selectedOffcut = null;
     if (sourceWarehouse === 'main') {
       selectedMaterial = activeMaterial(materialId, database);
-      if (selectedMaterial.stock < requestedQuantity) {
+      if (!Number.isInteger(selectedMaterial.stock)) {
+        throw new HttpError(409, `Main stock for ${selectedMaterial.code} has a fractional legacy balance; reconcile a physical stock count before issuing.`);
+      }
+      if (selectedMaterial.stock < mainWithdrawalQuantity) {
         throw new HttpError(409, 'Insufficient main-warehouse stock.');
       }
       database.prepare('UPDATE materials SET stock = stock - ? WHERE id = ? AND stock >= ?')
-        .run(requestedQuantity, materialId, requestedQuantity);
+        .run(mainWithdrawalQuantity, materialId, mainWithdrawalQuantity);
+      if (remainderQuantity > 0) {
+        const insertedOffcut = database.prepare(`
+          INSERT INTO secondary_warehouse_offcuts
+            (material_id, name, dimensions, quantity, unit, unit_cost_cents, origin_workshop_order_id, notes)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          selectedMaterial.id,
+          requireText(body.offcutName, 'offcutName', { maxLength: 200 }),
+          requireText(body.offcutDimensions, 'offcutDimensions', { maxLength: 200 }),
+          remainderQuantity,
+          selectedMaterial.unit,
+          selectedMaterial.unit_cost_cents,
+          order.id,
+          notes ?? `Remainder from ${mainWithdrawalQuantity} whole-unit main-warehouse withdrawal.`,
+        );
+        const createdOffcutId = Number(insertedOffcut.lastInsertRowid);
+        selectedOffcut = database.prepare('SELECT * FROM secondary_warehouse_offcuts WHERE id = ?').get(createdOffcutId);
+      }
     } else {
       selectedOffcut = database.prepare(`
         SELECT id, material_id, name, dimensions, quantity, unit, unit_cost_cents, status
@@ -217,9 +259,9 @@ export function issueMaterial(input, actorId = null, database = db) {
 
     const movementId = logMovement(database, {
       materialId: selectedMaterial?.id ?? selectedOffcut?.material_id ?? null,
-      offcutId,
+      offcutId: sourceWarehouse === 'secondary' ? offcutId : null,
       kind: 'issue',
-      quantity: requestedQuantity,
+      quantity: sourceWarehouse === 'main' ? mainWithdrawalQuantity : requestedQuantity,
       warehouse: sourceWarehouse,
       reference: order.order_code,
       sourceType: 'workshop_order',
@@ -227,29 +269,63 @@ export function issueMaterial(input, actorId = null, database = db) {
       notes,
       actorId,
     });
+    let offcutMovementId = null;
+    if (remainderQuantity > 0 && selectedOffcut) {
+      offcutMovementId = logMovement(database, {
+        offcutId: selectedOffcut.id,
+        kind: 'offcut_return',
+        quantity: remainderQuantity,
+        warehouse: 'secondary',
+        reference: order.order_code,
+        sourceType: 'workshop_order',
+        sourceId: order.id,
+        notes: `Remainder returned from ${mainWithdrawalQuantity} whole-unit main-warehouse withdrawal.`,
+        actorId,
+      });
+      recordStockAudit(database, actorId, 'warehouse_offcut', selectedOffcut.id, 'created_from_main_withdrawal', null, {
+        material_id: selectedMaterial.id,
+        workshop_order_id: order.id,
+        quantity: remainderQuantity,
+        unit: selectedMaterial.unit,
+      });
+    }
     recordStockAudit(database, actorId, 'inventory_movement', movementId, 'workshop_issue', null, {
       workshop_order_id: order.id,
       workshop_order_code: order.order_code,
       source_warehouse: sourceWarehouse,
       material_id: selectedMaterial?.id ?? selectedOffcut?.material_id ?? null,
-      offcut_id: offcutId,
-      quantity: requestedQuantity,
+      requested_quantity: requestedQuantity,
+      main_withdrawal_quantity: sourceWarehouse === 'main' ? mainWithdrawalQuantity : null,
+      remainder_quantity: remainderQuantity,
+      offcut_id: sourceWarehouse === 'secondary' ? offcutId : null,
+      returned_offcut_id: remainderQuantity > 0 ? selectedOffcut?.id ?? null : null,
+      offcut_movement_id: offcutMovementId,
     });
     return {
       movementId,
+      offcutMovementId,
       material: selectedMaterial ? activeMaterial(materialId, database) : null,
       offcut: selectedOffcut
-        ? database.prepare('SELECT * FROM secondary_warehouse_offcuts WHERE id = ?').get(offcutId)
+        ? database.prepare('SELECT * FROM secondary_warehouse_offcuts WHERE id = ?').get(selectedOffcut.id)
         : null,
       orderCode: order.order_code,
+      requestedQuantity,
+      mainWithdrawalQuantity: sourceWarehouse === 'main' ? mainWithdrawalQuantity : null,
+      remainderQuantity,
     };
   }).immediate();
 
   return {
     movement: database.prepare('SELECT * FROM inventory_movements WHERE id = ?').get(result.movementId),
+    offcutMovement: result.offcutMovementId
+      ? database.prepare('SELECT * FROM inventory_movements WHERE id = ?').get(result.offcutMovementId)
+      : null,
     material: result.material,
     offcut: result.offcut,
     workshop_order_code: result.orderCode,
+    requested_quantity: result.requestedQuantity,
+    main_withdrawal_quantity: result.mainWithdrawalQuantity,
+    remainder_quantity: result.remainderQuantity,
   };
 }
 
@@ -319,6 +395,9 @@ export function sellScrap(input, actorId = null, database = db) {
   if (offcutIds.length === 0) throw new HttpError(400, 'offcutIds must contain at least one offcut.');
   const totalSaleAmountCents = nonNegativeInteger(body.totalSaleAmountCents, 'totalSaleAmountCents');
   if (totalSaleAmountCents < 1) throw new HttpError(400, 'totalSaleAmountCents must be greater than zero.');
+  if (totalSaleAmountCents > MAX_SCRAP_SALE_CENTS) {
+    throw new HttpError(400, 'Scrap-sale transactions may not exceed 50,000 EGP.');
+  }
   const buyerName = optionalText(body.buyerName, 'buyerName', { maxLength: 200 });
 
   const treasuryEntryId = database.transaction(() => {

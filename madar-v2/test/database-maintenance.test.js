@@ -10,7 +10,7 @@ process.env.MADAR_V2_STORAGE_ROOT = join(temporaryDirectory, 'storage');
 process.env.NODE_ENV = 'test';
 process.env.COOKIE_SECURE = 'false';
 
-const [{ db, createConnection }, { initializeDatabase, migrateAccountLoginProtection, migrateAttendanceAdminClockOutNote, migrateAttendanceBiometricConfirmation, migrateAttendanceClockLocations, migrateCairoTimezone, migrateMaintenancePhotoRotations, migrateMachineMaintenanceNotes, migrateMachineNotesHistory }, { runDatabaseMaintenance }] = await Promise.all([
+const [{ db, createConnection }, { initializeDatabase, migrateAccountLoginProtection, migrateAttendanceAdminClockOutNote, migrateAttendanceBiometricConfirmation, migrateAttendanceClockLocations, migrateCairoTimezone, migrateDurableOperationsEvents, migrateMaintenancePhotoRotations, migrateMaintenancePhysicalPhotoRotations, migrateMachineMaintenanceNotes, migrateMachineNotesHistory, migrateWholeUnitMainWarehouse }, { runDatabaseMaintenance }] = await Promise.all([
   import('../server/database/connection.js'),
   import('../server/database/init.js'),
   import('../server/database/maintenance.js'),
@@ -34,9 +34,21 @@ test('database initialization sets Cairo and adds account lockout fields', () =>
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE version = '20261103-gps-retention-index'").get().count, 1);
   assert.ok(db.pragma('table_info(employee_daily_attendance)').some((column) => column.name === 'clock_out_admin_note'));
   assert.ok(db.pragma('table_info(maintenance_card_photo_rotations)').some((column) => column.name === 'angle'));
+  assert.ok(db.pragma('table_info(maintenance_card_photo_rotations)').some((column) => column.name === 'rotated_path'));
+  assert.ok(db.pragma('table_info(operations_events)').some((column) => column.name === 'event_id'));
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE version = '20261110-durable-operations-events'").get().count, 1);
+  assert.match(db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'inventory_movements'").get().sql, /offcut_return/);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE version = '20261110-main-warehouse-whole-units'").get().count, 1);
+  migrateDurableOperationsEvents(db);
+  migrateWholeUnitMainWarehouse(db);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE version = '20261110-durable-operations-events'").get().count, 1);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE version = '20261110-main-warehouse-whole-units'").get().count, 1);
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE version = '20261109-maintenance-photo-rotation-metadata'").get().count, 1);
   migrateMaintenancePhotoRotations(db);
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE version = '20261109-maintenance-photo-rotation-metadata'").get().count, 1);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE version = '20261110-maintenance-photo-rotation-derivatives'").get().count, 1);
+  migrateMaintenancePhysicalPhotoRotations(db);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE version = '20261110-maintenance-photo-rotation-derivatives'").get().count, 1);
   assert.ok(db.pragma('table_info(machines)').some((column) => column.name === 'maintenance_note'));
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE version = '20261109-machine-maintenance-notes'").get().count, 1);
   migrateMachineMaintenanceNotes(db);
@@ -61,6 +73,50 @@ test('database initialization sets Cairo and adds account lockout fields', () =>
   assert.ok(biometricColumns.has('clock_out_biometric_verified'));
   migrateAttendanceBiometricConfirmation(db);
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE version = '20261105-attendance-biometric-confirmation'").get().count, 1);
+});
+
+test('main-stock migration preserves movement IDs and adds fractional-offcut movements and whole-unit triggers', () => {
+  const legacy = createConnection(':memory:');
+  try {
+    legacy.exec(`
+      CREATE TABLE schema_migrations (version TEXT PRIMARY KEY);
+      CREATE TABLE users (id INTEGER PRIMARY KEY);
+      CREATE TABLE materials (id INTEGER PRIMARY KEY, stock REAL NOT NULL DEFAULT 0);
+      CREATE TABLE secondary_warehouse_offcuts (id INTEGER PRIMARY KEY);
+      CREATE TABLE inventory_movements (
+        id INTEGER PRIMARY KEY,
+        material_id INTEGER REFERENCES materials(id),
+        offcut_id INTEGER REFERENCES secondary_warehouse_offcuts(id),
+        kind TEXT NOT NULL CHECK (kind IN ('purchase', 'issue', 'scrap_sale', 'variance_gain', 'variance_loss')),
+        quantity REAL NOT NULL CHECK (quantity > 0),
+        warehouse TEXT NOT NULL CHECK (warehouse IN ('main', 'secondary')),
+        reference TEXT,
+        source_type TEXT CHECK (source_type IN ('workshop_order', 'maintenance_custody', 'manual', 'stock_count')),
+        source_id INTEGER,
+        notes TEXT,
+        created_by INTEGER REFERENCES users(id),
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CHECK (material_id IS NOT NULL OR offcut_id IS NOT NULL)
+      );
+      INSERT INTO materials (id, stock) VALUES (4, 6);
+      INSERT INTO inventory_movements (id, material_id, kind, quantity, warehouse)
+        VALUES (52, 4, 'purchase', 6, 'main');
+    `);
+    migrateWholeUnitMainWarehouse(legacy);
+    migrateWholeUnitMainWarehouse(legacy);
+
+    assert.deepEqual(legacy.prepare('SELECT id, material_id, kind, quantity, warehouse FROM inventory_movements').get(), {
+      id: 52, material_id: 4, kind: 'purchase', quantity: 6, warehouse: 'main',
+    });
+    assert.equal(legacy.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE version = '20261110-main-warehouse-whole-units'").get().count, 1);
+    legacy.prepare(`INSERT INTO inventory_movements (material_id, kind, quantity, warehouse)
+      VALUES (4, 'offcut_return', 0.5, 'secondary')`).run();
+    assert.throws(() => legacy.prepare('INSERT INTO materials (id, stock) VALUES (5, 0.5)').run(), /whole units/);
+    assert.throws(() => legacy.prepare('UPDATE materials SET stock = 6.5 WHERE id = 4').run(), /whole units/);
+    assert.equal(legacy.prepare('SELECT stock FROM materials WHERE id = 4').get().stock, 6);
+  } finally {
+    legacy.close();
+  }
 });
 
 test('machine notes history migration backfills card and fallback notes additively and is idempotent', () => {
@@ -155,6 +211,37 @@ test('maintenance photo rotation migration is additive, preserves records, and i
       updated_by: 8,
     });
     assert.equal(legacy.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get().count, 2);
+  } finally {
+    legacy.close();
+  }
+});
+
+test('physical photo-rotation migration adds only a nullable derivative path and preserves rotation history', () => {
+  const legacy = createConnection(':memory:');
+  try {
+    legacy.exec(`CREATE TABLE schema_migrations (version TEXT PRIMARY KEY);
+      CREATE TABLE users (id INTEGER PRIMARY KEY);
+      CREATE TABLE maintenance_cards (id INTEGER PRIMARY KEY);
+      INSERT INTO users (id) VALUES (8);
+      INSERT INTO maintenance_cards (id) VALUES (31);
+      INSERT INTO schema_migrations (version) VALUES ('prior-version');`);
+    migrateMaintenancePhotoRotations(legacy);
+    legacy.prepare(`INSERT INTO maintenance_card_photo_rotations (card_id, phase, filename, angle, updated_by)
+      VALUES (31, 'before', 'field-photo.jpg', 270, 8)`).run();
+    migrateMaintenancePhysicalPhotoRotations(legacy);
+    migrateMaintenancePhysicalPhotoRotations(legacy);
+
+    assert.deepEqual(legacy.prepare(`SELECT card_id, phase, filename, angle, updated_by, rotated_path
+      FROM maintenance_card_photo_rotations`).get(), {
+      card_id: 31,
+      phase: 'before',
+      filename: 'field-photo.jpg',
+      angle: 270,
+      updated_by: 8,
+      rotated_path: null,
+    });
+    assert.equal(legacy.prepare('SELECT COUNT(*) AS count FROM maintenance_card_photo_rotations').get().count, 1);
+    assert.equal(legacy.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get().count, 3);
   } finally {
     legacy.close();
   }

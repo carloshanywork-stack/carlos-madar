@@ -200,9 +200,19 @@
 #madar-app .rep-offline-map-canvas svg g[role="button"] { cursor: pointer; }
 #madar-app .rep-map-loading, #madar-app .rep-map-missing { position: absolute; inset: 12px 12px auto; width: fit-content; max-width: calc(100% - 24px); padding: 7px 9px; border: 1px solid #c7d3d3; border-radius: 8px; color: #314a55; background: rgba(255,255,255,.94); font-size: 9px; font-weight: 800; }
 #madar-app .rep-map-attribution { position: absolute; bottom: 7px; left: 7px; max-width: 85%; padding: 4px 6px; border-radius: 5px; color: #3c4e52; background: rgba(255,255,255,.88); font-size: 8px; }
+#madar-app .rep-map-machine-popup { position: absolute; z-index: 2; right: 10px; bottom: 10px; display: grid; width: min(330px, calc(100% - 20px)); gap: 7px; padding: 14px; border: 1px solid #c9d8d4; border-radius: 13px; color: #18352e; background: rgba(255,255,255,.97); box-shadow: 0 10px 32px #102b2430; }
+#madar-app .rep-map-machine-popup > strong { padding-inline-end: 26px; font-size: 13px; }
+#madar-app .rep-map-machine-popup > small { color: #52645e; font-size: 10px; line-height: 1.6; }
+#madar-app .rep-map-machine-popup-close { position: absolute; top: 7px; left: 8px; width: 28px; height: 28px; border: 0; border-radius: 50%; color: #42534e; background: #edf3f0; font-size: 19px; cursor: pointer; }
+#madar-app .rep-map-machine-status { display: inline-flex; align-items: center; gap: 6px; color: #3c5149; font-size: 9px; font-weight: 800; }
+#madar-app .rep-map-machine-status i { width: 8px; height: 8px; border-radius: 50%; background: var(--machine-status-color); }
+#madar-app .rep-map-machine-popup .rep-button { min-height: 36px; }
 #madar-app .rep-map-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 9px 15px; margin: 0; color: #4b5c63; font-size: 9px; }
 #madar-app .rep-map-legend span { display: inline-flex; align-items: center; gap: 5px; }
 #madar-app .rep-map-legend i { display: inline-block; width: 9px; height: 9px; border: 2px solid #2356a4; border-radius: 50%; background: #fff; }
+#madar-app .rep-map-legend i.done-pin { border-color: #168267; background: #168267; }
+#madar-app .rep-map-legend i.in-progress-pin { border-color: #d39b10; background: #d39b10; }
+#madar-app .rep-map-legend i.not-started-pin { border-color: #7b8791; background: #7b8791; }
 #madar-app .rep-map-legend i.gps-pin { border-color: #0875d1; background: #0875d1; }
 #madar-app .rep-map-legend small { margin-inline-start: auto; color: #5a6970; }
 

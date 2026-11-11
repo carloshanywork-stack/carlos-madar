@@ -3,6 +3,7 @@ import { basename, extname, join } from 'node:path';
 import { lstat, mkdtemp, readFile, readdir, rename, rm, stat } from 'node:fs/promises';
 import sharp from 'sharp';
 import * as XLSX from 'xlsx';
+import { applyPhotoRotation } from './photo-images.js';
 import { db } from '../../database/connection.js';
 import { recordAudit } from '../audit.js';
 import { assertCashAvailable, insertTreasuryEntry } from '../finance/treasury.service.js';
@@ -845,7 +846,9 @@ export function getMachineCorrectionRequests({ status = 'pending' } = {}, databa
     throw new HttpError(400, 'status must be pending, approved, rejected, or all.');
   }
   const parameters = status === 'all' ? [] : [status];
-  const where = status === 'all' ? '' : 'WHERE correction.status = ?';
+  const where = status === 'all'
+    ? "WHERE correction.request_type = 'machine_identity'"
+    : "WHERE correction.request_type = 'machine_identity' AND correction.status = ?";
   const rows = database.prepare(`
     SELECT correction.id, correction.machine_id, correction.card_id, correction.rep_user_id,
       correction.reported_code, correction.reported_name, correction.note, correction.location_json,
@@ -880,11 +883,12 @@ export function getMachineCorrectionRequests({ status = 'pending' } = {}, databa
       machine.active, machine.deleted_at
     FROM machine_correction_requests correction
     JOIN machines machine ON machine.id = correction.machine_id
-    WHERE correction.reported_code = ? COLLATE NOCASE AND correction.status = 'pending'
+     WHERE correction.request_type = 'machine_identity'
+       AND correction.reported_code = ? COLLATE NOCASE AND correction.status = 'pending'
     ORDER BY machine.id`);
   const pendingSameCode = database.prepare(`SELECT COUNT(DISTINCT machine_id) AS count
     FROM machine_correction_requests
-    WHERE status = 'pending' AND reported_code = ? COLLATE NOCASE`);
+     WHERE request_type = 'machine_identity' AND status = 'pending' AND reported_code = ? COLLATE NOCASE`);
   return rows.map((row) => {
     const candidateMap = new Map();
     for (const candidate of [...candidatesForCode.all(row.reported_code), ...reportingMachineCandidates.all(row.reported_code)]) {
@@ -922,7 +926,7 @@ export function getMachineCorrectionRequests({ status = 'pending' } = {}, databa
 export function getMachineCorrectionEvidence(correctionId, database = db) {
   const id = positiveId(correctionId, 'correctionId');
   const row = database.prepare(`SELECT evidence_data, evidence_content_type
-    FROM machine_correction_requests WHERE id = ?`).get(id);
+     FROM machine_correction_requests WHERE id = ? AND request_type = 'machine_identity'`).get(id);
   if (!row) throw new HttpError(404, 'Machine correction request was not found.');
   if (!row.evidence_data || !row.evidence_content_type) throw new HttpError(404, 'This correction has no evidence photo.');
   return { data: row.evidence_data, contentType: row.evidence_content_type };
@@ -935,7 +939,8 @@ function correctionCodeCandidates(code, database) {
       machine.active, machine.deleted_at
     FROM machine_correction_requests request
     JOIN machines machine ON machine.id = request.machine_id
-    WHERE request.reported_code = ? COLLATE NOCASE AND request.status = 'pending'`).all(code);
+     WHERE request.request_type = 'machine_identity'
+       AND request.reported_code = ? COLLATE NOCASE AND request.status = 'pending'`).all(code);
   const all = new Map([...codeCandidates, ...reportingCandidates]
     .map((candidate) => [Number(candidate.id), candidate]));
   const active = new Map([...all].filter(([, candidate]) => candidate.active === 1 && candidate.deleted_at === null));
@@ -949,12 +954,14 @@ function correctionCodeCandidates(code, database) {
 export function getMachineCorrectionCodeCandidates(correctionId, code, database = db) {
   const id = positiveId(correctionId, 'correctionId');
   const approvedCode = safeMachineCode(code);
-  const correction = database.prepare('SELECT machine_id FROM machine_correction_requests WHERE id = ?').get(id);
+  const correction = database.prepare(`SELECT machine_id FROM machine_correction_requests
+    WHERE id = ? AND request_type = 'machine_identity'`).get(id);
   if (!correction) throw new HttpError(404, 'Machine correction request was not found.');
   const candidates = correctionCodeCandidates(approvedCode, database);
   const machineId = Number(correction.machine_id);
   const otherPendingReport = database.prepare(`SELECT 1 FROM machine_correction_requests
-    WHERE id != ? AND status = 'pending' AND reported_code = ? COLLATE NOCASE AND machine_id != ? LIMIT 1`)
+    WHERE id != ? AND request_type = 'machine_identity' AND status = 'pending'
+      AND reported_code = ? COLLATE NOCASE AND machine_id != ? LIMIT 1`)
     .get(id, approvedCode, machineId);
   const candidateList = [...candidates.all.values()].map((candidate) => ({
     id: Number(candidate.id),
@@ -1016,12 +1023,14 @@ export async function resolveMachineCorrection(correctionId, input, actorId, dat
     throw new HttpError(409, 'A maintenance file recovery is pending. Restart the server before reviewing machine corrections.');
   }
 
-  const lockMachineId = database.prepare('SELECT machine_id FROM machine_correction_requests WHERE id = ?').get(id)?.machine_id ?? id;
+  const lockMachineId = database.prepare(`SELECT machine_id FROM machine_correction_requests
+    WHERE id = ? AND request_type = 'machine_identity'`).get(id)?.machine_id ?? id;
   return withMaintenanceOrderStorageLock(async () => withMachineStorageLock(lockMachineId, async () => {
     if (hasPendingMaintenanceFileRecovery(database)) {
       throw new HttpError(409, 'A maintenance file recovery is pending. Restart the server before reviewing machine corrections.');
     }
-    const correction = database.prepare(`SELECT * FROM machine_correction_requests WHERE id = ?`).get(id);
+    const correction = database.prepare(`SELECT * FROM machine_correction_requests
+      WHERE id = ? AND request_type = 'machine_identity'`).get(id);
     if (!correction) throw new HttpError(404, 'Machine correction request was not found.');
     if (correction.status !== 'pending') throw new HttpError(409, 'This machine correction has already been reviewed.');
     if (body.action === 'rejected') {
@@ -1042,7 +1051,8 @@ export async function resolveMachineCorrection(correctionId, input, actorId, dat
     const candidates = correctionCodeCandidates(approvedCode, database);
     const conflictingMachine = [...candidates.all.keys()].some((candidateId) => candidateId !== machineId);
     const conflictsWithAnotherReport = database.prepare(`SELECT 1 FROM machine_correction_requests
-      WHERE id != ? AND status = 'pending' AND reported_code = ? COLLATE NOCASE AND machine_id != ? LIMIT 1`)
+      WHERE id != ? AND request_type = 'machine_identity' AND status = 'pending'
+        AND reported_code = ? COLLATE NOCASE AND machine_id != ? LIMIT 1`)
       .get(id, approvedCode, machineId);
     const hasConflict = conflictingMachine || Boolean(conflictsWithAnotherReport);
     if (hasConflict) {
@@ -1114,7 +1124,8 @@ export async function resolveMachineCorrection(correctionId, input, actorId, dat
     let committed = false;
     try {
       const result = database.transaction(() => {
-        const currentCorrection = database.prepare('SELECT * FROM machine_correction_requests WHERE id = ?').get(id);
+        const currentCorrection = database.prepare(`SELECT * FROM machine_correction_requests
+          WHERE id = ? AND request_type = 'machine_identity'`).get(id);
         const currentMachine = database.prepare(`SELECT id, code, name_ar, active, deleted_at FROM machines WHERE id = ?`).get(machineId);
         if (!currentCorrection || currentCorrection.status !== 'pending'
             || !currentMachine || currentMachine.code !== machine.code || currentMachine.name_ar !== machine.name_ar
@@ -4430,9 +4441,9 @@ export async function deleteCardPhoto(orderId, cardId, phase, filename, actorId 
       `).run(JSON.stringify(beforePaths), JSON.stringify(afterPaths), nextStatus, targetCardId, id);
       if (update.changes !== 1) throw new HttpError(404, 'Active inspection card was not found.');
       const previousRotation = database.prepare(`
-        SELECT angle FROM maintenance_card_photo_rotations
+        SELECT angle, rotated_path FROM maintenance_card_photo_rotations
         WHERE card_id = ? AND phase = ? AND filename = ?
-      `).get(targetCardId, phase, name)?.angle ?? 0;
+      `).get(targetCardId, phase, name);
       database.prepare(`
         DELETE FROM maintenance_card_photo_rotations
         WHERE card_id = ? AND phase = ? AND filename = ?
@@ -4444,16 +4455,26 @@ export async function deleteCardPhoto(orderId, cardId, phase, filename, actorId 
         action: 'photo_delete',
         entityType: 'maintenance_card',
         entityId: targetCardId,
-        oldValues: { phase, photo: removedStoredPath, rotation: previousRotation, previous_status: card.status },
+          oldValues: { phase, photo: removedStoredPath, rotation: previousRotation?.angle ?? 0, previous_status: card.status },
         newValues: { status: nextStatus, remaining_before: beforePaths.length, remaining_after: afterPaths.length },
       });
-      return { removedStoredPath, status: nextStatus, beforeCount: beforePaths.length, afterCount: afterPaths.length };
+      return {
+        removedStoredPath,
+        removedRotatedPath: previousRotation?.rotated_path ?? null,
+        status: nextStatus,
+        beforeCount: beforePaths.length,
+        afterCount: afterPaths.length,
+      };
     }).immediate();
 
     let fileCleanupPending = false;
     try {
       const absolutePath = await resolveStorageFile(removedPhoto.removedStoredPath);
       await removeStorageFile(absolutePath);
+      if (removedPhoto.removedRotatedPath) {
+        const rotatedAbsolutePath = await resolveStorageFile(removedPhoto.removedRotatedPath);
+        await removeStorageFile(rotatedAbsolutePath);
+      }
     } catch (error) {
       if (error.status !== 404 && error.code !== 'ENOENT') {
         fileCleanupPending = true;
@@ -4530,15 +4551,38 @@ export async function moveCardPhoto(orderId, cardId, input, actorId = null, data
     const sourceAbsolutePath = await resolveStorageFile(sourceStoredPath);
     const destinationAbsoluteDirectory = await ensureStorageDirectory(...pathSegments.slice(0, -1));
     const destinationAbsolutePath = join(destinationAbsoluteDirectory, pathSegments.at(-1));
+    const rotation = database.prepare(`
+      SELECT angle, rotated_path FROM maintenance_card_photo_rotations
+      WHERE card_id = ? AND phase = ? AND filename = ?
+    `).get(targetCardId, fromPhase, name);
+    const sourceRotatedPath = rotation?.rotated_path ?? null;
+    const movedRotatedPath = sourceRotatedPath
+      ? [...pathSegments.slice(0, -1), sourceRotatedPath.split('/').at(-1)].join('/')
+      : null;
+    const sourceRotatedAbsolutePath = sourceRotatedPath ? await resolveStorageFile(sourceRotatedPath) : null;
+    const destinationRotatedAbsolutePath = movedRotatedPath
+      ? join(destinationAbsoluteDirectory, movedRotatedPath.split('/').at(-1))
+      : null;
     try {
       await lstat(destinationAbsolutePath);
       throw new HttpError(409, 'A photo with the same filename already exists in the destination phase.');
     } catch (error) {
       if (error.code !== 'ENOENT') throw error;
     }
+    if (destinationRotatedAbsolutePath && movedRotatedPath !== sourceRotatedPath) {
+      try {
+        await lstat(destinationRotatedAbsolutePath);
+        throw new HttpError(409, 'A rotated photo with the same filename already exists in the destination phase.');
+      } catch (error) {
+        if (error.code !== 'ENOENT') throw error;
+      }
+    }
 
     await rename(sourceAbsolutePath, destinationAbsolutePath);
     try {
+      if (sourceRotatedAbsolutePath && destinationRotatedAbsolutePath && movedRotatedPath !== sourceRotatedPath) {
+        await rename(sourceRotatedAbsolutePath, destinationRotatedAbsolutePath);
+      }
       const update = database.transaction(() => {
         const result = database.prepare(`
           UPDATE maintenance_cards
@@ -4546,16 +4590,12 @@ export async function moveCardPhoto(orderId, cardId, input, actorId = null, data
           WHERE id = ? AND order_id = ? AND deleted_at IS NULL
         `).run(JSON.stringify(beforePaths), JSON.stringify(afterPaths), nextStatus, targetCardId, id);
         if (result.changes !== 1) throw new HttpError(404, 'Active inspection card was not found.');
-        const rotation = database.prepare(`
-          SELECT angle FROM maintenance_card_photo_rotations
-          WHERE card_id = ? AND phase = ? AND filename = ?
-        `).get(targetCardId, fromPhase, name);
         if (rotation) {
           database.prepare(`
             UPDATE maintenance_card_photo_rotations
-            SET phase = ?, updated_at = CURRENT_TIMESTAMP
+            SET phase = ?, rotated_path = ?, updated_at = CURRENT_TIMESTAMP
             WHERE card_id = ? AND phase = ? AND filename = ?
-          `).run(toPhase, targetCardId, fromPhase, name);
+          `).run(toPhase, movedRotatedPath, targetCardId, fromPhase, name);
         }
 
         recordAudit({
@@ -4570,10 +4610,170 @@ export async function moveCardPhoto(orderId, cardId, input, actorId = null, data
       });
       update.immediate();
     } catch (error) {
+      if (sourceRotatedAbsolutePath && destinationRotatedAbsolutePath && movedRotatedPath !== sourceRotatedPath) {
+        await rename(destinationRotatedAbsolutePath, sourceRotatedAbsolutePath).catch(() => undefined);
+      }
       await rename(destinationAbsolutePath, sourceAbsolutePath);
       throw error;
     }
     return { ok: true, cardId: targetCardId, status: nextStatus, path: movedStoredPath };
+  });
+}
+
+export async function retagMaintenancePhoto(orderId, cardId, input, actorId = null, database = db) {
+  const sourceOrderId = positiveId(orderId, 'orderId');
+  const sourceCardId = positiveId(cardId, 'cardId');
+  const body = requireObject(input);
+  allowOnlyKeys(body, ['fromPhase', 'toPhase', 'filename', 'targetOrderId', 'targetCardId']);
+  const targetOrderId = body.targetOrderId === undefined ? sourceOrderId : positiveId(body.targetOrderId, 'targetOrderId');
+  const targetCardId = body.targetCardId === undefined ? sourceCardId : positiveId(body.targetCardId, 'targetCardId');
+  const moveInput = { fromPhase: body.fromPhase, toPhase: body.toPhase, filename: body.filename };
+  if (sourceOrderId === targetOrderId && sourceCardId === targetCardId) {
+    return moveCardPhoto(sourceOrderId, sourceCardId, moveInput, actorId, database);
+  }
+  const { fromPhase, toPhase } = moveInput;
+  if (!['before', 'after'].includes(fromPhase) || !['before', 'after'].includes(toPhase)) {
+    throw new HttpError(400, 'fromPhase and toPhase must be before or after.');
+  }
+  const filename = requireText(moveInput.filename, 'filename', { maxLength: 200 });
+  if (filename.includes('/') || filename.includes('\\')) throw new HttpError(400, 'Invalid photo filename.');
+
+  return withMaintenanceOrderStorageLock(async () => {
+    assertNoPendingMaintenanceFileRecovery(database);
+    const cardQuery = `
+      SELECT card.id, card.order_id, card.before_photos_json, card.after_photos_json, card.status,
+        order_record.status AS order_status, order_record.order_code, order_record.client_id,
+        client.storage_code AS client_code, machine.code AS machine_code
+      FROM maintenance_cards card
+      JOIN maintenance_orders order_record ON order_record.id = card.order_id
+      JOIN clients client ON client.id = order_record.client_id
+      JOIN machines machine ON machine.id = card.machine_id
+      WHERE order_record.id = ? AND card.id = ? AND order_record.deleted_at IS NULL AND card.deleted_at IS NULL
+    `;
+    const sourceCard = database.prepare(cardQuery).get(sourceOrderId, sourceCardId);
+    const targetCard = database.prepare(cardQuery).get(targetOrderId, targetCardId);
+    if (!sourceCard) throw new HttpError(404, 'Source inspection card was not found.');
+    if (!targetCard) throw new HttpError(404, 'Target maintenance order or machine card was not found.');
+    if (Number(sourceCard.client_id) !== Number(targetCard.client_id)) {
+      throw new HttpError(403, 'A photo can only be reassigned to another order for the same client.');
+    }
+    if (sourceCard.order_status === 'archived' || targetCard.order_status === 'archived') {
+      throw new HttpError(409, 'Archived maintenance orders do not allow photo changes.');
+    }
+
+    const sourceBefore = parsePhotoJson(sourceCard.before_photos_json);
+    const sourceAfter = parsePhotoJson(sourceCard.after_photos_json);
+    const targetBefore = parsePhotoJson(targetCard.before_photos_json);
+    const targetAfter = parsePhotoJson(targetCard.after_photos_json);
+    const sourceList = fromPhase === 'before' ? sourceBefore : sourceAfter;
+    const targetList = toPhase === 'before' ? targetBefore : targetAfter;
+    const index = sourceList.findIndex((path) => basename(path) === filename);
+    if (index < 0) throw new HttpError(404, 'Photo was not found in the source card phase.');
+    if (targetList.length >= MAX_MANUAL_CARD_PHASE_PHOTOS) {
+      throw new HttpError(400, `A maintenance card may contain at most ${MAX_MANUAL_CARD_PHASE_PHOTOS} manually uploaded photos in each phase.`);
+    }
+    const [sourceStoredPath] = sourceList.splice(index, 1);
+    const destinationDirectory = storageDirectory(
+      'clients', targetCard.client_code, 'maintenance', targetCard.order_code, targetCard.machine_code, toPhase,
+    );
+    const destinationStoredPath = `${destinationDirectory}/${basename(sourceStoredPath)}`;
+    targetList.push(destinationStoredPath);
+    const sourceNextStatus = sourceCard.status === 'excluded'
+      ? 'excluded'
+      : sourceBefore.length && sourceAfter.length ? 'completed' : 'pending';
+    const targetNextStatus = targetCard.status === 'excluded'
+      ? 'excluded'
+      : targetBefore.length && targetAfter.length ? 'completed' : 'pending';
+    const rotation = database.prepare(`
+      SELECT angle, rotated_path FROM maintenance_card_photo_rotations
+      WHERE card_id = ? AND phase = ? AND filename = ?
+    `).get(sourceCardId, fromPhase, filename);
+    const destinationRotatedPath = rotation?.rotated_path
+      ? `${destinationDirectory}/${basename(rotation.rotated_path)}`
+      : null;
+    const sourceAbsolutePath = await resolveStorageFile(sourceStoredPath);
+    const sourceRotatedAbsolutePath = rotation?.rotated_path
+      ? await resolveStorageFile(rotation.rotated_path)
+      : null;
+    const destinationAbsoluteDirectory = await ensureStorageDirectory(...destinationDirectory.split('/'));
+    const destinationAbsolutePath = join(destinationAbsoluteDirectory, basename(destinationStoredPath));
+    const destinationRotatedAbsolutePath = destinationRotatedPath
+      ? join(destinationAbsoluteDirectory, basename(destinationRotatedPath))
+      : null;
+    for (const path of [destinationAbsolutePath, destinationRotatedAbsolutePath].filter(Boolean)) {
+      try {
+        await lstat(path);
+        throw new HttpError(409, 'A photo with the same filename already exists in the target maintenance card.');
+      } catch (error) {
+        if (error.code !== 'ENOENT') throw error;
+      }
+    }
+
+    await rename(sourceAbsolutePath, destinationAbsolutePath);
+    try {
+      if (sourceRotatedAbsolutePath && destinationRotatedAbsolutePath) {
+        await rename(sourceRotatedAbsolutePath, destinationRotatedAbsolutePath);
+      }
+      const update = database.transaction(() => {
+        const sourceUpdate = database.prepare(`
+          UPDATE maintenance_cards SET before_photos_json = ?, after_photos_json = ?, status = ?, updated_at = CURRENT_TIMESTAMP
+          WHERE id = ? AND order_id = ? AND deleted_at IS NULL
+        `).run(JSON.stringify(sourceBefore), JSON.stringify(sourceAfter), sourceNextStatus, sourceCardId, sourceOrderId);
+        if (sourceUpdate.changes !== 1) throw new HttpError(404, 'Source inspection card was not found.');
+        const targetUpdate = database.prepare(`
+          UPDATE maintenance_cards SET before_photos_json = ?, after_photos_json = ?, status = ?, updated_at = CURRENT_TIMESTAMP
+          WHERE id = ? AND order_id = ? AND deleted_at IS NULL
+        `).run(JSON.stringify(targetBefore), JSON.stringify(targetAfter), targetNextStatus, targetCardId, targetOrderId);
+        if (targetUpdate.changes !== 1) throw new HttpError(404, 'Target inspection card was not found.');
+        if (rotation) {
+          database.prepare(`
+            UPDATE maintenance_card_photo_rotations
+            SET card_id = ?, phase = ?, rotated_path = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE card_id = ? AND phase = ? AND filename = ?
+          `).run(targetCardId, toPhase, destinationRotatedPath, sourceCardId, fromPhase, filename);
+        }
+        recordAudit({
+          database,
+          actorId,
+          action: 'photo_move',
+          entityType: 'maintenance_card',
+          entityId: sourceCardId,
+          oldValues: {
+            order_id: sourceOrderId, card_id: sourceCardId, phase: fromPhase,
+            photo: sourceStoredPath, rotation: rotation?.angle ?? 0, status: sourceCard.status,
+          },
+          newValues: {
+            order_id: targetOrderId, card_id: targetCardId, phase: toPhase,
+            photo: destinationStoredPath, rotation: rotation?.angle ?? 0,
+            source_status: sourceNextStatus, target_status: targetNextStatus,
+          },
+        });
+        recordAudit({
+          database,
+          actorId,
+          action: 'photo_receive',
+          entityType: 'maintenance_card',
+          entityId: targetCardId,
+          newValues: { order_id: targetOrderId, source_order_id: sourceOrderId, source_card_id: sourceCardId, phase: toPhase, photo: destinationStoredPath },
+        });
+      });
+      update.immediate();
+    } catch (error) {
+      if (sourceRotatedAbsolutePath && destinationRotatedAbsolutePath) {
+        await rename(destinationRotatedAbsolutePath, sourceRotatedAbsolutePath).catch(() => undefined);
+      }
+      await rename(destinationAbsolutePath, sourceAbsolutePath);
+      throw error;
+    }
+    return {
+      ok: true,
+      orderId: targetOrderId,
+      cardId: targetCardId,
+      phase: toPhase,
+      status: targetNextStatus,
+      sourceStatus: sourceNextStatus,
+      path: destinationStoredPath,
+    };
   });
 }
 
@@ -4611,11 +4811,23 @@ function findMaintenancePhotoMetadata(orderId, cardId, phase, filename, database
   if (!PHOTO_EXTENSIONS.has(extname(name).toLowerCase()) || !attachedStoredPath) {
     throw new HttpError(404, 'Photo is not attached to this inspection card.');
   }
-  const rotation = database.prepare(`
-    SELECT angle FROM maintenance_card_photo_rotations
+  const rotationRow = database.prepare(`
+    SELECT angle, rotated_path FROM maintenance_card_photo_rotations
     WHERE card_id = ? AND phase = ? AND filename = ?
-  `).get(targetCardId, phase, name)?.angle ?? 0;
-  return { id, cardId: targetCardId, phase, filename: name, storedPath: attachedStoredPath, rotation };
+  `).get(targetCardId, phase, name);
+  const rotation = rotationRow?.angle ?? 0;
+  const rotatedPath = rotationRow?.rotated_path ?? null;
+  return {
+    id,
+    cardId: targetCardId,
+    phase,
+    filename: name,
+    sourceStoredPath: attachedStoredPath,
+    storedPath: rotatedPath || attachedStoredPath,
+    rotatedPath,
+    savedRotation: rotationRow?.angle ?? rotation,
+    rotation: rotatedPath ? 0 : rotationRow?.angle ?? rotation,
+  };
 }
 
 export async function getMaintenancePhotoDetails(orderId, cardId, phase, filename, database = db) {
@@ -4625,6 +4837,44 @@ export async function getMaintenancePhotoDetails(orderId, cardId, phase, filenam
 
 export async function getMaintenancePhoto(orderId, cardId, phase, filename, database = db) {
   return (await getMaintenancePhotoDetails(orderId, cardId, phase, filename, database)).absolutePath;
+}
+
+export function getMaintenancePhotoTagTargets(orderId, database = db) {
+  const id = positiveId(orderId, 'orderId');
+  const source = database.prepare(`
+    SELECT id, client_id FROM maintenance_orders WHERE id = ? AND deleted_at IS NULL
+  `).get(id);
+  if (!source) throw new HttpError(404, 'Maintenance order was not found.');
+  const rows = database.prepare(`
+    SELECT order_record.id AS order_id, order_record.order_code, order_record.status AS order_status,
+      card.id AS card_id, machine.code AS machine_code, machine.name_ar AS machine_name_ar,
+      machine.area AS machine_area, card.before_photos_json, card.after_photos_json
+    FROM maintenance_orders order_record
+    JOIN maintenance_cards card ON card.order_id = order_record.id AND card.deleted_at IS NULL
+    JOIN machines machine ON machine.id = card.machine_id
+    WHERE order_record.client_id = ? AND order_record.deleted_at IS NULL
+      AND order_record.status <> 'archived'
+    ORDER BY CASE WHEN order_record.id = ? THEN 0 ELSE 1 END,
+      order_record.updated_at DESC, order_record.id DESC, card.id
+  `).all(source.client_id, id);
+  const orders = new Map();
+  for (const row of rows) {
+    const orderIdValue = Number(row.order_id);
+    let order = orders.get(orderIdValue);
+    if (!order) {
+      order = { id: orderIdValue, orderCode: row.order_code, status: row.order_status, cards: [] };
+      orders.set(orderIdValue, order);
+    }
+    order.cards.push({
+      id: Number(row.card_id),
+      machineCode: row.machine_code,
+      machineNameAr: row.machine_name_ar,
+      area: row.machine_area,
+      beforePhotoCount: parsePhotoJson(row.before_photos_json).length,
+      afterPhotoCount: parsePhotoJson(row.after_photos_json).length,
+    });
+  }
+  return [...orders.values()];
 }
 
 export async function rotateMaintenanceCardPhoto(orderId, cardId, input, actorId = null, database = db) {
@@ -4661,6 +4911,7 @@ export async function rotateMaintenanceCardPhoto(orderId, cardId, input, actorId
 
     const photo = findMaintenancePhotoMetadata(id, targetCardId, phase, filename, database);
     const absolutePath = await resolveStorageFile(photo.storedPath);
+    const sourceAbsolutePath = await resolveStorageFile(photo.sourceStoredPath);
     try {
       const metadata = await sharp(absolutePath, { failOn: 'none' }).metadata();
       if (!metadata.format) throw new Error('Image format could not be identified.');
@@ -4668,37 +4919,62 @@ export async function rotateMaintenanceCardPhoto(orderId, cardId, input, actorId
       throw new HttpError(415, 'This photo could not be rotated as a supported image.');
     }
 
-    const previousRotation = photo.rotation;
+    const previousRotation = photo.savedRotation;
     const nextRotation = ((previousRotation + delta) % 360 + 360) % 360;
-    const save = database.transaction(() => {
-      database.prepare(`
-        INSERT INTO maintenance_card_photo_rotations
-          (card_id, phase, filename, angle, updated_by, updated_at)
-        VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-        ON CONFLICT(card_id, phase, filename) DO UPDATE SET
-          angle = excluded.angle,
-          updated_by = excluded.updated_by,
-          updated_at = CURRENT_TIMESTAMP
-      `).run(targetCardId, phase, filename, nextRotation, actorId);
-      recordAudit({
-        database,
-        actorId,
-        action: 'rotate_maintenance_photo',
-        entityType: 'maintenance_card',
-        entityId: targetCardId,
-        oldValues: { phase, filename, rotation: previousRotation },
-        newValues: { phase, filename, rotation: nextRotation, rotation_delta: delta },
+    const sourceParts = photo.sourceStoredPath.split('/');
+    const sourceName = sourceParts.at(-1);
+    const sourceExtension = extname(sourceName);
+    const sourceStem = sourceName.slice(0, sourceName.length - sourceExtension.length);
+    const derivativeName = `${sourceStem}.madar-rotated-${nextRotation}-${randomUUID()}.jpg`;
+    const derivativePath = [...sourceParts.slice(0, -1), derivativeName].join('/');
+    const rotatedBuffer = await applyPhotoRotation(await readFile(sourceAbsolutePath), nextRotation);
+    const derivative = { ...await writeStorageFile(derivativePath, rotatedBuffer), storedPath: derivativePath };
+    try {
+      const save = database.transaction(() => {
+        database.prepare(`
+          INSERT INTO maintenance_card_photo_rotations
+            (card_id, phase, filename, angle, updated_by, updated_at, rotated_path)
+          VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
+          ON CONFLICT(card_id, phase, filename) DO UPDATE SET
+            angle = excluded.angle,
+            updated_by = excluded.updated_by,
+            updated_at = CURRENT_TIMESTAMP,
+            rotated_path = excluded.rotated_path
+        `).run(targetCardId, phase, filename, nextRotation, actorId, derivative.storedPath);
+        recordAudit({
+          database,
+          actorId,
+          action: 'rotate_maintenance_photo',
+          entityType: 'maintenance_card',
+          entityId: targetCardId,
+          oldValues: { phase, filename, rotation: previousRotation },
+          newValues: {
+            phase,
+            filename,
+            rotation: nextRotation,
+            rotation_delta: delta,
+            rotated_path: derivative.storedPath,
+          },
+        });
       });
-    });
-    save.immediate();
+      save.immediate();
+    } catch (error) {
+      if (derivative) await removeStorageFile(derivative.absolutePath).catch(() => undefined);
+      throw error;
+    }
 
     try {
-      await invalidateMaintenanceThumbnail(absolutePath, previousRotation);
-      await getMaintenanceThumbnail(absolutePath, nextRotation);
+      await invalidateMaintenanceThumbnail(absolutePath, photo.rotation);
+      const nextAbsolutePath = derivative.absolutePath;
+      await getMaintenanceThumbnail(nextAbsolutePath, 0);
     } catch (error) {
-      // The new cache key includes the saved angle, so a stale derived thumbnail
-      // cannot be served even if best-effort removal of the previous one fails.
+      // The stored derivative has its own cache key; a stale cache cannot replace it.
       console.warn(`Maintenance thumbnail cleanup for ${filename} is pending: ${error.message}`);
+    }
+    if (photo.rotatedPath && photo.rotatedPath !== derivative.storedPath) {
+      await removeStorageFile(absolutePath).catch((error) => {
+        console.warn(`Previous rotated photo cleanup for ${filename} is pending: ${error.message}`);
+      });
     }
 
     return {
@@ -4706,6 +4982,7 @@ export async function rotateMaintenanceCardPhoto(orderId, cardId, input, actorId
       filename,
       rotatedAt: Date.now(),
       angle: nextRotation,
+      rotatedPath: derivative.storedPath,
     };
   });
 }

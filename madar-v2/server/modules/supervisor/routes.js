@@ -3,7 +3,8 @@ import { readFile } from 'node:fs/promises';
 import { asyncHandler, HttpError } from '../http.js';
 import { requestActorId } from '../actor.js';
 import { getOfflineMapStatus, readOfflineMapTile } from './offline-tiles.js';
-import { publishOperationsEvent, subscribeOperationsEvents } from '../operations-events.js';
+import { getOperationsEventsAfter, publishOperationsEvent, subscribeOperationsEvents } from '../operations-events.js';
+import { approveRepMachineLocationCorrection, rejectRepMachineLocationCorrection, listLocationConfirmations } from '../rep/service.js';
 import {
   buildApprovedVisitsWorkbook,
   getPendingVisitReviews,
@@ -42,6 +43,8 @@ router.get('/map/tiles/:z/:x/:y', (req, res) => {
 });
 
 router.get('/events', (req, res) => {
+  const cursor = Number(req.get('Last-Event-ID') ?? req.query.lastEventId ?? 0);
+  const safeCursor = Number.isSafeInteger(cursor) && cursor >= 0 ? cursor : 0;
   res.status(200).set({
     'Cache-Control': 'private, no-cache, no-transform',
     Connection: 'keep-alive',
@@ -50,11 +53,17 @@ router.get('/events', (req, res) => {
   });
   res.flushHeaders?.();
   res.write('retry: 3000\n\n');
-
-  const unsubscribe = subscribeOperationsEvents((event) => {
+  let lastEventId = safeCursor;
+  const dispatch = (event) => {
+    const eventId = Number(event.id);
+    if (Number.isSafeInteger(eventId) && eventId <= lastEventId) return;
+    if (Number.isSafeInteger(eventId)) lastEventId = eventId;
     res.write(`id: ${event.id}\nevent: operations\ndata: ${JSON.stringify(event)}\n\n`);
     if (event.type === 'system.shutdown') res.end();
-  });
+  };
+  for (const event of getOperationsEventsAfter(safeCursor, { limit: 10_000 })) dispatch(event);
+
+  const unsubscribe = subscribeOperationsEvents(dispatch);
   const heartbeat = setInterval(() => res.write(': keepalive\n\n'), 25_000);
   heartbeat.unref?.();
   const close = () => {
@@ -74,6 +83,27 @@ router.get('/reps/:id/route', (req, res, next) => {
   try {
     res.set({ 'Cache-Control': 'private, no-store', Pragma: 'no-cache' });
     res.json(getSupervisorRepRoute(req.params.id, req.query.date));
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/location-confirmations', (req, res) => {
+  res.set({ 'Cache-Control': 'private, no-store' });
+  res.json({ success: true, requests: listLocationConfirmations({ status: req.query.status ?? 'pending' }) });
+});
+
+router.post('/corrections/:id/reject', (req, res, next) => {
+  try {
+    res.set({ 'Cache-Control': 'private, no-store' });
+    res.json(rejectRepMachineLocationCorrection(req.params.id, req.body, requestActorId(req)));
+  } catch (error) { next(error); }
+});
+
+router.post('/corrections/:id/approve', (req, res, next) => {
+  try {
+    res.set({ 'Cache-Control': 'private, no-store' });
+    res.json(approveRepMachineLocationCorrection(req.params.id, req.body, requestActorId(req)));
   } catch (error) {
     next(error);
   }

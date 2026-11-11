@@ -2,6 +2,7 @@ import { lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, apiUrl } from '../../lib/api.js';
 import { distanceBetweenGpsPointsMeters, getAdaptiveGpsInterval, GPS_POLLING } from './gps-adaptive.js';
 import { googleMapsNavigationUrl } from './map-utils.js';
+import { applyPendingMachineLocations, locationReviewState, locationReviewLabel } from './location-review.js';
 import {
   addPendingVisit,
   addPendingMachineAction,
@@ -24,6 +25,7 @@ import {
   addNativeBackListener,
   addNativeNetworkListener,
   acknowledgeNativeDutyTracking,
+  acknowledgeNativeAttendanceAction,
   authenticateNativeAttendance,
   deleteNativePendingBackup,
   exportPendingQueue,
@@ -33,6 +35,10 @@ import {
   getNativeNetworkStatus,
   isNativeRepApp,
   listNativeVisits,
+  listNativeAttendanceActions,
+  enqueueNativeAttendanceAction,
+  enqueueNativeMachineAction,
+  listNativeMachineActions,
   cacheNativeReasons,
   cacheNativeRoute,
   restoreNativePendingBackups,
@@ -109,6 +115,51 @@ function currentBusinessDate() {
   return `${date.year}-${date.month}-${date.day}`;
 }
 
+function businessDateFor(value) {
+  const date = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Africa/Cairo', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(new Date(value)).filter((part) => part.type !== 'literal').map(({ type, value: partValue }) => [type, partValue]));
+  return `${date.year}-${date.month}-${date.day}`;
+}
+
+function applyPendingAttendance(attendance, actions = []) {
+  let current = attendance ? { ...attendance } : null;
+  for (const item of [...actions].sort((left, right) => String(left.occurredAt).localeCompare(String(right.occurredAt)))) {
+    const action = item.action ?? item.payload?.action;
+    const occurredAt = item.occurredAt ?? item.payload?.occurredAt;
+    const location = item.location ?? item.payload?.location;
+    if (!['in', 'out'].includes(action) || !occurredAt) continue;
+    if (action === 'in') {
+      current = {
+        ...(current ?? {}),
+        work_date: businessDateFor(occurredAt),
+        status: 'present',
+        clock_in_time: occurredAt,
+        clock_in_source: 'app',
+        clock_in_lat: location?.latitude ?? null,
+        clock_in_lng: location?.longitude ?? null,
+        clock_in_accuracy: location?.accuracy ?? null,
+        clock_in_location_at: location?.updatedAt ?? null,
+        clock_in_biometric_verified: 1,
+        clock_out_time: null,
+        clock_out_source: null,
+      };
+    } else if (current?.clock_in_time && !current.clock_out_time) {
+      current = {
+        ...current,
+        clock_out_time: occurredAt,
+        clock_out_source: 'app',
+        clock_out_lat: location?.latitude ?? null,
+        clock_out_lng: location?.longitude ?? null,
+        clock_out_accuracy: location?.accuracy ?? null,
+        clock_out_location_at: location?.updatedAt ?? null,
+        clock_out_biometric_verified: 1,
+      };
+    }
+  }
+  return current;
+}
+
 function formatGps(location) {
   if (!location) return 'الموقع غير متاح';
   return `${location.latitude.toFixed(5)}, ${location.longitude.toFixed(5)} · دقة ±${Math.round(location.accuracy)}م`;
@@ -130,57 +181,6 @@ function visitSubmitted(machine) {
   return Boolean(machine.isCompleted || machine.isSubmitted);
 }
 
-function applyPendingMachineLocations(route, actions = []) {
-  const pins = new Map();
-  const correctionMachineIds = new Set();
-  for (const action of actions) {
-    if (action.type !== 'confirm_location' || action.status === 'blocked' || pins.has(Number(action.machineId))) continue;
-    const location = action.payload?.location;
-    if (!location || !Number.isFinite(Number(location.latitude)) || !Number.isFinite(Number(location.longitude))) continue;
-    pins.set(Number(action.machineId), location);
-  }
-  for (const action of actions) {
-    if (action.type === 'report_correction') correctionMachineIds.add(Number(action.machineId));
-  }
-  if ((!pins.size && !correctionMachineIds.size) || !route?.regions) return route;
-  return {
-    ...route,
-    regions: route.regions.map((region) => ({
-      ...region,
-      machines: region.machines.map((machine) => {
-        const machineId = Number(machine.machineId);
-        const location = pins.get(machineId);
-        if (correctionMachineIds.has(machineId)) return { ...machine, correctionPending: true, canVisit: false };
-        return location ? {
-          ...machine,
-          latitude: Number(location.latitude),
-          longitude: Number(location.longitude),
-          isLocationLocked: true,
-          geofenceRadiusMeters: 50,
-          locationConfirmationPending: true,
-        } : machine;
-      }),
-    })),
-  };
-}
-
-function updateRouteMachineLocation(route, machineId, location, pending = false) {
-  if (!route?.regions) return route;
-  return {
-    ...route,
-    regions: route.regions.map((region) => ({
-      ...region,
-      machines: region.machines.map((machine) => Number(machine.machineId) === Number(machineId) ? {
-        ...machine,
-        latitude: Number(location.latitude),
-        longitude: Number(location.longitude),
-        isLocationLocked: true,
-        geofenceRadiusMeters: 50,
-        locationConfirmationPending: pending,
-      } : machine),
-    })),
-  };
-}
 
 function updateRouteMachineCorrection(route, machineId) {
   if (!route?.regions) return route;
@@ -255,6 +255,7 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
   const [reasons, setReasons] = useState([]);
   const [pendingVisits, setPendingVisits] = useState([]);
   const [pendingMachineActions, setPendingMachineActions] = useState([]);
+  const [pendingAttendanceActions, setPendingAttendanceActions] = useState([]);
   const [query, setQuery] = useState('');
   const [routeFilter, setRouteFilter] = useState('all');
   const [selectedMachine, setSelectedMachine] = useState(null);
@@ -278,10 +279,27 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
   const routeRef = useRef(null);
   const pendingMachineActionsRef = useRef([]);
   const seenReviewNoticesRef = useRef(new Set());
+  const mockAuditAtRef = useRef(0);
   const nativeBackStateRef = useRef({});
   const userId = Number(user.id);
   const nativeApp = isNativeRepApp();
   routeRef.current = route;
+
+  const reportMockLocation = useCallback(async (action) => {
+    if (Date.now() - mockAuditAtRef.current < 60_000) return false;
+    if (offlineOnly || !navigator.onLine) return false;
+    mockAuditAtRef.current = Date.now();
+    try {
+      const result = await api.post('/api/rep/attendance/mock-location', {
+        action,
+        detectedAt: new Date().toISOString(),
+        is_mock: true,
+      }, { timeoutMs: 4000 });
+      return Boolean(result?.audited);
+    } catch {
+      return false;
+    }
+  }, [offlineOnly]);
 
   useEffect(() => {
     if (!attendance?.clock_in_time || attendance.clock_out_time) return undefined;
@@ -320,6 +338,28 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
         visits.push({ ...native, beforePhotos: [], afterPhotos: [] });
       }
       visits.sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+
+      const nativeActions = await listNativeMachineActions(userId).catch(() => []);
+      const nativeById = new Map(nativeActions.map((action) => [action.actionUuid, action]));
+      for (const stored of actions) {
+        const native = nativeById.get(stored.actionUuid);
+        if (!native) continue;
+        if (native.status === stored.status && (native.reviewNote ?? '') === (stored.reviewNote ?? '')) continue;
+        Object.assign(stored, {
+          status: native.status,
+          correctionId: native.correctionId ?? stored.correctionId,
+          reviewNote: native.reviewNote ?? stored.reviewNote,
+          lastError: native.lastError ?? stored.lastError,
+          attempts: native.attempts ?? stored.attempts,
+        });
+        await updatePendingMachineAction(stored.actionUuid, {
+          status: stored.status,
+          correctionId: stored.correctionId,
+          reviewNote: stored.reviewNote,
+          lastError: stored.lastError,
+          attempts: stored.attempts,
+        }).catch(() => undefined);
+      }
     }
     pendingMachineActionsRef.current = actions;
     setPendingMachineActions(actions);
@@ -336,6 +376,7 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
     try {
       const state = nativeApp ? await getNativeDutyTrackingState() : null;
       const mocked = Boolean(state?.mocked);
+      if (mocked) void reportMockLocation('tracking');
       const nativeLocation = state?.lastLocation && !mocked ? {
         latitude: state.lastLocation.latitude,
         longitude: state.lastLocation.longitude,
@@ -393,9 +434,9 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
     } finally {
       trackingSyncingRef.current = false;
     }
-  }, [nativeApp, offlineOnly, onDuty, userId]);
+  }, [nativeApp, offlineOnly, onDuty, reportMockLocation, userId]);
 
-  const captureVisitLocation = useCallback(async () => {
+  const captureVisitLocation = useCallback(async (purpose = 'visit') => {
     try {
       let location;
       if (nativeApp) {
@@ -426,10 +467,13 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
       setGpsError('');
       return location;
     } catch (error) {
+      if (/mock|تزييف|مزيف/i.test(String(error?.message ?? '')) || error?.code === 'MOCK_LOCATION_DETECTED') {
+        void reportMockLocation(purpose);
+      }
       setGpsError(error.message || 'تعذر تحديث GPS عند حفظ الزيارة.');
       return null;
     }
-  }, [nativeApp]);
+  }, [nativeApp, reportMockLocation]);
 
   useEffect(() => {
     gpsRef.current = gps;
@@ -438,22 +482,24 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
   const loadLocalSnapshots = useCallback(async () => {
     try {
       const recoveredCount = await restoreNativePendingBackups(userId);
-      const [savedRoute, savedReasons, visits, actions, savedAttendance, nativeCache] = await Promise.all([
+      const [savedRoute, savedReasons, visits, actions, savedAttendance, nativeCache, attendanceActions] = await Promise.all([
         getSnapshot('route_snapshots', userId),
         getSnapshot('reason_snapshots', userId),
         listPendingVisits(userId),
         listPendingMachineActions(userId),
         getSnapshot('attendance_snapshots', userId),
         nativeApp ? getNativeRepCache(userId) : Promise.resolve(null),
+        nativeApp ? listNativeAttendanceActions(userId) : Promise.resolve([]),
       ]);
+      setPendingAttendanceActions(attendanceActions);
       pendingMachineActionsRef.current = actions;
       setPendingMachineActions(actions);
       const cachedRoute = savedRoute?.route ?? nativeCache?.route;
       const cachedReasons = savedReasons?.reasons ?? nativeCache?.reasons;
       if (cachedRoute) setRoute(applyPendingMachineLocations({ ...cachedRoute, cachedAt: savedRoute?.cachedAt ?? cachedRoute.cachedAt }, actions));
       if (cachedReasons) setReasons(cachedReasons);
-      if (savedAttendance?.date === currentBusinessDate()) {
-        const cachedAttendance = savedAttendance.attendance ?? null;
+      if (savedAttendance?.date === currentBusinessDate() || attendanceActions.length) {
+        const cachedAttendance = applyPendingAttendance(savedAttendance.attendance ?? null, attendanceActions);
         setAttendance(cachedAttendance);
         setOnDuty(Boolean(cachedAttendance?.clock_in_time && !cachedAttendance.clock_out_time));
         setAttendanceLoaded(true);
@@ -464,10 +510,18 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
     } catch (error) {
       if (nativeApp) {
         try {
-          const [nativeCache, nativeVisits] = await Promise.all([
+          const [nativeCache, nativeVisits, nativeAttendanceActions] = await Promise.all([
             getNativeRepCache(userId),
             listNativeVisits(userId),
+            listNativeAttendanceActions(userId),
           ]);
+          setPendingAttendanceActions(nativeAttendanceActions);
+          const offlineAttendance = applyPendingAttendance(null, nativeAttendanceActions);
+          if (offlineAttendance) {
+            setAttendance(offlineAttendance);
+            setOnDuty(Boolean(offlineAttendance.clock_in_time && !offlineAttendance.clock_out_time));
+            setAttendanceLoaded(true);
+          }
           if (nativeCache?.route) setRoute(applyPendingMachineLocations(nativeCache.route));
           if (Array.isArray(nativeCache?.reasons)) setReasons(nativeCache.reasons);
           setPendingVisits(nativeVisits.filter((visit) => visit.status !== 'synced'));
@@ -532,7 +586,9 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
     try {
       const result = await api.get('/api/rep/attendance/today', { timeoutMs: 4000 });
       if (result?.success) {
-        const currentAttendance = result.attendance ?? null;
+        const pendingActions = nativeApp ? await listNativeAttendanceActions(userId) : [];
+        setPendingAttendanceActions(pendingActions);
+        const currentAttendance = applyPendingAttendance(result.attendance ?? null, pendingActions);
         setAttendance(currentAttendance);
         setOnDuty(Boolean(currentAttendance?.clock_in_time && !currentAttendance.clock_out_time));
         setAttendanceLoaded(true);
@@ -551,21 +607,28 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
       if (error.status === 401) window.dispatchEvent(new Event('madar-auth-expired'));
       return null;
     }
-  }, [offlineOnly, userId]);
+  }, [nativeApp, offlineOnly, userId]);
 
   const clockAttendance = useCallback(async (action) => {
-    if (offlineOnly || !navigator.onLine || serverState !== 'online') {
-      setToast('يلزم الاتصال بالخادم لتسجيل الحضور أو الانصراف.');
+    if (offlineOnly) {
+      setToast('أعد التحقق من الجلسة مع الخادم قبل بدء تسجيل حضور جديد.');
       return;
     }
     setAttendanceSaving(true);
     let nativeTrackingStarted = false;
+    let actionQueued = false;
     try {
       if (!nativeApp) throw new Error('تسجيل الحضور والانصراف بالبصمة متاح من تطبيق MADAR على أندرويد فقط.');
       const biometric = await authenticateNativeAttendance(action);
       if (biometric?.verified !== true) throw new Error('لم تكتمل المصادقة الحيوية.');
-      const location = await captureVisitLocation();
+      const location = await captureVisitLocation('attendance');
       if (!location) throw new Error('يلزم تفعيل GPS لتسجيل الحضور أو الانصراف.');
+      const attendanceLocation = {
+        latitude: location.latitude,
+        longitude: location.longitude,
+        accuracy: location.accuracy,
+        updatedAt: location.updatedAt,
+      };
       try {
         await saveGpsSample(userId, location);
         setStorageError('');
@@ -578,45 +641,97 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
         await startNativeDutyTracking();
         nativeTrackingStarted = true;
       }
-      const result = await api.post(`/api/rep/attendance/clock-${action}`, {
-        location,
+      const occurredAt = new Date().toISOString();
+      const actionUuid = globalThis.crypto?.randomUUID?.() ?? createVisitUuid();
+      const localAction = {
+        actionUuid,
+        repId: userId,
+        action,
+        occurredAt,
+        location: attendanceLocation,
         biometricVerified: true,
-      }, { timeoutMs: 15000 });
-      const currentAttendance = result.attendance ?? null;
-      setAttendance(currentAttendance);
-      setOnDuty(action === 'in');
+      };
+      await enqueueNativeAttendanceAction(localAction);
+      actionQueued = true;
+      const pendingActions = await listNativeAttendanceActions(userId);
+      setPendingAttendanceActions(pendingActions);
+      const optimisticAttendance = applyPendingAttendance(attendance, pendingActions);
+      setAttendance(optimisticAttendance);
+      setOnDuty(Boolean(optimisticAttendance?.clock_in_time && !optimisticAttendance.clock_out_time));
       setAttendanceLoaded(true);
+
+      let trackingReady = false;
+      if (action === 'out') {
+        // Flush and acknowledge every durable breadcrumb before stopping the
+        // native location service. WorkManager completes this later if offline.
+        trackingReady = await syncTracking({ duty: false, stop: true, location });
+        if (trackingReady) {
+          try {
+            await stopNativeDutyTracking();
+          } catch {
+            // A point may arrive between the flush and stop request. Keep the
+            // clock-out queued until WorkManager drains it and stops tracking.
+            trackingReady = false;
+          }
+        }
+      } else {
+        trackingReady = await syncTracking({ duty: true, location });
+      }
+      void requestNativeSync().catch(() => undefined);
+
+      let serverAttendance = null;
+      if (trackingReady && navigator.onLine && serverState === 'online') {
+        try {
+          const result = await api.post('/api/rep/attendance/sync', {
+            actionUuid,
+            action,
+            occurredAt,
+            location: attendanceLocation,
+            biometricVerified: true,
+          }, { timeoutMs: 15000 });
+          if (result?.success === true && result.actionUuid === actionUuid && result.attendance) {
+            serverAttendance = result.attendance;
+            await acknowledgeNativeAttendanceAction(actionUuid, userId);
+            const remainingActions = await listNativeAttendanceActions(userId);
+            setPendingAttendanceActions(remainingActions);
+            serverAttendance = applyPendingAttendance(serverAttendance, remainingActions);
+            setAttendance(serverAttendance);
+            setOnDuty(Boolean(serverAttendance.clock_in_time && !serverAttendance.clock_out_time));
+          }
+        } catch (error) {
+          if (error.status === 401) window.dispatchEvent(new Event('madar-auth-expired'));
+          // The native action remains queued; this covers both network loss and a
+          // response lost after the server committed the idempotent action.
+        }
+      }
+      if (!serverAttendance) {
+        void requestNativeSync().catch(() => undefined);
+        setToast(action === 'in'
+          ? 'تم حفظ الحضور محلياً وبدأ تتبع الوردية؛ ستتم المزامنة تلقائياً عند الاتصال.'
+          : 'تم حفظ الانصراف محلياً؛ سيُستكمل بعد تأكيد مزامنة نقاط GPS وإيقاف التتبع تلقائياً.');
+      } else {
+        setToast(action === 'in'
+          ? 'تم تسجيل الحضور وبدأ تتبع الوردية.'
+          : 'تم تسجيل الانصراف وإيقاف تتبع الوردية.');
+      }
       try {
         await saveSnapshot('attendance_snapshots', userId, {
-          date: currentAttendance?.work_date,
-          attendance: currentAttendance,
+          date: serverAttendance?.work_date ?? optimisticAttendance?.work_date,
+          attendance: serverAttendance ?? optimisticAttendance,
           lastLocation: location,
           cachedAt: new Date().toISOString(),
         });
       } catch {
         // The server has already committed the attendance event.
       }
-      const trackingSync = syncTracking({
-        duty: action === 'in',
-        stop: action === 'out',
-        location,
-      });
-      if (action === 'out' && nativeApp) {
-        void trackingSync.finally(() => stopNativeDutyTracking().catch(() => undefined));
-      } else {
-        void trackingSync;
-      }
-      setToast(action === 'in'
-        ? 'تم تسجيل الحضور؛ وحُفظ موقع البداية محلياً وعلى الخادم.'
-        : 'تم تسجيل الانصراف؛ وحُفظ موقع النهاية محلياً وعلى الخادم.');
       void refreshAttendance();
     } catch (error) {
-      if (action === 'in' && nativeTrackingStarted) await stopNativeDutyTracking().catch(() => undefined);
+      if (action === 'in' && nativeTrackingStarted && !actionQueued) await stopNativeDutyTracking().catch(() => undefined);
       setToast(error.message || 'تعذر تسجيل الحضور. حاول مرة أخرى.');
     } finally {
       setAttendanceSaving(false);
     }
-  }, [authenticateNativeAttendance, captureVisitLocation, nativeApp, offlineOnly, refreshAttendance, serverState, syncTracking, userId]);
+  }, [attendance, authenticateNativeAttendance, captureVisitLocation, nativeApp, offlineOnly, refreshAttendance, requestNativeSync, serverState, syncTracking, userId]);
 
   const checkServer = useCallback(async () => {
     const online = navigator.onLine;
@@ -688,6 +803,9 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
           void refreshData();
         } else if (event.type === 'rep.visit.reviewed') {
           setToast(event.status === 'approved' ? 'اعتمد المشرف آخر زيارة ميدانية.' : 'طلب المشرف إعادة تصوير الزيارة.');
+          void refreshData();
+        } else if (event.type === 'rep.machine.location-reviewed') {
+          setToast(event.status === 'approved' ? 'اعتمد المدير موقع الماكينة.' : 'رُفض الموقع المقترح؛ راجع الملاحظة وأعد الإرسال.');
           void refreshData();
         } else if (event.type === 'attendance.changed') {
           void refreshAttendance();
@@ -854,7 +972,7 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
           if (!active) return;
           const displacementMeters = distanceBetweenGpsPointsMeters(previousLocation, location);
           const speedMetersPerSecond = Number(location.speed) || 0;
-          const moving = speedMetersPerSecond >= GPS_POLLING.movementSpeedMetersPerSecond
+          const moving = speedMetersPerSecond > GPS_POLLING.movementSpeedMetersPerSecond
             || displacementMeters > GPS_POLLING.movementDistanceMeters;
           if (moving) stationarySince = null;
           else if (stationarySince === null) stationarySince = Date.now();
@@ -914,7 +1032,7 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
         };
         const displacementMeters = distanceBetweenGpsPointsMeters(previousLocation, location);
         const speedMetersPerSecond = Number(location.speed) || 0;
-        const moving = speedMetersPerSecond >= GPS_POLLING.movementSpeedMetersPerSecond
+        const moving = speedMetersPerSecond > GPS_POLLING.movementSpeedMetersPerSecond
           || displacementMeters > GPS_POLLING.movementDistanceMeters;
         if (moving) stationarySince = null;
         else if (stationarySince === null) stationarySince = Date.now();
@@ -955,12 +1073,33 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
     let changedServer = false;
     try {
       const actions = await listPendingMachineActions(userId);
+      const reviews = await api.get('/api/rep/location-confirmations', { timeoutMs: 12000 });
+      for (const action of actions.filter((item) => item.type === 'confirm_location')) {
+        const review = reviews.requests?.find((item) => item.actionUuid === action.actionUuid);
+        if (!review) continue;
+        if (action.status !== locationReviewState(review.status)) changedServer = true;
+        Object.assign(action, { status: locationReviewState(review.status), correctionId: review.id, reviewNote: review.reviewNote });
+        await updatePendingMachineAction(action.actionUuid, { status: action.status, correctionId: review.id, reviewNote: review.reviewNote });
+      }
       const pausedCardIds = new Set();
       const pausedMachineIds = new Set();
       let canDrainVisits = true;
       for (const action of actions) {
         if (Number(action.repId) !== userId) continue;
         const cardId = Number(action.payload?.cardId);
+        if (action.type === 'confirm_location' && ['approved', 'rejected'].includes(action.status)) {
+          const review = reviews.requests?.find((item) => item.actionUuid === action.actionUuid);
+          if (!review?.approvedLocation) {
+            pausedMachineIds.add(Number(action.machineId));
+            pausedCardIds.add(cardId);
+          }
+          continue;
+        }
+        if (action.type === 'confirm_location' && action.status === 'pending_approval') {
+          pausedMachineIds.add(Number(action.machineId));
+          pausedCardIds.add(cardId);
+          continue;
+        }
         if (action.status === 'blocked') {
           if (Number.isSafeInteger(cardId) && cardId > 0) pausedCardIds.add(cardId);
           if (action.type === 'report_correction') pausedMachineIds.add(Number(action.machineId));
@@ -987,18 +1126,12 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
               action.payload,
               { timeoutMs: 12000 },
             );
-            if (result?.machine) {
-              setRoute((current) => {
-                const updated = updateRouteMachineLocation(current, action.machineId, {
-                  latitude: result.machine.latitude,
-                  longitude: result.machine.longitude,
-                }, false);
-                void saveSnapshot('route_snapshots', userId, {
-                  route: updated,
-                  cachedAt: new Date().toISOString(),
-                }).catch(() => undefined);
-                return updated;
-              });
+            await updatePendingMachineAction(action.actionUuid, {
+              status: locationReviewState(result.status), correctionId: result.correctionId,
+            });
+            if (result.status !== 'approved') {
+              pausedMachineIds.add(Number(action.machineId));
+              pausedCardIds.add(cardId);
             }
           } else {
             const formData = new FormData();
@@ -1016,7 +1149,7 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
             if (Number.isSafeInteger(cardId) && cardId > 0) pausedCardIds.add(cardId);
           }
           if (!result?.success) throw new Error('لم يؤكد الخادم حفظ إجراء الماكينة.');
-          await deletePendingMachineAction(action.actionUuid);
+          if (action.type !== 'confirm_location') await deletePendingMachineAction(action.actionUuid);
           changedServer = true;
         } catch (error) {
           const permanentClientError = error.status >= 400 && error.status < 500
@@ -1179,6 +1312,12 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
   }, [drainQueue, offlineOnly, pendingMachineActions.length, pendingVisits.length, serverState]);
 
   useEffect(() => {
+    if (nativeApp && pendingAttendanceActions.length && serverState === 'online' && !offlineOnly) {
+      void requestNativeSync().catch(() => undefined);
+    }
+  }, [nativeApp, offlineOnly, pendingAttendanceActions.length, requestNativeSync, serverState]);
+
+  useEffect(() => {
     if ((!pendingVisits.length && !pendingMachineActions.length) || offlineOnly) return undefined;
     const timer = window.setInterval(() => void drainQueue(), 30000);
     return () => window.clearInterval(timer);
@@ -1215,7 +1354,7 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
     remaining: routeMachines.filter((machine) => !visitSubmitted(machine)).length,
     completed: routeMachines.filter(visitSubmitted).length,
   };
-  const pendingQueueCount = pendingVisits.length + pendingMachineActions.length;
+  const pendingQueueCount = pendingVisits.length + pendingMachineActions.length + pendingAttendanceActions.length;
 
   useEffect(() => {
     if (!pendingQueueCount) return undefined;
@@ -1237,7 +1376,7 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
     setPendingExportBusy(true);
     try {
       const result = await exportPendingQueue(userId, user.username);
-      setToast(`أُنشئ ملف JSON يحمل ${result.visits + result.machineActions} عنصراً: ${result.path}`);
+      setToast(`أُنشئ ملف JSON يحمل ${result.visits + result.machineActions + result.attendanceActions} عنصراً: ${result.path}`);
     } catch (error) {
       setToast(error.message || 'تعذر إنشاء نسخة JSON من العمل المعلق.');
     } finally {
@@ -1322,7 +1461,7 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
 
   const confirmSelectedMachineLocation = async (location) => {
     if (!selectedMachine?.machineId) throw new Error('تعذر تحديد بطاقة الماكينة؛ حدّث المسار وحاول مجدداً.');
-    if (!location || !Number.isFinite(Number(location.latitude)) || !Number.isFinite(Number(location.longitude))) {
+    if (!location || !Number.isFinite(location.latitude) || !Number.isFinite(location.longitude)) {
       throw new Error('تعذر قراءة إحداثيات GPS الحالية.');
     }
     const actionUuid = createVisitUuid();
@@ -1348,22 +1487,24 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
       lastError: '',
     };
     try {
+      await enqueueNativeMachineAction(queuedAction).catch((error) => {
+        console.warn('Native machine action queue was unavailable; IndexedDB remains authoritative.', error);
+      });
       await addPendingMachineAction(queuedAction);
       pendingMachineActionsRef.current = [...pendingMachineActionsRef.current, queuedAction];
       setPendingMachineActions(pendingMachineActionsRef.current);
       setRoute((current) => {
-        const updated = updateRouteMachineLocation(current, selectedMachine.machineId, payload.location, true);
+        const updated = applyPendingMachineLocations(current, pendingMachineActionsRef.current);
         void saveSnapshot('route_snapshots', userId, { route: updated, cachedAt: new Date().toISOString() }).catch(() => undefined);
         return updated;
       });
-      setToast('تم حفظ تأكيد الموقع محلياً؛ سيُقفل على الخادم قبل مزامنة أي زيارة.');
+      setToast('حُفظ الموقع المقترح؛ تظل الزيارة متوقفة حتى اعتماد المدير.');
       void drainQueue();
       return {
-        latitude: payload.location.latitude,
-        longitude: payload.location.longitude,
-        isLocationLocked: true,
-        geofenceRadiusMeters: 50,
+        locationConfirmation: { actionUuid, proposedLocation: payload.location, status: 'queued' },
+        locationReviewState: 'queued',
         locationConfirmationPending: true,
+        canVisit: false,
       };
     } catch (error) {
       setStorageError(error.message || 'تعذر حفظ تأكيد الموقع على الهاتف.');
@@ -1400,6 +1541,9 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
       lastError: '',
     };
     try {
+      await enqueueNativeMachineAction(queuedAction, evidence ?? null).catch((error) => {
+        console.warn('Native machine correction queue was unavailable; IndexedDB remains authoritative.', error);
+      });
       await addPendingMachineAction(queuedAction);
       pendingMachineActionsRef.current = [...pendingMachineActionsRef.current, queuedAction];
       setPendingMachineActions(pendingMachineActionsRef.current);
@@ -1460,13 +1604,13 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
           <strong>{attendance?.clock_in_time ? `${attendanceHours(attendance, clockNow).toFixed(2)} ساعة` : 'لم يسجل الحضور بعد'}</strong>
           <small>{attendance?.clock_in_time
             ? `حضور ${formatTime(attendance.clock_in_time)}${attendance.clock_out_time ? ` · انصراف ${formatTime(attendance.clock_out_time)}` : ' · الدوام مستمر'}`
-            : 'يسجل النظام الوقت من الخادم وموقع GPS عند الحضور.'}</small>
+            : 'يُحفظ وقت الجهاز وموقع GPS بأمان؛ وتتم المزامنة تلقائياً عند الاتصال.'}</small>
         </div>
         <div className="rep-attendance-actions">
           <button
             className={`rep-attendance-punch ${attendanceIsOpen ? 'clock-out' : 'clock-in'}`}
             type="button"
-            disabled={attendanceSaving || offlineOnly || serverState !== 'online' || attendanceIsClosed}
+            disabled={attendanceSaving || offlineOnly || !nativeApp || attendanceIsClosed}
             onClick={() => void clockAttendance(punchAction)}
             aria-label={attendanceIsOpen ? 'تسجيل الانصراف وإيقاف تتبع الوردية' : attendanceIsClosed ? 'تم تسجيل الانصراف لهذا اليوم' : 'تسجيل الحضور وبدء تتبع الوردية'}
           >
@@ -1480,7 +1624,7 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
           </button>
           <div className={`rep-attendance-gps ${gps ? 'has-fix' : ''}`} role="status">
             <i aria-hidden="true" />
-            <span><b>GPS</b> · {gps ? formatGps(gps) : gpsError || 'سيُطلب الموقع عند تسجيل البصمة'}</span>
+            <span><b>GPS</b> · {gps ? formatGps(gps) : gpsError || 'سيُطلب الموقع عند تسجيل البصمة'}{pendingAttendanceActions.length ? ` · ${pendingAttendanceActions.length} تسجيل حضور بانتظار المزامنة` : ''}</span>
           </div>
         </div>
       </section>
@@ -1568,14 +1712,21 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
                            <span className="rep-machine-distance">
                              <i aria-hidden="true">↔</i>
                              {machine.locationConfirmationPending
-                               ? 'موقع مؤكد محلياً · بانتظار المزامنة'
+                                ? 'موقع مقترح · بانتظار الإرسال أو اعتماد المدير'
                                : !machine.isLocationLocked || machineDistance(machine, gps) === null
                                ? !machine.isLocationLocked || !Number.isFinite(machine.latitude) || !Number.isFinite(machine.longitude)
                                  ? 'الموقع الجغرافي غير مثبت'
                                  : 'سجّل الحضور لتحديث المسافة'
                                : `المسافة الحالية ${Math.round(machineDistance(machine, gps))}م · GPS ±${Math.round(gps.accuracy)}م`}
                           </span>
-                          {machine.reviewNote && <small className="rep-review-note">ملاحظة المشرف: {machine.reviewNote}</small>}
+                           {machine.reviewNote && <small className="rep-review-note">ملاحظة المشرف: {machine.reviewNote}</small>}
+                           {machine.locationConfirmation && <small className="rep-review-note">
+                             طلب الموقع: {({ queued: 'بانتظار الإرسال', pending_approval: 'بانتظار الاعتماد', approved: 'معتمد', rejected: 'مرفوض؛ يمكنك إرسال موقع مصحح' })[machine.locationReviewState] || 'بانتظار المراجعة'}
+                             {machine.locationConfirmation.reviewNote ? ` · ${machine.locationConfirmation.reviewNote}` : ''}
+                           </small>}
+                           {machine.locationConfirmation?.proposedLocation && <small>
+                             الموقع المقترح: <bdi>{machine.locationConfirmation.proposedLocation.latitude}, {machine.locationConfirmation.proposedLocation.longitude}</bdi>
+                           </small>}
                           <span className="rep-machine-open">{machine.isCompleted ? 'تم اعتماد الزيارة' : machine.reviewStatus === 'pending' ? 'بانتظار قرار المشرف' : machine.reviewStatus === 'reshoot' ? 'افتح لإعادة التصوير' : machine.canVisit === false ? 'للعرض فقط' : 'ابدأ الزيارة'} <b aria-hidden="true">←</b></span>
                         </button>
                         {googleMapsNavigationUrl(machine) && <a className="rep-map-link" href={googleMapsNavigationUrl(machine)} target="_blank" rel="noopener noreferrer">⌖ ملاحة إلى الماكينة في Google Maps</a>}
@@ -1596,29 +1747,38 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
       </section>
 
        {showQueue && <section className="rep-queue-panel" aria-label="قائمة الإجراءات المعلقة">
-         <div className="rep-queue-panel-head"><div><span className="rep-eyebrow">التخزين المحلي</span><h2>إجراءات بانتظار المزامنة <small>{pendingQueueCount}</small></h2></div><button className="rep-icon-button" type="button" onClick={() => setShowQueue(false)} aria-label="إخفاء قائمة المزامنة">×</button></div>
+         <div className="rep-queue-panel-head"><div><span className="rep-eyebrow">التخزين المحلي</span><h2>سجل الإجراءات والمزامنة <small>{pendingQueueCount}</small></h2></div><button className="rep-icon-button" type="button" onClick={() => setShowQueue(false)} aria-label="إخفاء قائمة المزامنة">×</button></div>
          {!pendingQueueCount ? <p className="rep-queue-empty">لا توجد إجراءات معلقة لهذا الحساب.</p> : <ul className="rep-queue-list">
-         {pendingMachineActions.map((action) => <li key={action.actionUuid}>
+          {pendingMachineActions.map((action) => <li key={action.actionUuid}>
+            {['pending_approval', 'approved', 'rejected'].includes(action.status) && <span>
+              {({ pending_approval: 'بانتظار اعتماد المدير', approved: 'معتمد', rejected: 'مرفوض؛ أعد الإرسال من بطاقة الماكينة' })[action.status]} {action.reviewNote || ''}
+            </span>}
            <span className={`rep-queue-state ${action.status === 'syncing' ? 'syncing' : ''} ${action.status === 'blocked' ? 'blocked' : ''}`} aria-hidden="true">{action.status === 'syncing' ? '↻' : action.status === 'blocked' ? '!' : '⏳'}</span>
-           <div><strong>{action.type === 'confirm_location' ? `تأكيد موقع الماكينة ${action.payload?.cardId ? `· بطاقة ${action.payload.cardId}` : ''}` : `بلاغ ماكينة مختلفة · ${action.payload?.reportedCode || ''}`}</strong><small>حُفظ {formatTime(action.createdAt)}{action.attempts ? ` · محاولات ${action.attempts}` : ''} · {action.status === 'blocked' ? 'تحتاج مراجعة' : action.status === 'syncing' ? 'جارٍ الإرسال' : 'بانتظار المزامنة'}</small>{action.evidence && <small>صورة الإثبات محفوظة محلياً · {Math.ceil(action.evidence.size / 1024)} KB</small>}{action.lastError && <small className="rep-queue-error">{action.lastError}</small>}</div>
+            <div><strong>{action.type === 'confirm_location' ? `مقترح موقع الماكينة · بطاقة ${action.payload?.cardId || ''}` : `بلاغ ماكينة مختلفة · ${action.payload?.reportedCode || ''}`}</strong><small>حُفظ {formatTime(action.createdAt)}{action.attempts ? ` · محاولات ${action.attempts}` : ''} · {locationReviewLabel(action.status)}</small>{action.evidence && <small>صورة الإثبات محفوظة محلياً · {Math.ceil(action.evidence.size / 1024)} KB</small>}{action.lastError && <small className="rep-queue-error">{action.lastError}</small>}</div>
            {action.status === 'blocked'
              ? <button type="button" className="rep-queue-retry" disabled={serverState !== 'online' || offlineOnly} onClick={async () => { await updatePendingMachineAction(action.actionUuid, { status: 'queued', lastError: '' }); await refreshPending(); void drainQueue(); }}>إعادة المحاولة</button>
              : <span className="rep-queue-local">محفوظ محلياً</span>}
          </li>)}
-         {pendingVisits.map((visit) => <li key={visit.visitUuid}>
+          {pendingVisits.map((visit) => <li key={visit.visitUuid}>
            <span className={`rep-queue-state ${visit.status === 'syncing' ? 'syncing' : ''} ${visit.status === 'blocked' ? 'blocked' : ''}`} aria-hidden="true">{visit.status === 'syncing' ? '↻' : visit.status === 'blocked' ? '!' : '⏳'}</span>
            <div><strong>ماكينة {visit.payload.machineCode} · {visit.payload.regionName}</strong><small>حُفظت {formatTime(visit.createdAt)}{visit.attempts ? ` · محاولات ${visit.attempts}` : ''} · {visit.status === 'blocked' ? 'تحتاج مراجعة' : visit.status === 'syncing' ? 'جارٍ الإرسال' : 'بانتظار المزامنة'}</small>{visit.lastError && <small className="rep-queue-error">{visit.lastError}</small>}</div>
             {visit.status === 'blocked'
               ? <button type="button" className="rep-queue-retry" disabled={serverState !== 'online' || offlineOnly} onClick={async () => { if (nativeApp && visit.nativeStoragePath?.startsWith('internal://visits/')) await retryNativeVisit(visit.visitUuid, userId); else await updatePendingVisit(visit.visitUuid, { status: 'queued', lastError: '' }); await refreshPending(); void drainQueue(); }}>إعادة المحاولة</button>
-             : <span className="rep-queue-local">محفوظة محلياً</span>}
-         </li>)}</ul>}
-         <button type="button" className="rep-button rep-button-light rep-sync-now" disabled={!pendingQueueCount || pendingExportBusy} onClick={() => void exportPending()}>{pendingExportBusy ? 'جارٍ تجهيز نسخة JSON…' : 'تصدير نسخة JSON'}</button>
-         <button type="button" className="rep-button rep-button-primary rep-sync-now" disabled={!pendingQueueCount || serverState !== 'online' || offlineOnly} onClick={() => void drainQueue()}>{serverState === 'online' ? 'مزامنة الآن ↻' : 'ستتم المزامنة عند الاتصال'}</button>
+              : <span className="rep-queue-local">محفوظة محلياً</span>}
+          </li>)}
+          {pendingAttendanceActions.map((action) => <li key={action.actionUuid}>
+            <span className="rep-queue-state" aria-hidden="true">⏳</span>
+            <div><strong>{action.action === 'in' ? 'تسجيل حضور محفوظ محلياً' : 'تسجيل انصراف محفوظ محلياً'}</strong><small>{formatTime(action.occurredAt)} · دقة GPS ±{Math.round(action.location?.accuracy ?? 0)}م · {action.status === 'attendance_rejected' ? 'مرفوض؛ يحتاج مراجعة' : action.status || 'pending_attendance_sync'}</small>{action.attempts ? <small>محاولات المزامنة {action.attempts}</small> : null}{action.lastError && <small className="rep-queue-error">{action.lastError}</small>}</div>
+            <span className="rep-queue-local">محفوظ محلياً</span>
+          </li>)}
+          </ul>}
+          <button type="button" className="rep-button rep-button-light rep-sync-now" disabled={!pendingQueueCount || pendingExportBusy} onClick={() => void exportPending()}>{pendingExportBusy ? 'جارٍ تجهيز نسخة JSON…' : 'تصدير نسخة JSON'}</button>
+          <button type="button" className="rep-button rep-button-primary rep-sync-now" disabled={!pendingQueueCount || serverState !== 'online' || offlineOnly} onClick={() => { if (nativeApp && pendingAttendanceActions.length) void requestNativeSync().catch(() => undefined); void drainQueue(); }}>{serverState === 'online' ? 'مزامنة الآن ↻' : 'ستتم المزامنة عند الاتصال'}</button>
        </section>}
 
         <footer className="rep-app-footer"><span>مَــدَارْ · تطبيق المندوب الميداني</span><span>{gps ? `آخر GPS: ${formatGps(gps)}` : onDuty ? gpsError : nativeApp ? 'فعّل الحضور لتسجيل GPS أثناء الوردية' : 'يُسجّل GPS مع الحضور والانصراف والزيارة'}</span></footer>
 
-      {selectedMachine && <MachineVisitSheet machine={selectedMachine} reasons={reasons} gps={gps} gpsError={gpsError} captureLocation={captureVisitLocation} onClose={() => setSelectedMachine(null)} onSave={saveVisit} onConfirmLocation={confirmSelectedMachineLocation} onReportCorrection={submitSelectedMachineCorrection} />}
+        {selectedMachine && <MachineVisitSheet machine={{ ...selectedMachine, ...(route?.regions ?? []).flatMap((region) => region.machines).find((machine) => machine.cardId === selectedMachine.cardId) }} repName={user.fullName} reasons={reasons} gps={gps} gpsError={gpsError} captureLocation={captureVisitLocation} onClose={() => setSelectedMachine(null)} onSave={saveVisit} onConfirmLocation={confirmSelectedMachineLocation} onReportCorrection={submitSelectedMachineCorrection} />}
       {tutorialOpen && <Tutorial nativeApp={nativeApp} onFinish={finishTutorial} />}
       {toast && <div className="rep-toast" role="status">✓ {toast}</div>}
     </main>

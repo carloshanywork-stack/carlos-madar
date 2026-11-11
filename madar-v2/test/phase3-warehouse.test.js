@@ -39,10 +39,10 @@ after(async () => {
   rmSync(temporaryDirectory, { recursive: true, force: true });
 });
 
-async function request(path, options = {}) {
+async function request(path, options = {}, cookie = authCookie) {
   const response = await fetch(`${baseUrl}${path}`, {
     ...options,
-    headers: { ...(options.headers ?? {}), cookie: authCookie },
+    headers: { ...(options.headers ?? {}), ...(cookie ? { cookie } : {}) },
   });
   return {
     response,
@@ -166,6 +166,29 @@ test('Phase 3 warehouse lifecycle preserves Phase 1/2 domains and reconciles phy
   assert.equal(invalidScrapSale.response.status, 409);
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM treasury_entries').get().count, 0);
 
+  const operationsUser = await request('/api/users', jsonOptions('POST', {
+    username: 'warehouse-operations',
+    role: 'operations',
+    full_name: 'Warehouse Operations',
+    password: 'warehouse-operations-test-password',
+  }));
+  assert.equal(operationsUser.response.status, 201, JSON.stringify(operationsUser.body));
+  const operationsLogin = await fetch(`${baseUrl}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ username: 'warehouse-operations', password: 'warehouse-operations-test-password' }),
+  });
+  assert.equal(operationsLogin.status, 200);
+  const operationsCookie = (operationsLogin.headers.getSetCookie?.()[0] ?? operationsLogin.headers.get('set-cookie'))
+    ?.split(';', 1)[0];
+  assert.ok(operationsCookie);
+  const forbiddenScrapSale = await request('/api/warehouse/offcuts/scrap-sales', jsonOptions('POST', {
+    offcutIds: [reusableOffcut.id],
+    totalSaleAmountCents: 1000,
+  }), operationsCookie);
+  assert.equal(forbiddenScrapSale.response.status, 403);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM treasury_entries').get().count, 0);
+
   const scrapOffcut = await request('/api/warehouse/offcuts', jsonOptions('POST', {
     name: 'Unusable acrylic scrap',
     dimensions: 'small mixed pieces',
@@ -174,6 +197,12 @@ test('Phase 3 warehouse lifecycle preserves Phase 1/2 domains and reconciles phy
     notes: 'Manual scrap sale test',
   }));
   assert.equal(scrapOffcut.response.status, 201);
+  const excessiveScrapSale = await request('/api/warehouse/offcuts/scrap-sales', jsonOptions('POST', {
+    offcutIds: [scrapOffcut.body.id],
+    totalSaleAmountCents: 5_000_001,
+  }));
+  assert.equal(excessiveScrapSale.response.status, 400);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM treasury_entries').get().count, 0);
   const scrapSale = await request('/api/warehouse/offcuts/scrap-sales', jsonOptions('POST', {
     offcutIds: [scrapOffcut.body.id],
     totalSaleAmountCents: 50000,
@@ -242,20 +271,51 @@ test('Phase 3 warehouse lifecycle preserves Phase 1/2 domains and reconciles phy
     [countableOffcut.body.id, foundOffcut.body.id].sort((a, b) => a - b),
   );
 
-  const duringCountIssue = await request('/api/warehouse/issue', jsonOptions('POST', {
+  const fractionalMainWithoutChoice = await request('/api/warehouse/issue', jsonOptions('POST', {
     workshopOrderId: secondWorkshopOrder.id,
     sourceWarehouse: 'main',
     materialId: material.id,
     quantity: 0.5,
   }));
+  assert.equal(fractionalMainWithoutChoice.response.status, 400);
+  assert.equal((await request('/api/warehouse/materials')).body.find((row) => row.id === material.id).stock, 9);
+
+  const duringCountIssue = await request('/api/warehouse/issue', jsonOptions('POST', {
+    workshopOrderId: secondWorkshopOrder.id,
+    sourceWarehouse: 'main',
+    materialId: material.id,
+    quantity: 0.5,
+    mainWithdrawalMode: 'round_up',
+    offcutName: 'Acrylic fractional remainder',
+    offcutDimensions: '0.5 sheet equivalent',
+  }));
   assert.equal(duringCountIssue.response.status, 201);
-  assert.equal((await request('/api/warehouse/materials')).body.find((row) => row.id === material.id).stock, 8.5);
+  assert.equal(duringCountIssue.body.requested_quantity, 0.5);
+  assert.equal(duringCountIssue.body.main_withdrawal_quantity, 1);
+  assert.equal(duringCountIssue.body.remainder_quantity, 0.5);
+  assert.equal(duringCountIssue.body.movement.quantity, 1);
+  assert.equal(duringCountIssue.body.offcutMovement.kind, 'offcut_return');
+  assert.equal(duringCountIssue.body.offcutMovement.quantity, 0.5);
+  assert.equal(duringCountIssue.body.offcut.quantity, 0.5);
+  assert.equal(duringCountIssue.body.offcut.dimensions, '0.5 sheet equivalent');
+  assert.equal((await request('/api/warehouse/materials')).body.find((row) => row.id === material.id).stock, 8);
 
   const incompleteReconciliation = await request(
     `/api/warehouse/stock-counts/${countStart.body.id}/reconcile`,
     jsonOptions('POST', { main: [], offcuts: [] }),
   );
   assert.equal(incompleteReconciliation.response.status, 400);
+  const fractionalMainCount = await request(
+    `/api/warehouse/stock-counts/${countStart.body.id}/reconcile`,
+    jsonOptions('POST', {
+      main: [{ materialId: material.id, countedQuantity: 8.5 }],
+      offcuts: [
+        { offcutId: countableOffcut.body.id, countedQuantity: 0 },
+        { offcutId: foundOffcut.body.id, countedQuantity: 2 },
+      ],
+    }),
+  );
+  assert.equal(fractionalMainCount.response.status, 400);
 
   const reconciliation = await request(
     `/api/warehouse/stock-counts/${countStart.body.id}/reconcile`,
@@ -273,18 +333,17 @@ test('Phase 3 warehouse lifecycle preserves Phase 1/2 domains and reconciles phy
   assert.equal(reconciliation.body.session.closed_by !== null, true);
   assert.equal((await request('/api/warehouse/materials')).body.find((row) => row.id === material.id).stock, 8);
   assert.equal(reconciliation.body.session.lines.main[0].snapshot_quantity, 9);
-  assert.equal(reconciliation.body.session.lines.main[0].system_quantity_at_reconcile, 8.5);
-  assert.equal(reconciliation.body.session.lines.main[0].variance_quantity, -0.5);
+  assert.equal(reconciliation.body.session.lines.main[0].system_quantity_at_reconcile, 8);
+  assert.equal(reconciliation.body.session.lines.main[0].variance_quantity, 0);
   assert.deepEqual(
     reconciliation.body.variances.map((variance) => variance.movement_id !== null),
-    [true, true, true],
+    [false, true, true],
   );
   const countMovements = db.prepare(`
     SELECT kind, quantity, warehouse FROM inventory_movements
     WHERE source_type = 'stock_count' AND source_id = ? ORDER BY id
   `).all(countStart.body.id);
   assert.deepEqual(countMovements, [
-    { kind: 'variance_loss', quantity: 0.5, warehouse: 'main' },
     { kind: 'variance_loss', quantity: 2, warehouse: 'secondary' },
     { kind: 'variance_gain', quantity: 1, warehouse: 'secondary' },
   ]);

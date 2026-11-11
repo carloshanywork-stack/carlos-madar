@@ -52,7 +52,7 @@ router.post('/offcuts', requireWarehouseMutationAccess, (req, res) => {
   res.status(201).json(roleAware(createOffcut(req.body, requestActorId(req)), req));
 });
 
-router.post('/offcuts/scrap-sales', requireWarehouseMutationAccess, (req, res) => {
+router.post('/offcuts/scrap-sales', requireFinanceOrAdmin, (req, res) => {
   res.status(201).json(roleAware(sellScrap(req.body, requestActorId(req)), req));
 });
 

@@ -1,0 +1,96 @@
+{
+  "id": "7ab6c6736abad58c1624513571c7a838",
+  "name": "MADAR V2 - Active CI, API & Storage Health",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "514985d43f20b336",
+      "name": "Run manually",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [240, 240]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "daysInterval": 1,
+              "triggerAtHour": 6,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      },
+      "id": "bca109648c4d003b",
+      "name": "Daily at 06:00 Cairo",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 440]
+    },
+    {
+      "parameters": {
+        "command": "node /home/carlos/Desktop/MADAR/madar-v2/scripts/n8n-system-check.mjs"
+      },
+      "id": "eec3e1407d842020",
+      "name": "Run tests and local health checks",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [500, 340]
+    },
+    {
+      "parameters": {
+        "jsCode": "const stdout = $input.first()?.json?.stdout;\nif (typeof stdout !== 'string' || !stdout.trim()) {\n  throw new Error('The local verification script returned no JSON report.');\n}\nconst report = JSON.parse(stdout.trim());\nconst lines = [\n  `MADAR V2 system check — ${report.overall}`,\n  `Checked: ${report.checkedAt}`,\n  ...report.checks.map((check) => `${check.status}: ${check.name} — ${JSON.stringify(check.details)}`),\n];\nif (report.overall === 'FAIL') {\n  throw new Error(lines.join('\\n'));\n}\nreturn [{ json: { ...report, supervisorReport: lines.join('\\n'), delivery: 'Available in this n8n execution only; no external notification channel is configured.' } }];"
+      },
+      "id": "0237e334bada9c2c",
+      "name": "Build supervisor report and fail the run on errors",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [780, 340]
+    }
+  ],
+  "connections": {
+    "Run manually": {
+      "main": [
+        [
+          {
+            "node": "Run tests and local health checks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Daily at 06:00 Cairo": {
+      "main": [
+        [
+          {
+            "node": "Run tests and local health checks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run tests and local health checks": {
+      "main": [
+        [
+          {
+            "node": "Build supervisor report and fail the run on errors",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Africa/Cairo"
+  },
+  "pinData": {},
+  "staticData": null,
+  "tags": []
+}

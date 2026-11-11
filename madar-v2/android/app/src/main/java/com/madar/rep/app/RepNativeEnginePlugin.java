@@ -50,7 +50,8 @@ import java.util.concurrent.Executors;
 @CapacitorPlugin(name = "RepEngine")
 public final class RepNativeEnginePlugin extends Plugin {
     private static final ExecutorService IO = Executors.newFixedThreadPool(2);
-    private BiometricPrompt activeBiometricPrompt;
+    private volatile BiometricPrompt activeBiometricPrompt;
+    private boolean biometricPromptStarting;
     private static final String[] INITIAL_PERMISSIONS = new String[] {
         Manifest.permission.CAMERA,
         Manifest.permission.ACCESS_FINE_LOCATION,
@@ -174,40 +175,84 @@ public final class RepNativeEnginePlugin extends Plugin {
             call.reject("لا توجد بصمة أو مصادقة حيوية جاهزة على هذا الهاتف. أعد إعدادها من الإعدادات.", "BIOMETRIC_NOT_ENROLLED");
             return;
         }
-        if (!(getActivity() instanceof FragmentActivity)) {
+        final android.app.Activity hostActivity = getActivity();
+        if (!(hostActivity instanceof FragmentActivity)) {
             call.reject("تعذر فتح نافذة المصادقة الحيوية.", "BIOMETRIC_PROMPT_UNAVAILABLE");
             return;
         }
-        if (activeBiometricPrompt != null) {
-            call.reject("هناك عملية مصادقة حيوية قيد التنفيذ.", "BIOMETRIC_PROMPT_BUSY");
-            return;
+        synchronized (this) {
+            if (activeBiometricPrompt != null || biometricPromptStarting) {
+                call.reject("هناك عملية مصادقة حيوية قيد التنفيذ.", "BIOMETRIC_PROMPT_BUSY");
+                return;
+            }
+            biometricPromptStarting = true;
         }
 
         call.setKeepAlive(true);
         String title = "in".equals(action) ? "تأكيد تسجيل الحضور" : "تأكيد تسجيل الانصراف";
-        activeBiometricPrompt = RepBiometricAuth.authenticate((FragmentActivity) getActivity(), title,
-            new RepBiometricAuth.Callback() {
-                @Override
-                public void onSuccess(int authenticationType) {
-                    activeBiometricPrompt = null;
-                    call.setKeepAlive(false);
-                    call.resolve(new JSObject()
-                        .put("verified", true)
-                        .put("verifiedAt", isoTimestamp(new Date()))
-                        .put("authenticationType", authenticationType));
-                }
+        final FragmentActivity activity = (FragmentActivity) hostActivity;
+        try {
+            activity.runOnUiThread(() -> {
+                try {
+                    if (activity.isFinishing() || activity.isDestroyed()) {
+                        synchronized (RepNativeEnginePlugin.this) {
+                            biometricPromptStarting = false;
+                        }
+                        call.setKeepAlive(false);
+                        call.reject("تعذر فتح نافذة المصادقة الحيوية.", "BIOMETRIC_PROMPT_UNAVAILABLE");
+                        return;
+                    }
 
-                @Override
-                public void onError(int errorCode) {
-                    activeBiometricPrompt = null;
+                    BiometricPrompt prompt = RepBiometricAuth.authenticate(activity, title,
+                        new RepBiometricAuth.Callback() {
+                            @Override
+                            public void onSuccess(int authenticationType) {
+                                synchronized (RepNativeEnginePlugin.this) {
+                                    activeBiometricPrompt = null;
+                                    biometricPromptStarting = false;
+                                }
+                                call.setKeepAlive(false);
+                                call.resolve(new JSObject()
+                                    .put("verified", true)
+                                    .put("verifiedAt", isoTimestamp(new Date()))
+                                    .put("authenticationType", authenticationType));
+                            }
+
+                            @Override
+                            public void onError(int errorCode) {
+                                synchronized (RepNativeEnginePlugin.this) {
+                                    activeBiometricPrompt = null;
+                                    biometricPromptStarting = false;
+                                }
+                                call.setKeepAlive(false);
+                                String message = errorCode == BiometricPrompt.ERROR_USER_CANCELED
+                                    || errorCode == BiometricPrompt.ERROR_NEGATIVE_BUTTON
+                                    ? "أُلغيت المصادقة الحيوية؛ لم يتم تسجيل الحضور."
+                                    : "تعذرت المصادقة الحيوية؛ لم يتم تسجيل الحضور. حاول مجدداً أو أعد إعداد البصمة.";
+                                call.reject(message, "BIOMETRIC_AUTH_FAILED");
+                            }
+                        });
+                    synchronized (RepNativeEnginePlugin.this) {
+                        activeBiometricPrompt = prompt;
+                        biometricPromptStarting = false;
+                    }
+                } catch (Exception error) {
+                    synchronized (RepNativeEnginePlugin.this) {
+                        activeBiometricPrompt = null;
+                        biometricPromptStarting = false;
+                    }
                     call.setKeepAlive(false);
-                    String message = errorCode == BiometricPrompt.ERROR_USER_CANCELED
-                        || errorCode == BiometricPrompt.ERROR_NEGATIVE_BUTTON
-                        ? "أُلغيت المصادقة الحيوية؛ لم يتم تسجيل الحضور."
-                        : "تعذرت المصادقة الحيوية؛ لم يتم تسجيل الحضور. حاول مجدداً أو أعد إعداد البصمة.";
-                    call.reject(message, "BIOMETRIC_AUTH_FAILED");
+                    call.reject("تعذر فتح نافذة المصادقة الحيوية.", "BIOMETRIC_PROMPT_FAILED", error);
                 }
             });
+        } catch (Exception error) {
+            synchronized (this) {
+                activeBiometricPrompt = null;
+                biometricPromptStarting = false;
+            }
+            call.setKeepAlive(false);
+            call.reject("تعذر جدولة نافذة المصادقة الحيوية على واجهة أندرويد.", "BIOMETRIC_PROMPT_FAILED", error);
+        }
     }
 
     @PluginMethod
@@ -216,8 +261,16 @@ public final class RepNativeEnginePlugin extends Plugin {
             call.resolve(new JSObject().put("ignored", true));
             return;
         }
-        getContext().getSharedPreferences("madar_rep_permissions", Context.MODE_PRIVATE)
-            .edit().putBoolean("battery_exemption_requested", true).apply();
+        android.content.SharedPreferences preferences = getContext()
+            .getSharedPreferences("madar_rep_permissions", Context.MODE_PRIVATE);
+        if (preferences.getBoolean("battery_exemption_requested", false)) {
+            call.resolve(new JSObject().put("ignored", false).put("alreadyRequested", true));
+            return;
+        }
+        if (!preferences.edit().putBoolean("battery_exemption_requested", true).commit()) {
+            call.reject("تعذر حفظ حالة طلب استثناء البطارية.", "BATTERY_REQUEST_STATE_FAILED");
+            return;
+        }
         try {
             Intent intent = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
                 Uri.parse("package:" + getContext().getPackageName()));
@@ -258,6 +311,12 @@ public final class RepNativeEnginePlugin extends Plugin {
         } catch (Exception error) {
             call.reject("تعذر حفظ رمز الجلسة المشفر على الهاتف.", "SECURE_SESSION_SAVE_FAILED", error);
         }
+    }
+
+    @PluginMethod
+    public void getSessionAuthorization(PluginCall call) {
+        String token = RepAuthStore.token(getContext());
+        call.resolve(new JSObject().put("token", token));
     }
 
     @PluginMethod
@@ -370,6 +429,99 @@ public final class RepNativeEnginePlugin extends Plugin {
     }
 
     @PluginMethod
+    public void enqueueAttendanceAction(PluginCall call) {
+        JSONObject action = call.getData();
+        if (action == null) { call.reject("بيانات الحضور غير صالحة."); return; }
+        IO.execute(() -> {
+            try (RepLocalStore store = new RepLocalStore(getContext())) {
+                store.enqueueAttendanceAction(action);
+                call.resolve(new JSObject().put("saved", true)
+                    .put("actionUuid", action.optString("actionUuid"))
+                    .put("status", "pending_attendance_sync"));
+            } catch (Exception error) {
+                call.reject("تعذر حفظ تسجيل الحضور في قاعدة SQLite المحلية.", "NATIVE_ATTENDANCE_SAVE_FAILED", error);
+            }
+        });
+    }
+
+    @PluginMethod
+    public void enqueueMachineAction(PluginCall call) {
+        JSONObject action = call.getData();
+        if (action == null) { call.reject("بيانات إجراء الماكينة غير صالحة."); return; }
+        IO.execute(() -> {
+            try (RepLocalStore store = new RepLocalStore(getContext())) {
+                store.enqueueMachineAction(getContext(), action);
+                MadarSyncScheduler.ensurePeriodic(getContext());
+                MadarSyncScheduler.enqueueNow(getContext(), false);
+                call.resolve(new JSObject().put("saved", true)
+                    .put("actionUuid", action.optString("actionUuid"))
+                    .put("status", "queued"));
+            } catch (Exception error) {
+                call.reject("تعذر حفظ إجراء الماكينة في طابور SQLite الأصلي.", "NATIVE_MACHINE_ACTION_SAVE_FAILED", error);
+            }
+        });
+    }
+
+    @PluginMethod
+    public void listMachineActions(PluginCall call) {
+        long repId = call.getData().optLong("repId", 0L);
+        if (repId < 1L) { call.reject("معرّف المندوب غير صالح."); return; }
+        IO.execute(() -> {
+            try (RepLocalStore store = new RepLocalStore(getContext())) {
+                JSONArray actions = store.listMachineActions(repId);
+                call.resolve(new JSObject().put("actions", new JSArray(actions.toString())));
+            } catch (Exception error) {
+                call.reject("تعذر قراءة إجراءات الماكينة المعلقة.", "NATIVE_MACHINE_ACTION_READ_FAILED", error);
+            }
+        });
+    }
+
+    @PluginMethod
+    public void retryMachineAction(PluginCall call) {
+        String actionUuid = call.getString("actionUuid");
+        long repId = call.getData().optLong("repId", 0L);
+        if (actionUuid == null || repId < 1L) { call.reject("بيانات إعادة المحاولة غير صالحة."); return; }
+        IO.execute(() -> {
+            try (RepLocalStore store = new RepLocalStore(getContext())) {
+                store.markMachineActionRetry(actionUuid, "");
+                MadarSyncScheduler.enqueueNow(getContext(), true);
+                call.resolve(new JSObject().put("updated", true));
+            } catch (Exception error) {
+                call.reject("تعذرت إعادة إجراء الماكينة إلى طابور المزامنة.", "NATIVE_MACHINE_ACTION_RETRY_FAILED", error);
+            }
+        });
+    }
+
+    @PluginMethod
+    public void listAttendanceActions(PluginCall call) {
+        long repId = call.getData().optLong("repId", 0L);
+        if (repId < 1L) { call.reject("معرّف المندوب غير صالح."); return; }
+        IO.execute(() -> {
+            try (RepLocalStore store = new RepLocalStore(getContext())) {
+                JSONArray actions = store.listAttendanceActions(repId);
+                call.resolve(new JSObject().put("actions", new JSArray(actions.toString())));
+            } catch (Exception error) {
+                call.reject("تعذر قراءة تسجيلات الحضور المعلقة.", "NATIVE_ATTENDANCE_READ_FAILED", error);
+            }
+        });
+    }
+
+    @PluginMethod
+    public void acknowledgeAttendanceAction(PluginCall call) {
+        String actionUuid = call.getString("actionUuid");
+        long repId = call.getData().optLong("repId", 0L);
+        if (actionUuid == null || repId < 1L) { call.reject("بيانات تأكيد مزامنة الحضور غير صالحة."); return; }
+        IO.execute(() -> {
+            try (RepLocalStore store = new RepLocalStore(getContext())) {
+                boolean removed = store.deleteAttendanceAction(actionUuid, repId);
+                call.resolve(new JSObject().put("removed", removed));
+            } catch (Exception error) {
+                call.reject("تعذر تأكيد مزامنة تسجيل الحضور.", "NATIVE_ATTENDANCE_ACK_FAILED", error);
+            }
+        });
+    }
+
+    @PluginMethod
     public void listVisits(PluginCall call) {
         long repId = call.getData().optLong("repId", 0L);
         if (repId < 1) { call.reject("معرّف المندوب غير صالح."); return; }
@@ -472,6 +624,7 @@ public final class RepNativeEnginePlugin extends Plugin {
 
     @PluginMethod
     public void requestSync(PluginCall call) {
+        MadarSyncScheduler.ensurePeriodic(getContext());
         MadarSyncScheduler.enqueueNow(getContext(), false);
         call.resolve(new JSObject().put("scheduled", true));
     }
@@ -510,6 +663,13 @@ public final class RepNativeEnginePlugin extends Plugin {
         } catch (Exception ignored) { /* Some provider URIs do not expose EXIF; camera orientation is corrected by Capacitor. */ }
         Bitmap oriented = orient(decoded, orientation);
         if (oriented != decoded) decoded.recycle();
+        if (oriented.getWidth() > oriented.getHeight()) {
+            Matrix portraitMatrix = new Matrix();
+            portraitMatrix.setRotate(90f);
+            Bitmap portrait = Bitmap.createBitmap(oriented, 0, 0, oriented.getWidth(), oriented.getHeight(), portraitMatrix, true);
+            if (portrait != oriented) oriented.recycle();
+            oriented = portrait;
+        }
         float scale = Math.min(1f, 1600f / Math.max(oriented.getWidth(), oriented.getHeight()));
         Bitmap scaled = oriented;
         if (scale < 1f) {
@@ -637,7 +797,7 @@ public final class RepNativeEnginePlugin extends Plugin {
         float fontSize = Math.max(15f, Math.round(width * 0.022f));
         float lineHeight = Math.round(fontSize * 1.38f);
         float padding = Math.max(12f, Math.round(fontSize * 0.65f));
-        float panelWidth = Math.min(width, Math.max(width * 0.58f, 300f));
+        float panelWidth = width;
         float panelHeight = Math.min(height, padding * 2f + lineHeight * 6f);
         float top = Math.max(0f, height - panelHeight);
         Paint background = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -656,22 +816,22 @@ public final class RepNativeEnginePlugin extends Plugin {
             try { timestamp = new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssX", Locale.US).parse(capturedAt); }
             catch (Exception ignoredAgain) { timestamp = new Date(); }
         }
-        SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd", Locale.US);
-        SimpleDateFormat weekdayFormat = new SimpleDateFormat("EEEE", new Locale("ar"));
-        SimpleDateFormat timeFormat = new SimpleDateFormat("hh:mm:ss a", Locale.US);
+        SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy/MM/dd", Locale.US);
+        SimpleDateFormat timeFormat = new SimpleDateFormat("HH:mm", Locale.US);
         TimeZone cairo = TimeZone.getTimeZone("Africa/Cairo");
-        dateFormat.setTimeZone(cairo); weekdayFormat.setTimeZone(cairo); timeFormat.setTimeZone(cairo);
+        dateFormat.setTimeZone(cairo); timeFormat.setTimeZone(cairo);
         String gps = location == null ? "الموقع غير متاح"
-            : String.format(Locale.US, "%.5f, %.5f · ±%dم", location.optDouble("latitude"), location.optDouble("longitude"), Math.round(location.optDouble("accuracy")));
+            : String.format(Locale.US, "%.5f, %.5f", location.optDouble("latitude"), location.optDouble("longitude"));
         String region = data.optString("regionName", "");
         String area = data.optString("areaName", "");
+        String repName = data.optString("repName", "").trim();
         String lines[] = new String[] {
             "مَــدَارْ · " + ("before".equals(phase) ? "قبل الصيانة" : "بعد الصيانة"),
-            "التاريخ: " + dateFormat.format(timestamp) + " · " + weekdayFormat.format(timestamp),
-            "الوقت: " + timeFormat.format(timestamp),
-            "GPS: " + gps,
+            data.optString("machineCode", "") + " | " + dateFormat.format(timestamp) + " " + timeFormat.format(timestamp),
+            gps + " | " + (repName.isEmpty() ? "مندوب ميداني" : repName),
+            location == null ? "دقة GPS غير متاحة" : "دقة GPS: ±" + Math.round(location.optDouble("accuracy")) + "م",
             "المنطقة: " + (region.isEmpty() ? "غير محددة" : region) + (area.isEmpty() ? "" : " · " + area),
-            "الماكينة: " + data.optString("machineCode", "") + " · " + data.optString("machineName", ""),
+            data.optString("machineName", ""),
         };
         float maxWidth = Math.max(40f, panelWidth - padding * 2f);
         for (int index = 0; index < lines.length; index += 1) {

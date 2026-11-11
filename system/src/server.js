@@ -754,11 +754,11 @@ function resolveOrderEmployeeIds(body) {
   return ids
 }
 
-function employeeDto(employee, user = null, includeAccess = true) {
+function employeeDto(employee, user = null, includeAccess = true, requester = null) {
   return {
     id: employee.id, name: employee.name, department: employee.department, phone: employee.phone,
     jobTitle: employee.jobTitle || '', active: Boolean(employee.active),
-    monthlySalaryCents: Number(employee.monthlySalaryCents || 0),
+    ...(requester?.role === 'admin' ? { monthlySalaryCents: Number(employee.monthlySalaryCents || 0) } : {}),
     canLogin: Boolean(employee.canLogin),
     loginRole: employee.loginRole || user?.role || '',
     ...(includeAccess ? {
@@ -1599,7 +1599,7 @@ api.get('/employees', requireAuth, asyncRoute(async (req, res) => {
     include: [{ model: models.User, as: 'user', attributes: ['id', 'username', 'active', 'deleted_at'], required: false, paranoid: false }],
     order: [['name', 'ASC']],
   })
-  res.json(employees.map((employee) => employeeDto(employee, employee.user, req.user.role === 'admin')))
+  res.json(employees.map((employee) => employeeDto(employee, employee.user, req.user.role === 'admin', req.user)))
 }))
 
 api.post(['/employees', '/staff'], requireAuth, allowRoles('admin'), asyncRoute(async (req, res) => {
@@ -1639,7 +1639,7 @@ api.post(['/employees', '/staff'], requireAuth, allowRoles('admin'), asyncRoute(
         newValues: { name, department, phone, monthlySalaryCents, username: user?.username || null, loginRequired: requiresLogin }, transaction })
       return { employee, user }
     })
-    res.status(201).json(employeeDto(created.employee, created.user))
+    res.status(201).json(employeeDto(created.employee, created.user, true, req.user))
   } catch (error) {
     if (error.name === 'SequelizeUniqueConstraintError' || error.original?.code === 'SQLITE_CONSTRAINT_UNIQUE') {
       return sendError(res, 409, 'اسم المستخدم مرتبط بحساب آخر.')
@@ -1749,7 +1749,7 @@ api.patch(['/employees/:id', '/staff/:id'], requireAuth, allowRoles('admin'), as
       return { employee, user }
     })
     if (!updated) return sendError(res, 404, 'الموظف غير موجود.')
-    res.json(employeeDto(updated.employee, updated.user))
+    res.json(employeeDto(updated.employee, updated.user, true, req.user))
   } catch (error) {
     if (error.name === 'SequelizeUniqueConstraintError' || error.original?.code === 'SQLITE_CONSTRAINT_UNIQUE') {
       return sendError(res, 409, 'اسم المستخدم مرتبط بحساب آخر.')
@@ -7001,6 +7001,17 @@ function queryBulkMaintenanceRecords({ area, reasonId, fromDate, toDate }) {
   const dateRange = archiveDateConditions(fromDate, toDate)
   conditions.push(...dateRange.conditions)
   params.push(...dateRange.params)
+  const matchingOrderIds = db.prepare(`SELECT o.id FROM orders o
+      JOIN clients c ON c.id=o.client_id
+      JOIN order_machines om ON om.order_id=o.id
+      JOIN machines m ON m.id=om.machine_id
+    WHERE ${conditions.join(' AND ')}
+    GROUP BY o.id ORDER BY o.archived_at,o.id LIMIT 21`).all(...params).map((row) => row.id)
+  if (matchingOrderIds.length > 20) {
+    throw apiError(400, 'يرجى تحديد 20 أمر صيانة كحد أقصى للتصدير الواحد')
+  }
+  if (!matchingOrderIds.length) return []
+  const orderPlaceholders = matchingOrderIds.map(() => '?').join(',')
   const rows = db.prepare(`SELECT o.id AS order_id,o.code AS order_code,o.archived_at,o.type,
       c.name AS client_name,c.code AS client_code,c.primary_color,c.secondary_color,c.logo_path,
        om.id AS card_id,om.before_photos,om.after_photos,om.reason_ids,
@@ -7008,8 +7019,8 @@ function queryBulkMaintenanceRecords({ area, reasonId, fromDate, toDate }) {
     FROM orders o JOIN clients c ON c.id=o.client_id
       JOIN order_machines om ON om.order_id=o.id
       JOIN machines m ON m.id=om.machine_id
-    WHERE ${conditions.join(' AND ')}
-    ORDER BY area COLLATE NOCASE,o.archived_at,o.id,m.code COLLATE NOCASE,m.id`).all(...params)
+    WHERE ${conditions.join(' AND ')} AND o.id IN (${orderPlaceholders})
+    ORDER BY area COLLATE NOCASE,o.archived_at,o.id,m.code COLLATE NOCASE,m.id`).all(...params, ...matchingOrderIds)
   return rows.map((row) => ({
     order: {
       id: row.order_id, code: row.order_code, archived_at: row.archived_at, type: row.type,
@@ -7574,6 +7585,7 @@ api.post('/export/bulk-maintenance', requireAuth, allowRoles('admin'), createRat
 api.get('/reports/export.pptx', requireAuth, allowRoles('admin'), createRateLimiter('GET /reports/export.pptx'), asyncRoute(async (req, res) => {
   const ids = String(req.query.ids || '').split(',').map(Number).filter((id) => id > 0)
   if (!ids.length) return sendError(res, 400, 'حدد أمرًا واحدًا على الأقل للتصدير.')
+  if (ids.length > 20) return sendError(res, 400, 'يرجى تحديد 20 أمر صيانة كحد أقصى للتصدير الواحد')
   const placeholders = ids.map(() => '?').join(',')
   const orders = db.prepare(`SELECT o.*,c.name AS client_name,c.code AS client_code,c.primary_color,c.secondary_color,c.logo_path
     FROM orders o JOIN clients c ON c.id=o.client_id WHERE o.status='archived' AND o.deleted_at IS NULL AND o.id IN (${placeholders}) ORDER BY o.archived_at`).all(...ids)

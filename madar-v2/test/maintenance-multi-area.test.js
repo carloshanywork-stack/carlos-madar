@@ -265,7 +265,6 @@ test('admins can edit archived card reasons, notes, and machine codes while phot
   assert.equal(orderResponse.response.status, 201, JSON.stringify(orderResponse.body));
   const card = orderResponse.body.cards.find((item) => item.machine_id === machineResponse.body.id);
   assert.ok(card);
-
   const createReason = async (name) => {
     const result = await request('/api/maintenance/reasons', json('POST', { name }));
     assert.equal(result.response.status, 201, JSON.stringify(result.body));
@@ -646,6 +645,18 @@ test('maintenance photo rotation is audited metadata applied to viewer, thumbnai
   assert.equal(orderResponse.response.status, 201, JSON.stringify(orderResponse.body));
   const card = orderResponse.body.cards.find((item) => item.machine_id === machineResponse.body.id);
   assert.ok(card);
+  const targetOrder = await request('/api/maintenance/orders', json('POST', {
+    clientId,
+    areas: ['Photo Rotation Area'],
+    employeeIds: [],
+    autoPopulateAreaMachines: false,
+  }));
+  assert.equal(targetOrder.response.status, 201, JSON.stringify(targetOrder.body));
+  const targetCardResponse = await request(`/api/maintenance/orders/${targetOrder.body.id}/cards`, json('POST', {
+    machineId: machineResponse.body.id,
+  }));
+  assert.equal(targetCardResponse.response.status, 201, JSON.stringify(targetCardResponse.body));
+  const targetCard = targetCardResponse.body;
   const reasonId = Number(db.prepare('INSERT INTO maintenance_reasons (name) VALUES (?)')
     .run('اختبار أسباب الصيانة').lastInsertRowid);
 
@@ -691,7 +702,11 @@ test('maintenance photo rotation is audited metadata applied to viewer, thumbnai
   const absoluteSourcePath = join(storageRoot, ...upload.body.path.split('/'));
   const originalStoredBytes = readFileSync(absoluteSourcePath);
   const photoUrl = `/api/maintenance/orders/${orderResponse.body.id}/cards/${card.id}/photos/before/${encodeURIComponent(filename)}`;
-  const rotationUrl = `/api/maintenance/orders/${orderResponse.body.id}/cards/${card.id}/photos/rotate`;
+  const rotationUrl = '/api/maintenance/photos/rotate';
+  const tagTargets = await request(`/api/maintenance/orders/${orderResponse.body.id}/photos/tag-targets`, {}, operationsCookie);
+  assert.equal(tagTargets.response.status, 200);
+  assert.ok(tagTargets.body.orders.some((item) => item.id === targetOrder.body.id
+    && item.cards.some((target) => target.id === targetCard.id)));
 
   const operationsOrder = await request(`/api/maintenance/orders/${orderResponse.body.id}`, {}, operationsCookie);
   assert.equal(operationsOrder.body.canEditReasons, true);
@@ -715,23 +730,28 @@ test('maintenance photo rotation is audited metadata applied to viewer, thumbnai
   assert.deepEqual(await sharp(initialThumbnail.body).metadata().then(({ width, height }) => ({ width, height })), { width: 32, height: 24 });
 
   const invalidRotation = await request(rotationUrl, json('POST', {
-    phase: 'before', filename, angle: 45,
+    orderId: orderResponse.body.id, cardId: card.id, phase: 'before', filename, angle: 45,
   }));
   assert.equal(invalidRotation.response.status, 400);
   const deniedRotation = await request(rotationUrl, json('POST', {
-    phase: 'before', filename, angle: 90,
+    orderId: orderResponse.body.id, cardId: card.id, phase: 'before', filename, angle: 90,
   }), purchasingCookie);
   assert.equal(deniedRotation.response.status, 403);
 
   const savedRotation = await request(rotationUrl, json('POST', {
-    phase: 'before', filename, angle: 90,
+    orderId: orderResponse.body.id, cardId: card.id, phase: 'before', filename, angle: 90,
   }), operationsCookie);
   assert.equal(savedRotation.response.status, 200, JSON.stringify(savedRotation.body));
   assert.equal(savedRotation.body.success, true);
   assert.equal(savedRotation.body.angle, 90);
   assert.equal(savedRotation.body.filename, filename);
   assert.equal(typeof savedRotation.body.rotatedAt, 'number');
+  assert.equal(typeof savedRotation.body.rotatedPath, 'string');
   assert.deepEqual(readFileSync(absoluteSourcePath), originalStoredBytes, 'rotation must not modify archived/source file bytes');
+  const rotatedAbsolutePath = join(storageRoot, ...savedRotation.body.rotatedPath.split('/'));
+  assert.deepEqual(await sharp(readFileSync(rotatedAbsolutePath)).metadata().then(({ format, width, height }) => ({ format, width, height })), {
+    format: 'jpeg', width: 24, height: 32,
+  }, 'rotation writes a durable upright JPEG derivative while retaining the archived source');
   db.prepare("UPDATE maintenance_cards SET status = 'completed' WHERE id = ?").run(card.id);
 
   const rotatedPhoto = await request(photoUrl);
@@ -756,7 +776,13 @@ test('maintenance photo rotation is audited metadata applied to viewer, thumbnai
   `).get(card.id);
   assert.equal(audit.actor_id, Number(db.prepare('SELECT id FROM users WHERE username = ?').get(operationsUsername).id));
   assert.deepEqual(JSON.parse(audit.old_values_json), { phase: 'before', filename, rotation: 0 });
-  assert.deepEqual(JSON.parse(audit.new_values_json), { phase: 'before', filename, rotation: 90, rotation_delta: 90 });
+  assert.deepEqual(JSON.parse(audit.new_values_json), {
+    phase: 'before',
+    filename,
+    rotation: 90,
+    rotation_delta: 90,
+    rotated_path: savedRotation.body.rotatedPath,
+  });
 
   const pptx = await buildMaintenancePptx(orderResponse.body.id, db);
   const pptxDimensions = await readZipImageDimensions(pptx.buffer, 'ppt/media/');
@@ -773,6 +799,36 @@ test('maintenance photo rotation is audited metadata applied to viewer, thumbnai
     WHERE card_id = ? AND phase = 'after' AND filename = ?`).get(card.id, filename).angle, 90);
   const movedPhoto = await request(`/api/maintenance/orders/${orderResponse.body.id}/cards/${card.id}/photos/after/${encodeURIComponent(filename)}`);
   assert.deepEqual(await sharp(movedPhoto.body).metadata().then(({ width, height }) => ({ width, height })), { width: 24, height: 32 });
+
+  const retaggedPhoto = await request(`/api/maintenance/orders/${orderResponse.body.id}/cards/${card.id}/photos/move`, json('POST', {
+    fromPhase: 'after',
+    toPhase: 'before',
+    filename,
+    targetOrderId: targetOrder.body.id,
+    targetCardId: targetCard.id,
+  }), operationsCookie);
+  assert.equal(retaggedPhoto.response.status, 200, JSON.stringify(retaggedPhoto.body));
+  assert.equal(retaggedPhoto.body.orderId, targetOrder.body.id);
+  assert.equal(retaggedPhoto.body.cardId, targetCard.id);
+  const reassignedSourcePath = join(storageRoot, ...retaggedPhoto.body.path.split('/'));
+  assert.equal(readFileSync(reassignedSourcePath).equals(originalStoredBytes), true, 'reassignment preserves the archived source image bytes');
+  const reassignedRotation = db.prepare(`SELECT card_id, phase, angle, rotated_path FROM maintenance_card_photo_rotations
+    WHERE card_id = ? AND phase = 'before' AND filename = ?`).get(targetCard.id, filename);
+  assert.equal(reassignedRotation.angle, 90);
+  const clientStorageCode = db.prepare('SELECT storage_code FROM clients WHERE id = ?').get(clientId).storage_code;
+  assert.ok(reassignedRotation.rotated_path.startsWith(`clients/${clientStorageCode}/maintenance/${targetOrder.body.order_code}/`));
+  const reassignedPhoto = await request(`/api/maintenance/orders/${targetOrder.body.id}/cards/${targetCard.id}/photos/before/${encodeURIComponent(filename)}`);
+  assert.equal(reassignedPhoto.response.status, 200);
+  assert.deepEqual(await sharp(reassignedPhoto.body).metadata().then(({ width, height }) => ({ width, height })), { width: 24, height: 32 });
+
+  const secondRotation = await request(rotationUrl, json('POST', {
+    orderId: targetOrder.body.id, cardId: targetCard.id, phase: 'before', filename, angle: 90,
+  }), operationsCookie);
+  assert.equal(secondRotation.response.status, 200, JSON.stringify(secondRotation.body));
+  assert.equal(secondRotation.body.angle, 180);
+  const fullyRotatedPhoto = await request(`/api/maintenance/orders/${targetOrder.body.id}/cards/${targetCard.id}/photos/before/${encodeURIComponent(filename)}`);
+  assert.deepEqual(await sharp(fullyRotatedPhoto.body).metadata().then(({ width, height }) => ({ width, height })), { width: 32, height: 24 });
+  assert.equal(readFileSync(reassignedSourcePath).equals(originalStoredBytes), true, 'repeated rotation still reads and retains the archived source bytes');
 });
 
 test('maintenance card startup recovery restores staged folders for an uncommitted deletion', async () => {

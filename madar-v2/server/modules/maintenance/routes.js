@@ -42,6 +42,7 @@ import {
   getMachineCorrectionRequests,
   getMachineNotesHistory,
   getMachineMap,
+  getMaintenancePhotoTagTargets,
   getMaintenancePhotoDetails,
   getUnmatchedMaintenancePhoto,
   importMachines,
@@ -51,7 +52,7 @@ import {
   listMaintenanceRepresentatives,
   listMaintenanceReasons,
   listMaintenanceOrders,
-  moveCardPhoto,
+  retagMaintenancePhoto,
   populateMaintenanceOrderArea,
   replaceMaintenanceOrderRepresentatives,
   rotateMaintenanceCardPhoto,
@@ -294,6 +295,17 @@ router.put('/machines/:id/maintenance-note', requireRole('admin'), (req, res, ne
   }
 });
 
+router.put('/areas/notes', requireRole('admin'), (req, res, next) => {
+  try {
+    const body = requireObject(req.body);
+    allowOnlyKeys(body, ['machineId', 'notes']);
+    const note = requireText(body.notes, 'notes', { maxLength: 2000 });
+    res.json(recordMachineNote({ machineId: body.machineId, note, actorId: requestActorId(req) }));
+  } catch (error) {
+    next(error);
+  }
+});
+
 router.get('/machines/:id/notes-history', (req, res, next) => {
   try {
     res.set(NO_CACHE_HEADERS);
@@ -526,7 +538,12 @@ router.post('/orders/:id/custody-advance', (req, res, next) => {
 });
 
 router.post('/orders/:id/cards/:cardId/photos/move', asyncHandler(async (req, res) => {
-  res.json(await moveCardPhoto(
+  const hasTagTarget = Number(req.body?.targetOrderId ?? req.params.id) !== Number(req.params.id)
+    || Number(req.body?.targetCardId ?? req.params.cardId) !== Number(req.params.cardId);
+  if (hasTagTarget && !['admin', 'operations'].includes(req.user?.role)) {
+    throw new HttpError(403, 'Administrator or Operations access is required to change a photo assignment.');
+  }
+  res.json(await retagMaintenancePhoto(
     req.params.id,
     req.params.cardId,
     req.body,
@@ -534,11 +551,27 @@ router.post('/orders/:id/cards/:cardId/photos/move', asyncHandler(async (req, re
   ));
 }));
 
+router.get('/orders/:id/photos/tag-targets', requireAdminOrOperations, (req, res, next) => {
+  try { res.json({ orders: getMaintenancePhotoTagTargets(req.params.id) }); }
+  catch (error) { next(error); }
+});
+
 router.post('/orders/:id/cards/:cardId/photos/rotate', requireAdminOrOperations, asyncHandler(async (req, res) => {
   res.json(await rotateMaintenanceCardPhoto(
     req.params.id,
     req.params.cardId,
     req.body,
+    requestActorId(req),
+  ));
+}));
+
+router.post('/photos/rotate', requireAdminOrOperations, asyncHandler(async (req, res) => {
+  const body = requireObject(req.body);
+  allowOnlyKeys(body, ['orderId', 'cardId', 'phase', 'filename', 'angle']);
+  res.json(await rotateMaintenanceCardPhoto(
+    body.orderId,
+    body.cardId,
+    { phase: body.phase, filename: body.filename, angle: body.angle },
     requestActorId(req),
   ));
 }));
@@ -570,7 +603,7 @@ router.get('/orders/:id/cards/:cardId/photos/:phase/:filename', asyncHandler(asy
     req.params.phase,
     req.params.filename,
   );
-  let type = {
+  let type = photo.rotatedPath ? 'image/jpeg' : {
     '.jpg': 'image/jpeg',
     '.jpeg': 'image/jpeg',
     '.png': 'image/png',

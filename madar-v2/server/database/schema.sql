@@ -289,7 +289,7 @@ CREATE TABLE IF NOT EXISTS inventory_movements (
   id INTEGER PRIMARY KEY,
   material_id INTEGER REFERENCES materials(id),
   offcut_id INTEGER REFERENCES secondary_warehouse_offcuts(id),
-  kind TEXT NOT NULL CHECK (kind IN ('purchase', 'issue', 'scrap_sale', 'variance_gain', 'variance_loss')),
+  kind TEXT NOT NULL CHECK (kind IN ('purchase', 'issue', 'offcut_return', 'scrap_sale', 'variance_gain', 'variance_loss')),
   quantity REAL NOT NULL CHECK (quantity > 0),
   warehouse TEXT NOT NULL CHECK (warehouse IN ('main', 'secondary')),
   reference TEXT,

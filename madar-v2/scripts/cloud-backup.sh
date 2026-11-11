@@ -136,8 +136,6 @@ copy_config() {
   fi
 }
 
-copy_config "$PROJECT_ROOT/.env" 'madar-v2.env'
-copy_config "$(dirname -- "$PROJECT_ROOT")/.env" 'repository.env'
 copy_config "$PROJECT_ROOT/server/config/env.js" 'env.js'
 copy_config "$PROJECT_ROOT/package.json" 'package.json'
 copy_config "$PROJECT_ROOT/package-lock.json" 'package-lock.json'

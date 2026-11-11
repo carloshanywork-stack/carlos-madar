@@ -375,6 +375,75 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
     headers: { authorization: `Bearer ${nativeLogin.body.token}` },
   });
   assert.equal(nativeBearerRoute.response.status, 200, 'native background jobs authenticate with the bearer token returned only to the native client');
+
+  const offlineClockInUuid = randomUUID();
+  const clockInAt = new Date(Date.now() - 60_000).toISOString();
+  const attendanceLocation = {
+    latitude: 30.0123,
+    longitude: 31.2345,
+    accuracy: 18,
+    updatedAt: clockInAt,
+  };
+  const offlineClockInPayload = {
+    actionUuid: offlineClockInUuid,
+    action: 'in',
+    occurredAt: clockInAt,
+    location: attendanceLocation,
+    biometricVerified: true,
+  };
+  const offlineClockIn = await request('/api/rep/attendance/sync', jsonOptions('POST', offlineClockInPayload), login.cookie);
+  assert.equal(offlineClockIn.response.status, 200);
+  assert.equal(offlineClockIn.body.success, true);
+  assert.equal(offlineClockIn.body.idempotent, false);
+  assert.equal(offlineClockIn.body.attendance.clock_in_source, 'app');
+  assert.equal(offlineClockIn.body.attendance.clock_in_biometric_verified, 1);
+  assert.equal(offlineClockIn.body.attendance.clock_in_accuracy, 18);
+  const repeatedClockIn = await request('/api/rep/attendance/sync', jsonOptions('POST', offlineClockInPayload), login.cookie);
+  assert.equal(repeatedClockIn.response.status, 200);
+  assert.equal(repeatedClockIn.body.idempotent, true);
+  assert.equal(repeatedClockIn.body.attendance.id, offlineClockIn.body.attendance.id);
+  const changedClockInReplay = await request('/api/rep/attendance/sync', jsonOptions('POST', {
+    ...offlineClockInPayload,
+    location: { ...attendanceLocation, accuracy: 19 },
+  }), login.cookie);
+  assert.equal(changedClockInReplay.response.status, 409);
+  const inaccurateClockIn = await request('/api/rep/attendance/sync', jsonOptions('POST', {
+    ...offlineClockInPayload,
+    actionUuid: randomUUID(),
+    location: { ...attendanceLocation, accuracy: 251 },
+  }), login.cookie);
+  assert.equal(inaccurateClockIn.response.status, 400);
+
+  const clockOutAt = new Date(Date.now() - 30_000).toISOString();
+  const clockOutPayload = {
+    actionUuid: randomUUID(),
+    action: 'out',
+    occurredAt: clockOutAt,
+    location: { ...attendanceLocation, updatedAt: clockOutAt },
+    biometricVerified: true,
+  };
+  const offlineClockOut = await request('/api/rep/attendance/sync', jsonOptions('POST', clockOutPayload), login.cookie);
+  assert.equal(offlineClockOut.response.status, 200);
+  assert.equal(offlineClockOut.body.attendance.clock_out_source, 'app');
+  assert.equal(offlineClockOut.body.attendance.clock_out_biometric_verified, 1);
+  const repeatedClockOut = await request('/api/rep/attendance/sync', jsonOptions('POST', clockOutPayload), login.cookie);
+  assert.equal(repeatedClockOut.response.status, 200);
+  assert.equal(repeatedClockOut.body.idempotent, true);
+
+  const mockAttendanceAudit = await request('/api/rep/attendance/mock-location', jsonOptions('POST', {
+    action: 'tracking',
+    detectedAt: new Date().toISOString(),
+    is_mock: true,
+  }), login.cookie);
+  assert.equal(mockAttendanceAudit.response.status, 200);
+  assert.equal(mockAttendanceAudit.body.audited, true);
+  const mockTrackingRejected = await request('/api/rep/tracking', jsonOptions('POST', {
+    onDuty: false,
+    is_mock: true,
+  }), login.cookie);
+  assert.equal(mockTrackingRejected.response.status, 400);
+  assert.ok(db.prepare(`SELECT 1 FROM audit_log WHERE actor_id = ? AND action = 'mock_location_attempt' LIMIT 1`).get(repId));
+
   const repApkStatus = await request('/download/apk/status', {}, login.cookie);
   assert.equal(repApkStatus.response.status, 200);
   assert.equal(repApkStatus.body.artifactType, 'fallback');
@@ -460,6 +529,8 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   assert.equal(otherRepRoute.response.status, 403);
   const repCannotReadERPOrders = await request('/api/maintenance/orders?status=in_progress', {}, login.cookie);
   assert.equal(repCannotReadERPOrders.response.status, 403);
+  const repCannotReadTreasury = await request('/api/finance/treasury', {}, login.cookie);
+  assert.equal(repCannotReadTreasury.response.status, 403);
   const repCannotReadAdminUsers = await request('/api/auth/users', {}, login.cookie);
   assert.equal(repCannotReadAdminUsers.response.status, 403);
   const repCannotReadSupervisorRadar = await request('/api/supervisor/radar', {}, login.cookie);
@@ -519,20 +590,14 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   assert.equal(unpinnedVisit.response.status, 409);
   assert.match(unpinnedVisit.body.error, /تثبيت موقع الماكينة/);
   const targetMachineId = db.prepare('SELECT id FROM machines WHERE code = ?').get('1434').id;
-  const invalidAccuracyConfirmation = await request(`/api/rep/machines/${targetMachineId}/confirm-location`, jsonOptions('POST', {
-    actionUuid: randomUUID(), cardId: missingAfterCardId,
-    location: { ...visitPayload.location, accuracy: 101 },
-  }), login.cookie);
-  assert.equal(invalidAccuracyConfirmation.response.status, 400);
-  const outsideAssignmentConfirmation = await request(`/api/rep/machines/${db.prepare('SELECT id FROM machines WHERE code = ?').get('2400').id}/confirm-location`, jsonOptions('POST', {
-    actionUuid: randomUUID(), cardId: otherRegionCardId, location: visitPayload.location,
-  }), login.cookie);
-  assert.equal(outsideAssignmentConfirmation.response.status, 403);
+  // Location lifecycle assertions run independently in location-approval.test.js.
+  // This broader visit scenario requires two administrator-approved fixtures.
   const otherRegionMachineId = db.prepare('SELECT id FROM machines WHERE code = ?').get('2400').id;
   const universalLocationConfirmation = await request(`/api/rep/machines/${otherRegionMachineId}/confirm-location`, jsonOptions('POST', {
     actionUuid: randomUUID(), cardId: otherRegionCardId, location: visitPayload.location,
   }), universalLogin.cookie);
   assert.equal(universalLocationConfirmation.response.status, 201, JSON.stringify(universalLocationConfirmation.body));
+  assert.equal((await request(`/api/supervisor/corrections/${universalLocationConfirmation.body.correctionId}/approve`, jsonOptions('POST', {}), adminCookie)).response.status, 200);
   const locationConfirmationPayload = {
     actionUuid: randomUUID(),
     cardId: missingAfterCardId,
@@ -541,17 +606,8 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   const locationConfirmation = await request(`/api/rep/machines/${targetMachineId}/confirm-location`, jsonOptions('POST', locationConfirmationPayload), login.cookie);
   assert.equal(locationConfirmation.response.status, 201, JSON.stringify(locationConfirmation.body));
   assert.equal(locationConfirmation.body.success, true);
-  assert.equal(locationConfirmation.body.machine.is_location_locked, 1);
-  assert.equal(locationConfirmation.body.machine.geofence_radius_meters, 50);
-  assert.equal(locationConfirmation.body.machine.latitude, visitPayload.location.latitude);
-  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM rep_machine_location_verifications WHERE machine_id = ?').get(targetMachineId).count, 1);
-  const repeatedLocationConfirmation = await request(`/api/rep/machines/${targetMachineId}/confirm-location`, jsonOptions('POST', locationConfirmationPayload), login.cookie);
-  assert.equal(repeatedLocationConfirmation.response.status, 200);
-  assert.equal(repeatedLocationConfirmation.body.idempotent, true);
-  const secondLocationConfirmation = await request(`/api/rep/machines/${targetMachineId}/confirm-location`, jsonOptions('POST', {
-    ...locationConfirmationPayload, actionUuid: randomUUID(),
-  }), login.cookie);
-  assert.equal(secondLocationConfirmation.response.status, 409);
+  assert.equal(locationConfirmation.body.status, 'pending');
+  assert.equal((await request(`/api/supervisor/corrections/${locationConfirmation.body.correctionId}/approve`, jsonOptions('POST', {}), adminCookie)).response.status, 200);
   const representativeCannotSetGeofence = await request(`/api/maintenance/machines/${targetMachineId}/geofence`, jsonOptions('PATCH', {
     latitude: visitPayload.location.latitude,
     longitude: visitPayload.location.longitude,
@@ -660,9 +716,10 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   assert.equal(pendingMachine.canVisit, false);
 
   const repEventController = new AbortController();
+  const repEventCursor = db.prepare('SELECT COALESCE(MAX(event_id), 0) AS cursor FROM operations_events').get().cursor;
   db.prepare('DELETE FROM maintenance_order_reps WHERE order_id = ? AND user_id = ?').run(orderId, repId);
   const repEventResponse = await fetch(`${baseUrl}/api/rep/events`, {
-    headers: { cookie: login.cookie },
+    headers: { cookie: login.cookie, 'Last-Event-ID': String(repEventCursor) },
     signal: repEventController.signal,
   });
   assert.equal(repEventResponse.status, 200);
@@ -684,6 +741,16 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   }
   assert.equal(assignmentEvent.orderId, orderId);
   assert.ok(assignmentEvent.recipientUserIds.includes(repId));
+
+  const repReplayController = new AbortController();
+  const repReplayResponse = await fetch(`${baseUrl}/api/rep/events`, {
+    headers: { cookie: login.cookie, 'Last-Event-ID': String(repEventCursor) },
+    signal: repReplayController.signal,
+  });
+  assert.equal(repReplayResponse.status, 200);
+  const replayedAssignment = await readOperationsEvent(repReplayResponse, 'maintenance.order.assigned');
+  repReplayController.abort();
+  assert.equal(replayedAssignment.id, assignmentEvent.id);
 
   const firstQa = await request('/api/supervisor/qa/queue', {}, adminCookie);
   assert.equal(firstQa.response.status, 200);
@@ -790,12 +857,13 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
 
   const now = Date.now();
   const trackPoints = [
-    { latitude: 24.8000, longitude: 46.7000, accuracy: 10, updatedAt: new Date(now - 20000).toISOString() },
-    { latitude: 24.8010, longitude: 46.7010, accuracy: 10, updatedAt: new Date(now - 10000).toISOString() },
+    { clientPointId: 'track-1', latitude: 24.8000, longitude: 46.7000, accuracy: 10, updatedAt: new Date(now - 20000).toISOString() },
+    { clientPointId: 'track-2', latitude: 24.8010, longitude: 46.7010, accuracy: 10, updatedAt: new Date(now - 10000).toISOString() },
   ];
   const eventController = new AbortController();
+  const supervisorEventCursor = db.prepare('SELECT COALESCE(MAX(event_id), 0) AS cursor FROM operations_events').get().cursor;
   const eventResponse = await fetch(`${baseUrl}/api/supervisor/events`, {
-    headers: { cookie: adminCookie },
+    headers: { cookie: adminCookie, 'Last-Event-ID': String(supervisorEventCursor) },
     signal: eventController.signal,
   });
   assert.equal(eventResponse.status, 200);
@@ -824,6 +892,9 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   }), login.cookie);
   assert.equal(tracking.response.status, 200);
   assert.equal(tracking.body.onDuty, true);
+  assert.deepEqual(tracking.body.points.map((point) => point.clientPointId), ['track-1', 'track-2', 'location']);
+  assert.deepEqual(tracking.body.points.map((point) => point.status), ['accepted', 'accepted', 'accepted']);
+  assert.equal(tracking.body.rejectedPoints, 0);
   let timeoutId;
   let trackingEvent;
   try {
@@ -837,7 +908,17 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   }
   assert.equal(trackingEvent.userId, repId);
   assert.equal(trackingEvent.acceptedPoints, 3);
+  const supervisorReplayController = new AbortController();
+  const supervisorReplayResponse = await fetch(`${baseUrl}/api/supervisor/events`, {
+    headers: { cookie: adminCookie, 'Last-Event-ID': String(supervisorEventCursor) },
+    signal: supervisorReplayController.signal,
+  });
+  assert.equal(supervisorReplayResponse.status, 200);
+  const replayedTracking = await readOperationsEvent(supervisorReplayResponse, 'rep.tracking.updated');
+  supervisorReplayController.abort();
+  assert.equal(replayedTracking.id, trackingEvent.id);
   const offlineBacklogPoint = {
+    clientPointId: 'offline-backlog-1',
     latitude: 24.7990,
     longitude: 46.6990,
     accuracy: 12,
@@ -850,12 +931,34 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   }), login.cookie);
   assert.equal(recoveredBacklog.response.status, 200);
   assert.equal(recoveredBacklog.body.acceptedPoints, 1, 'offline breadcrumbs up to the local 90-day retention window should be accepted');
+  assert.equal(recoveredBacklog.body.points[0].clientPointId, 'offline-backlog-1');
+  assert.equal(recoveredBacklog.body.points[0].status, 'accepted');
+  const rejectedBacklog = await request('/api/rep/tracking', jsonOptions('POST', {
+    onDuty: true,
+    trail: [
+      { clientPointId: 'too-old', latitude: 24.7980, longitude: 46.6980, accuracy: 12, updatedAt: new Date(now - 91 * 24 * 60 * 60 * 1000).toISOString() },
+      { clientPointId: 'too-new', latitude: 24.7970, longitude: 46.6970, accuracy: 12, updatedAt: new Date(now + 10 * 60 * 1000).toISOString() },
+    ],
+  }), login.cookie);
+  assert.equal(rejectedBacklog.response.status, 200);
+  assert.equal(rejectedBacklog.body.acceptedPoints, 0);
+  assert.equal(rejectedBacklog.body.rejectedPoints, 2);
+  assert.deepEqual(rejectedBacklog.body.points.map((point) => [point.clientPointId, point.status, point.reason]), [
+    ['too-old', 'rejected', 'older_than_retention'],
+    ['too-new', 'rejected', 'future_timestamp'],
+  ]);
   const duplicateTracking = await request('/api/rep/tracking', jsonOptions('POST', {
     onDuty: true, location: { ...trackPoints[1], updatedAt: new Date(now).toISOString() }, trail: trackPoints,
   }), login.cookie);
   assert.equal(duplicateTracking.response.status, 200);
+  assert.ok(duplicateTracking.body.points.every((point) => point.status === 'duplicate'));
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM rep_location_points WHERE rep_user_id = ?').get(repId).count, 4);
-  const stopBase = Date.now();
+  // Keep the full six-minute stationary window inside one Cairo business day;
+  // using "now" makes this assertion flaky when the suite runs across midnight.
+  const stopBaseDate = new Date();
+  stopBaseDate.setUTCHours(12, 0, 0, 0);
+  stopBaseDate.setUTCDate(stopBaseDate.getUTCDate() - 1);
+  const stopBase = stopBaseDate.getTime();
   const stopTrail = [-7, -5, -3, -1].map((minutes) => ({
     latitude: 24.8020,
     longitude: 46.7020,
@@ -894,12 +997,19 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   const repRoute = await request(`/api/supervisor/reps/${repId}/route?date=${routeDate}`, {}, adminCookie);
   assert.equal(repRoute.response.status, 200, JSON.stringify(repRoute.body));
   assert.equal(repRoute.body.date, routeDate);
-  assert.ok(repRoute.body.polyline.length >= 7);
-  assert.equal(repRoute.body.stops.length, 1);
-  assert.equal(repRoute.body.stops[0].durationMinutes, 6);
+  assert.ok(repRoute.body.polyline.length >= 3);
   assert.ok(repRoute.body.speedSummary.averageKmh >= 0);
   assert.ok(repRoute.body.visitedMachines.length >= 2);
   assert.equal(repRoute.body.visitedMachines[0].machineCode, '1434');
+  const stopWorkDate = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Africa/Cairo', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(stopBaseDate);
+  const stopRoute = stopWorkDate === routeDate
+    ? repRoute
+    : await request(`/api/supervisor/reps/${repId}/route?date=${stopWorkDate}`, {}, adminCookie);
+  assert.equal(stopRoute.response.status, 200);
+  assert.equal(stopRoute.body.stops.length, 1);
+  assert.equal(stopRoute.body.stops[0].durationMinutes, 6);
 
   const activeSession = db.prepare('SELECT id FROM rep_duty_sessions WHERE rep_user_id = ? AND ended_at IS NULL').get(repId);
   const finalTrailPoint = {
