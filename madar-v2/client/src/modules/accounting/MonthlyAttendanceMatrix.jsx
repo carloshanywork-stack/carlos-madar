@@ -14,6 +14,7 @@ const STATUS = {
   absent: { label: 'غائب', icon: '✖', className: 'badge-absent' },
   leave: { label: 'إجازة', icon: '🏖️', className: 'badge-leave' },
   late: { label: 'متأخر / نصف يوم', icon: '⏰', className: 'badge-late' },
+  cancelled: { label: 'ملغى بواسطة الإدارة', icon: '❌', className: 'badge-cancelled' },
 };
 const WEEKDAY = ['ح', 'ن', 'ث', 'ر', 'خ', 'ج', 'س'];
 const MONTH_PATTERN = /^\d{4}-(0[1-9]|1[0-2])$/;
@@ -174,6 +175,19 @@ export default function MonthlyAttendanceMatrix() {
     }
   }
 
+  async function cancelTodayAttendance(employee, record) {
+    if (dirty.size || saving || !['present', 'late'].includes(record?.status)) return;
+    if (!window.confirm(`هل تريد إلغاء حضور ${employee.name} لهذا اليوم؟ سيُعاد ضبط تسجيل الحضور في تطبيق المندوب.`)) return;
+    setSaving(true);
+    setError('');
+    try {
+      await api.post('/api/attendance/cancel', { employeeId: Number(employee.employee_id), workDate: todayDate });
+      await loadMonth(month, { preserveError: true });
+      showToast(`تم إلغاء حضور ${employee.name} وإشعار التطبيق.`);
+    } catch (caught) { setError(errorMessage(caught)); }
+    finally { setSaving(false); }
+  }
+
   async function exportMonthly() {
     setError('');
     try {
@@ -268,6 +282,7 @@ export default function MonthlyAttendanceMatrix() {
                         <button type="button" className={`madar-attendance-cell-status ${badge?.className ?? 'badge-empty'}`} title={`${employee.name} · ${day.date}${badge ? ` · ${badge.label}` : ' · غير مسجل'}`} disabled={saving} onClick={() => toggleAttendance(employee.employee_id, day.date)}>
                           {badge?.icon ?? '—'}
                         </button>
+                        {day.date === todayDate && ['present', 'late'].includes(record?.status) && <button type="button" className="madar-attendance-cell-edit" title="إلغاء الحضور لهذا اليوم" aria-label={`إلغاء حضور ${employee.name} اليوم`} disabled={saving || Boolean(dirtyCount)} onClick={() => void cancelTodayAttendance(employee, record)}>❌</button>}
                         <button type="button" className="madar-attendance-cell-edit" aria-label={`خيارات حضور ${employee.name} بتاريخ ${day.date}`} title="الحالة والإضافي والملاحظات" disabled={saving} onClick={(event) => openEditor(event, employee.employee_id, day.date)}>⋯</button>
                       </td>;
                     })}

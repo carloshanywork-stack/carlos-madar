@@ -33,6 +33,8 @@ test('database initialization sets Cairo and adds account lockout fields', () =>
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE version = '20261103-account-login-protection'").get().count, 1);
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE version = '20261103-gps-retention-index'").get().count, 1);
   assert.ok(db.pragma('table_info(employee_daily_attendance)').some((column) => column.name === 'clock_out_admin_note'));
+  assert.match(db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'employee_daily_attendance'").get().sql, /'cancelled'/);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE version = '20261111-attendance-cancellation-status'").get().count, 1);
   assert.ok(db.pragma('table_info(maintenance_card_photo_rotations)').some((column) => column.name === 'angle'));
   assert.ok(db.pragma('table_info(maintenance_card_photo_rotations)').some((column) => column.name === 'rotated_path'));
   assert.ok(db.pragma('table_info(operations_events)').some((column) => column.name === 'event_id'));
@@ -50,6 +52,8 @@ test('database initialization sets Cairo and adds account lockout fields', () =>
   migrateMaintenancePhysicalPhotoRotations(db);
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE version = '20261110-maintenance-photo-rotation-derivatives'").get().count, 1);
   assert.ok(db.pragma('table_info(machines)').some((column) => column.name === 'maintenance_note'));
+  assert.ok(db.pragma('table_info(machines)').some((column) => column.name === 'updated_at'));
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE version = '20261111-machine-updated-at'").get().count, 1);
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE version = '20261109-machine-maintenance-notes'").get().count, 1);
   migrateMachineMaintenanceNotes(db);
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE version = '20261109-machine-maintenance-notes'").get().count, 1);

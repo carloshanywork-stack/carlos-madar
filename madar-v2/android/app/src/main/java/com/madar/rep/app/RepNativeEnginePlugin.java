@@ -51,6 +51,7 @@ import java.util.concurrent.Executors;
 public final class RepNativeEnginePlugin extends Plugin {
     private static final ExecutorService IO = Executors.newFixedThreadPool(2);
     private BiometricPrompt activeBiometricPrompt;
+    private boolean biometricPromptStarting;
     private static final String[] INITIAL_PERMISSIONS = new String[] {
         Manifest.permission.CAMERA,
         Manifest.permission.ACCESS_FINE_LOCATION,
@@ -178,36 +179,49 @@ public final class RepNativeEnginePlugin extends Plugin {
             call.reject("تعذر فتح نافذة المصادقة الحيوية.", "BIOMETRIC_PROMPT_UNAVAILABLE");
             return;
         }
-        if (activeBiometricPrompt != null) {
+        if (activeBiometricPrompt != null || biometricPromptStarting) {
             call.reject("هناك عملية مصادقة حيوية قيد التنفيذ.", "BIOMETRIC_PROMPT_BUSY");
             return;
         }
 
         call.setKeepAlive(true);
         String title = "in".equals(action) ? "تأكيد تسجيل الحضور" : "تأكيد تسجيل الانصراف";
-        activeBiometricPrompt = RepBiometricAuth.authenticate((FragmentActivity) getActivity(), title,
-            new RepBiometricAuth.Callback() {
-                @Override
-                public void onSuccess(int authenticationType) {
-                    activeBiometricPrompt = null;
-                    call.setKeepAlive(false);
-                    call.resolve(new JSObject()
-                        .put("verified", true)
-                        .put("verifiedAt", isoTimestamp(new Date()))
-                        .put("authenticationType", authenticationType));
-                }
+        biometricPromptStarting = true;
+        FragmentActivity activity = (FragmentActivity) getActivity();
+        activity.runOnUiThread(() -> {
+            try {
+                activeBiometricPrompt = RepBiometricAuth.authenticate(activity, title,
+                    new RepBiometricAuth.Callback() {
+                        @Override
+                        public void onSuccess(int authenticationType) {
+                            activeBiometricPrompt = null;
+                            biometricPromptStarting = false;
+                            call.setKeepAlive(false);
+                            call.resolve(new JSObject()
+                                .put("verified", true)
+                                .put("verifiedAt", isoTimestamp(new Date()))
+                                .put("authenticationType", authenticationType));
+                        }
 
-                @Override
-                public void onError(int errorCode) {
-                    activeBiometricPrompt = null;
-                    call.setKeepAlive(false);
-                    String message = errorCode == BiometricPrompt.ERROR_USER_CANCELED
-                        || errorCode == BiometricPrompt.ERROR_NEGATIVE_BUTTON
-                        ? "أُلغيت المصادقة الحيوية؛ لم يتم تسجيل الحضور."
-                        : "تعذرت المصادقة الحيوية؛ لم يتم تسجيل الحضور. حاول مجدداً أو أعد إعداد البصمة.";
-                    call.reject(message, "BIOMETRIC_AUTH_FAILED");
-                }
-            });
+                        @Override
+                        public void onError(int errorCode) {
+                            activeBiometricPrompt = null;
+                            biometricPromptStarting = false;
+                            call.setKeepAlive(false);
+                            String message = errorCode == BiometricPrompt.ERROR_USER_CANCELED
+                                || errorCode == BiometricPrompt.ERROR_NEGATIVE_BUTTON
+                                ? "أُلغيت المصادقة الحيوية؛ لم يتم تسجيل الحضور."
+                                : "تعذرت المصادقة الحيوية؛ لم يتم تسجيل الحضور. حاول مجدداً أو أعد إعداد البصمة.";
+                            call.reject(message, "BIOMETRIC_AUTH_FAILED");
+                        }
+                    });
+            } catch (Exception error) {
+                activeBiometricPrompt = null;
+                biometricPromptStarting = false;
+                call.setKeepAlive(false);
+                call.reject("تعذر فتح نافذة المصادقة الحيوية.", "BIOMETRIC_PROMPT_FAILED", error);
+            }
+        });
     }
 
     @PluginMethod

@@ -51,6 +51,8 @@ const adminClockOutNoteMigration = '20261104-attendance-admin-clockout-note';
 const attendanceClockLocationMigration = '20261105-attendance-clock-gps';
 const attendanceBiometricMigration = '20261105-attendance-biometric-confirmation';
 const repAttendanceSyncMigration = '20261110-rep-offline-attendance-sync';
+const attendanceCancellationMigration = '20261111-attendance-cancellation-status';
+const machineUpdatedAtMigration = '20261111-machine-updated-at';
 const machineVerificationCorrectionsMigration = '20261104-machine-verification-corrections';
 const machineLocationConfirmationReviewMigration = '20261110-machine-location-confirmation-review';
 const machineCorrectionRenameRecoveryMigration = '20261104-machine-correction-rename-recovery';
@@ -1010,6 +1012,53 @@ export function migrateRepAttendanceSync(database) {
   migrate.immediate();
 }
 
+export function migrateAttendanceCancellation(database) {
+  if (database.prepare('SELECT 1 FROM schema_migrations WHERE version = ?').get(attendanceCancellationMigration)) return;
+  const original = database.prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'employee_daily_attendance'`).get()?.sql;
+  if (!original) return;
+  if (original.includes("'cancelled'")) {
+    database.prepare('INSERT INTO schema_migrations (version) VALUES (?)').run(attendanceCancellationMigration);
+    return;
+  }
+  const widened = original
+    .replace(/CREATE TABLE\s+(?:IF NOT EXISTS\s+)?["`\[]?employee_daily_attendance["`\]]?/i, 'CREATE TABLE employee_daily_attendance_cancel_migration')
+    .replace("'present', 'absent', 'late', 'leave'", "'present', 'absent', 'late', 'leave', 'cancelled'");
+  if (widened === original || !widened.includes("'cancelled'")) {
+    throw new Error('Unable to safely add cancelled attendance status to the existing schema.');
+  }
+  database.pragma('foreign_keys = OFF');
+  try {
+    database.transaction(() => {
+      const columns = database.pragma('table_info(employee_daily_attendance)').map((column) => column.name);
+      const columnList = columns.map((column) => `"${column}"`).join(', ');
+      database.exec(widened);
+      database.exec(`INSERT INTO employee_daily_attendance_cancel_migration (${columnList}) SELECT ${columnList} FROM employee_daily_attendance`);
+      database.exec('DROP TABLE employee_daily_attendance');
+      database.exec('ALTER TABLE employee_daily_attendance_cancel_migration RENAME TO employee_daily_attendance');
+      database.exec(`CREATE INDEX IF NOT EXISTS idx_employee_attendance_date ON employee_daily_attendance(work_date, employee_id);
+        CREATE INDEX IF NOT EXISTS idx_employee_attendance_overtime ON employee_daily_attendance(overtime_status, work_date, employee_id);`);
+      database.prepare('INSERT INTO schema_migrations (version) VALUES (?)').run(attendanceCancellationMigration);
+    }).immediate();
+  } finally {
+    database.pragma('foreign_keys = ON');
+  }
+  const violations = database.pragma('foreign_key_check');
+  if (violations.length) throw new Error('Attendance cancellation migration produced foreign key violations.');
+}
+
+export function migrateMachineUpdatedAt(database) {
+  const migrate = database.transaction(() => {
+    if (database.prepare('SELECT 1 FROM schema_migrations WHERE version = ?').get(machineUpdatedAtMigration)) return;
+    const columns = new Set(database.pragma('table_info(machines)').map((column) => column.name));
+    if (!columns.has('updated_at')) {
+      database.exec('ALTER TABLE machines ADD COLUMN updated_at TEXT');
+      database.exec('UPDATE machines SET updated_at = COALESCE(created_at, CURRENT_TIMESTAMP)');
+    }
+    database.prepare('INSERT INTO schema_migrations (version) VALUES (?)').run(machineUpdatedAtMigration);
+  });
+  migrate.immediate();
+}
+
 export function migrateUserEmployeeLinks(database) {
   const migrate = database.transaction(() => {
     const applied = database.prepare('SELECT 1 FROM schema_migrations WHERE version = ?')
@@ -1574,6 +1623,7 @@ export function initializeDatabase({ database = db, initialAdminPassword = env.i
     migrateRepSupervisorRadar(database);
     migrateCairoTimezone(database);
     migrateMachineGeofenceAndBreadcrumbs(database);
+    migrateMachineUpdatedAt(database);
     migrateMachineVerificationAndCorrections(database);
     migrateMachineLocationConfirmationReview(database);
     migrateMachineCorrectionRenameRecovery(database);
@@ -1587,6 +1637,7 @@ export function initializeDatabase({ database = db, initialAdminPassword = env.i
     migrateAttendanceClockLocations(database);
     migrateAttendanceBiometricConfirmation(database);
     migrateRepAttendanceSync(database);
+    migrateAttendanceCancellation(database);
     migrateClientProfileCrud(database);
     migrateUserEmployeeLinks(database);
     migrateUserEmployeeProfileSync(database);

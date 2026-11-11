@@ -26,6 +26,7 @@ import {
   createMachine,
   createMaintenanceReason,
   createMaintenanceOrder,
+  createTestMockMaintenanceOrder,
   deactivateMachine,
   deactivateMaintenanceReason,
   deleteMaintenanceCard,
@@ -57,6 +58,7 @@ import {
   replaceMaintenanceOrderRepresentatives,
   rotateMaintenanceCardPhoto,
   setMachineGeofenceLocation,
+  resetMachineGeofenceLocation,
   recordMachineNote,
   resolveMachineCorrection,
   processMaintenanceTripFolder,
@@ -274,6 +276,14 @@ router.patch('/machines/:id/geofence', requireRole('admin'), (req, res, next) =>
   catch (error) { next(error); }
 });
 
+router.post('/machines/:id/reset-location', requireAdminOrOperations, (req, res, next) => {
+  try {
+    const machine = resetMachineGeofenceLocation(req.params.id, requestActorId(req));
+    publishOperationsEvent('rep.machine.location-reset', { machineId: machine.id });
+    res.json({ success: true, machine });
+  } catch (error) { next(error); }
+});
+
 router.delete('/machines/:id', (req, res, next) => {
   try { res.json(deactivateMachine(req.params.id, requestActorId(req))); }
   catch (error) { next(error); }
@@ -382,6 +392,19 @@ router.post('/orders', (req, res, next) => {
   } catch (error) {
     next(error);
   }
+});
+
+router.post('/orders/test-mock', requireAdminOrOperations, (req, res, next) => {
+  try {
+    const order = createTestMockMaintenanceOrder(req.body, requestActorId(req));
+    publishOperationsEvent('maintenance.order.assigned', {
+      orderId: order.id,
+      orderCode: order.order_code,
+      areas: order.areas ?? [order.area].filter(Boolean),
+      recipientUserIds: order.representatives.map((representative) => Number(representative.id)),
+    });
+    res.status(201).json(order);
+  } catch (error) { next(error); }
 });
 
 router.put('/orders/:id/representatives', requireRole('admin'), (req, res, next) => {

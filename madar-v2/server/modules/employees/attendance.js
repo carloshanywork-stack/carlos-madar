@@ -158,6 +158,32 @@ export function getAttendanceBusinessTimeZone(database = db) {
   return getTimeZone(database);
 }
 
+export function cancelDailyAttendance(employeeIdValue, workDateValue, actorId = null, database = db) {
+  const employeeId = positiveId(employeeIdValue, 'employeeId');
+  const workDate = requireText(workDateValue, 'workDate', { maxLength: 10 });
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(workDate) || Number.isNaN(Date.parse(`${workDate}T00:00:00Z`))) {
+    throw new HttpError(400, 'workDate must be a valid YYYY-MM-DD date.');
+  }
+  return database.transaction(() => {
+    const current = database.prepare(`SELECT * FROM employee_daily_attendance
+      WHERE employee_id = ? AND work_date = ?`).get(employeeId, workDate);
+    if (!current) throw new HttpError(404, 'Attendance record was not found.');
+    if (current.status === 'cancelled') return current;
+    database.prepare(`UPDATE employee_daily_attendance SET status = 'cancelled',
+      clock_in_time = NULL, clock_out_time = NULL, total_hours = 0, regular_hours = 0,
+      overtime_hours = 0, notes = CASE WHEN COALESCE(notes, '') = ''
+        THEN 'تم إلغاء الحضور بواسطة الإدارة'
+        ELSE notes || ' | تم إلغاء الحضور بواسطة الإدارة' END
+      WHERE employee_id = ? AND work_date = ?`)
+      .run(employeeId, workDate);
+    const updated = database.prepare(`SELECT * FROM employee_daily_attendance
+      WHERE employee_id = ? AND work_date = ?`).get(employeeId, workDate);
+    recordAudit({ database, actorId, action: 'cancel_attendance', entityType: 'employee_daily_attendance',
+      entityId: updated.id, oldValues: current, newValues: updated });
+    return updated;
+  }).immediate();
+}
+
 export function getOverdueAttendance(database = db, now = new Date()) {
   const timeZone = getAttendanceBusinessTimeZone(database);
   const records = database.prepare(`SELECT attendance.id, attendance.employee_id, attendance.work_date,
