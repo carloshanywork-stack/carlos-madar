@@ -228,6 +228,15 @@ export async function addNativeAppStateListener(callback) {
   return NativeApp.addListener('appStateChange', callback);
 }
 
+export async function getNativeAppInfo() {
+  if (!isNativeRepApp()) return null;
+  try {
+    return await NativeApp.getInfo();
+  } catch {
+    return null;
+  }
+}
+
 function blobToBase64(blob) {
   return blob.arrayBuffer().then((buffer) => {
     const bytes = new Uint8Array(buffer);

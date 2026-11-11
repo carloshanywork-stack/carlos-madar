@@ -223,38 +223,26 @@ final class RepLocalStore extends SQLiteOpenHelper {
     }
 
     synchronized Visit nextVisit(long repId, Set<Long> excludedCardIds) throws Exception {
-        String filter = "";
-        List<String> arguments = new ArrayList<>();
-        arguments.add(String.valueOf(repId));
-        if (excludedCardIds != null && !excludedCardIds.isEmpty()) {
-            StringBuilder placeholders = new StringBuilder();
-            for (Long cardId : excludedCardIds) {
-                if (cardId == null || cardId < 1L) continue;
-                if (placeholders.length() > 0) placeholders.append(", ");
-                placeholders.append('?');
-                arguments.add(String.valueOf(cardId));
-            }
-            if (placeholders.length() > 0) {
-                filter = " AND CAST(json_extract(payload_json, '$.cardId') AS INTEGER) NOT IN (" + placeholders + ")";
-            }
-        }
         SQLiteDatabase database = getWritableDatabase();
         try (Cursor cursor = database.rawQuery(
-            "SELECT visit_uuid, rep_id, payload_json FROM pending_visits WHERE rep_id = ? AND status IN ('pending', 'uploading')"
-                + filter + " ORDER BY created_at ASC LIMIT 1",
-            arguments.toArray(new String[0])
+            "SELECT visit_uuid, rep_id, payload_json FROM pending_visits WHERE rep_id = ? AND status IN ('pending', 'uploading') ORDER BY created_at ASC LIMIT 500",
+            new String[] { String.valueOf(repId) }
         )) {
-            if (!cursor.moveToFirst()) return null;
-            String uuid = cursor.getString(0);
-            JSONObject payload = new JSONObject(cursor.getString(2));
-            List<Photo> photos = new ArrayList<>();
-            try (Cursor photoCursor = database.rawQuery(
-                "SELECT phase, photo_index, path, captured_at FROM visit_photos WHERE visit_uuid = ? ORDER BY CASE phase WHEN 'before' THEN 0 ELSE 1 END, photo_index",
-                new String[] { uuid }
-            )) {
-                while (photoCursor.moveToNext()) photos.add(new Photo(photoCursor.getString(0), photoCursor.getInt(1), photoCursor.getString(2), photoCursor.getString(3)));
+            while (cursor.moveToNext()) {
+                JSONObject candidatePayload = new JSONObject(cursor.getString(2));
+                long cardId = candidatePayload.optLong("cardId", 0L);
+                if (excludedCardIds != null && cardId > 0L && excludedCardIds.contains(cardId)) continue;
+                String uuid = cursor.getString(0);
+                List<Photo> photos = new ArrayList<>();
+                try (Cursor photoCursor = database.rawQuery(
+                    "SELECT phase, photo_index, path, captured_at FROM visit_photos WHERE visit_uuid = ? ORDER BY CASE phase WHEN 'before' THEN 0 ELSE 1 END, photo_index",
+                    new String[] { uuid }
+                )) {
+                    while (photoCursor.moveToNext()) photos.add(new Photo(photoCursor.getString(0), photoCursor.getInt(1), photoCursor.getString(2), photoCursor.getString(3)));
+                }
+                return new Visit(uuid, cursor.getLong(1), candidatePayload, photos);
             }
-            return new Visit(uuid, cursor.getLong(1), payload, photos);
+            return null;
         }
     }
 
@@ -479,7 +467,7 @@ final class RepLocalStore extends SQLiteOpenHelper {
         try (Cursor cursor = getReadableDatabase().rawQuery(
             "SELECT action_uuid, rep_id, action_type, machine_id, card_id, payload_json, evidence_path, "
                 + "evidence_content_type, attempts FROM pending_machine_actions "
-                + "WHERE rep_id = ? AND status = 'queued' ORDER BY created_at, action_uuid LIMIT 1",
+                + "WHERE rep_id = ? AND status IN ('queued', 'syncing') ORDER BY created_at, action_uuid LIMIT 1",
             new String[] { String.valueOf(repId) }
         )) {
             if (!cursor.moveToFirst()) return null;
@@ -543,14 +531,35 @@ final class RepLocalStore extends SQLiteOpenHelper {
     synchronized Set<Long> blockingMachineCardIds(long repId) {
         Set<Long> cardIds = new HashSet<>();
         try (Cursor cursor = getReadableDatabase().rawQuery(
-            "SELECT card_id FROM pending_machine_actions WHERE rep_id = ? AND ("
-                + "(action_type = 'confirm_location' AND status IN ('queued', 'syncing', 'pending_approval', 'blocked', 'rejected')) "
-                + "OR (action_type = 'report_correction' AND status IN ('queued', 'syncing', 'blocked')))",
+            "SELECT action.card_id FROM pending_machine_actions action "
+                + "WHERE action.rep_id = ? AND action.rowid = ("
+                + "  SELECT candidate.rowid FROM pending_machine_actions candidate "
+                + "  WHERE candidate.rep_id = action.rep_id AND candidate.card_id = action.card_id "
+                + "    AND candidate.action_type = action.action_type "
+                + "  ORDER BY candidate.rowid DESC LIMIT 1) "
+                + "AND ("
+                + "(action.action_type = 'confirm_location' AND action.status IN ('queued', 'syncing', 'pending_approval', 'blocked', 'rejected')) "
+                + "OR (action.action_type = 'report_correction' AND action.status IN ('queued', 'syncing', 'blocked')))",
             new String[] { String.valueOf(repId) }
         )) {
             while (cursor.moveToNext()) cardIds.add(cursor.getLong(0));
         }
         return cardIds;
+    }
+
+    /**
+     * A newer successful report supersedes older blocked/rejected reports for the
+     * same card so they cannot keep the visit blocked forever. Rows are preserved
+     * with status `superseded` instead of being deleted.
+     */
+    synchronized void supersedeMachineActions(long repId, long cardId, String type, String exceptActionUuid) {
+        ContentValues values = new ContentValues();
+        values.put("status", "superseded");
+        getWritableDatabase().update("pending_machine_actions", values,
+            "rep_id = ? AND card_id = ? AND action_type = ? AND action_uuid != ? "
+                + "AND status IN ('queued', 'syncing', 'pending_approval', 'blocked', 'rejected')",
+            new String[] { String.valueOf(repId), String.valueOf(cardId), type,
+                exceptActionUuid == null ? "" : exceptActionUuid });
     }
 
     synchronized JSONArray listMachineActions(long repId) throws Exception {

@@ -99,6 +99,7 @@ public final class RepTrackStore extends SQLiteOpenHelper {
             if (hasRepId) return;
         }
         database.execSQL("ALTER TABLE " + TABLE + " RENAME TO breadcrumbs_legacy");
+        database.execSQL("DROP INDEX IF EXISTS idx_breadcrumbs_rep_id");
         createBreadcrumbTable(database);
         database.execSQL("INSERT OR IGNORE INTO " + TABLE
             + " (rep_id, timestamp, latitude, longitude, accuracy, speed)"

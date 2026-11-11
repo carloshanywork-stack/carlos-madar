@@ -250,7 +250,7 @@ public final class MadarSyncWorker extends Worker {
                         .build();
                     try (Response response = client.newCall(request).execute()) {
                         JSONObject result = parseJson(responseBody(response.body()));
-                        if (response.code() == 200 && result != null && result.optBoolean("success", false)) {
+                        if ((response.code() == 200 || response.code() == 201) && result != null && result.optBoolean("success", false)) {
                             long correctionId = result.optLong("correctionId", result.optLong("id", 0L));
                             String status = result.optString("status", "pending");
                             String localStatus = "approved".equals(status) || "rejected".equals(status)
@@ -305,7 +305,8 @@ public final class MadarSyncWorker extends Worker {
                     .build();
                 try (Response response = client.newCall(request).execute()) {
                     JSONObject result = parseJson(responseBody(response.body()));
-                    if (response.code() == 200 && result != null && result.optBoolean("success", false)) {
+                    if ((response.code() == 200 || response.code() == 201) && result != null && result.optBoolean("success", false)) {
+                        store.supersedeMachineActions(repId, action.cardId, "report_correction", action.actionUuid);
                         store.deleteMachineAction(action.actionUuid, repId);
                         continue;
                     }
