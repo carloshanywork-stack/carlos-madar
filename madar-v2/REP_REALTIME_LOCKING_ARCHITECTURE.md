@@ -576,6 +576,8 @@ broadcastOperationsEvent(transactionResult.event);
 
 This guarantees the event is in the replay log if the business transaction commits, and subscribers never see an event for a rollback.
 
+If the event insert itself fails (for example, a disk error), mirror the existing `publishOperationsEvent` fallback: return an in-memory event with a timestamp/sequence ID, log the failure, and let the business transaction commit. The route refresh remains the reconciliation path; an unpersisted event only loses replay, not the business mutation.
+
 ### 8.3 SSE endpoint changes
 
 `GET /api/rep/events` already supports recipients and replay. Keep it. Add:
@@ -600,7 +602,8 @@ function findRepLockableCard(rep, cardId, database = db) {
   const card = database.prepare(`
     SELECT card.id AS card_id, card.order_id, card.machine_id, card.status AS card_status,
       card.deleted_at AS card_deleted_at,
-      order_record.status AS order_status, order_record.deleted_at AS order_deleted_at,
+      order_record.status AS order_status, order_record.area AS order_area,
+      order_record.deleted_at AS order_deleted_at,
       machine.code AS machine_code, machine.name_ar AS machine_name_ar,
       machine.area AS machine_area, machine.active AS machine_active,
       machine.deleted_at AS machine_deleted_at,
@@ -624,7 +627,8 @@ function findRepLockableCard(rep, cardId, database = db) {
       || card.client_deleted_at) {
     throw new HttpError(404, 'Card not found.');
   }
-  if (!card.machine_active || card.card_status === 'excluded' || card.order_status === 'archived') {
+  if (!card.machine_active || card.card_status === 'excluded'
+      || card.card_status === 'completed' || card.order_status === 'archived') {
     throw new HttpError(409, 'This card is no longer available.');
   }
   if (card.correction_pending) {
@@ -640,6 +644,10 @@ function findRepLockableCard(rep, cardId, database = db) {
     if (!assigned.has(regionKey(card.machine_area))) {
       throw new HttpError(403, 'This machine is outside your assigned regions.');
     }
+  }
+  const orderAreas = String(card.order_area ?? '').split(/[،,]/).map(regionKey).filter(Boolean);
+  if (orderAreas.length && !orderAreas.includes(regionKey(card.machine_area))) {
+    throw new HttpError(403, 'This machine is outside the work order regions.');
   }
   if (card.upload_in_progress) {
     throw new HttpError(409, 'A visit upload is already in progress for this card.');
@@ -664,21 +672,10 @@ export function acquireRepCardLock(rep, cardIdInput, input, database = db) {
   const expiresAt = now + LOCK_TTL_MS;
 
   const result = database.transaction(() => {
+    ensureRepCardWorkState(cardId, database);
     const current = database.prepare(`
       SELECT * FROM rep_card_work_state WHERE card_id = ?
     `).get(cardId);
-
-    // Fresh installs or a card created after the migration.
-    if (!current) {
-      database.prepare(`
-        INSERT INTO rep_card_work_state
-          (card_id, machine_id, state, lock_token, locked_by_user_id, locked_by_name,
-           locked_device_id, lock_acquired_at, lock_expires_at_ms, last_heartbeat_at, version)
-        VALUES (?, ?, 'in_progress', ?, ?, ?, ?, ?, ?, ?, 1)
-      `).run(cardId, card.machine_id, token, rep.id, rep.fullName ?? rep.username,
-        deviceId, new Date(now).toISOString(), expiresAt, new Date(now).toISOString());
-      return { acquired: true, previousState: 'available', version: 1 };
-    }
 
     if (current.state === 'submitted' || current.state === 'approved') {
       throw new HttpError(409, 'This card has already been submitted.');
@@ -707,7 +704,7 @@ export function acquireRepCardLock(rep, cardIdInput, input, database = db) {
 
     // Same owner+device is an idempotent re-open. Expired locks are stolen atomically.
     const version = Number(current.version) + 1;
-    database.prepare(`
+    const update = database.prepare(`
       UPDATE rep_card_work_state
       SET state = 'in_progress', lock_token = ?, locked_by_user_id = ?, locked_by_name = ?,
           locked_device_id = ?, lock_acquired_at = ?, lock_expires_at_ms = ?,
@@ -717,28 +714,28 @@ export function acquireRepCardLock(rep, cardIdInput, input, database = db) {
     `).run(token, rep.id, rep.fullName ?? rep.username, deviceId,
       new Date(now).toISOString(), expiresAt, new Date(now).toISOString(),
       version, cardId, current.version);
+    if (update.changes !== 1) {
+      throw new HttpError(409, 'The card changed while it was being opened. Refresh and try again.');
+    }
 
-    return {
-      acquired: true,
+    const event = stageOperationsEvent('rep.card.state', {
+      cardId,
+      machineId: Number(card.machine_id),
+      machineCode: card.machine_code,
+      orderId: Number(card.order_id),
+      regionName: card.machine_area,
+      state: 'in_progress',
       previousState: current.state,
       version,
-    };
+      owner: { userId: Number(rep.id), name: rep.fullName ?? rep.username },
+      lockExpiresAt: new Date(expiresAt).toISOString(),
+      recipientUserIds: repOrderRecipientIds(card.order_id, database),
+    }, database);
+
+    return { acquired: true, previousState: current.state, version, event };
   }).immediate();
 
-  const event = stageOperationsEvent('rep.card.state', {
-    cardId,
-    machineId: Number(card.machine_id),
-    machineCode: card.machine_code,
-    orderId: Number(card.order_id),
-    regionName: card.machine_area,
-    state: 'in_progress',
-    previousState: result.previousState,
-    version: result.version,
-    owner: { userId: Number(rep.id), name: rep.fullName ?? rep.username },
-    lockExpiresAt: new Date(expiresAt).toISOString(),
-    recipientUserIds: repOrderRecipientIds(card.order_id, database),
-  }, database);
-  broadcastOperationsEvent(event);
+  broadcastOperationsEvent(result.event);
 
   return {
     success: true,
@@ -758,6 +755,99 @@ export function acquireRepCardLock(rep, cardIdInput, input, database = db) {
 
 Important concurrency detail: the `UPDATE ... WHERE version = ?` plus `BEGIN IMMEDIATE` serializes competing acquires. If two reps race, one updates and the other re-reads inside its own transaction and sees the active lock.
 
+### 9.2.1 Heartbeat
+
+```js
+export function heartbeatRepCardLock(rep, cardIdInput, input, database = db) {
+  const cardId = positiveId(cardIdInput, 'cardId');
+  const { lockToken } = requireObject(input);
+  const token = requireText(lockToken, 'lockToken', { maxLength: 64 });
+  const expiresAt = Date.now() + LOCK_TTL_MS;
+
+  return database.transaction(() => {
+    const current = database.prepare(`
+      SELECT * FROM rep_card_work_state WHERE card_id = ?
+    `).get(cardId);
+    if (!current || current.state !== 'in_progress'
+        || current.lock_token !== token
+        || Number(current.locked_by_user_id) !== Number(rep.id)) {
+      const error = new HttpError(409, 'The lock is no longer owned by this device.');
+      error.code = 'LOCK_LOST';
+      error.details = current ? { lock: publicLock(current) } : {};
+      throw error;
+    }
+
+    const version = Number(current.version) + 1;
+    database.prepare(`
+      UPDATE rep_card_work_state
+      SET lock_expires_at_ms = ?, last_heartbeat_at = ?, version = ?,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE card_id = ? AND lock_token = ? AND version = ?
+    `).run(expiresAt, new Date().toISOString(), version, cardId, token, current.version);
+
+    return {
+      success: true,
+      lock: {
+        cardId,
+        expiresAt: new Date(expiresAt).toISOString(),
+        version,
+        isMine: true,
+      },
+    };
+  }).immediate();
+}
+```
+
+Heartbeat does **not** publish an SSE event. It is high-frequency and only extends the lease.
+
+### 9.2.2 Release
+
+```js
+export function releaseRepCardLock(rep, cardIdInput, input, database = db) {
+  const cardId = positiveId(cardIdInput, 'cardId');
+  const { lockToken } = requireObject(input);
+  const token = requireText(lockToken, 'lockToken', { maxLength: 64 });
+
+  const result = database.transaction(() => {
+    ensureRepCardWorkState(cardId, database);
+    const current = database.prepare(`
+      SELECT * FROM rep_card_work_state WHERE card_id = ?
+    `).get(cardId);
+
+    if (current.state !== 'in_progress' || current.lock_token !== token
+        || Number(current.locked_by_user_id) !== Number(rep.id)) {
+      return { success: true, released: false, state: current.state, version: current.version };
+    }
+
+    const version = Number(current.version) + 1;
+    database.prepare(`
+      UPDATE rep_card_work_state
+      SET state = 'available', lock_token = NULL, locked_by_user_id = NULL,
+          locked_by_name = NULL, locked_device_id = NULL, lock_acquired_at = NULL,
+          lock_expires_at_ms = NULL, last_heartbeat_at = NULL, version = ?,
+          state_changed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+      WHERE card_id = ? AND lock_token = ? AND version = ?
+    `).run(version, cardId, token, current.version);
+
+    const event = stageOperationsEvent('rep.card.state', {
+      cardId,
+      machineId: Number(current.machine_id),
+      state: 'available',
+      previousState: 'in_progress',
+      version,
+      owner: null,
+      lockExpiresAt: null,
+      recipientUserIds: repOrderRecipientIdsForCard(cardId, database),
+    }, database);
+
+    return { success: true, released: true, state: 'available', version, event };
+  }).immediate();
+
+  if (result.event) broadcastOperationsEvent(result.event);
+  return result;
+}
+```
+
 ### 9.3 Submit integration
 
 `syncRepVisit(rep, input, files, options)` gains a `lockToken` option. The route passes `req.get('x-madar-lock-token')`.
@@ -773,46 +863,57 @@ assertRepCardSubmitAllowed(rep, initialCard, lockToken, database);
 
 ```js
 function assertRepCardSubmitAllowed(rep, card, lockToken, database) {
+  ensureRepCardWorkState(card.card_id, database);
   const work = database.prepare('SELECT * FROM rep_card_work_state WHERE card_id = ?')
     .get(card.card_id);
 
-  if (work?.state === 'submitted' || work?.state === 'approved') {
+  if (work.state === 'submitted' || work.state === 'approved') {
     throw new HttpError(409, 'This card has already been submitted.');
   }
-  if (work?.state === 'in_progress') {
-    const isOwner = Number(work.locked_by_user_id) === Number(rep.id);
-    const tokenMatches = lockToken && work.lock_token === lockToken;
-    if (!isOwner || !tokenMatches) {
+  if (work.state === 'in_progress') {
+    const sameOwner = Number(work.locked_by_user_id) === Number(rep.id);
+    const tokenMatches = Boolean(lockToken) && work.lock_token === lockToken && sameOwner;
+    const expired = Number(work.lock_expires_at_ms) <= Date.now();
+    const legacyAllowed = !lockToken && (sameOwner || expired);
+    if (!tokenMatches && !legacyAllowed) {
       const error = new HttpError(409, 'This machine is being processed by another representative.');
       error.code = 'CARD_LOCKED';
       error.details = { lock: publicLock(work) };
       throw error;
     }
   }
-  // No lock row or state available/reshoot: legacy upload path is allowed.
+  // No lock row, available/reshoot, or a permitted legacy path: continue to
+  // photo staging. The final transaction re-validates and consumes the lock.
 }
 ```
 
 Inside `recordReceivedVisit()` (same `IMMEDIATE` transaction that completes the visit):
 
 ```js
-function consumeLockAndSubmit(rep, cardId, visitId, lockToken, database) {
+function consumeLockAndSubmit(rep, card, visitId, lockToken, database) {
+  ensureRepCardWorkState(card.card_id, database);
   const work = database.prepare('SELECT * FROM rep_card_work_state WHERE card_id = ?')
-    .get(cardId);
+    .get(card.card_id);
+  const previousState = work.state;
 
   // Already submitted by the same visit: idempotent replay.
-  if (work?.state === 'submitted' && Number(work.submitted_visit_id) === Number(visitId)) {
-    return { state: 'submitted', version: Number(work.version), idempotent: true };
+  if (work.state === 'submitted' && Number(work.submitted_visit_id) === Number(visitId)) {
+    return { state: 'submitted', version: Number(work.version), idempotent: true, event: null };
   }
 
-  if (work?.state === 'submitted' || work?.state === 'approved') {
+  if (work.state === 'submitted' || work.state === 'approved') {
     throw new HttpError(409, 'This card has already been submitted.');
   }
 
-  if (work?.state === 'in_progress') {
-    const tokenMatches = lockToken && work.lock_token === lockToken
-      && Number(work.locked_by_user_id) === Number(rep.id);
-    if (!tokenMatches) {
+  if (work.state === 'in_progress') {
+    const sameOwner = Number(work.locked_by_user_id) === Number(rep.id);
+    const tokenMatches = Boolean(lockToken) && work.lock_token === lockToken && sameOwner;
+    const expired = Number(work.lock_expires_at_ms) <= Date.now();
+    // New clients must present the token. During rollout, a legacy client may
+    // finish its own lock or take over an expired lock, but never an active
+    // lock held by another rep.
+    const legacyAllowed = !lockToken && (sameOwner || expired);
+    if (!tokenMatches && !legacyAllowed) {
       const error = new HttpError(409, 'This machine is being processed by another representative.');
       error.code = 'CARD_LOCKED';
       error.details = { lock: publicLock(work) };
@@ -820,53 +921,49 @@ function consumeLockAndSubmit(rep, cardId, visitId, lockToken, database) {
     }
   }
 
-  // Atomic consume. The WHERE clause is the final race guard.
+  // We hold BEGIN IMMEDIATE; the version guard catches an unexpected writer
+  // and keeps the consume idempotent.
+  const nextVersion = Number(work.version) + 1;
   const update = database.prepare(`
     UPDATE rep_card_work_state
     SET state = 'submitted', lock_token = NULL, locked_by_user_id = NULL,
         locked_by_name = NULL, locked_device_id = NULL, lock_acquired_at = NULL,
         lock_expires_at_ms = NULL, last_heartbeat_at = NULL,
-        submitted_visit_id = ?, version = version + 1,
+        submitted_visit_id = ?, version = ?,
         state_changed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-    WHERE card_id = ?
-      AND state IN ('available', 'reshoot', 'in_progress')
-      AND (state <> 'in_progress' OR lock_token = ?)
-  `).run(visitId, cardId, lockToken ?? '');
+    WHERE card_id = ? AND version = ?
+  `).run(visitId, nextVersion, card.card_id, work.version);
 
   if (update.changes !== 1) {
     throw new HttpError(409, 'The card changed while the visit was uploading. Refresh and try again.');
   }
 
-  const next = database.prepare('SELECT * FROM rep_card_work_state WHERE card_id = ?').get(cardId);
-  return { state: 'submitted', version: Number(next.version) };
+  const event = stageOperationsEvent('rep.card.state', {
+    cardId: card.card_id,
+    machineId: card.machine_id,
+    machineCode: card.machine_code,
+    orderId: card.order_id,
+    regionName: card.machine_area,
+    state: 'submitted',
+    previousState,
+    version: nextVersion,
+    owner: null,
+    lockExpiresAt: null,
+    recipientUserIds: repOrderRecipientIds(card.order_id, database),
+  }, database);
+
+  return { state: 'submitted', version: nextVersion, idempotent: false, event };
 }
 ```
 
 Notes:
 
-- The update allows `available`/`reshoot` without a token for legacy clients. This is intentional during rollout. Once all clients send a token, tighten the WHERE clause with an env flag.
-- If the card is in `in_progress` by the same rep but the token is missing, reject; the rep must reopen/heartbeat.
+- The update allows `available`/`reshoot` without a token for legacy clients. This is intentional during rollout. Once all clients send a token, set `REP_REQUIRE_LOCK_TOKEN=true` and reject `!lockToken` for `in_progress`.
+- A legacy client may finish its own lock or take over an expired lock, but it can never take an active lock held by another rep.
+- A new client with a missing/mismatched token is rejected even if the lock is its own; it must reopen/heartbeat.
 - `visitId` is the `rep_visits.id` reserved earlier.
 - The visit row is completed in the same transaction. If the lock update fails, the transaction rolls back, and the existing catch block marks the visit `failed` and cleans files.
-
-After the transaction commits, stage and broadcast:
-
-```js
-const event = stageOperationsEvent('rep.card.state', {
-  cardId: card.card_id,
-  machineId: card.machine_id,
-  machineCode: card.machine_code,
-  orderId: card.order_id,
-  regionName: card.machine_area,
-  state: 'submitted',
-  previousState: 'in_progress',
-  version: result.version,
-  owner: null,
-  lockExpiresAt: null,
-  recipientUserIds: repOrderRecipientIds(card.order_id, database),
-}, database);
-broadcastOperationsEvent(event);
-```
+- The event is staged inside the same transaction. `recordReceivedVisit()` returns `{ visit, event }`; `syncRepVisit()` returns the visit plus the event to the route, which calls `broadcastOperationsEvent()` after the transaction commits.
 
 The route currently publishes `rep.visit.submitted` after `syncRepVisit`. Keep it for supervisor/analytics, but add `cardId`, `machineId`, `recipientUserIds`, and `state` so clients can use either event. The canonical client event is `rep.card.state`.
 
@@ -907,8 +1004,7 @@ const canVisit = row.order_status !== 'archived'
   && !isCompleted
   && !isSubmitted
   && !correctionPending
-  && !isLockedByOther
-  && workState !== 'in_progress';
+  && (!lockActive || Number(row.lock_user_id) === Number(rep.id));
 
 const lock = workState === 'in_progress' ? {
   userId: Number(row.lock_user_id),
@@ -936,6 +1032,37 @@ The route response adds:
 - `pendingReview`: `submitted`.
 - `pending`: `totalMachines - completed` (keep the current meaning for backward compatibility).
 - Add `active`: cards with `available`/`reshoot`/`in_progress`.
+
+Implementation detail: fetch all cards for the rep first, compute `summary`, then filter the mapped card list by `view` before returning it. If the route query applies the `view` filter in SQL, `summary` would only count the returned view and progress would jump when the completed tab is opened. The daily route is small enough that one query plus an in-memory filter is simpler and correct.
+
+### 9.4.1 Ensure a work row exists
+
+Cards can be created after the migration. Before any lock/submit/state read, run:
+
+```js
+function ensureRepCardWorkState(cardId, database = db) {
+  database.prepare(`
+    INSERT INTO rep_card_work_state (card_id, machine_id, state)
+    SELECT id, machine_id, 'available'
+    FROM maintenance_cards
+    WHERE id = ? AND deleted_at IS NULL
+    ON CONFLICT(card_id) DO NOTHING
+  `).run(cardId);
+}
+```
+
+Call this from `acquireRepCardLock`, `consumeLockAndSubmit`, and `getRepCardWorkState`. For the route, run one bulk insert instead of one insert per card:
+
+```sql
+INSERT INTO rep_card_work_state (card_id, machine_id, state)
+SELECT card.id, card.machine_id, 'available'
+FROM maintenance_cards card
+LEFT JOIN rep_card_work_state work ON work.card_id = card.id
+WHERE work.card_id IS NULL AND card.deleted_at IS NULL
+ON CONFLICT(card_id) DO NOTHING;
+```
+
+This keeps new cards consistent without adding triggers to `maintenance_cards`.
 
 ### 9.5 Review integration
 
@@ -1041,6 +1168,10 @@ async function openMachine(machine) {
 ```
 
 The sheet must not render until `activeLock.token` exists. This is the “status immediately becomes In Progress” guarantee.
+
+UI rule: do **not** render an `in_progress` card as a disabled button. Keep it tappable but visually marked “🔒 قيد المعالجة · {name}”. Tapping calls `openMachine()`, which shows the conflict dialog with the owner and expiry. If the button is disabled, the second rep never sees the required notification. Only `submitted`/`approved`/excluded/archived cards should be non-interactive (and most of those are hidden from the active view).
+
+All entry points must use `openMachine()`: the region grid, search results, and the offline map’s `onMachineSelect`. A direct `setSelectedMachine()` bypasses the lock and must be removed.
 
 ### 10.2 Heartbeat
 
@@ -1695,6 +1826,7 @@ Keep defaults conservative. A server restart should not break old clients.
   - `consumeLockAndSubmit`
   - `getRepCardWorkState`
   - `repOrderRecipientIds`
+  - `repOrderRecipientIdsForCard`
   - `publicLock`
   - `publishRepCardState`
 - `server/modules/rep/service.js`
