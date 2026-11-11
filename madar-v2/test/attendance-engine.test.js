@@ -354,6 +354,23 @@ test('rep and admin clock actions persist source/GPS, guard duplicate punches, a
 
   const employeeId = repCreated.body.id;
   const repEmployeeId = db.prepare('SELECT id FROM employees WHERE user_id = ?').get(employeeId).id;
+  const cancelledDate = getAttendanceBusinessDate(db);
+  const cancellation = await request('/api/attendance/cancel', jsonOptions('POST', {
+    employeeId: repEmployeeId, workDate: cancelledDate,
+  }), adminCookie);
+  assert.equal(cancellation.response.status, 200, JSON.stringify(cancellation.body));
+  assert.equal(cancellation.body.attendance.status, 'cancelled');
+  assert.equal(cancellation.body.attendance.clock_in_time, null);
+  assert.equal(cancellation.body.attendance.clock_out_time, null);
+  assert.equal(cancellation.body.attendance.total_hours, 0);
+  assert.match(cancellation.body.attendance.notes, /تم إلغاء الحضور بواسطة الإدارة/);
+  const cancellationEvent = db.prepare(`SELECT payload_json FROM operations_events
+    WHERE event_type = 'attendance.changed' ORDER BY event_id DESC LIMIT 1`).get();
+  assert.equal(JSON.parse(cancellationEvent.payload_json).action, 'cancelled');
+  assert.equal(JSON.parse(cancellationEvent.payload_json).userId, Number(employeeId));
+  const cancellationAudit = db.prepare(`SELECT action FROM audit_log
+    WHERE entity_type = 'employee_daily_attendance' AND entity_id = ? ORDER BY id DESC LIMIT 1`).get(String(cancellation.body.attendance.id));
+  assert.equal(cancellationAudit.action, 'cancel_attendance');
   const adminUserId = adminLogin.body.user.id;
   db.prepare('UPDATE employees SET base_salary_cents = 234000 WHERE id = ?').run(repEmployeeId);
   const openAttendanceId = Number(db.prepare(`INSERT INTO employee_daily_attendance

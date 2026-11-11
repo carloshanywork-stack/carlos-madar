@@ -11,6 +11,7 @@ process.env.MADAR_V2_DATABASE_PATH = join(temporaryDirectory, 'rep.sqlite');
 process.env.MADAR_V2_STORAGE_ROOT = join(temporaryDirectory, 'storage');
 process.env.MADAR_V2_OFFLINE_MAP_PATH = join(temporaryDirectory, 'local-map.mbtiles');
 process.env.MADAR_REP_APK_PATH = join(temporaryDirectory, 'madar-rep.apk');
+process.env.REP_ATTENDANCE_MAX_OFFLINE_AGE_HOURS = '24';
 process.env.STORAGE_MOUNT_PATH = '';
 process.env.NODE_ENV = 'test';
 process.env.COOKIE_SECURE = 'false';
@@ -31,6 +32,7 @@ const [
   { recoverRepVisitUploads },
   { recoverMachineCorrectionRenames },
   { closeOfflineMap },
+  { env },
 ] = await Promise.all([
   import('../server/app.js'),
   import('../server/database/connection.js'),
@@ -40,6 +42,7 @@ const [
   import('../server/modules/rep/service.js'),
   import('../server/modules/maintenance/service.js'),
   import('../server/modules/supervisor/offline-tiles.js'),
+  import('../server/config/env.js'),
 ]);
 
 initializeDatabase({ initialAdminPassword: '' });
@@ -97,6 +100,16 @@ function jsonOptions(method, body) {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
   };
+}
+
+async function withFrozenNow(milliseconds, callback) {
+  const actualNow = Date.now;
+  Date.now = () => milliseconds;
+  try {
+    return await callback();
+  } finally {
+    Date.now = actualNow;
+  }
 }
 
 async function readOperationsEvent(response, expectedType) {
@@ -346,7 +359,10 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
     username: 'rep-nour',
     password: 'Rep-Nour-Password-2026!',
   }));
-  assert.equal(regularLogin.response.status, 401);
+  assert.equal(regularLogin.response.status, 200, JSON.stringify(regularLogin.body));
+  assert.equal(regularLogin.body.role, 'rep');
+  assert.equal(regularLogin.body.user.role, 'rep');
+  assert.match(regularLogin.body.token, /^eyJ/, 'the unified login returns a bearer token alongside its session cookie');
 
   const login = await request('/api/rep/login', jsonOptions('POST', {
     username: 'rep-nour',
@@ -429,6 +445,131 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   const repeatedClockOut = await request('/api/rep/attendance/sync', jsonOptions('POST', clockOutPayload), login.cookie);
   assert.equal(repeatedClockOut.response.status, 200);
   assert.equal(repeatedClockOut.body.idempotent, true);
+
+  assert.equal(env.repAttendanceMaxOfflineAgeHours, 24);
+  const policyNow = Date.now();
+  const maxOfflineAgeMs = 24 * 60 * 60 * 1000;
+  const boundaryAction = {
+    actionUuid: randomUUID(),
+    action: 'in',
+    occurredAt: new Date(policyNow - maxOfflineAgeMs).toISOString(),
+    location: { ...attendanceLocation, updatedAt: new Date(policyNow - maxOfflineAgeMs).toISOString() },
+    biometricVerified: true,
+  };
+  const exactBoundary = await withFrozenNow(policyNow, () => request('/api/rep/attendance/sync',
+    jsonOptions('POST', boundaryAction), login.cookie));
+  assert.equal(exactBoundary.response.status, 200, JSON.stringify(exactBoundary.body));
+  assert.equal(exactBoundary.body.idempotent, false);
+  const attendanceId = exactBoundary.body.attendance.id;
+  const boundaryAuditCount = db.prepare(`SELECT COUNT(*) AS count FROM audit_log
+    WHERE entity_type = 'employee_attendance' AND entity_id = ?`).get(attendanceId).count;
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM rep_attendance_sync_actions WHERE action_uuid = ?')
+    .get(boundaryAction.actionUuid).count, 1);
+
+  const oldClockOut = {
+    actionUuid: randomUUID(), action: 'out',
+    occurredAt: new Date(policyNow - maxOfflineAgeMs - 1).toISOString(),
+    biometricVerified: true,
+  };
+  const auditCountBeforeOldOut = db.prepare(`SELECT COUNT(*) AS count FROM audit_log
+    WHERE entity_type = 'employee_attendance' AND entity_id = ?`).get(attendanceId).count;
+  const expiredClockOut = await withFrozenNow(policyNow, () => request('/api/rep/attendance/sync',
+    jsonOptions('POST', oldClockOut), login.cookie));
+  assert.equal(expiredClockOut.response.status, 409);
+  assert.equal(expiredClockOut.body.code, 'ATTENDANCE_REVIEW_REQUIRED');
+  assert.match(expiredClockOut.body.error, /24-hour window/);
+  const unchangedOpenAttendance = db.prepare('SELECT clock_out_time FROM employee_daily_attendance WHERE id = ?').get(attendanceId);
+  assert.equal(unchangedOpenAttendance.clock_out_time, null, 'expired clock-out must not affect payroll-effective attendance');
+  assert.equal(db.prepare(`SELECT COUNT(*) AS count FROM audit_log
+    WHERE entity_type = 'employee_attendance' AND entity_id = ?`).get(attendanceId).count, auditCountBeforeOldOut);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM rep_attendance_sync_actions WHERE action_uuid = ?')
+    .get(oldClockOut.actionUuid).count, 0, 'rejected action UUID is not recorded as accepted');
+
+  const expiredPunches = [
+    {
+      actionUuid: randomUUID(), action: 'in',
+      occurredAt: new Date(policyNow - maxOfflineAgeMs - 1).toISOString(),
+      location: { ...attendanceLocation, updatedAt: new Date(policyNow - maxOfflineAgeMs - 1).toISOString() },
+      biometricVerified: true,
+    },
+    {
+      actionUuid: randomUUID(), action: 'in', occurredAt: '2001-01-15T12:00:00.000Z',
+      location: { ...attendanceLocation, updatedAt: '2001-01-15T12:00:00.000Z' }, biometricVerified: true,
+    },
+  ];
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM payroll_runs WHERE month_year = ?').get('2001-01').count,
+    0, 'the arbitrarily old test date is in an unfinalized payroll month');
+  for (const expiredPunch of expiredPunches) {
+    const beforeRows = db.prepare('SELECT COUNT(*) AS count FROM employee_daily_attendance WHERE employee_id = ?')
+      .get(db.prepare('SELECT id FROM employees WHERE user_id = ?').get(repId).id).count;
+    const beforeAudit = db.prepare(`SELECT COUNT(*) AS count FROM audit_log
+      WHERE actor_id = ? AND entity_type = 'employee_attendance'`).get(repId).count;
+    const rejection = await withFrozenNow(policyNow, () => request('/api/rep/attendance/sync',
+      jsonOptions('POST', expiredPunch), login.cookie));
+    assert.equal(rejection.response.status, 409, JSON.stringify(rejection.body));
+    assert.equal(rejection.body.code, 'ATTENDANCE_REVIEW_REQUIRED');
+    assert.equal(typeof rejection.body.error, 'string');
+    assert.ok(rejection.body.error.length > 0, 'the server returns a reconciliation reason');
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM employee_daily_attendance WHERE employee_id = ?')
+      .get(db.prepare('SELECT id FROM employees WHERE user_id = ?').get(repId).id).count, beforeRows);
+    assert.equal(db.prepare(`SELECT COUNT(*) AS count FROM audit_log
+      WHERE actor_id = ? AND entity_type = 'employee_attendance'`).get(repId).count, beforeAudit);
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM rep_attendance_sync_actions WHERE action_uuid = ?')
+      .get(expiredPunch.actionUuid).count, 0);
+  }
+
+  const futurePunch = {
+    ...boundaryAction,
+    actionUuid: randomUUID(),
+    occurredAt: new Date(policyNow + 5 * 60 * 1000 + 1).toISOString(),
+  };
+  futurePunch.location = { ...attendanceLocation, updatedAt: futurePunch.occurredAt };
+  const futureRejected = await withFrozenNow(policyNow, () => request('/api/rep/attendance/sync',
+    jsonOptions('POST', futurePunch), login.cookie));
+  assert.equal(futureRejected.response.status, 400);
+  assert.match(futureRejected.body.error, /five minutes in the future/);
+
+  const acceptedReplay = await withFrozenNow(policyNow + maxOfflineAgeMs + 1, () => request(
+    '/api/rep/attendance/sync', jsonOptions('POST', boundaryAction), login.cookie));
+  assert.equal(acceptedReplay.response.status, 200, JSON.stringify(acceptedReplay.body));
+  assert.equal(acceptedReplay.body.idempotent, true, 'accepted action replay is checked before age policy');
+  assert.equal(acceptedReplay.body.attendance.id, attendanceId);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM rep_attendance_sync_actions WHERE action_uuid = ?')
+    .get(boundaryAction.actionUuid).count, 1, 'accepted replay does not create a duplicate action record');
+  assert.equal(db.prepare(`SELECT COUNT(*) AS count FROM audit_log
+    WHERE entity_type = 'employee_attendance' AND entity_id = ?`).get(attendanceId).count, boundaryAuditCount,
+  'accepted replay does not create a duplicate attendance audit effect');
+  const changedExpiredReplay = await withFrozenNow(policyNow + maxOfflineAgeMs + 1, () => request(
+    '/api/rep/attendance/sync', jsonOptions('POST', {
+      ...boundaryAction,
+      location: { ...boundaryAction.location, accuracy: boundaryAction.location.accuracy + 1 },
+    }), login.cookie));
+  assert.equal(changedExpiredReplay.response.status, 409);
+  assert.notEqual(changedExpiredReplay.body.code, 'ATTENDANCE_REVIEW_REQUIRED');
+
+  const unauthenticatedPunch = await request('/api/rep/attendance/sync', jsonOptions('POST', boundaryAction));
+  assert.equal(unauthenticatedPunch.response.status, 401);
+  const otherRepCreated = await request('/api/users', jsonOptions('POST', {
+    username: 'attendance-isolation-rep', full_name: 'Attendance Isolation Rep', role: 'rep',
+    assignedRegions: [], password: 'Attendance-Isolation-Password-2026!',
+  }), adminCookie);
+  assert.equal(otherRepCreated.response.status, 201, JSON.stringify(otherRepCreated.body));
+  const otherRepLogin = await request('/api/auth/login', jsonOptions('POST', {
+    username: 'attendance-isolation-rep', password: 'Attendance-Isolation-Password-2026!',
+  }));
+  assert.equal(otherRepLogin.response.status, 200);
+  const otherRepReplay = await withFrozenNow(policyNow + maxOfflineAgeMs + 1, () => request(
+    '/api/rep/attendance/sync', jsonOptions('POST', boundaryAction), otherRepLogin.cookie));
+  assert.equal(otherRepReplay.response.status, 409, 'another representative cannot replay the first representative action UUID');
+  assert.notEqual(otherRepReplay.body.code, 'ATTENDANCE_REVIEW_REQUIRED');
+
+  const cleanupClockOut = {
+    actionUuid: randomUUID(), action: 'out', occurredAt: new Date(policyNow).toISOString(),
+    biometricVerified: true,
+  };
+  const cleanupResult = await withFrozenNow(policyNow, () => request('/api/rep/attendance/sync',
+    jsonOptions('POST', cleanupClockOut), login.cookie));
+  assert.equal(cleanupResult.response.status, 200, JSON.stringify(cleanupResult.body));
 
   const mockAttendanceAudit = await request('/api/rep/attendance/mock-location', jsonOptions('POST', {
     action: 'tracking',

@@ -23,6 +23,15 @@ function readTrustProxyHops(value) {
   return hops;
 }
 
+export function readRepAttendanceMaxOfflineAgeHours(value) {
+  if (value === undefined) return 24;
+  const hours = Number(value);
+  if (!Number.isFinite(hours) || hours <= 0 || !Number.isFinite(hours * 60 * 60 * 1000)) {
+    throw new Error('REP_ATTENDANCE_MAX_OFFLINE_AGE_HOURS must be a positive finite number.');
+  }
+  return hours;
+}
+
 const nodeEnv = process.env.NODE_ENV ?? 'development';
 if (!['development', 'test', 'production'].includes(nodeEnv)) {
   throw new Error('NODE_ENV must be development, test, or production.');
@@ -59,6 +68,9 @@ export const env = Object.freeze({
   host: process.env.HOST ?? '127.0.0.1',
   port: readPort(process.env.PORT),
   trustProxyHops: readTrustProxyHops(process.env.TRUST_PROXY_HOPS),
+  repAttendanceMaxOfflineAgeHours: readRepAttendanceMaxOfflineAgeHours(
+    process.env.REP_ATTENDANCE_MAX_OFFLINE_AGE_HOURS,
+  ),
   storageMountPath: process.env.STORAGE_MOUNT_PATH?.trim() || undefined,
   dataDirectory: process.env.MADAR_V2_DATA_DIR?.trim() || undefined,
   databasePath: process.env.MADAR_V2_DATABASE_PATH?.trim() || undefined,

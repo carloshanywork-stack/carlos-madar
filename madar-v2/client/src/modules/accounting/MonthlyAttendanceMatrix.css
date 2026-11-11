@@ -30,6 +30,7 @@
 .madar-attendance-cell-status.badge-absent { background: #fee2e2; color: #991b1b; }
 .madar-attendance-cell-status.badge-leave { background: #dbeafe; color: #1d4ed8; }
 .madar-attendance-cell-status.badge-late { background: #fef3c7; color: #92400e; }
+.madar-attendance-cell-status.badge-cancelled { background: #fee2e2; color: #991b1b; }
 .madar-attendance-cell-status.badge-empty { background: transparent; color: #94a3b8; }
 .madar-attendance-cell-edit { position: absolute; top: 1px; left: 0; width: 14px; height: 15px; border: 0; border-radius: 0 0 5px 0; background: #dbeafe; color: #1d4ed8; opacity: 0; font-size: 11px; line-height: 12px; cursor: pointer; }
 .madar-attendance-cell:hover .madar-attendance-cell-edit, .madar-attendance-cell-edit:focus-visible { opacity: 1; }

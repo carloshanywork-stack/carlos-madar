@@ -129,3 +129,35 @@
   #madar-app .supervisor-panel-head h2 { font-size: 14px; }
   #madar-app .live-pill { font-size: 8px; }
 }
+#madar-app .location-reviews-panel { padding: 20px; border: 1px solid #283e52; border-radius: 14px; color: #e2e8f0; background: #152232; box-shadow: 0 16px 36px rgba(4, 12, 21, .18); }
+#madar-app .location-reviews-header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+#madar-app .location-reviews-header > div { flex: 1; }
+#madar-app .location-reviews-eyebrow { color: #7dd3c7; font-size: 9px; font-weight: 900; letter-spacing: .13em; }
+#madar-app .location-reviews-header h2 { margin: 5px 0 0; color: #f1f5f9; font-size: 18px; font-weight: 900; }
+#madar-app .location-reviews-count { display: grid; min-width: 30px; height: 30px; place-items: center; border: 1px solid #31506a; border-radius: 10px; color: #bae6fd; background: #1a3045; font-size: 12px; font-weight: 900; }
+#madar-app .location-reviews-refresh, #madar-app .location-review-actions button { min-height: 36px; padding: 0 13px; border: 1px solid #2c4257; border-radius: 9px; color: #e2e8f0; background: #203246; cursor: pointer; font: inherit; font-size: 11px; font-weight: 850; transition: background .15s ease, transform .15s ease; }
+#madar-app .location-reviews-refresh:hover { background: #2a4056; }
+#madar-app .location-review-list { display: grid; gap: 12px; }
+#madar-app .location-review-card { padding: 14px; border: 1px solid #2c4257; border-radius: 12px; color: #e2e8f0; background: linear-gradient(145deg, #18283a, #142130); }
+#madar-app .location-review-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+#madar-app .location-review-card h3 { margin: 0; color: #f8fafc; font-size: 14px; font-weight: 900; }
+#madar-app .location-review-card p { margin: 6px 0 0; color: #a8bac9; font-size: 11px; }
+#madar-app .location-review-card p strong { color: #dce8f2; }
+#madar-app .location-review-card p span { color: #7f95a8; }
+#madar-app .location-review-accuracy { flex: none; padding: 5px 9px; border: 1px solid #1d6472; border-radius: 999px; color: #a5f3fc; background: #164e63; font-size: 11px; font-weight: 900; }
+#madar-app .location-review-comparison { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; margin: 13px 0; }
+#madar-app .location-review-comparison > div { display: grid; gap: 6px; min-width: 0; padding: 10px; border: 1px solid #263d52; border-radius: 9px; background: rgba(10, 20, 31, .48); }
+#madar-app .location-review-comparison small { color: #91a6b9; font-size: 10px; font-weight: 800; }
+#madar-app .location-review-comparison bdi { color: #e2e8f0; font: 600 11px ui-monospace, SFMono-Regular, Consolas, monospace; overflow-wrap: anywhere; }
+#madar-app .location-review-note { display: grid; gap: 6px; color: #a8bac9; font-size: 10px; font-weight: 800; }
+#madar-app .location-review-note input { min-height: 38px; padding: 8px 10px; border: 1px solid #2c4257; border-radius: 8px; outline: none; color: #f1f5f9; background: #0f1924; font: inherit; }
+#madar-app .location-review-note input:focus { border-color: #38bdf8; box-shadow: 0 0 0 2px rgba(56, 189, 248, .13); }
+#madar-app .location-review-actions { display: flex; gap: 8px; margin-top: 10px; }
+#madar-app .location-review-actions .location-review-approve { border-color: #059669; color: #fff; background: #059669; }
+#madar-app .location-review-actions .location-review-approve:hover { background: #047857; }
+#madar-app .location-review-actions .location-review-reject { border-color: #b91c1c; color: #fff; background: #b91c1c; }
+#madar-app .location-review-actions .location-review-reject:hover { background: #991b1b; }
+#madar-app .location-review-actions button:disabled, #madar-app .location-reviews-refresh:disabled { cursor: not-allowed; opacity: .55; }
+#madar-app .location-reviews-empty, #madar-app .location-reviews-error { padding: 12px; border: 1px solid #2c4257; border-radius: 9px; color: #a8bac9; background: #1a2a3d; }
+#madar-app .location-reviews-error { color: #fecaca; border-color: #7f1d1d; background: #351d27; }
+@media (max-width: 560px) { #madar-app .location-reviews-panel { padding: 14px; } #madar-app .location-review-comparison { grid-template-columns: 1fr; } #madar-app .location-reviews-header { flex-wrap: wrap; } }

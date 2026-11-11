@@ -3,9 +3,11 @@ import { requestActorId } from '../actor.js';
 import { allowOnlyKeys, positiveId, requireObject } from '../http.js';
 import { publishOperationsEvent } from '../operations-events.js';
 import { requireFinanceOrAdmin } from '../auth/authorization.js';
+import { db } from '../../database/connection.js';
 import {
   clockInForEmployee,
   clockOutForEmployee,
+  cancelDailyAttendance,
   getAttendanceBusinessDate,
   getAttendanceBusinessTimeZone,
   getOverdueAttendance,
@@ -71,6 +73,21 @@ router.post('/clock-out', requireAdmin, (req, res) => {
       overtimeHours: Number(attendance.overtime_hours),
     });
   }
+  res.json({ success: true, attendance });
+});
+
+router.post('/cancel', requireFinanceOrAdmin, (req, res) => {
+  const body = requireObject(req.body);
+  allowOnlyKeys(body, ['employeeId', 'workDate']);
+  const attendance = cancelDailyAttendance(positiveId(body.employeeId, 'employeeId'), body.workDate, requestActorId(req));
+  const linkedUserId = db.prepare('SELECT user_id FROM employees WHERE id = ?').get(attendance.employee_id)?.user_id;
+  publishOperationsEvent('attendance.changed', {
+    employeeId: attendance.employee_id,
+    workDate: attendance.work_date,
+    action: 'cancelled',
+    actorId: requestActorId(req),
+    ...(linkedUserId ? { userId: Number(linkedUserId), recipientUserIds: [Number(linkedUserId)] } : {}),
+  });
   res.json({ success: true, attendance });
 });
 

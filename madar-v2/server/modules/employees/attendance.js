@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { db } from '../../database/connection.js';
+import { env } from '../../config/env.js';
 import { recordAudit } from '../audit.js';
 import { HttpError, allowOnlyKeys, positiveId, requireObject, requireText } from '../http.js';
 
@@ -156,6 +157,32 @@ export function getAttendanceBusinessDate(database = db, now = new Date()) {
 
 export function getAttendanceBusinessTimeZone(database = db) {
   return getTimeZone(database);
+}
+
+export function cancelDailyAttendance(employeeIdValue, workDateValue, actorId = null, database = db) {
+  const employeeId = positiveId(employeeIdValue, 'employeeId');
+  const workDate = requireText(workDateValue, 'workDate', { maxLength: 10 });
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(workDate) || Number.isNaN(Date.parse(`${workDate}T00:00:00Z`))) {
+    throw new HttpError(400, 'workDate must be a valid YYYY-MM-DD date.');
+  }
+  return database.transaction(() => {
+    const current = database.prepare(`SELECT * FROM employee_daily_attendance
+      WHERE employee_id = ? AND work_date = ?`).get(employeeId, workDate);
+    if (!current) throw new HttpError(404, 'Attendance record was not found.');
+    if (current.status === 'cancelled') return current;
+    database.prepare(`UPDATE employee_daily_attendance SET status = 'cancelled',
+      clock_in_time = NULL, clock_out_time = NULL, total_hours = 0, regular_hours = 0,
+      overtime_hours = 0, notes = CASE WHEN COALESCE(notes, '') = ''
+        THEN 'تم إلغاء الحضور بواسطة الإدارة'
+        ELSE notes || ' | تم إلغاء الحضور بواسطة الإدارة' END
+      WHERE employee_id = ? AND work_date = ?`)
+      .run(employeeId, workDate);
+    const updated = database.prepare(`SELECT * FROM employee_daily_attendance
+      WHERE employee_id = ? AND work_date = ?`).get(employeeId, workDate);
+    recordAudit({ database, actorId, action: 'cancel_attendance', entityType: 'employee_daily_attendance',
+      entityId: updated.id, oldValues: current, newValues: updated });
+    return updated;
+  }).immediate();
 }
 
 export function getOverdueAttendance(database = db, now = new Date()) {
@@ -456,6 +483,13 @@ export function syncRepAttendanceAction(userIdValue, input, database = db) {
         actionUuid,
         attendance: getAttendanceRecord(employee.id, record.work_date, database),
       };
+    }
+
+    const maximumOfflineAgeMs = env.repAttendanceMaxOfflineAgeHours * 60 * 60 * 1000;
+    if (Date.now() - occurredAtMilliseconds > maximumOfflineAgeMs) {
+      throw new HttpError(409,
+        `Offline attendance is older than the allowed ${env.repAttendanceMaxOfflineAgeHours}-hour window and requires administrator review.`,
+        { apiCode: 'ATTENDANCE_REVIEW_REQUIRED' });
     }
 
     const attendance = body.action === 'in'

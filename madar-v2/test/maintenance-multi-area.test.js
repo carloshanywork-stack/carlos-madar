@@ -68,6 +68,26 @@ function json(method, body) {
   return { method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) };
 }
 
+test('test mock order creates and assigns an isolated visit; geofence reset clears and audits the machine location', async () => {
+  const repId = Number(db.prepare(`INSERT INTO users (username, password_hash, full_name, role)
+    VALUES (?, ?, ?, 'rep')`).run(`mock-rep-${randomUUID()}`, bcrypt.hashSync('test-rep-password', 4), 'Mock Test Rep').lastInsertRowid);
+  const created = await request('/api/maintenance/orders/test-mock', json('POST', { representativeId: repId, regionName: 'QA North' }));
+  assert.equal(created.response.status, 201, JSON.stringify(created.body));
+  assert.match(created.body.order_code, /^MN-TEST-\d{4,}$/);
+  assert.equal(created.body.cards.length, 1);
+  assert.equal(created.body.cards[0].machine_code, 'TEST-ATM-999');
+  assert.equal(created.body.representatives.some((rep) => Number(rep.id) === repId), true);
+  const machineId = Number(created.body.cards[0].machine_id);
+  db.prepare('UPDATE machines SET latitude = 30.1, longitude = 31.2, is_location_locked = 1 WHERE id = ?').run(machineId);
+  const reset = await request(`/api/maintenance/machines/${machineId}/reset-location`, json('POST', {}));
+  assert.equal(reset.response.status, 200, JSON.stringify(reset.body));
+  assert.equal(reset.body.machine.latitude, null);
+  assert.equal(reset.body.machine.longitude, null);
+  assert.equal(reset.body.machine.is_location_locked, 0);
+  assert.equal(reset.body.machine.geofence_radius_meters, 50);
+  assert.equal(db.prepare(`SELECT action FROM audit_log WHERE entity_type = 'machine' AND entity_id = ? ORDER BY id DESC LIMIT 1`).get(String(machineId)).action, 'reset_geofence_location');
+});
+
 function assertNoCache(response) {
   const cacheControl = response.headers.get('cache-control') ?? '';
   for (const directive of ['private', 'no-cache', 'no-store', 'must-revalidate']) {

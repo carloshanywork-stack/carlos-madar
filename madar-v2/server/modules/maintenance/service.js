@@ -541,6 +541,23 @@ export function setMachineGeofenceLocation(machineId, input, actorId = null, dat
   }).immediate();
 }
 
+export function resetMachineGeofenceLocation(machineId, actorId = null, database = db) {
+  const id = positiveId(machineId, 'machineId');
+  return database.transaction(() => {
+    const machine = database.prepare(`SELECT id, latitude, longitude, is_location_locked,
+      geofence_radius_meters FROM machines WHERE id = ? AND deleted_at IS NULL`).get(id);
+    if (!machine) throw new HttpError(404, 'Machine was not found.');
+    database.prepare(`UPDATE machines SET latitude = NULL, longitude = NULL,
+      is_location_locked = 0, geofence_radius_meters = 50, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?`).run(id);
+    const updated = database.prepare(`SELECT id, code, latitude, longitude, is_location_locked,
+      geofence_radius_meters FROM machines WHERE id = ?`).get(id);
+    recordAudit({ database, actorId, action: 'reset_geofence_location', entityType: 'machine', entityId: id,
+      oldValues: machine, newValues: updated });
+    return updated;
+  }).immediate();
+}
+
 function parseCorrectionLocation(value) {
   try {
     const location = JSON.parse(value ?? '{}');
@@ -2878,6 +2895,60 @@ export function createMaintenanceOrder(input, actorId = null, database = db) {
   return getMaintenanceOrder(orderId, database);
 }
 
+export function createTestMockMaintenanceOrder(input, actorId = null, database = db) {
+  const body = requireObject(input);
+  allowOnlyKeys(body, ['representativeId', 'regionName']);
+  const representativeId = positiveId(body.representativeId, 'representativeId');
+  const region = optionalText(body.regionName, 'regionName', { maxLength: 160 }) || 'تجريبي';
+  const orderId = database.transaction(() => {
+    const representative = database.prepare(`SELECT id FROM users
+      WHERE id = ? AND role = 'rep' AND active = 1 AND deleted_at IS NULL`).get(representativeId);
+    if (!representative) throw new HttpError(400, 'Select an active field representative.');
+    const priorClient = database.prepare(`SELECT * FROM clients WHERE code = 'C-TEST'`).get() ?? null;
+    database.prepare(`INSERT INTO clients (code, name, name_ar, storage_code)
+      VALUES ('C-TEST', 'Test Client', 'عميل تجريبي', 'C-TEST')
+      ON CONFLICT(code) DO UPDATE SET name = excluded.name, name_ar = excluded.name_ar,
+        storage_code = excluded.storage_code, deleted_at = NULL`).run();
+    const client = database.prepare(`SELECT id FROM clients WHERE code = 'C-TEST' AND deleted_at IS NULL`).get();
+    if (!client) throw new HttpError(409, 'The designated test client could not be initialized.');
+    const currentClient = database.prepare('SELECT * FROM clients WHERE id = ?').get(client.id);
+    if (JSON.stringify(priorClient) !== JSON.stringify(currentClient)) {
+      recordAudit({ database, actorId, action: priorClient ? 'update_test_fixture' : 'create_test_fixture',
+        entityType: 'client', entityId: Number(client.id), oldValues: priorClient, newValues: currentClient });
+    }
+    const priorMachine = database.prepare(`SELECT * FROM machines WHERE code = 'TEST-ATM-999'`).get() ?? null;
+    database.prepare(`INSERT INTO machines (code, name_ar, name_en, area, is_location_locked)
+      VALUES ('TEST-ATM-999', 'ماكينة تجريبية لاختبار التطبيق', 'Test ATM', ?, 0)
+      ON CONFLICT(code) DO UPDATE SET name_ar = excluded.name_ar, name_en = excluded.name_en,
+        area = excluded.area, latitude = NULL, longitude = NULL,
+        is_location_locked = 0, geofence_radius_meters = 50, active = 1, deleted_at = NULL,
+        updated_at = CURRENT_TIMESTAMP`).run(region);
+    const machine = database.prepare(`SELECT id FROM machines WHERE code = 'TEST-ATM-999'`).get();
+    const currentMachine = database.prepare('SELECT * FROM machines WHERE id = ?').get(machine.id);
+    if (JSON.stringify(priorMachine) !== JSON.stringify(currentMachine)) {
+      recordAudit({ database, actorId, action: priorMachine ? 'update_test_fixture' : 'create_test_fixture',
+        entityType: 'machine', entityId: Number(machine.id), oldValues: priorMachine, newValues: currentMachine });
+    }
+    database.prepare(`INSERT INTO client_machines (client_id, machine_id, site_area, active)
+      VALUES (?, ?, ?, 1) ON CONFLICT(client_id, machine_id) DO UPDATE SET site_area = excluded.site_area, active = 1`)
+      .run(client.id, machine.id, region);
+    const highestSuffix = Number(database.prepare(`SELECT COALESCE(MAX(CAST(SUBSTR(order_code, 9) AS INTEGER)), 0) AS suffix
+      FROM maintenance_orders WHERE order_code GLOB 'MN-TEST-[0-9]*'`).get().suffix);
+    const suffix = String(highestSuffix + 1).padStart(4, '0');
+    const orderCode = `MN-TEST-${suffix}`;
+    const created = database.prepare(`INSERT INTO maintenance_orders (order_code, client_id, area, notes, created_by)
+      VALUES (?, ?, ?, 'Test order for mobile representative workflow', ?)`).run(orderCode, client.id, region, actorId);
+    const id = Number(created.lastInsertRowid);
+    const card = database.prepare('INSERT INTO maintenance_cards (order_id, machine_id) VALUES (?, ?)').run(id, machine.id);
+    database.prepare(`INSERT INTO maintenance_order_reps (order_id, user_id, assigned_by) VALUES (?, ?, ?)`)
+      .run(id, representativeId, actorId);
+    recordAudit({ database, actorId, action: 'create_test_mock_order', entityType: 'maintenance_order', entityId: id,
+      newValues: { order_code: orderCode, client_id: Number(client.id), machine_id: Number(machine.id), card_id: Number(card.lastInsertRowid), representative_user_id: representativeId, region } });
+    return id;
+  }).immediate();
+  return getMaintenanceOrder(orderId, database);
+}
+
 export function listMaintenanceRepresentatives(database = db) {
   return database.prepare(`
     SELECT id, username, full_name, assigned_regions_json
@@ -3024,7 +3095,8 @@ export function getMaintenanceOrder(orderId, database = db) {
 
   const cards = database.prepare(`
     SELECT card.*, reason.name AS single_reason_name, machine.code AS machine_code, machine.name_ar AS machine_name_ar,
-      machine.name_en AS machine_name_en, machine.area AS machine_area
+      machine.name_en AS machine_name_en, machine.area AS machine_area, machine.latitude AS machine_latitude,
+      machine.longitude AS machine_longitude, machine.is_location_locked AS machine_location_locked
     FROM maintenance_cards card
     JOIN machines machine ON machine.id = card.machine_id
     LEFT JOIN maintenance_reasons reason ON reason.id = card.reason_id

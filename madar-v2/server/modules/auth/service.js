@@ -121,11 +121,14 @@ export function authenticateUser(username, password, database = db, { allowedRol
       || Buffer.byteLength(password, 'utf8') > 72) return null;
   const roles = allowedRoles === undefined ? null : [...new Set(allowedRoles)];
   const roleClause = roles === null ? '' : `AND role IN (${roles.map(() => '?').join(', ')})`;
+  const accountStateClause = roles?.includes('rep')
+    ? "AND ((active = 1 AND deleted_at IS NULL) OR role = 'rep')"
+    : 'AND active = 1 AND deleted_at IS NULL';
   const row = database.prepare(`
     SELECT id, username, password_hash, full_name, role,
       assigned_regions_json, is_online, last_location_json, failed_login_attempts, locked_until
     FROM users
-    WHERE username = ? COLLATE NOCASE AND active = 1 AND deleted_at IS NULL
+    WHERE username = ? COLLATE NOCASE ${accountStateClause}
       ${roleClause}
     LIMIT 1
   `).get(username.trim(), ...(roles ?? []));

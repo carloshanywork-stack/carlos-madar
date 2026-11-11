@@ -6,6 +6,7 @@ import { applyPendingMachineLocations, locationReviewState, locationReviewLabel 
 import {
   addPendingVisit,
   addPendingMachineAction,
+  clearSnapshot,
   deleteGpsSamples,
   deletePendingMachineAction,
   deletePendingVisit,
@@ -815,7 +816,14 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
           setToast(event.status === 'approved' ? 'اعتمد المدير موقع الماكينة.' : 'رُفض الموقع المقترح؛ راجع الملاحظة وأعد الإرسال.');
           void refreshData();
         } else if (event.type === 'attendance.changed') {
-          void refreshAttendance();
+          const cancellationIsForUser = Number(event.userId) === userId
+            || (Array.isArray(event.recipientUserIds) && event.recipientUserIds.map(Number).includes(userId))
+            || Number(event.employeeId) === Number(user.employee_id ?? attendance?.employee_id);
+          if (event.action === 'cancelled' && cancellationIsForUser) {
+            setAttendance(null);
+            void clearSnapshot('attendance_snapshots', userId).catch(() => undefined);
+            setToast('⚠️ تم إلغاء تسجيل الحضور لهذا اليوم من قبل الإدارة.');
+          } else void refreshAttendance();
         }
       } catch {
         // Ignore malformed frames; the regular route refresh remains a fallback.
@@ -826,7 +834,7 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
       events.removeEventListener('operations', onOperationsEvent);
       events.close();
     };
-  }, [nativeApp, offlineOnly, refreshAttendance, refreshData, serverState]);
+  }, [attendance?.employee_id, nativeApp, offlineOnly, refreshAttendance, refreshData, serverState, user.employee_id]);
 
   useEffect(() => {
     if (!nativeApp) return undefined;

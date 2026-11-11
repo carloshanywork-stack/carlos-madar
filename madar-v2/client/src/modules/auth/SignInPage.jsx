@@ -7,7 +7,6 @@ export default function SignInPage({ setupRequired, initialError = '', onLoginSu
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(initialError);
-  const [accountMode, setAccountMode] = useState('staff');
   const [serverState, setServerState] = useState('checking');
 
   useEffect(() => {
@@ -58,19 +57,16 @@ export default function SignInPage({ setupRequired, initialError = '', onLoginSu
           username: form.username,
           password: form.password,
         });
-      } else if (accountMode === 'rep') {
-        result = await api.post('/api/rep/login', {
-          username: form.username,
-          password: form.password,
-        }, isNativeRepApp() ? { headers: { 'X-Madar-Native-Client': 'android' } } : {});
-        if (isNativeRepApp() && result.token) await saveNativeSession(result.token, result.rep);
       } else {
         result = await api.post('/api/auth/login', {
-          username: form.username,
+          username: form.username.trim(),
           password: form.password,
         });
+        if (result.user?.role === 'rep' && isNativeRepApp() && result.token) {
+          await saveNativeSession(result.token, result.user);
+        }
       }
-      onLoginSuccess(accountMode === 'rep' && !setupRequired ? result.rep : result.user);
+      onLoginSuccess(result.user);
     } catch (requestError) {
       setError(requestError.message || 'Unable to sign in. Please try again.');
     } finally {
@@ -79,11 +75,11 @@ export default function SignInPage({ setupRequired, initialError = '', onLoginSu
   };
 
   return (
-    <main className="auth-screen" dir={accountMode === 'rep' ? 'rtl' : 'ltr'}>
+    <main className="auth-screen" dir="rtl">
       <header className="auth-header">
         <div className="auth-wordmark" aria-label="تسجيل الدخول إلى مدار">
           <span className="auth-brand-mark">M</span>
-          <span className="auth-brand-copy"><strong>MADAR</strong><small>{accountMode === 'rep' ? 'تطبيق المندوب الميداني' : 'نظام إدارة التشغيل والصيانة'}</small></span>
+          <span className="auth-brand-copy"><strong>MADAR</strong><small>مساحة عمل آمنة</small></span>
         </div>
         <button
           className="auth-theme-toggle"
@@ -102,18 +98,12 @@ export default function SignInPage({ setupRequired, initialError = '', onLoginSu
           <div className="auth-story-orbit auth-story-orbit-two" />
           <div className="auth-story-content">
             <span className="auth-eyebrow"><span className="auth-eyebrow-dot" /> LOCAL-FIRST OPERATIONS</span>
-            <h1>{accountMode === 'rep' ? 'كل زيارة محفوظة، حتى خارج التغطية.' : 'Clarity for every part of your operation.'}</h1>
-            <p>{accountMode === 'rep' ? 'مسارك وصورك تُحفظ على هاتفك أولاً، ثم تُزامن مع نظام مدار عند توفر الاتصال.' : 'One calm workspace for maintenance, workshop, inventory and finance.'}</p>
+            <h1>إدارة أوضح لكل أعمالك.</h1>
+            <p>مساحة واحدة لمتابعة الزيارات والصيانة والعمليات اليومية.</p>
             <div className="auth-story-points">
-              {accountMode === 'rep' ? <>
-                <span><i>01</i> مسار اليوم حسب المنطقة</span>
-                <span><i>02</i> توثيق قبل وبعد</span>
-                <span><i>03</i> حفظ محلي ومزامنة تلقائية</span>
-              </> : <>
-                <span><i>01</i> Work orders & machine history</span>
-                <span><i>02</i> Stock, invoices & treasury</span>
-                <span><i>03</i> Your data stays on your system</span>
-              </>}
+              <span><i>01</i> متابعة العمل الميداني</span>
+              <span><i>02</i> أوامر الصيانة وسجل الماكينات</span>
+              <span><i>03</i> بياناتك تبقى على نظامك</span>
             </div>
           </div>
           <div className="auth-story-foot"><span>BUILT FOR THE WORK BEHIND THE WORK</span><span>V2.0</span></div>
@@ -121,18 +111,13 @@ export default function SignInPage({ setupRequired, initialError = '', onLoginSu
 
         <div className="auth-card-wrap">
           <div className="auth-card">
-            <div className="auth-card-kicker">{setupRequired ? 'الإعداد لأول مرة' : accountMode === 'rep' ? 'الدخول الميداني' : 'مساحة عمل آمنة'}</div>
-            <h2>{setupRequired ? 'إنشاء حساب المدير' : accountMode === 'rep' ? 'مرحباً بك يا مندوب' : 'مرحباً بعودتك'}</h2>
+            <div className="auth-card-kicker">{setupRequired ? 'الإعداد لأول مرة' : 'مساحة عمل آمنة'}</div>
+            <h2>{setupRequired ? 'إنشاء حساب المدير' : 'مرحباً بك في MADAR'}</h2>
             <p className="auth-card-description" dir="rtl">
               {setupRequired
                 ? 'أنشئ حساب المدير لتأمين مساحة عمل MADAR.'
-                : accountMode === 'rep' ? 'سجّل الدخول لتنزيل مسار اليوم ومتابعة زياراتك.' : 'سجّل الدخول باستخدام حساب MADAR للمتابعة.'}
+                : 'سجّل الدخول للمتابعة إلى حسابك.'}
             </p>
-
-            {!setupRequired && <div className="auth-account-switch" role="group" aria-label="نوع الحساب">
-              <button type="button" className={accountMode === 'staff' ? 'active' : ''} onClick={() => setAccountMode('staff')}>موظف / إدارة</button>
-              <button type="button" className={accountMode === 'rep' ? 'active' : ''} onClick={() => setAccountMode('rep')}>مندوب ميداني</button>
-            </div>}
 
             <div className={`auth-server-status ${serverState === 'online' ? 'online' : ''} ${serverState === 'checking' ? 'checking' : ''}`} role="status">
               <i />{serverState === 'online' ? 'الخادم متصل وجاهز لتسجيل الدخول' : serverState === 'checking' ? 'جارٍ فحص اتصال الخادم…' : 'الخادم غير متاح · يلزم الاتصال لتسجيل الدخول'}
@@ -156,7 +141,7 @@ export default function SignInPage({ setupRequired, initialError = '', onLoginSu
               )}
 
               <label className="auth-field">
-                <span>{accountMode === 'rep' && !setupRequired ? 'كود المندوب' : 'اسم المستخدم'}</span>
+                <span>اسم المستخدم / كود المندوب</span>
                 <input
                   dir="ltr"
                   autoComplete="username"
@@ -166,7 +151,7 @@ export default function SignInPage({ setupRequired, initialError = '', onLoginSu
                   maxLength={64}
                   name="username"
                   onChange={update('username')}
-                  placeholder={accountMode === 'rep' && !setupRequired ? 'أدخل كود المندوب' : 'أدخل اسم المستخدم'}
+                  placeholder="أدخل اسم المستخدم أو كود المندوب"
                   required
                   value={form.username}
                 />

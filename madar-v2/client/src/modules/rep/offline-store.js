@@ -257,6 +257,16 @@ export async function saveSnapshot(storeName, repId, data) {
   });
 }
 
+export async function clearSnapshot(storeName, repId) {
+  const transaction = await createTransaction(storeName, 'readwrite');
+  transaction.objectStore(storeName).delete(Number(repId));
+  return new Promise((resolve, reject) => {
+    transaction.oncomplete = () => resolve(true);
+    transaction.onerror = () => reject(transaction.error ?? new Error('تعذر حذف النسخة المحلية.'));
+    transaction.onabort = () => reject(transaction.error ?? new Error('أُلغي حذف النسخة المحلية.'));
+  });
+}
+
 export async function listOfflineMapPacks() {
   const transaction = await createTransaction('offline_map_packs', 'readonly');
   return requestValue(transaction.objectStore('offline_map_packs').getAll());

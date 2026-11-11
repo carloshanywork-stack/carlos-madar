@@ -24,5 +24,6 @@ export function errorHandler(error, req, res, next) {
     error: status >= 500 && process.env.NODE_ENV === 'production'
       ? 'Internal server error'
       : error.message,
+    ...(error.apiCode ? { code: error.apiCode } : {}),
   });
 }

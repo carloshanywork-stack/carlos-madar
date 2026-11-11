@@ -267,6 +267,15 @@ export default function MaintenanceOrderDetail() {
     return freshOrder;
   }
 
+  async function resetMachineLocation(card) {
+    if (!window.confirm('هل أنت متأكد من مسح الموقع الجغرافي لهذه الماكينة لتمكين المندوب من تحديده مجدداً؟')) return;
+    try {
+      await api.post(`/api/maintenance/machines/${card.machine_id}/reset-location`, {});
+      await reload();
+      showToast('تمت إعادة تعيين الموقع الجغرافي للماكينة.');
+    } catch (caught) { showToast(errorMessage(caught), 'error'); }
+  }
+
   useEffect(() => {
     if (!tripProcessing) return undefined;
     let cancelled = false;
@@ -891,7 +900,8 @@ export default function MaintenanceOrderDetail() {
                     marginRight: '6px', flexShrink: 0,
                   }}
                 />}
-                <span>{card.machine_name_ar}{card.machine_name_en ? ` · ${card.machine_name_en}` : ''}</span>
+            <span>{card.machine_name_ar}{card.machine_name_en ? ` · ${card.machine_name_en}` : ''}</span>
+            {(card.machine_location_locked || card.machine_latitude != null || card.machine_longitude != null) && <button type="button" className="madar-button madar-button-ghost madar-button-small" onClick={(event) => { event.stopPropagation(); void resetMachineLocation(card); }}>🔄 إعادة تعيين الموقع</button>}
                 {missingAfterPhotos && <span className="madar-badge madar-badge-danger" style={{
                   background: 'rgba(239, 68, 68, 0.15)', color: '#f87171', border: '1px solid rgba(239, 68, 68, 0.3)',
                   fontWeight: 700, fontSize: '10px',

@@ -34,8 +34,6 @@ function distanceMeters(first, second) {
 }
 
 export default function MachineVisitSheet({ machine, repName = '', reasons, gps, gpsError, captureLocation, onClose, onSave, onConfirmLocation, onReportCorrection }) {
-  const [machineCondition, setMachineCondition] = useState('');
-  const [reasonIds, setReasonIds] = useState([]);
   const [notes, setNotes] = useState('');
   const [photos, setPhotos] = useState({ before: [], after: [] });
   const [activePhase, setActivePhase] = useState('before');
@@ -142,12 +140,6 @@ export default function MachineVisitSheet({ machine, repName = '', reasons, gps,
     } finally {
       setCorrectionSaving(false);
     }
-  };
-
-  const toggleReason = (id) => {
-    setReasonIds((current) => current.includes(Number(id))
-      ? current.filter((item) => item !== Number(id))
-      : [...current, Number(id)]);
   };
 
   const processCaptures = async (phase, files) => {
@@ -308,10 +300,6 @@ export default function MachineVisitSheet({ machine, repName = '', reasons, gps,
       setError('يلزم التقاط 3 صور قبل الصيانة؛ صور ما بعد الصيانة اختيارية وبحد أقصى 3 صور.');
       return;
     }
-    if (!machineCondition) {
-      setError('اختر حالة الماكينة قبل حفظ الزيارة.');
-      return;
-    }
     setError('');
     setSaving(true);
     try {
@@ -331,8 +319,8 @@ export default function MachineVisitSheet({ machine, repName = '', reasons, gps,
       }
       await onSave({
         visitUuid: draftVisitUuid,
-        machineCondition,
-        reasonIds,
+        machineCondition: 'working',
+        reasonIds: [],
         notes: notes.trim(),
         beforePhotos: photos.before.map(({ blob, path, sizeBytes, capturedAt: photoCapturedAt }) => blob ?? ({ path, sizeBytes, capturedAt: photoCapturedAt })),
         afterPhotos: photos.after.map(({ blob, path, sizeBytes, capturedAt: photoCapturedAt }) => blob ?? ({ path, sizeBytes, capturedAt: photoCapturedAt })),
@@ -469,51 +457,6 @@ export default function MachineVisitSheet({ machine, repName = '', reasons, gps,
 
           <section className="rep-form-section">
             <div className="rep-section-title">
-              <div><span className="rep-eyebrow">MACHINE CHECK</span><h3>حالة الماكينة</h3></div>
-              <small>اختر الحالة الحالية</small>
-            </div>
-            <div className="rep-condition-options" role="radiogroup" aria-label="حالة الماكينة">
-              {[
-                ['working', 'تعمل', '✓'],
-                ['faulty', 'عطلانة', '!'],
-                ['preventive_maintenance', 'صيانة وقائية', '⌁'],
-              ].map(([value, label, icon]) => (
-                <button key={value} type="button" role="radio" aria-checked={machineCondition === value}
-                  className={`rep-condition-option ${machineCondition === value ? 'selected' : ''}`}
-                  onClick={() => setMachineCondition(value)}>
-                  <span aria-hidden="true">{icon}</span>{label}
-                </button>
-              ))}
-            </div>
-          </section>
-
-          <section className="rep-form-section">
-            <div className="rep-section-title">
-              <div><span className="rep-eyebrow">MAINTENANCE</span><h3>ما الذي تم إصلاحه؟</h3></div>
-              <small>اختياري · يمكنك اختيار أكثر من سبب</small>
-            </div>
-            {reasons.length ? (
-              <div className="rep-reason-grid">
-                {reasons.map((reason) => {
-                  const active = reasonIds.includes(Number(reason.id));
-                  return (
-                    <button
-                      key={reason.id}
-                      type="button"
-                      className={`rep-reason-chip ${active ? 'selected' : ''}`}
-                      aria-pressed={active}
-                      onClick={() => toggleReason(reason.id)}
-                    >
-                      <span aria-hidden="true">{active ? '✓' : '+'}</span>{reason.name}
-                    </button>
-                  );
-                })}
-              </div>
-            ) : <p className="rep-muted-box">لا توجد أسباب صيانة محفوظة. يمكنك متابعة الزيارة بدون تحديد سبب.</p>}
-          </section>
-
-          <section className="rep-form-section">
-            <div className="rep-section-title">
               <div><span className="rep-eyebrow">PHOTO PROOF</span><h3>توثيق الزيارة</h3></div>
               <small>{activePhase === 'before' ? 'الخطوة 1 من 2 · صور قبل الصيانة' : 'الخطوة 2 من 2 · صور بعد الصيانة اختيارية'}</small>
             </div>
@@ -547,7 +490,7 @@ export default function MachineVisitSheet({ machine, repName = '', reasons, gps,
 
         <footer className="rep-sheet-footer">
           <button type="button" className="rep-button rep-button-light" onClick={onClose} disabled={visitBusy}>إلغاء</button>
-          <button type="button" className="rep-button rep-button-primary rep-save-visit" onClick={save} disabled={saving || !canCapture || !machineCondition || photos.before.length !== 3 || photos.after.length > 3 || Boolean(processingPhase) || (nativeApp && /تزييف الموقع/.test(gpsError ?? ''))}>
+          <button type="button" className="rep-button rep-button-primary rep-save-visit" onClick={save} disabled={saving || !canCapture || photos.before.length !== 3 || photos.after.length > 3 || Boolean(processingPhase) || (nativeApp && /تزييف الموقع/.test(gpsError ?? ''))}>
             {saving ? 'جارٍ تحديد الموقع وحفظ الزيارة…' : photos.after.length ? '💾 إنهاء الزيارة وحفظ الصور' : '💾 إنهاء الزيارة بصور قبل فقط'}
           </button>
         </footer>

@@ -38,6 +38,8 @@ export default function MaintenancePage({ isAdmin = false }) {
   const { data: areas } = useApi('/api/maintenance/areas');
   const { data: representatives, loading: representativesLoading } = useApi('/api/maintenance/representatives');
   const [createOpen, setCreateOpen] = useState(false);
+  const [mockOrderOpen, setMockOrderOpen] = useState(false);
+  const [mockRepresentativeId, setMockRepresentativeId] = useState('');
   const [employeeIds, setEmployeeIds] = useState([]);
   const [repUserIds, setRepUserIds] = useState([]);
   const [saving, setSaving] = useState(false);
@@ -92,13 +94,28 @@ export default function MaintenancePage({ isAdmin = false }) {
     }
   }
 
+  async function createMockOrder(event) {
+    event.preventDefault();
+    if (!mockRepresentativeId) return;
+    setSaving(true);
+    setFormError('');
+    try {
+      await api.post('/api/maintenance/orders/test-mock', { representativeId: Number(mockRepresentativeId) });
+      setMockOrderOpen(false);
+      if (status !== 'in_progress') setStatus('in_progress');
+      else await reload();
+      showToast('تم إنشاء أمر الاختبار وإسناده للمندوب بنجاح.');
+    } catch (caught) { setFormError(errorMessage(caught)); }
+    finally { setSaving(false); }
+  }
+
   return (
     <>
       <PageHeader
         kicker="الخدمة الميدانية · الصيانة"
         title={view === 'reasons' ? 'أسباب الأعطال' : view === 'machines' ? 'قاعدة الماكينات' : view === 'area_notes' ? 'صيانات المناطق' : 'أوامر الصيانة'}
         description={view === 'reasons' ? 'إدارة أسباب الأعطال التي تظهر في بطاقات فحص الصيانة.' : view === 'machines' ? 'دليل الماكينات النشطة ومناطق الخدمة والاستيراد.' : view === 'area_notes' ? 'عرض أحدث الملاحظات الفنية المسجلة لكل ماكينة حسب المنطقة.' : 'من إنشاء أمر الخدمة حتى فحص الآلات، التوثيق بالصور، والمراجعة والأرشفة.'}
-        actions={view === 'orders' && <Button icon="plus" onClick={() => { setFormError(''); setEmployeeIds([]); setRepUserIds([]); setSelectedAreas([]); setAutoPopulate(true); setCreateOpen(true); }}>إنشاء أمر صيانة</Button>}
+        actions={view === 'orders' && <div className="madar-inline-wrap"><Button variant="secondary" onClick={() => { setFormError(''); setMockRepresentativeId(''); setMockOrderOpen(true); }}>🧪 إنشاء أمر صيانة تجريبي</Button><Button icon="plus" onClick={() => { setFormError(''); setEmployeeIds([]); setRepUserIds([]); setSelectedAreas([]); setAutoPopulate(true); setCreateOpen(true); }}>إنشاء أمر صيانة</Button></div>}
       />
       <div className="madar-section"><Tabs items={[
         { value: 'orders', label: 'أوامر الصيانة (Orders)' },
@@ -148,6 +165,16 @@ export default function MaintenancePage({ isAdmin = false }) {
         ) : <EmptyState icon="wrench" title={search ? 'لا توجد نتائج' : 'لا توجد أوامر في هذه المرحلة'} description={search ? 'جرّب كلمة بحث أخرى.' : 'يمكنك إنشاء أمر صيانة جديد لبدء الزيارة الميدانية.'} action={status === 'in_progress' && !search && <Button icon="plus" onClick={() => setCreateOpen(true)}>إنشاء أمر صيانة</Button>} />}
       </section>
 
+        <Modal open={mockOrderOpen} onClose={() => setMockOrderOpen(false)} title="إنشاء أمر صيانة تجريبي" description="ينشئ ماكينة اختبار وبطاقة زيارة مسندة للمندوب المحدد.">
+          <form onSubmit={createMockOrder}><div className="madar-form-stack">
+            <Select label="المندوب الميداني *" required value={mockRepresentativeId} onChange={(event) => setMockRepresentativeId(event.target.value)}>
+              <option value="">اختر المندوب</option>
+              {(representatives ?? []).map((rep) => <option key={rep.id} value={rep.id}>{rep.full_name || rep.username}</option>)}
+            </Select>
+            {formError && <Alert tone="error">{formError}</Alert>}
+            <div className="madar-inline-wrap"><Button type="submit" disabled={saving || !mockRepresentativeId || representativesLoading}>{saving ? 'جارٍ الإنشاء…' : 'إنشاء أمر الاختبار'}</Button><Button type="button" variant="secondary" onClick={() => setMockOrderOpen(false)}>إلغاء</Button></div>
+          </div></form>
+        </Modal>
         <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="إنشاء أمر صيانة" description="أمر ميداني مستقل عن أوامر الإنتاج. عيّن المندوبين لتظهر لهم بطاقات هذا الأمر في التطبيق.">
         <form onSubmit={createOrder}>
           <div className="madar-form-stack">

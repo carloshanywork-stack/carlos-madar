@@ -53,15 +53,20 @@ router.post('/login', loginRateLimiter, asyncHandler(async (req, res) => {
     throw new HttpError(400, 'Username and password are required.');
   }
   const result = authenticateUser(username, password, undefined, {
-    allowedRoles: ['admin', 'sales', 'operations', 'purchasing', 'finance', 'accountant'],
+    allowedRoles: ['admin', 'sales', 'operations', 'purchasing', 'finance', 'accountant', 'rep'],
   });
+  if (result?.disabled) {
+    res.clearCookie(env.authCookieName, authCookieOptions(req));
+    res.status(403).json({ success: false, message: REP_ACCOUNT_DISABLED_MESSAGE });
+    return;
+  }
   if (!result) {
     res.status(401).json({ error: 'اسم المستخدم أو كلمة المرور غير صحيحة' });
     return;
   }
   const { user, token } = result;
   setSessionCookie(req, res, token);
-  res.json({ ok: true, user, token });
+  res.json({ ok: true, user, token, role: user.role });
 }));
 
 router.post('/logout', (req, res) => {
