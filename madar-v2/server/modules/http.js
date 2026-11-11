@@ -1,10 +1,11 @@
 import path from 'node:path';
 
 export class HttpError extends Error {
-  constructor(status, message) {
+  constructor(status, message, { apiCode } = {}) {
     super(message);
     this.name = 'HttpError';
     this.status = status;
+    if (apiCode) this.apiCode = apiCode;
   }
 }
 

@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { db } from '../../database/connection.js';
+import { env } from '../../config/env.js';
 import { recordAudit } from '../audit.js';
 import { HttpError, allowOnlyKeys, positiveId, requireObject, requireText } from '../http.js';
 
@@ -482,6 +483,13 @@ export function syncRepAttendanceAction(userIdValue, input, database = db) {
         actionUuid,
         attendance: getAttendanceRecord(employee.id, record.work_date, database),
       };
+    }
+
+    const maximumOfflineAgeMs = env.repAttendanceMaxOfflineAgeHours * 60 * 60 * 1000;
+    if (Date.now() - occurredAtMilliseconds > maximumOfflineAgeMs) {
+      throw new HttpError(409,
+        `Offline attendance is older than the allowed ${env.repAttendanceMaxOfflineAgeHours}-hour window and requires administrator review.`,
+        { apiCode: 'ATTENDANCE_REVIEW_REQUIRED' });
     }
 
     const attendance = body.action === 'in'

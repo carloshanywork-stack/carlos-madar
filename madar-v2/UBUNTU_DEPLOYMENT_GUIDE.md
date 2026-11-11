@@ -96,11 +96,12 @@ HOST=127.0.0.1
 PORT=3000
 STORAGE_MOUNT_PATH=/mnt/storage
 MADAR_V2_JWT_SECRET=<64-hex-character-secret>
+REP_ATTENDANCE_MAX_OFFLINE_AGE_HOURS=24
 CORS_ORIGINS=https://madar.example.com
 COOKIE_SECURE=true
 ```
 
-`MADAR_V2_JWT_SECRET` must be at least 32 bytes. Keep `HOST=127.0.0.1`: the app should not be directly reachable from the network. `COOKIE_SECURE=true` requires HTTPS in the browser, so configure TLS before completing administrator setup or logging in remotely. Leave `MADAR_INITIAL_ADMIN_PASSWORD` unset to create the first administrator using the app's one-time setup screen.
+`MADAR_V2_JWT_SECRET` must be at least 32 bytes. `REP_ATTENDANCE_MAX_OFFLINE_AGE_HOURS` must be a positive finite number; it defaults to 24 hours. Older offline punches are retained on the representative device for administrator reconciliation and are not applied to payroll. Keep `HOST=127.0.0.1`: the app should not be directly reachable from the network. `COOKIE_SECURE=true` requires HTTPS in the browser, so configure TLS before completing administrator setup or logging in remotely. Leave `MADAR_INITIAL_ADMIN_PASSWORD` unset to create the first administrator using the app's one-time setup screen.
 
 Leave the `MADAR_V2_*` data/database/storage/backup path overrides unset for the standard layout so they resolve under `/mnt/storage`. The deploy script creates and restricts the configured mount-backed runtime directories, plus system-partition `logs/` and `server/assets/`; it does not recursively chmod the source tree.
 

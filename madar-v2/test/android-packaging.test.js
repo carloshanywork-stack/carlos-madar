@@ -103,6 +103,14 @@ test('native rep gate, private SQLite queue, and WorkManager upload contract are
   assert.match(worker, /confirm-location/);
   assert.match(worker, /\/corrections/);
   assert.match(worker, /markAttendanceRejected/);
+  assert.match(worker, /String serverMessage = result == null[\s\S]*?optString\("error"/,
+    'the native sync worker extracts the actual API error for local administrator reconciliation');
+  assert.match(worker, /markAttendanceRejected\(attendanceAction\.actionUuid,[\s\S]*?serverMessage[\s\S]*?\);\s*continue;/,
+    'a rejected attendance item is preserved with the server reason and does not block later queue work');
+  assert.match(store, /UPDATE pending_attendance_actions SET status = 'attendance_rejected',[\s\S]*?last_error = \?/,
+    'permanently rejected attendance remains in local SQLite with its actual error text');
+  assert.match(worker, /Set<Long> blockedCardIds = store\.blockingMachineCardIds\(repId\);[\s\S]*?store\.nextVisit\(repId, blockedCardIds\)/,
+    'attendance rejection does not prevent the independent visit queue from syncing');
   assert.match(worker, /blockingMachineCardIds/);
   assert.match(worker, /acknowledgeTrackingBatch/);
   assert.match(worker, /clientPointId/);
