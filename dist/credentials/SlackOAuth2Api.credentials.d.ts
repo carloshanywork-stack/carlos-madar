@@ -1,0 +1,10 @@
+import type { ICredentialType, INodeProperties } from 'n8n-workflow';
+export declare const userScopes: string[];
+export declare class SlackOAuth2Api implements ICredentialType {
+    name: string;
+    extends: string[];
+    displayName: string;
+    documentationUrl: string;
+    properties: INodeProperties[];
+}
+//# sourceMappingURL=SlackOAuth2Api.credentials.d.ts.map

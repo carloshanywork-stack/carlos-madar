@@ -1,0 +1,27 @@
+/**
+ * ClickUp Node - Version 1 - Zod Schema
+ * Discriminator: resource=spaceTag, operation=update
+ *
+ * Use .parse() for strict validation or .safeParse() for error handling.
+ *
+ * Schema helpers (z, expressionSchema, etc.) are passed as parameters
+ * by the schema-validator, not imported from external files.
+ *
+ * @generated - CommonJS JavaScript for runtime loading
+ */
+
+module.exports = function getSchema({ parameters, z, expressionSchema, stringOrExpression, numberOrExpression, booleanOrExpression, resourceLocatorValueSchema, resourceMapperValueSchema, filterValueSchema, assignmentCollectionValueSchema, iDataObjectSchema }) {
+
+  return z.object({
+    parameters: z.object({
+      resource: z.literal('spaceTag'),
+      operation: z.literal('update'),
+      authentication: z.union([z.literal('accessToken'), z.literal('oAuth2'), expressionSchema]).optional(),
+      space: stringOrExpression,
+      name: stringOrExpression,
+      newName: stringOrExpression,
+      foregroundColor: stringOrExpression.optional(),
+      backgroundColor: stringOrExpression.optional(),
+    }).optional(),
+  });
+};

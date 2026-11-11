@@ -1,8 +1,8 @@
 import { ZipArchive } from 'archiver';
 import { closeSync, createWriteStream, existsSync, openSync, readSync } from 'node:fs';
-import { access, cp, lstat, mkdir, mkdtemp, readdir, realpath, rename, rm, stat } from 'node:fs/promises';
+import { cp, lstat, mkdir, mkdtemp, open, readdir, readFile, readlink, realpath, rename, rm, stat } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
-import { dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import Database from 'better-sqlite3';
 import * as yauzl from 'yauzl';
@@ -271,7 +271,7 @@ function readFileSyncHeader(filePath) {
   }
 }
 
-async function replaceDatabaseFromSnapshot(snapshotPath, actorId) {
+async function replaceDatabaseFromSnapshot(snapshotPath, actorId, restoreTimestamp) {
   const escapedSnapshot = snapshotPath.replaceAll("'", "''");
   db.exec(`ATTACH DATABASE '${escapedSnapshot}' AS restored_snapshot`);
   try {
@@ -303,7 +303,11 @@ async function replaceDatabaseFromSnapshot(snapshotPath, actorId) {
       db.prepare('UPDATE sessions SET revoked_at = CURRENT_TIMESTAMP WHERE revoked_at IS NULL').run();
       const safeActorId = actorId && db.prepare('SELECT 1 FROM users WHERE id = ?').get(actorId) ? actorId : null;
       recordAudit({ database: db, actorId: safeActorId, action: 'restore', entityType: 'system_backup', entityId: 1,
-        newValues: { restored_at: new Date().toISOString(), sessions_revoked: true } });
+        newValues: {
+          restored_at: restoreTimestamp,
+          restore_journal_timestamp: restoreTimestamp,
+          sessions_revoked: true,
+        } });
     }).immediate();
     const violations = db.pragma('foreign_key_check');
     if (violations.length) throw new HttpError(400, 'Restored database failed foreign-key validation.');
@@ -312,7 +316,177 @@ async function replaceDatabaseFromSnapshot(snapshotPath, actorId) {
   }
 }
 
-async function restoreStorageFromStage(stagedStorage, actorId) {
+const restoreJournalPath = join(dataDirectory, '.restore-in-progress.json');
+
+async function syncDirectory(directory) {
+  const handle = await open(directory, 'r');
+  try { await handle.sync(); } finally { await handle.close(); }
+}
+
+async function persistRestoreJournal(journal) {
+  await mkdir(dataDirectory, { recursive: true });
+  const temporaryPath = join(dataDirectory, `.restore-in-progress-${randomUUID()}.tmp`);
+  const handle = await open(temporaryPath, 'wx', 0o600);
+  try {
+    await handle.writeFile(`${JSON.stringify(journal)}\n`);
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+  try {
+    await rename(temporaryPath, restoreJournalPath);
+    await syncDirectory(dataDirectory);
+  } catch (error) {
+    await rm(temporaryPath, { force: true });
+    throw error;
+  }
+}
+
+async function removeRestoreJournal() {
+  await rm(restoreJournalPath, { force: true });
+  await syncDirectory(dataDirectory);
+}
+
+async function pathExists(path) {
+  try { await lstat(path); return true; }
+  catch (error) {
+    if (error.code === 'ENOENT') return false;
+    throw error;
+  }
+}
+
+async function configuredStorageTarget() {
+  try {
+    const rootMetadata = await lstat(storageRoot);
+    if (rootMetadata.isSymbolicLink()) {
+      try { return await realpath(storageRoot); }
+      catch (error) {
+        if (error.code !== 'ENOENT') throw error;
+        const target = await readlink(storageRoot);
+        return resolve(dirname(storageRoot), target);
+      }
+    }
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
+  return resolve(storageRoot);
+}
+
+function restoreCommitWasRecorded(database, timestamp) {
+  const records = database.prepare(`
+    SELECT new_values_json FROM audit_log
+    WHERE action = 'restore' AND entity_type = 'system_backup'
+    ORDER BY id DESC LIMIT 50
+  `).all();
+  return records.some((record) => {
+    try { return JSON.parse(record.new_values_json)?.restore_journal_timestamp === timestamp; }
+    catch { return false; }
+  });
+}
+
+async function validateRestoreJournal(journal) {
+  if (!journal || typeof journal !== 'object' || Array.isArray(journal)
+    || !['storage_staged', 'db_replacing', 'db_replaced'].includes(journal.stage)
+    || typeof journal.timestamp !== 'string' || !Number.isFinite(Date.parse(journal.timestamp))
+    || typeof journal.stageRoot !== 'string' || !isAbsolute(journal.stageRoot)
+    || typeof journal.snapshotPath !== 'string' || !isAbsolute(journal.snapshotPath)
+    || typeof journal.stagedStoragePath !== 'string' || !isAbsolute(journal.stagedStoragePath)
+    || typeof journal.newStoragePath !== 'string' || !isAbsolute(journal.newStoragePath)
+    || typeof journal.oldStorageExisted !== 'boolean') {
+    throw new Error('Interrupted restore journal is invalid; refusing to start with uncertain storage state.');
+  }
+  const stageRoot = resolve(journal.stageRoot);
+  if (dirname(stageRoot) !== resolve(dirname(storageRoot)) || !basename(stageRoot).startsWith('.madar-v2-restore-')
+    || resolve(journal.snapshotPath) !== join(stageRoot, 'data', 'madar-v2.sqlite')
+    || resolve(journal.stagedStoragePath) !== join(stageRoot, 'storage')) {
+    throw new Error('Interrupted restore journal contains unsafe staging paths.');
+  }
+  if (resolve(journal.newStoragePath) !== await configuredStorageTarget()) {
+    throw new Error('Interrupted restore journal does not match the configured storage root.');
+  }
+  if (journal.oldStorageExisted) {
+    if (typeof journal.oldStoragePath !== 'string' || !isAbsolute(journal.oldStoragePath)) {
+      throw new Error('Interrupted restore journal is missing its previous storage path.');
+    }
+    const oldStoragePath = resolve(journal.oldStoragePath);
+    if (dirname(oldStoragePath) !== dirname(resolve(journal.newStoragePath))
+      || !basename(oldStoragePath).startsWith('.madar-v2-storage-old-')) {
+      throw new Error('Interrupted restore journal contains an unsafe previous storage path.');
+    }
+  } else if (journal.oldStoragePath !== null) {
+    throw new Error('Interrupted restore journal has an unexpected previous storage path.');
+  }
+  return { ...journal, stageRoot };
+}
+
+async function rollbackRestoreStorage(journal) {
+  const oldStorageExists = journal.oldStoragePath && await pathExists(journal.oldStoragePath);
+  if (oldStorageExists) {
+    await rm(journal.newStoragePath, { recursive: true, force: true });
+    await rename(journal.oldStoragePath, journal.newStoragePath);
+    await syncDirectory(dirname(journal.newStoragePath));
+    return;
+  }
+  if (journal.oldStorageExisted) {
+    if (!(await pathExists(journal.newStoragePath))) {
+      throw new Error('Interrupted restore rollback cannot find either the previous or current storage directory.');
+    }
+    // The old directory was not moved, or rollback had already completed.
+    return;
+  }
+  await rm(journal.newStoragePath, { recursive: true, force: true });
+}
+
+export async function recoverInterruptedRestore({ database = db, logger = console, journalPath = restoreJournalPath } = {}) {
+  let contents;
+  try { contents = await readFile(journalPath, 'utf8'); }
+  catch (error) {
+    if (error.code === 'ENOENT') return { recovered: false };
+    throw error;
+  }
+  let journal;
+  try { journal = await validateRestoreJournal(JSON.parse(contents)); }
+  catch (error) {
+    if (error instanceof SyntaxError) {
+      throw new Error('Interrupted restore journal is malformed; refusing to start with uncertain storage state.');
+    }
+    throw error;
+  }
+
+  const databaseWasReplaced = journal.stage === 'db_replaced'
+    || restoreCommitWasRecorded(database, journal.timestamp);
+  if (databaseWasReplaced) {
+    const health = checkSystemDatabaseHealth(database);
+    if (health.status !== 'ok') {
+      throw new Error(`Interrupted restore database is unhealthy (${health.integrity}; ${health.foreignKeyViolations} foreign-key violations).`);
+    }
+    if (!(await pathExists(journal.newStoragePath))) {
+      throw new Error('Interrupted restore database was committed but restored storage is missing.');
+    }
+    if (journal.oldStoragePath) {
+      await rm(journal.oldStoragePath, { recursive: true, force: true });
+      await syncDirectory(dirname(journal.newStoragePath));
+    }
+    await rm(journal.stageRoot, { recursive: true, force: true });
+    await removeRestoreJournalAt(journalPath);
+    logger.info?.(`Completed interrupted MADAR V2 restore (${journal.timestamp}); database and storage are consistent.`);
+    return { recovered: true, outcome: 'completed' };
+  }
+
+  await rollbackRestoreStorage(journal);
+  if (!journal.oldStorageExisted) await syncDirectory(dirname(journal.newStoragePath));
+  await rm(journal.stageRoot, { recursive: true, force: true });
+  await removeRestoreJournalAt(journalPath);
+  logger.error?.(`ALERT: Interrupted MADAR V2 restore (${journal.timestamp}) was rolled back; previous storage was restored.`);
+  return { recovered: true, outcome: 'rolled_back' };
+}
+
+async function removeRestoreJournalAt(journalPath) {
+  await rm(journalPath, { force: true });
+  await syncDirectory(dirname(journalPath));
+}
+
+async function restoreStorageFromStage(stagedStorage, { snapshotPath, actorId, stageRoot }) {
   await safeStorageTree(stagedStorage);
   await ensureRealDirectory(dirname(storageRoot));
   let rootMetadata = null;
@@ -332,9 +506,24 @@ async function restoreStorageFromStage(stagedStorage, actorId) {
     }
   }
   const existing = Boolean(rootMetadata);
-  const oldStoragePath = join(dirname(restorePath), `.madar-v2-storage-old-${randomUUID()}`);
-  if (existing) await rename(restorePath, oldStoragePath);
+  const oldStoragePath = existing ? join(dirname(restorePath), `.madar-v2-storage-old-${randomUUID()}`) : null;
+  const timestamp = new Date().toISOString();
+  let journal = {
+    stage: 'storage_staged',
+    oldStoragePath,
+    oldStorageExisted: existing,
+    newStoragePath: restorePath,
+    snapshotPath,
+    stagedStoragePath: stagedStorage,
+    stageRoot,
+    timestamp,
+  };
+  await persistRestoreJournal(journal);
   try {
+    if (existing) {
+      await rename(restorePath, oldStoragePath);
+      await syncDirectory(dirname(restorePath));
+    }
     try {
       await rename(stagedStorage, restorePath);
     } catch (error) {
@@ -342,21 +531,31 @@ async function restoreStorageFromStage(stagedStorage, actorId) {
       await cp(stagedStorage, restorePath, { recursive: true, errorOnExist: true, force: false });
       await rm(stagedStorage, { recursive: true, force: true });
     }
-    try {
-      await replaceDatabaseFromSnapshot(actorId.snapshotPath, actorId.actorId);
-    } catch (error) {
-      await rm(restorePath, { recursive: true, force: true });
-      if (existing) await rename(oldStoragePath, restorePath);
-      throw error;
+    await syncDirectory(dirname(restorePath));
+    journal = { ...journal, stage: 'db_replacing' };
+    await persistRestoreJournal(journal);
+    await replaceDatabaseFromSnapshot(snapshotPath, actorId, timestamp);
+    const health = checkSystemDatabaseHealth(db);
+    if (health.status !== 'ok') {
+      throw new HttpError(400, 'Restored database failed integrity or foreign-key validation.');
     }
-    if (existing) await rm(oldStoragePath, { recursive: true, force: true });
-  } catch (error) {
+    journal = { ...journal, stage: 'db_replaced' };
+    await persistRestoreJournal(journal);
     if (existing) {
+      await rm(oldStoragePath, { recursive: true, force: true });
+      await syncDirectory(dirname(restorePath));
+    }
+    await rm(stageRoot, { recursive: true, force: true });
+    await removeRestoreJournal();
+  } catch (error) {
+    if (!restoreCommitWasRecorded(db, timestamp)) {
       try {
-        await access(oldStoragePath);
-        await rm(restorePath, { recursive: true, force: true });
-        await rename(oldStoragePath, restorePath);
-      } catch { /* already restored */ }
+        await rollbackRestoreStorage(journal);
+        await rm(stageRoot, { recursive: true, force: true });
+        await removeRestoreJournal();
+      } catch (rollbackError) {
+        error.message = `${error.message}; restore rollback was deferred to startup recovery: ${rollbackError.message}`;
+      }
     }
     throw error;
   }
@@ -371,7 +570,7 @@ async function restoreBackupFile(uploadedPath, actorId) {
     try {
       const { databaseFile, storageDirectory } = await extractBackupArchive(uploadedPath, stageRoot);
       validateSnapshot(databaseFile);
-      await restoreStorageFromStage(storageDirectory, { snapshotPath: databaseFile, actorId });
+      await restoreStorageFromStage(storageDirectory, { snapshotPath: databaseFile, actorId, stageRoot });
       return { restored: true, restoredAt: new Date().toISOString() };
     } finally {
       await rm(stageRoot, { recursive: true, force: true });

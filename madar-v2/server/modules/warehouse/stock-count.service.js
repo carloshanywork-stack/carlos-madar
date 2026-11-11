@@ -86,7 +86,7 @@ export function startStockCount(input = {}, actorId = null, database = db) {
   return readSession(sessionId, database);
 }
 
-function normalizeCountArray(items, idKey, label) {
+function normalizeCountArray(items, idKey, label, { wholeUnits = false } = {}) {
   if (!Array.isArray(items)) throw new HttpError(400, `${label} must be an array.`);
   const seen = new Set();
   return items.map((item, index) => {
@@ -95,9 +95,13 @@ function normalizeCountArray(items, idKey, label) {
     const id = positiveId(row[idKey], `${label}[${index}].${idKey}`);
     if (seen.has(id)) throw new HttpError(400, `${label} cannot contain duplicate IDs.`);
     seen.add(id);
+    const count = countedQuantity(row.countedQuantity, `${label}[${index}].countedQuantity`);
+    if (wholeUnits && !Number.isInteger(count)) {
+      throw new HttpError(400, `${label}[${index}].countedQuantity must be a whole-unit main-warehouse count.`);
+    }
     return {
       id,
-      countedQuantity: countedQuantity(row.countedQuantity, `${label}[${index}].countedQuantity`),
+      countedQuantity: count,
     };
   });
 }
@@ -136,7 +140,7 @@ export function reconcileStockCount(sessionId, input, actorId = null, database =
   const id = positiveId(sessionId, 'stockCountId');
   const body = requireObject(input);
   allowOnlyKeys(body, ['main', 'offcuts', 'notes']);
-  const mainCounts = normalizeCountArray(body.main, 'materialId', 'main');
+  const mainCounts = normalizeCountArray(body.main, 'materialId', 'main', { wholeUnits: true });
   const offcutCounts = normalizeCountArray(body.offcuts, 'offcutId', 'offcuts');
   const notes = optionalText(body.notes, 'notes', { maxLength: 2000 });
 

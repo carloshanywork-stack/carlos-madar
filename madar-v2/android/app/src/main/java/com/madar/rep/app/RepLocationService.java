@@ -62,6 +62,11 @@ public class RepLocationService extends Service implements LocationListener {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         if (intent != null && ACTION_STOP.equals(intent.getAction())) {
+            if (hasUnacknowledgedBreadcrumbs()) {
+                MadarSyncScheduler.ensurePeriodic(getApplicationContext());
+                MadarSyncScheduler.enqueueNow(getApplicationContext(), false);
+                return START_STICKY;
+            }
             stopTracking();
             return START_NOT_STICKY;
         }
@@ -87,6 +92,15 @@ public class RepLocationService extends Service implements LocationListener {
         startForegroundCompat();
         beginGpsUpdates();
         return START_STICKY;
+    }
+
+    private boolean hasUnacknowledgedBreadcrumbs() {
+        if (trackStore == null) return true;
+        try {
+            return trackStore.pendingCount(RepAuthStore.repId(this)) > 0;
+        } catch (Exception error) {
+            return true;
+        }
     }
 
     private void startForegroundCompat() {
@@ -187,7 +201,7 @@ public class RepLocationService extends Service implements LocationListener {
     }
 
     private void appendTrackPoint(Location location) {
-        if (trackStore != null) trackStore.append(location);
+        if (trackStore != null) trackStore.append(location, RepAuthStore.repId(this));
     }
 
     @Override
@@ -275,7 +289,7 @@ public class RepLocationService extends Service implements LocationListener {
             : "المدار يعمل أثناء الوردية؛ لا تُغلق التطبيق قبل تسجيل الانصراف.";
         NotificationCompat.Builder builder = new NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_menu_mylocation)
-            .setContentTitle(mocked ? "تحذير أمان الموقع" : "مدار · تسجيل خط السير نشط")
+            .setContentTitle(mocked ? "تحذير أمان الموقع" : "مدار - جاري تتبع المسار الميداني")
             .setContentText(content)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setOngoing(!mocked)

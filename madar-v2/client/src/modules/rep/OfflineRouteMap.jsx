@@ -31,15 +31,24 @@ export default function OfflineRouteMap({ pack, machines, gps, onMachineSelect, 
   const [zoom, setZoom] = useState(Math.min(pack.maxZoom, pack.id === 'all-egypt' ? 9 : 12));
   const [tiles, setTiles] = useState([]);
   const [tilesLoading, setTilesLoading] = useState(true);
+  const [selectedMachineId, setSelectedMachineId] = useState(null);
   const dragRef = useRef(null);
   const activeCenter = center;
   const worldCenter = useMemo(() => projectToWorld(activeCenter, zoom), [activeCenter, zoom]);
   const tileCoordinates = useMemo(() => getVisibleTileCoordinates(activeCenter, zoom, VIEW_WIDTH, VIEW_HEIGHT), [activeCenter, zoom]);
   const locatedMachines = machines.filter((machine) => Number.isFinite(machine.latitude) && Number.isFinite(machine.longitude));
+  const selectedMachine = machines.find((machine) => Number(machine.machineId) === Number(selectedMachineId)) ?? null;
+
+  function getMachineStatus(machine) {
+    if (machine.isCompleted || machine.reviewStatus === 'approved') return { label: 'تم الفحص', color: '#168267' };
+    if (machine.isSubmitted || ['pending', 'reshoot'].includes(machine.reviewStatus)) return { label: 'قيد التنفيذ', color: '#d39b10' };
+    return { label: 'لم تبدأ', color: '#7b8791' };
+  }
 
   useEffect(() => {
     setCenter(defaultCenter);
     setZoom(Math.min(pack.maxZoom, Math.max(pack.minZoom, pack.id === 'all-egypt' ? 9 : 12)));
+    setSelectedMachineId(null);
   }, [pack.packId, pack.minZoom, pack.maxZoom]);
 
   useEffect(() => {
@@ -123,13 +132,16 @@ export default function OfflineRouteMap({ pack, machines, gps, onMachineSelect, 
             const x = VIEW_WIDTH / 2 + point.x - worldCenter.x;
             const y = VIEW_HEIGHT / 2 + point.y - worldCenter.y;
             if (x < -30 || x > VIEW_WIDTH + 30 || y < -30 || y > VIEW_HEIGHT + 30) return null;
+            const status = getMachineStatus(machine);
+            const selected = Number(selectedMachineId) === Number(machine.machineId);
             return <g key={`${machine.cardId}-${machine.machineCode}`} role="button" tabIndex="0"
-              aria-label={`فتح ماكينة ${machine.machineCode} ${machine.arabicName ?? ''}`}
-              onClick={() => { if (machine.canVisit !== false) onMachineSelect({ ...machine, regionName: machine.regionName }); }}
-              onKeyDown={(event) => { if (machine.canVisit !== false && (event.key === 'Enter' || event.key === ' ')) onMachineSelect({ ...machine, regionName: machine.regionName }); }}>
-              <circle cx={x} cy={y} r="12" fill="#fff" stroke={machine.isCorrectionPin ? '#bd5a16' : machine.isUnverifiedPin ? '#9a6813' : machine.isCompleted ? '#168267' : '#2356a4'} strokeWidth="4" />
-              <circle cx={x} cy={y} r="4" fill={machine.isCorrectionPin ? '#bd5a16' : machine.isUnverifiedPin ? '#9a6813' : machine.isCompleted ? '#168267' : '#2356a4'} />
-              <title>{`${machine.machineCode} · ${machine.arabicName ?? ''} · ${machine.regionName ?? ''}`}</title>
+              aria-label={`${machine.machineCode} · ${machine.arabicName ?? ''} · ${status.label}`}
+              aria-pressed={selected}
+              onClick={() => setSelectedMachineId(Number(machine.machineId))}
+              onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setSelectedMachineId(Number(machine.machineId)); } }}>
+              <circle cx={x} cy={y} r={selected ? 15 : 12} fill="#fff" stroke={machine.isCorrectionPin ? '#bd5a16' : machine.isUnverifiedPin ? '#9a6813' : status.color} strokeWidth="4" />
+              <circle cx={x} cy={y} r="4" fill={machine.isCorrectionPin ? '#bd5a16' : machine.isUnverifiedPin ? '#9a6813' : status.color} />
+              <title>{`${machine.machineCode} · ${machine.arabicName ?? ''} · ${status.label}`}</title>
             </g>;
           })}
           {gps && (() => {
@@ -140,11 +152,23 @@ export default function OfflineRouteMap({ pack, machines, gps, onMachineSelect, 
               <circle cx={x} cy={y} r="7" fill="#0875d1" stroke="#fff" strokeWidth="3" /><title>موقع GPS الحالي</title></g>;
           })()}
         </svg>
+        {selectedMachine && <aside className="rep-map-machine-popup" role="dialog" aria-label={`تفاصيل الماكينة ${selectedMachine.machineCode}`}>
+          <button type="button" className="rep-map-machine-popup-close" aria-label="إغلاق تفاصيل الماكينة" onClick={() => setSelectedMachineId(null)}>×</button>
+          <span className="rep-map-machine-status" style={{ '--machine-status-color': getMachineStatus(selectedMachine).color }}>
+            <i aria-hidden="true" />{getMachineStatus(selectedMachine).label}
+          </span>
+          <strong>{selectedMachine.machineCode} · {selectedMachine.arabicName ?? 'ماكينة'}</strong>
+          <small>{selectedMachine.address || 'العنوان غير مسجل'}{selectedMachine.regionName ? ` · ${selectedMachine.regionName}` : ''}</small>
+          <button type="button" className="rep-button rep-button-primary" disabled={selectedMachine.canVisit === false}
+            onClick={() => { if (selectedMachine.canVisit !== false) onMachineSelect({ ...selectedMachine, regionName: selectedMachine.regionName }); }}>
+            {selectedMachine.canVisit === false ? 'الزيارة غير متاحة حالياً' : 'ابدأ الزيارة'}
+          </button>
+        </aside>}
         {tilesLoading && <span className="rep-map-loading">{pack.serverSource ? 'جارٍ تحميل البلاطات من MBTiles المحلي…' : 'جارٍ فتح بلاطات الخريطة من ذاكرة الهاتف…'}</span>}
         {!tilesLoading && !tiles.length && <span className="rep-map-missing">لا توجد بلاطات محفوظة لهذا الموضع/التكبير. حرّك الخريطة أو غيّر مستوى التكبير.</span>}
         <small className="rep-map-attribution">{pack.attribution || 'خريطة محلية مخزنة على الهاتف'}</small>
       </div>
-      <p className="rep-map-legend"><span><i className="machine-pin" />ماكينة ضمن المسار</span><span><i className="gps-pin" />موقع GPS الحالي</span><small>اسحب الخريطة لتحريكها؛ تحديد الموقع عبر GPS لا يحتاج إلى إنترنت.</small></p>
+      <p className="rep-map-legend"><span><i className="machine-pin done-pin" />تم الفحص</span><span><i className="machine-pin in-progress-pin" />قيد التنفيذ</span><span><i className="machine-pin not-started-pin" />لم تبدأ</span><span><i className="gps-pin" />موقع GPS الحالي</span><small>اسحب الخريطة لتحريكها؛ تحديد الموقع عبر GPS لا يحتاج إلى إنترنت.</small></p>
     </section>
   );
 }

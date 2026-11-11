@@ -10,6 +10,17 @@ def releaseStoreFile = releaseStorePath ? rootProject.file(releaseStorePath) : n
 def releaseSigningConfigured = ['storePassword', 'keyAlias', 'keyPassword']
     .every { releaseSigningProperties.getProperty(it)?.trim() } && releaseStoreFile?.isFile()
 
+def versionPropertiesFile = rootProject.file('version.properties')
+def versionProperties = new Properties()
+if (versionPropertiesFile.exists()) {
+    versionPropertiesFile.withInputStream { versionProperties.load(it) }
+}
+def repVersionCode = (System.getenv('MADAR_REP_VERSION_CODE')
+    ?: versionProperties.getProperty('versionCode') ?: '1').trim().toInteger()
+def repVersionName = (System.getenv('MADAR_REP_VERSION_NAME')
+    ?: versionProperties.getProperty('versionName') ?: '1.0').trim()
+if (repVersionCode < 1) throw new GradleException('Android versionCode must be a positive integer.')
+
 android {
     namespace = "com.madar.rep.app"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -17,8 +28,8 @@ android {
         applicationId "com.madar.rep.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        versionCode repVersionCode
+        versionName repVersionName
         buildConfigField "String", "REP_SERVER_URL", "\"${(System.getenv('MADAR_REP_SERVER_URL') ?: 'https://carlos-pc.tail852ef0.ts.net').replace('\\', '\\\\').replace('"', '\\"')}\""
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {

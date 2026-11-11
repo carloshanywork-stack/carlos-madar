@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../lib/api.js';
 import { regionAccessLabel } from '../../lib/regions.js';
 import './supervisor-radar.css';
+import LocationReviews from './LocationReviews.jsx';
 
 const STATUS = {
   active: { label: 'على المسار', color: '#168569' },
@@ -322,6 +323,7 @@ export default function SupervisorRadarPage() {
         <article className="qa-kpi"><span>طابور مراجعة الصور</span><strong>{visits.length}</strong><small>لا تدخل التقارير قبل الاعتماد</small></article>
       </section>
 
+      <LocationReviews />
       <div className="supervisor-main-grid">
         <section className="supervisor-panel radar-panel">
           <div className="supervisor-panel-head">

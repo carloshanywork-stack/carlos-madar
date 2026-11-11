@@ -1,0 +1,24 @@
+/**
+ * AWS SES Node - Version 1 - Zod Schema
+ * Discriminator: resource=customVerificationEmail, operation=update
+ *
+ * Use .parse() for strict validation or .safeParse() for error handling.
+ *
+ * Schema helpers (z, expressionSchema, etc.) are passed as parameters
+ * by the schema-validator, not imported from external files.
+ *
+ * @generated - CommonJS JavaScript for runtime loading
+ */
+
+module.exports = function getSchema({ parameters, z, expressionSchema, stringOrExpression, numberOrExpression, booleanOrExpression, resourceLocatorValueSchema, resourceMapperValueSchema, filterValueSchema, assignmentCollectionValueSchema, iDataObjectSchema }) {
+
+  return z.object({
+    parameters: z.object({
+      resource: z.literal('customVerificationEmail'),
+      operation: z.literal('update'),
+      authentication: z.union([z.literal('iam'), z.literal('assumeRole'), expressionSchema]).optional(),
+      templateName: stringOrExpression.optional(),
+      updateFields: z.object({ failureRedirectionURL: stringOrExpression.optional(), fromEmailAddress: stringOrExpression.optional(), successRedirectionURL: stringOrExpression.optional(), templateContent: stringOrExpression.optional(), templateSubject: stringOrExpression.optional() }).optional(),
+    }).optional(),
+  });
+};

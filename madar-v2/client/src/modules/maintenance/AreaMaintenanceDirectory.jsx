@@ -6,7 +6,7 @@ import { useToast } from '../../lib/useToast.js';
 import Alert from '../../components/ui/Alert.jsx';
 import Button from '../../components/ui/Button.jsx';
 import EmptyState from '../../components/ui/EmptyState.jsx';
-import { Select, Textarea } from '../../components/ui/Field.jsx';
+import { Select } from '../../components/ui/Field.jsx';
 import Icon from '../../components/ui/Icon.jsx';
 import LoadingState from '../../components/ui/LoadingState.jsx';
 import Modal from '../../components/ui/Modal.jsx';
@@ -23,13 +23,14 @@ export default function AreaMaintenanceDirectory() {
   const [editingMachine, setEditingMachine] = useState(null);
   const [noteText, setNoteText] = useState('');
   const [saving, setSaving] = useState(false);
+  const [optimisticNotes, setOptimisticNotes] = useState({});
   const [historyMachine, setHistoryMachine] = useState(null);
   const [notesHistoryList, setNotesHistoryList] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState('');
   const historyRequestId = useRef(0);
   const [exportModalOpen, setExportModalOpen] = useState(false);
-  const [exportConfig, setExportConfig] = useState({ area: '', machineId: null, onlyNotes: true, historyMode: 'latest' });
+  const [exportConfig, setExportConfig] = useState({ area: '', machineId: null, onlyNotes: true, includeHistory: false });
   const { notice, showToast, clearToast } = useToast();
 
   const areaOptions = useMemo(() => (groups ?? []).map((group) => group.area), [groups]);
@@ -48,7 +49,7 @@ export default function AreaMaintenanceDirectory() {
   }, [area, groups, onlyWithNotesFilter, search]);
 
   function openExport({ area: targetArea = area, machineId = null, onlyNotes = true } = {}) {
-    setExportConfig({ area: targetArea, machineId, onlyNotes, historyMode: 'latest' });
+    setExportConfig({ area: targetArea, machineId, onlyNotes, includeHistory: false });
     setExportModalOpen(true);
   }
 
@@ -57,7 +58,7 @@ export default function AreaMaintenanceDirectory() {
     if (exportConfig.area) query.set('area', exportConfig.area);
     if (exportConfig.machineId) query.set('machineId', String(exportConfig.machineId));
     query.set('onlyNotes', String(exportConfig.onlyNotes));
-    query.set('historyMode', exportConfig.historyMode);
+    query.set('historyMode', exportConfig.includeHistory ? 'all' : 'latest');
     setExportModalOpen(false);
     window.location.assign(`/api/maintenance/area-notes/export.xlsx?${query.toString()}`);
   }
@@ -99,13 +100,24 @@ export default function AreaMaintenanceDirectory() {
     if (!machine.notes?.trim()) return;
     if (!window.confirm(`سيتم مسح الملاحظة الحالية للماكينة ${machine.code} مع الاحتفاظ بسجلها السابق. هل تريد المتابعة؟`)) return;
     setClearingId(machine.id);
+    setOptimisticNotes((current) => ({ ...current, [machine.id]: '' }));
     try {
       const result = await api.delete(`/api/maintenance/machines/${machine.id}/maintenance-note`);
       await reload();
+      setOptimisticNotes((current) => {
+        const next = { ...current };
+        delete next[machine.id];
+        return next;
+      });
       showToast(result.clearedCount
         ? `تم مسح ${result.clearedCount} ملاحظة للماكينة ${machine.code}.`
         : `لا توجد ملاحظات محفوظة للماكينة ${machine.code}.`);
     } catch (caught) {
+      setOptimisticNotes((current) => {
+        const next = { ...current };
+        delete next[machine.id];
+        return next;
+      });
       showToast(errorMessage(caught), 'error');
     } finally {
       setClearingId(null);
@@ -115,13 +127,27 @@ export default function AreaMaintenanceDirectory() {
   async function saveNote(event) {
     event.preventDefault();
     if (!editingMachine) return;
+    const machine = editingMachine;
+    const previousNote = Object.hasOwn(optimisticNotes, machine.id)
+      ? optimisticNotes[machine.id]
+      : machine.notes ?? '';
+    const nextNote = noteText.trim();
+    if (!nextNote) return;
+    setOptimisticNotes((current) => ({ ...current, [machine.id]: nextNote }));
     setSaving(true);
+    setEditingMachine(null);
     try {
-      await api.put(`/api/maintenance/machines/${editingMachine.id}/maintenance-note`, { notes: noteText });
+      await api.put('/api/maintenance/areas/notes', { machineId: machine.id, notes: nextNote });
       await reload();
-      showToast(`تم حفظ ملاحظة الماكينة ${editingMachine.code} بنجاح.`);
-      setEditingMachine(null);
+      setOptimisticNotes((current) => {
+        const next = { ...current };
+        delete next[machine.id];
+        return next;
+      });
+      showToast(`تم حفظ ملاحظة الماكينة ${machine.code} بنجاح.`);
     } catch (caught) {
+      setOptimisticNotes((current) => ({ ...current, [machine.id]: previousNote }));
+      setEditingMachine(machine);
       showToast(errorMessage(caught), 'error');
     } finally {
       setSaving(false);
@@ -145,7 +171,6 @@ export default function AreaMaintenanceDirectory() {
         </label>
         <div className="madar-inline-wrap">
           <Button variant="primary" icon="download" onClick={() => openExport({ onlyNotes: true })}>تصدير Excel (كل المناطق)</Button>
-          <Button variant="secondary" icon="download" onClick={() => openExport({ onlyNotes: false })}>تصدير شامل (كل الماكينات)</Button>
         </div>
       </div>
 
@@ -154,7 +179,7 @@ export default function AreaMaintenanceDirectory() {
         <section className="madar-panel madar-section" key={group.area}>
           <div className="madar-panel-header">
               <div><h2>المنطقة: {group.area}</h2><p>{group.machines.length} ماكينة</p></div>
-              <Button variant="secondary" size="small" icon="download" onClick={() => openExport({ area: group.area })}>تصدير المنطقة</Button>
+              <Button variant="secondary" size="small" icon="download" onClick={() => openExport({ area: group.area })}>تصدير المنطقة المحددة إلى Excel</Button>
           </div>
           <div className="madar-table-wrap">
             <table className="madar-table">
@@ -162,10 +187,29 @@ export default function AreaMaintenanceDirectory() {
               <tbody>{group.machines.map((machine) => (
                 <tr key={machine.id}>
                   <td><span className="madar-code">{machine.code}</span></td>
-                  <td><strong>{machine.name_ar}</strong></td>
+                  <td><button className="madar-link" type="button" onClick={() => openHistory(machine)} title="فتح سجل ملاحظات الماكينة"><strong>{machine.name_ar}</strong></button></td>
                   <td>{machine.name_en || '—'}</td>
                   <td>
-                    <div style={{ minWidth: 220, maxWidth: 600, whiteSpace: 'pre-wrap' }}>{machine.notes || '—'}</div>
+                    <div style={{ minWidth: 220, maxWidth: 600, whiteSpace: 'pre-wrap' }}>
+                      {(Object.hasOwn(optimisticNotes, machine.id) ? optimisticNotes[machine.id] : machine.notes) || '—'}
+                    </div>
+                    {editingMachine?.id === machine.id && (
+                      <form onSubmit={saveNote} className="madar-form-stack" style={{ marginTop: 8, minWidth: 260 }}>
+                        <textarea
+                          aria-label={`ملاحظة الماكينة ${machine.code}`}
+                          rows={3}
+                          maxLength={2000}
+                          autoFocus
+                          value={noteText}
+                          onChange={(event) => setNoteText(event.target.value)}
+                          placeholder="اكتب ملاحظة الصيانة..."
+                        />
+                        <div className="madar-inline-wrap">
+                          <Button type="submit" size="small" disabled={saving || !noteText.trim()}>{saving ? 'جارٍ الحفظ…' : 'حفظ الملاحظة'}</Button>
+                          <Button type="button" variant="secondary" size="small" disabled={saving} onClick={() => setEditingMachine(null)}>إلغاء</Button>
+                        </div>
+                      </form>
+                    )}
                     {machine.has_history && <button className="madar-link" type="button" onClick={() => openHistory(machine)}>📜 سجل الملاحظات ({machine.history_count})</button>}
                   </td>
                   <td>
@@ -174,12 +218,11 @@ export default function AreaMaintenanceDirectory() {
                         variant="ghost"
                         size="small"
                         icon="edit"
-                        iconOnly
-                        aria-label={`تعديل ملاحظة ${machine.code}`}
-                        title="إضافة أو تعديل ملاحظة"
+                        aria-label={`إضافة أو تعديل ملاحظة ${machine.code}`}
+                        title="إضافة / تعديل ملاحظة"
                         disabled={saving}
                         onClick={() => { setEditingMachine(machine); setNoteText(machine.notes || ''); }}
-                      />
+                      >إضافة / تعديل ملاحظة</Button>
                       <Button
                         variant="ghost"
                         size="small"
@@ -225,30 +268,6 @@ export default function AreaMaintenanceDirectory() {
         </section>
       )}
       <Modal
-        open={Boolean(editingMachine)}
-        onClose={() => { if (!saving) setEditingMachine(null); }}
-        title={`تعديل ملاحظة الماكينة: ${editingMachine?.code ?? ''} - ${editingMachine?.name_ar ?? ''}`}
-        description="أضف أو حدّث الملاحظة الفنية الظاهرة في سجل صيانة المناطق."
-      >
-        <form onSubmit={saveNote}>
-          <div className="madar-form-stack">
-            <Textarea
-              label="الملاحظة"
-              rows={4}
-              maxLength={2000}
-              autoFocus
-              value={noteText}
-              onChange={(event) => setNoteText(event.target.value)}
-              placeholder="اكتب ملاحظة الصيانة..."
-            />
-          </div>
-          <div className="madar-form-actions">
-            <Button variant="secondary" disabled={saving} onClick={() => setEditingMachine(null)}>إلغاء</Button>
-          <Button type="submit" disabled={saving || !noteText.trim()}>{saving ? 'جارٍ الحفظ…' : 'حفظ الملاحظة'}</Button>
-          </div>
-        </form>
-      </Modal>
-      <Modal
         open={Boolean(historyMachine)}
         onClose={closeHistory}
         title={`سجل ملاحظات الماكينة: ${historyMachine?.code ?? ''} - ${historyMachine?.name_ar ?? ''}`}
@@ -259,7 +278,7 @@ export default function AreaMaintenanceDirectory() {
           {historyError && <Alert tone="error">{historyError}</Alert>}
           {historyLoading ? <LoadingState label="جارٍ تحميل سجل الملاحظات" /> : notesHistoryList.length ? (
             <ol className="madar-note-timeline">
-              {notesHistoryList.map((entry) => (
+              {[...notesHistoryList].reverse().map((entry) => (
                 <li key={entry.id} className="madar-note-timeline-entry">
                   <div className="madar-note-timeline-meta">
                     <time dateTime={entry.created_at}>{entry.formatted_date || entry.created_at}</time>
@@ -293,28 +312,23 @@ export default function AreaMaintenanceDirectory() {
             <legend>نطاق الماكينات</legend>
             <div className="madar-export-scope-options" style={{ gridTemplateColumns: '1fr' }}>
               <label className="madar-export-radio-option">
-                <input type="radio" name="area-notes-scope" checked={exportConfig.onlyNotes} onChange={() => setExportConfig((current) => ({ ...current, onlyNotes: true }))} />
-                <span><strong>الماكينات ذات الملاحظات فقط</strong><small>النطاق الافتراضي: يشمل الملاحظات الحالية والسجل المحفوظ.</small></span>
+              <input type="radio" name="area-notes-scope" checked={exportConfig.onlyNotes} onChange={() => setExportConfig((current) => ({ ...current, onlyNotes: true }))} />
+                <span><strong>تصدير الماكينات التي تحتوي على ملاحظات فقط</strong><small>الخيار الافتراضي: يضم الملاحظة الحالية لكل ماكينة.</small></span>
               </label>
               <label className="madar-export-radio-option">
                 <input type="radio" name="area-notes-scope" checked={!exportConfig.onlyNotes} onChange={() => setExportConfig((current) => ({ ...current, onlyNotes: false }))} />
-                <span><strong>حصر شامل لكافة الماكينات</strong><small>يشمل الماكينات النشطة حتى إن لم يكن لها تعليق.</small></span>
+                <span><strong>تصدير كل الماكينات</strong><small>يشمل الماكينات النشطة حتى إن لم يكن لها تعليق.</small></span>
               </label>
             </div>
           </fieldset>
-          <fieldset className="madar-export-fieldset">
-            <legend>تفاصيل التعليقات</legend>
-            <div className="madar-export-scope-options" style={{ gridTemplateColumns: '1fr' }}>
-              <label className="madar-export-radio-option">
-                <input type="radio" name="area-notes-history" checked={exportConfig.historyMode === 'latest'} onChange={() => setExportConfig((current) => ({ ...current, historyMode: 'latest' }))} />
-                <span><strong>أحدث ملاحظة فقط</strong><small>يعرض التعليق الحالي المختصر لكل ماكينة.</small></span>
-              </label>
-              <label className="madar-export-radio-option">
-                <input type="radio" name="area-notes-history" checked={exportConfig.historyMode === 'all'} onChange={() => setExportConfig((current) => ({ ...current, historyMode: 'all' }))} />
-                <span><strong>السجل الكامل لكافة الملاحظات السابقة</strong><small>يتضمن التاريخ واسم الكاتب والدور ورقم أمر الصيانة.</small></span>
-              </label>
-            </div>
-          </fieldset>
+          <label className="madar-export-radio-option">
+            <input
+              type="checkbox"
+              checked={exportConfig.includeHistory}
+              onChange={(event) => setExportConfig((current) => ({ ...current, includeHistory: event.target.checked }))}
+            />
+            <span><strong>تضمين تاريخ الملاحظات السابقة في ملف الإكسيل</strong><small>يشمل التاريخ واسم الكاتب والدور ورقم أمر الصيانة عند توفرها.</small></span>
+          </label>
           <p className="madar-muted madar-small">
             النطاق المحدد: {exportConfig.machineId
               ? `الماكينة ${(groups ?? []).flatMap((group) => group.machines).find((machine) => machine.id === exportConfig.machineId)?.code ?? ''}`

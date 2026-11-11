@@ -1,0 +1,34 @@
+/**
+ * AWS SES Node - Version 1
+ * Discriminator: resource=customVerificationEmail, operation=getAll
+ */
+
+
+interface Credentials {
+  aws: CredentialReference;
+  awsAssumeRole: CredentialReference;
+}
+
+/** Get many of the existing custom verification email templates for your account */
+export type AwsSesV1CustomVerificationEmailGetAllParams = {
+  resource: 'customVerificationEmail';
+  operation: 'getAll';
+  authentication?: 'iam' | 'assumeRole' | Expression<string>;
+/**
+ * Whether to return all results or only up to a given limit
+ * @default false
+ */
+    returnAll?: boolean | Expression<boolean>;
+/**
+ * Max number of results to return
+ * @displayOptions.show { returnAll: [false] }
+ * @default 20
+ */
+    limit?: number | Expression<number>;
+};
+
+export type AwsSesV1CustomVerificationEmailGetAllNode = {
+  type: 'n8n-nodes-base.awsSes';
+  version: 1;
+  config: NodeConfig<AwsSesV1CustomVerificationEmailGetAllParams> & { credentials?: Credentials };
+};

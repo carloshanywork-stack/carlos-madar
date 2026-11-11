@@ -1,0 +1,108 @@
+/**
+ * Airtable Trigger Node - Version 1
+ * Starts the workflow when Airtable events occur
+ */
+
+
+export interface AirtableTriggerV1Params {
+/**
+ * Time at which polling should occur
+ * @default {"item":[{"mode":"everyMinute"}]}
+ */
+    pollTimes?: {
+        /** Item
+     */
+    item?: Array<{
+      /** How often to trigger.
+       * @default everyDay
+       */
+      mode?: 'everyMinute' | 'everyHour' | 'everyDay' | 'everyWeek' | 'everyMonth' | 'everyX' | 'custom' | Expression<string>;
+      /** The hour of the day to trigger (24h format)
+       * @displayOptions.hide { mode: ["custom", "everyHour", "everyMinute", "everyX"] }
+       * @default 14
+       */
+      hour?: number | Expression<number>;
+      /** The minute past the hour to trigger (0-59)
+       * @displayOptions.hide { mode: ["custom", "everyMinute", "everyX"] }
+       * @default 0
+       */
+      minute?: number | Expression<number>;
+      /** The day of the month to trigger
+       * @displayOptions.show { mode: ["everyMonth"] }
+       * @default 1
+       */
+      dayOfMonth?: number | Expression<number>;
+      /** The weekday to trigger
+       * @displayOptions.show { mode: ["everyWeek"] }
+       * @default 1
+       */
+      weekday?: '1' | '2' | '3' | '4' | '5' | '6' | '0' | Expression<string>;
+      /** Use custom cron expression. Values and ranges as follows:&lt;ul&gt;&lt;li&gt;Seconds: 0-59&lt;/li&gt;&lt;li&gt;Minutes: 0 - 59&lt;/li&gt;&lt;li&gt;Hours: 0 - 23&lt;/li&gt;&lt;li&gt;Day of Month: 1 - 31&lt;/li&gt;&lt;li&gt;Months: 0 - 11 (Jan - Dec)&lt;/li&gt;&lt;li&gt;Day of Week: 0 - 6 (Sun - Sat)&lt;/li&gt;&lt;/ul&gt;
+       * @displayOptions.show { mode: ["custom"] }
+       * @default * * * * * *
+       */
+      cronExpression?: string | Expression<string>;
+      /** All how many X minutes/hours it should trigger
+       * @displayOptions.show { mode: ["everyX"] }
+       * @default 2
+       */
+      value?: number | Expression<number>;
+      /** If it should trigger all X minutes or hours
+       * @displayOptions.show { mode: ["everyX"] }
+       * @default hours
+       */
+      unit?: 'minutes' | 'hours' | Expression<string>;
+    }>;
+  };
+  authentication?: 'airtableApi' | 'airtableTokenApi' | 'airtableOAuth2Api' | Expression<string>;
+/**
+ * The Airtable Base in which to operate on
+ * @default {"mode":"url","value":""}
+ */
+    baseId?: { __rl: true; mode: 'url' | 'id'; value: string; cachedResultName?: string };
+  tableId?: { __rl: true; mode: 'url' | 'id'; value: string; cachedResultName?: string };
+/**
+ * A Created Time or Last Modified Time field that will be used to sort records. If you do not have a Created Time or Last Modified Time field in your schema, please create one, because without this field trigger will not work correctly.
+ */
+    triggerField: string | Expression<string>;
+/**
+ * Whether the attachment fields define in 'Download Fields' will be downloaded
+ * @default false
+ */
+    downloadAttachments?: boolean | Expression<boolean>;
+/**
+ * Name of the fields of type 'attachment' that should be downloaded. Multiple ones can be defined separated by comma. Case sensitive.
+ * @displayOptions.show { downloadAttachments: [true] }
+ * @required when the displayOptions conditions above match
+ */
+    downloadFieldNames?: string | Expression<string>;
+  additionalFields?: {
+    /** Fields to be included in the response. Multiple ones can be set separated by comma. Example: &lt;code&gt;name, id&lt;/code&gt;. By default just the trigger field will be included.
+     */
+    fields?: string | Expression<string>;
+    /** Formulas may involve functions, numeric operations, logical operations, and text operations that operate on fields. More info &lt;a href="https://support.airtable.com/articles/7330071120-airtable-formula-field-functions-reference"&gt;here&lt;/a&gt;.
+     */
+    formula?: string | Expression<string>;
+    /** The name or ID of a view in the table. If set, only the records in that view will be returned.
+     */
+    viewId?: string | Expression<string>;
+  };
+}
+
+export interface AirtableTriggerV1Credentials {
+  airtableApi: CredentialReference;
+  airtableTokenApi: CredentialReference;
+  airtableOAuth2Api: CredentialReference;
+}
+
+interface AirtableTriggerV1NodeBase {
+  type: 'n8n-nodes-base.airtableTrigger';
+  version: 1;
+  isTrigger: true;
+}
+
+export type AirtableTriggerV1ParamsNode = AirtableTriggerV1NodeBase & {
+  config: NodeConfig<AirtableTriggerV1Params> & { credentials?: AirtableTriggerV1Credentials };
+};
+
+export type AirtableTriggerV1Node = AirtableTriggerV1ParamsNode;

@@ -7,6 +7,34 @@ import { compareMachineCodes, compareMachineNames, compareMaintenanceAreas } fro
 import { formatMachineNoteDate, getMachineNotesHistory } from './note-history.js';
 
 const AREA_NOTE_HEADERS = ['كود الماكينة', 'الاسم بالعربي', 'الاسم بالإنجليزي', 'الملاحظات'];
+const AREA_HEADER_COLORS = ['174F63', '315C9B', '38765D', '8A5A24', '72518A', '3C7180'];
+
+function fittedColumnWidths(rows, limits) {
+  return limits.map(({ min, max }, column) => {
+    const widest = rows.reduce((current, row) => Math.max(
+      current,
+      ...String(row[column] ?? '').split(/\r?\n/).map((line) => [...line].length),
+    ), min - 2);
+    return { wch: Math.max(min, Math.min(max, widest + 2)) };
+  });
+}
+
+function areaBannerStyle(area) {
+  const hash = [...String(area)].reduce((value, character) => (value * 31 + character.codePointAt(0)) >>> 0, 7);
+  const color = AREA_HEADER_COLORS[hash % AREA_HEADER_COLORS.length];
+  return {
+    fill: { patternType: 'solid', fgColor: { rgb: color } },
+    font: { bold: true, color: { rgb: 'FFFFFF' }, sz: 15 },
+    alignment: { horizontal: 'right', vertical: 'center', readingOrder: 2 },
+    border: {
+      top: { style: 'medium', color: { rgb: color } },
+      bottom: { style: 'medium', color: { rgb: color } },
+      left: { style: 'medium', color: { rgb: color } },
+      right: { style: 'medium', color: { rgb: color } },
+    },
+  };
+}
+
 function addWorksheetPrintSetup(sheetXml) {
   const sheetProperties = '<sheetPr><pageSetUpPr fitToPage="1" autoPageBreaks="0"/></sheetPr>';
   let xml = /<sheetPr\b/.test(sheetXml)
@@ -284,7 +312,9 @@ export async function buildAreaMaintenanceNotesWorkbook(input = {}, database = d
       rows.push(['—', '—', '—', latestEntry?.order_code || '—', machine.current_note]);
     }
     const worksheet = XLSX.utils.aoa_to_sheet(rows);
-    worksheet['!cols'] = [{ wch: 22 }, { wch: 26 }, { wch: 18 }, { wch: 24 }, { wch: 58 }];
+    worksheet['!cols'] = fittedColumnWidths(rows, [
+      { min: 18, max: 28 }, { min: 18, max: 34 }, { min: 14, max: 22 }, { min: 18, max: 30 }, { min: 30, max: 72 },
+    ]);
     worksheet['!rows'] = rows.map((row, index) => {
       if (index === 0) return { hpt: 30 };
       if (index === 4) return { hpt: 26 };
@@ -340,7 +370,9 @@ export async function buildAreaMaintenanceNotesWorkbook(input = {}, database = d
       ...group.machines.map((machine) => [machine.code, machine.name_ar, machine.name_en ?? '', machine.notes ?? '']),
     ];
     const worksheet = XLSX.utils.aoa_to_sheet(rows);
-    worksheet['!cols'] = [{ wch: 18 }, { wch: 30 }, { wch: 28 }, { wch: 52 }];
+    worksheet['!cols'] = fittedColumnWidths(rows, [
+      { min: 14, max: 28 }, { min: 18, max: 42 }, { min: 18, max: 38 }, { min: 24, max: 72 },
+    ]);
     worksheet['!rows'] = rows.map((row, index) => {
       if (index === 0) return { hpt: 30 };
       if (index === 1) return { hpt: 26 };
@@ -370,8 +402,9 @@ export async function buildAreaMaintenanceNotesWorkbook(input = {}, database = d
     worksheet['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 3 } }];
     worksheet['!views'] = [{ RTL: true }];
 
+    const currentAreaBannerStyle = areaBannerStyle(areaName);
     for (let column = 0; column < 4; column += 1) {
-      worksheet[XLSX.utils.encode_cell({ r: 0, c: column })].s = bannerStyle;
+      worksheet[XLSX.utils.encode_cell({ r: 0, c: column })].s = currentAreaBannerStyle;
       worksheet[XLSX.utils.encode_cell({ r: 1, c: column })].s = headerStyle;
     }
     for (let row = 2; row < rows.length; row += 1) {

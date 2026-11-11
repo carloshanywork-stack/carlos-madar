@@ -39,6 +39,8 @@ const FIXED_LOGO_CANDIDATES = [
 ];
 const EXPORT_PROGRESS_TTL_MS = 10 * 60 * 1000;
 const PPTX_EXPORT_SOCKET_TIMEOUT_MS = 7 * 60 * 1000;
+const MAX_PPTX_EXPORT_ORDERS = 20;
+const TOO_MANY_PPTX_ORDERS_MESSAGE = 'يرجى تحديد 20 أمر صيانة كحد أقصى للتصدير الواحد';
 const PPTX_IMAGE_MAX_DIMENSION = 680;
 const PPTX_IMAGE_JPEG_QUALITY = 70;
 const exportProgressMap = new Map();
@@ -655,8 +657,9 @@ export async function buildMaintenancePptxExport(input, database = defaultDataba
   const body = requireObject(input);
   allowOnlyKeys(body, ['orderIds', 'reasonId', 'area', 'groupBy', 'showReasonFooter', 'exportId', 'useFixedLogoOnCover']);
   if (!Array.isArray(body.orderIds)) throw new HttpError(400, 'orderIds must be an array of maintenance order IDs.');
-  if (body.orderIds.length > 500) throw new HttpError(400, 'Select no more than 500 orders at a time.');
+  if (body.orderIds.length > MAX_PPTX_EXPORT_ORDERS) throw new HttpError(400, TOO_MANY_PPTX_ORDERS_MESSAGE);
   const requestedOrderIds = integerIdArray(body.orderIds, 'orderIds');
+  if (!requestedOrderIds.length) throw new HttpError(400, 'يرجى تحديد أمر صيانة واحد على الأقل للتصدير.');
   const exportId = optionalText(body.exportId, 'exportId', { maxLength: 128 }) || null;
   const reasonId = body.reasonId === undefined || body.reasonId === null || body.reasonId === ''
     ? null
@@ -667,17 +670,7 @@ export async function buildMaintenancePptxExport(input, database = defaultDataba
   optionalBoolean(body.showReasonFooter, 'showReasonFooter');
   const useFixedLogoOnCover = optionalBoolean(body.useFixedLogoOnCover, 'useFixedLogoOnCover');
 
-  let orderIds = requestedOrderIds;
-  if (!orderIds.length) {
-    orderIds = database.prepare(`
-      SELECT id FROM maintenance_orders
-      WHERE status = 'archived' AND deleted_at IS NULL
-      ORDER BY COALESCE(archived_at, updated_at, created_at) DESC, id DESC
-    `).all().map((row) => row.id);
-  }
-  if (!orderIds.length) throw new HttpError(404, 'لا توجد بطاقات صيانة تحتوي على صور للأوامر والفلاتر المحددة.');
-
-  const orders = orderIds.map((orderId) => getMaintenanceOrder(orderId, database));
+  const orders = requestedOrderIds.map((orderId) => getMaintenanceOrder(orderId, database));
   let reasonName = null;
   if (reasonId !== null) {
     reasonName = database.prepare('SELECT name FROM maintenance_reasons WHERE id = ?').get(reasonId)?.name;
@@ -1093,6 +1086,9 @@ export async function exportMaintenancePptx(req, res, database = defaultDatabase
     if (query[key] !== undefined) input[key] = query[key];
   }
   if (input.orderIds === undefined) input.orderIds = [];
+  if (!Array.isArray(input.orderIds)) throw new HttpError(400, 'orderIds must be an array of maintenance order IDs.');
+  if (input.orderIds.length > MAX_PPTX_EXPORT_ORDERS) throw new HttpError(400, TOO_MANY_PPTX_ORDERS_MESSAGE);
+  if (!input.orderIds.length) throw new HttpError(400, 'يرجى تحديد أمر صيانة واحد على الأقل للتصدير.');
   const mode = optionalText(input.mode, 'mode', { maxLength: 16 }) ?? 'sync';
   delete input.mode;
   if (!['sync', 'async'].includes(mode)) throw new HttpError(400, 'mode must be sync or async.');

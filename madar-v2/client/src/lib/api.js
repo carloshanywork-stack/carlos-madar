@@ -1,3 +1,5 @@
+import { getNativeAuthorizationHeaders } from '../modules/rep/native-session.js';
+
 export class ApiError extends Error {
   constructor(message, status, payload) {
     super(message);
@@ -25,6 +27,8 @@ function notifyDisabledRep(payload) {
 async function request(path, options = {}) {
   const { timeoutMs = 0, signal: callerSignal, ...fetchOptions } = options;
   const headers = new Headers(options.headers ?? {});
+  const nativeHeaders = await getNativeAuthorizationHeaders();
+  for (const [name, value] of Object.entries(nativeHeaders)) headers.set(name, value);
   headers.set('Cache-Control', 'no-cache, no-store, must-revalidate');
   headers.set('Pragma', 'no-cache');
   headers.set('Expires', '0');
@@ -72,24 +76,27 @@ async function request(path, options = {}) {
 
 function uploadWithProgress(path, formData, onProgress) {
   return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open('POST', apiUrl(path));
-    xhr.withCredentials = true;
-    xhr.upload.addEventListener('progress', (event) => {
-      if (event.lengthComputable) onProgress?.(Math.round((event.loaded / event.total) * 100));
-    });
-    xhr.addEventListener('error', () => reject(new ApiError('تعذر الاتصال بالخادم أثناء رفع الملف.', 0)));
-    xhr.addEventListener('load', () => {
-      const contentType = xhr.getResponseHeader('content-type') ?? '';
-      let payload;
-      try { payload = contentType.includes('application/json') ? JSON.parse(xhr.responseText) : xhr.responseText; }
-      catch { payload = {}; }
-      if (xhr.status < 200 || xhr.status >= 300) {
-        notifyDisabledRep(payload);
-        reject(new ApiError(payload?.message || payload?.error || `تعذر تنفيذ الطلب (${xhr.status})`, xhr.status, payload));
-      } else resolve(payload);
-    });
-    xhr.send(formData);
+    getNativeAuthorizationHeaders().then((nativeHeaders) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', apiUrl(path));
+      xhr.withCredentials = true;
+      for (const [name, value] of Object.entries(nativeHeaders)) xhr.setRequestHeader(name, value);
+      xhr.upload.addEventListener('progress', (event) => {
+        if (event.lengthComputable) onProgress?.(Math.round((event.loaded / event.total) * 100));
+      });
+      xhr.addEventListener('error', () => reject(new ApiError('تعذر الاتصال بالخادم أثناء رفع الملف.', 0)));
+      xhr.addEventListener('load', () => {
+        const contentType = xhr.getResponseHeader('content-type') ?? '';
+        let payload;
+        try { payload = contentType.includes('application/json') ? JSON.parse(xhr.responseText) : xhr.responseText; }
+        catch { payload = {}; }
+        if (xhr.status < 200 || xhr.status >= 300) {
+          notifyDisabledRep(payload);
+          reject(new ApiError(payload?.message || payload?.error || `تعذر تنفيذ الطلب (${xhr.status})`, xhr.status, payload));
+        } else resolve(payload);
+      });
+      xhr.send(formData);
+    }).catch(reject);
   });
 }
 

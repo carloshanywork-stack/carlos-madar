@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { db } from '../../database/connection.js';
 import { recordAudit } from '../audit.js';
 import { HttpError, allowOnlyKeys, positiveId, requireObject, requireText } from '../http.js';
@@ -215,8 +216,8 @@ function normalizeLocation(input) {
   const accuracy = body.accuracy;
   if (typeof latitude !== 'number' || !Number.isFinite(latitude) || latitude < -90 || latitude > 90
       || typeof longitude !== 'number' || !Number.isFinite(longitude) || longitude < -180 || longitude > 180
-      || typeof accuracy !== 'number' || !Number.isFinite(accuracy) || accuracy < 0 || accuracy > 100000) {
-    throw new HttpError(400, 'location must contain valid latitude, longitude, and accuracy values.');
+      || typeof accuracy !== 'number' || !Number.isFinite(accuracy) || accuracy < 0 || accuracy > 250) {
+    throw new HttpError(400, 'location must contain valid coordinates and GPS accuracy of 250 meters or better.');
   }
   const updatedAt = requireText(body.updatedAt, 'location.updatedAt', { maxLength: 64 });
   if (!Number.isFinite(Date.parse(updatedAt))) throw new HttpError(400, 'location.updatedAt must be a valid date and time.');
@@ -240,10 +241,13 @@ function openAttendance(employeeId, database) {
 }
 
 function clockIn(employeeIdValue, source, location, actorId, database = db,
-  { now = new Date(), markOnTime = false, biometricVerified = false } = {}) {
+  { now = new Date(), markOnTime = false, biometricVerified = false, offlineSync = false, actionUuid = null } = {}) {
   const employeeId = positiveId(employeeIdValue, 'employeeId');
   const employee = activeEmployee(employeeId, database);
   const timeZone = getTimeZone(database);
+  if (source === 'app' && now.valueOf() > Date.now() + 5 * 60 * 1000) {
+    throw new HttpError(400, 'Clock-in time cannot be more than five minutes in the future.');
+  }
   const date = localDate(now, timeZone);
   const clockInTime = now.toISOString();
   assertAttendanceMonthOpen(date, database);
@@ -297,6 +301,8 @@ function clockIn(employeeIdValue, source, location, actorId, database = db,
         clock_in_accuracy: location?.accuracy ?? null,
         clock_in_location_at: location?.updatedAt ?? null,
         clock_in_biometric_verified: Boolean(biometricVerified),
+        offline_sync: Boolean(offlineSync),
+        ...(actionUuid ? { client_action_uuid: actionUuid } : {}),
         status,
       } });
     return current;
@@ -305,13 +311,16 @@ function clockIn(employeeIdValue, source, location, actorId, database = db,
 }
 
 function clockOut(employeeIdValue, source, location, actorId, database = db,
-  { now = new Date(), adminNote = null, customTime = false, biometricVerified = false } = {}) {
+  { now = new Date(), adminNote = null, customTime = false, biometricVerified = false, offlineSync = false, actionUuid = null } = {}) {
   const employeeId = positiveId(employeeIdValue, 'employeeId');
   const employee = activeEmployee(employeeId, database);
   const current = openAttendance(employee.id, database);
   if (!current) throw new HttpError(409, 'There is no open attendance record for this employee.');
   assertAttendanceMonthOpen(current.work_date, database);
   const clockOutTime = now.toISOString();
+  if (source === 'app' && now.valueOf() > Date.now() + 5 * 60 * 1000) {
+    throw new HttpError(400, 'Clock-out time cannot be more than five minutes in the future.');
+  }
   const timeZone = getTimeZone(database);
   if (customTime && localDate(now, timeZone).slice(0, 7) !== current.work_date.slice(0, 7)) {
     throw new HttpError(409, 'Clock-out must remain in the same payroll month as the open attendance record.');
@@ -348,6 +357,8 @@ function clockOut(employeeIdValue, source, location, actorId, database = db,
         clock_out_accuracy: location?.accuracy ?? null,
         clock_out_location_at: location?.updatedAt ?? null,
         clock_out_biometric_verified: Boolean(biometricVerified),
+        offline_sync: Boolean(offlineSync),
+        ...(actionUuid ? { client_action_uuid: actionUuid } : {}),
         clock_out_admin_note: source === 'admin' ? adminNote : null,
         ...hours,
         overtime_status: overtimeStatus,
@@ -395,6 +406,98 @@ export function clockOutForRep(userId, input, database = db, options = {}) {
   const location = body.location === undefined || body.location === null ? null : normalizeLocation(body.location);
   const employee = employeeForRep(positiveId(userId, 'userId'), database);
   return clockOut(employee.id, 'app', location, userId, database, { ...options, biometricVerified: true });
+}
+
+export function syncRepAttendanceAction(userIdValue, input, database = db) {
+  const body = requireObject(input);
+  allowOnlyKeys(body, ['actionUuid', 'action', 'occurredAt', 'location', 'biometricVerified']);
+  const userId = positiveId(userIdValue, 'userId');
+  const actionUuid = requireText(body.actionUuid, 'actionUuid', { maxLength: 36 });
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(actionUuid)) {
+    throw new HttpError(400, 'actionUuid must be a valid UUID.');
+  }
+  if (!['in', 'out'].includes(body.action)) throw new HttpError(400, 'action must be in or out.');
+  if (body.biometricVerified !== true) throw new HttpError(400, 'يجب تأكيد المصادقة قبل مزامنة الحضور.');
+  const occurredAtText = requireText(body.occurredAt, 'occurredAt', { maxLength: 64 });
+  const occurredAtMilliseconds = Date.parse(occurredAtText);
+  if (!Number.isFinite(occurredAtMilliseconds)) throw new HttpError(400, 'occurredAt must be a valid date and time.');
+  if (occurredAtMilliseconds > Date.now() + 5 * 60 * 1000) {
+    throw new HttpError(400, 'Attendance time cannot be more than five minutes in the future.');
+  }
+  const occurredAt = new Date(occurredAtMilliseconds);
+  const location = body.location === undefined || body.location === null ? null : normalizeLocation(body.location);
+  if (body.action === 'in' && !location) throw new HttpError(400, 'Clock-in requires a GPS fix.');
+  const employee = employeeForRep(userId, database);
+  const payloadHash = createHash('sha256').update(JSON.stringify({
+    userId,
+    action: body.action,
+    occurredAt: occurredAt.toISOString(),
+    location,
+    biometricVerified: true,
+  })).digest('hex');
+
+  return database.transaction(() => {
+    const existing = database.prepare(`
+      SELECT action_uuid, rep_user_id, attendance_id, action, payload_sha256
+      FROM rep_attendance_sync_actions WHERE action_uuid = ?
+    `).get(actionUuid);
+    if (existing) {
+      if (Number(existing.rep_user_id) !== userId || existing.action !== body.action || existing.payload_sha256 !== payloadHash) {
+        throw new HttpError(409, 'This attendance action UUID was already used with different data.');
+      }
+      const record = database.prepare('SELECT employee_id, work_date FROM employee_daily_attendance WHERE id = ?')
+        .get(existing.attendance_id);
+      if (!record || Number(record.employee_id) !== Number(employee.id)) {
+        throw new HttpError(409, 'The original attendance record for this action is no longer available.');
+      }
+      return {
+        success: true,
+        idempotent: true,
+        actionUuid,
+        attendance: getAttendanceRecord(employee.id, record.work_date, database),
+      };
+    }
+
+    const attendance = body.action === 'in'
+      ? clockIn(employee.id, 'app', location, userId, database, {
+        now: occurredAt, biometricVerified: true, offlineSync: true, actionUuid,
+      })
+      : clockOut(employee.id, 'app', location, userId, database, {
+        now: occurredAt, biometricVerified: true, offlineSync: true, actionUuid,
+      });
+    database.prepare(`
+      INSERT INTO rep_attendance_sync_actions
+        (action_uuid, rep_user_id, attendance_id, action, payload_sha256, occurred_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(actionUuid, userId, attendance.id, body.action, payloadHash, occurredAt.toISOString());
+    return { success: true, idempotent: false, actionUuid, attendance };
+  }).immediate();
+}
+
+export function recordRepMockLocationAttempt(userIdValue, input, database = db) {
+  const body = requireObject(input);
+  allowOnlyKeys(body, ['action', 'detectedAt', 'is_mock', 'mock_flag']);
+  const userId = positiveId(userIdValue, 'userId');
+  employeeForRep(userId, database);
+  const action = requireText(body.action, 'action', { maxLength: 32 });
+  if (!['in', 'out', 'tracking', 'visit'].includes(action)) throw new HttpError(400, 'Unsupported GPS action.');
+  const isMock = body.is_mock ?? body.mock_flag;
+  if (isMock !== true) throw new HttpError(400, 'A confirmed mock-location flag is required.');
+  const detectedAtText = body.detectedAt === undefined ? new Date().toISOString()
+    : requireText(body.detectedAt, 'detectedAt', { maxLength: 64 });
+  const detectedAt = Date.parse(detectedAtText);
+  if (!Number.isFinite(detectedAt) || detectedAt > Date.now() + 5 * 60 * 1000) {
+    throw new HttpError(400, 'detectedAt must be a valid date and time.');
+  }
+  recordAudit({
+    database,
+    actorId: userId,
+    action: 'mock_location_attempt',
+    entityType: 'rep_attendance_security',
+    entityId: userId,
+    newValues: { action, is_mock: 1, detected_at: new Date(detectedAt).toISOString() },
+  });
+  return { success: true, audited: true };
 }
 
 export function getTodayAttendanceForRep(userId, database = db, now = new Date()) {

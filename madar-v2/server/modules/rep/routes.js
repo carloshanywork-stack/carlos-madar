@@ -4,10 +4,16 @@ import { db } from '../../database/connection.js';
 import { asyncHandler, allowOnlyKeys, HttpError, requireObject, requireText } from '../http.js';
 import { diskUploadMany, memoryUpload } from '../upload.js';
 import { ensureStorageDirectory, removeStorageFile } from '../storage.js';
-import { publishOperationsEvent, subscribeOperationsEvents } from '../operations-events.js';
+import { getOperationsEventsAfter, publishOperationsEvent, subscribeOperationsEvents } from '../operations-events.js';
 import { loginRateLimiter } from '../auth/login-rate-limit.js';
 import { getOfflineMapPackCatalog, getOfflineMapPackManifest, readOfflineMapPackTile } from '../supervisor/offline-tiles.js';
-import { clockInForRep, clockOutForRep, getTodayAttendanceForRep } from '../employees/attendance.js';
+import {
+  clockInForRep,
+  clockOutForRep,
+  getTodayAttendanceForRep,
+  recordRepMockLocationAttempt,
+  syncRepAttendanceAction,
+} from '../employees/attendance.js';
 import {
   authenticateRepUser,
   authCookieOptions,
@@ -18,6 +24,7 @@ import {
   getRepFaultReasons,
   getRepTodayRoute,
   confirmRepMachineLocation,
+  listLocationConfirmations,
   requireRepUsername,
   submitRepMachineCorrection,
   syncRepLocationPing,
@@ -75,6 +82,8 @@ router.use(requireActiveRep);
 
 router.get('/events', (req, res) => {
   const repId = Number(req.user.id);
+  const cursor = Number(req.get('Last-Event-ID') ?? req.query.lastEventId ?? 0);
+  const safeCursor = Number.isSafeInteger(cursor) && cursor >= 0 ? cursor : 0;
   res.status(200).set({
     'Cache-Control': 'private, no-cache, no-transform',
     Connection: 'keep-alive',
@@ -83,7 +92,11 @@ router.get('/events', (req, res) => {
   });
   res.flushHeaders?.();
   res.write('retry: 3000\n\n');
-  const unsubscribe = subscribeOperationsEvents((event) => {
+  let lastEventId = safeCursor;
+  const dispatch = (event) => {
+    const eventId = Number(event.id);
+    if (Number.isSafeInteger(eventId) && eventId <= lastEventId) return;
+    if (Number.isSafeInteger(eventId)) lastEventId = eventId;
     if (event.type === 'system.shutdown') {
       res.write(`id: ${event.id}\nevent: operations\ndata: ${JSON.stringify(event)}\n\n`);
       res.end();
@@ -93,6 +106,10 @@ router.get('/events', (req, res) => {
     const isDirectRecipient = Number(event.userId) === repId;
     if (!recipients.includes(repId) && !isDirectRecipient) return;
     res.write(`id: ${event.id}\nevent: operations\ndata: ${JSON.stringify(event)}\n\n`);
+  };
+  for (const event of getOperationsEventsAfter(safeCursor, { limit: 10_000 })) dispatch(event);
+  const unsubscribe = subscribeOperationsEvents((event) => {
+    dispatch(event);
   });
   const heartbeat = setInterval(() => res.write(': keepalive\n\n'), 25_000);
   heartbeat.unref?.();
@@ -138,6 +155,39 @@ router.post('/attendance/clock-out', (req, res) => {
   res.json({ success: true, attendance });
 });
 
+router.post('/attendance/sync', (req, res, next) => {
+  try {
+    const result = syncRepAttendanceAction(req.user.id, req.body);
+    publishOperationsEvent('attendance.changed', {
+      userId: req.user.id,
+      employeeId: result.attendance.employee_id,
+      workDate: result.attendance.work_date,
+    });
+    if (result.attendance.overtime_status === 'pending' && Number(result.attendance.overtime_hours) > 0) {
+      publishOperationsEvent('overtime.pending', {
+        userId: req.user.id,
+        employeeId: result.attendance.employee_id,
+        employeeName: result.attendance.name,
+        workDate: result.attendance.work_date,
+        overtimeHours: Number(result.attendance.overtime_hours),
+      });
+    }
+    res.set({ 'Cache-Control': 'private, no-store', Pragma: 'no-cache' });
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/attendance/mock-location', (req, res, next) => {
+  try {
+    res.set({ 'Cache-Control': 'private, no-store', Pragma: 'no-cache' });
+    res.json(recordRepMockLocationAttempt(req.user.id, req.body));
+  } catch (error) {
+    next(error);
+  }
+});
+
 router.get('/today-route', (req, res, next) => {
   try {
     requireRepUsername(req.query.username, req.user.username);
@@ -148,11 +198,16 @@ router.get('/today-route', (req, res, next) => {
   }
 });
 
+router.get('/location-confirmations', (req, res) => {
+  res.set({ 'Cache-Control': 'private, no-store' });
+  res.json({ success: true, requests: listLocationConfirmations({ repId: req.user.id, status: 'all' }) });
+});
+
 router.post('/machines/:machineId/confirm-location', (req, res, next) => {
   try {
     const result = confirmRepMachineLocation(req.user, req.params.machineId, req.body);
     if (!result.idempotent) {
-      publishOperationsEvent('rep.machine.location-confirmed', {
+      publishOperationsEvent('rep.machine.location-requested', {
         userId: req.user.id,
         machineId: result.machine.id,
         machineCode: result.machine.code,

@@ -132,6 +132,12 @@ public class RepLocationPlugin extends Plugin {
                     if (!settled.compareAndSet(false, true)) return;
                     handler.removeCallbacks(timeout);
                     locationManager.removeUpdates(this);
+                    getContext().getSharedPreferences(RepLocationService.PREFERENCES_NAME, Context.MODE_PRIVATE)
+                        .edit()
+                        .putBoolean("last_location_mocked", true)
+                        .putString("last_location_json", locationToJson(location, true).toString())
+                        .putString("last_location_warning", MOCK_WARNING)
+                        .apply();
                     call.reject(MOCK_WARNING, "MOCK_LOCATION_DETECTED");
                     return;
                 }
@@ -198,6 +204,15 @@ public class RepLocationPlugin extends Plugin {
 
     @PluginMethod
     public void stopDutyTracking(PluginCall call) {
+        try (RepTrackStore trackStore = new RepTrackStore(getContext())) {
+            if (trackStore.pendingCount(RepAuthStore.repId(getContext())) > 0) {
+                call.reject("لن يتوقف تتبع الوردية قبل تأكيد مزامنة جميع نقاط GPS المحفوظة.", "GPS_TRAIL_PENDING");
+                return;
+            }
+        } catch (Exception error) {
+            call.reject("تعذر التحقق من مزامنة نقاط GPS؛ سيظل التتبع نشطاً لحماية سجل الوردية.", "GPS_TRAIL_CHECK_FAILED", error);
+            return;
+        }
         Intent intent = new Intent(getContext(), RepLocationService.class);
         intent.setAction(RepLocationService.ACTION_STOP);
         getContext().startService(intent);
@@ -226,7 +241,7 @@ public class RepLocationPlugin extends Plugin {
         }
         try {
             try (RepTrackStore trackStore = new RepTrackStore(getContext())) {
-                result.put("trail", new JSArray(trackStore.pendingTrail().toString()));
+                result.put("trail", new JSArray(trackStore.pendingTrail(RepAuthStore.repId(getContext())).toString()));
             }
         } catch (Exception ignored) {
             result.put("trail", new JSArray());
@@ -242,7 +257,7 @@ public class RepLocationPlugin extends Plugin {
             return;
         }
         try (RepTrackStore trackStore = new RepTrackStore(getContext())) {
-            int removed = trackStore.acknowledgeThrough(throughId.longValue());
+            int removed = trackStore.acknowledgeThrough(throughId.longValue(), RepAuthStore.repId(getContext()));
             call.resolve(new JSObject().put("removed", removed));
         } catch (Exception error) {
             call.reject("تعذر تأكيد مزامنة نقاط GPS المحلية.", "TRACK_ACK_FAILED", error);

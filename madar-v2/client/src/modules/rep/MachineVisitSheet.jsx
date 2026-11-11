@@ -33,7 +33,7 @@ function distanceMeters(first, second) {
   return 6371000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(Math.max(0, 1 - a)));
 }
 
-export default function MachineVisitSheet({ machine, reasons, gps, gpsError, captureLocation, onClose, onSave, onConfirmLocation, onReportCorrection }) {
+export default function MachineVisitSheet({ machine, repName = '', reasons, gps, gpsError, captureLocation, onClose, onSave, onConfirmLocation, onReportCorrection }) {
   const [machineCondition, setMachineCondition] = useState('');
   const [reasonIds, setReasonIds] = useState([]);
   const [notes, setNotes] = useState('');
@@ -81,7 +81,8 @@ export default function MachineVisitSheet({ machine, reasons, gps, gpsError, cap
     return () => window.clearInterval(timer);
   }, [captureLocation]);
 
-  const activeMachine = confirmedPin ? { ...machine, ...confirmedPin } : machine;
+  const activeMachine = confirmedPin && !machine.locationConfirmation ? { ...machine, ...confirmedPin } : machine;
+  const locationPending = activeMachine.locationConfirmationPending === true;
   const locationLocked = activeMachine.isLocationLocked === true;
   const hasMachinePin = Number.isFinite(activeMachine.latitude) && Number.isFinite(activeMachine.longitude);
   const measuredDistance = gps && hasMachinePin
@@ -90,7 +91,7 @@ export default function MachineVisitSheet({ machine, reasons, gps, gpsError, cap
   const effectiveDistance = measuredDistance === null ? null : Math.max(0, measuredDistance - Number(gps.accuracy ?? 0));
   const radius = Math.max(1, Number(activeMachine.geofenceRadiusMeters) || 50);
   const withinGeofence = locationLocked && hasMachinePin && effectiveDistance !== null && effectiveDistance <= radius;
-  const canCapture = Boolean(gps) && withinGeofence && !correctionOpen;
+  const canCapture = Boolean(gps) && withinGeofence && !correctionOpen && !locationPending && activeMachine.canVisit !== false;
 
   const confirmCurrentLocation = async () => {
     setError('');
@@ -105,12 +106,7 @@ export default function MachineVisitSheet({ machine, reasons, gps, gpsError, cap
         throw new Error('إشارة GPS قديمة؛ انتظر تحديث الموقع ثم حاول تثبيته من جديد.');
       }
       const pin = await onConfirmLocation(currentLocation);
-      setConfirmedPin({
-        latitude: Number(pin?.latitude ?? currentLocation.latitude),
-        longitude: Number(pin?.longitude ?? currentLocation.longitude),
-        isLocationLocked: true,
-        geofenceRadiusMeters: 50,
-      });
+      setConfirmedPin(pin);
     } catch (confirmationError) {
       setError(confirmationError.message || 'تعذر تثبيت الموقع؛ ستبقى الماكينة غير مثبتة.');
     } finally {
@@ -197,6 +193,7 @@ export default function MachineVisitSheet({ machine, reasons, gps, gpsError, cap
             watermark: {
               machineCode: activeMachine.machineCode,
               machineName: activeMachine.arabicName,
+              repName,
               regionName: activeMachine.regionName,
               areaName: activeMachine.areaName,
               phase,
@@ -427,7 +424,7 @@ export default function MachineVisitSheet({ machine, reasons, gps, gpsError, cap
             {!gps
               ? 'جارٍ انتظار إشارة GPS؛ يلزم الموقع لتفعيل التصوير.'
               : !locationLocked || !hasMachinePin
-                ? 'هذه أول زيارة موثقة للموقع. تأكد من كود الماكينة ثم ثبّت موقعك الحالي أو أرسل بلاغ ماكينة خاطئة.'
+                 ? 'تأكد من كود الماكينة ثم أرسل موقعك الحالي لاعتماد المدير، أو أرسل بلاغ ماكينة خاطئة.'
                 : withinGeofence
                   ? `أنت داخل النطاق · المسافة ${Math.round(effectiveDistance)} متر (المسموح ${radius} متر).`
                   : `أنت خارج النطاق · المسافة الفعالة ${Math.round(effectiveDistance)} متر (المسموح ${radius} متر).`}
@@ -436,11 +433,12 @@ export default function MachineVisitSheet({ machine, reasons, gps, gpsError, cap
           {!locationLocked || !hasMachinePin ? <section className="rep-machine-verification">
             <div>
               <strong>تحقق من هوية وموقع الماكينة</strong>
-              <small>سيُحفظ موقع GPS الحالي كمرجع ثابت، بنطاق زيارة 50 متراً.</small>
+              <small>{locationPending ? 'الموقع المقترح بانتظار الإرسال أو اعتماد المدير؛ التصوير متوقف.' : 'يُرسل موقع GPS للمراجعة؛ لا يُعتمد إلا بقرار المدير.'}</small>
+              {activeMachine.locationConfirmation?.reviewNote && <small>{activeMachine.locationConfirmation.reviewNote}</small>}
             </div>
             <button type="button" className="rep-button rep-button-primary" onClick={() => void confirmCurrentLocation()}
-              disabled={confirmingLocation || !gps || Number(gps.accuracy) > 100 || saving || correctionSaving || correctionOpen}>
-              {confirmingLocation ? 'جارٍ تثبيت موقع GPS…' : 'هذه هي الماكينة الصحيحة · ثبّت موقعي الحالي'}
+              disabled={locationPending || confirmingLocation || !gps || Number(gps.accuracy) > 100 || saving || correctionSaving || correctionOpen}>
+              {confirmingLocation ? 'جارٍ حفظ المقترح…' : 'إرسال موقعي الحالي لاعتماد المدير'}
             </button>
           </section> : <section className="rep-machine-verification verified">
             <div>

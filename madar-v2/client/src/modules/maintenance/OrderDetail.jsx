@@ -397,12 +397,12 @@ export default function MaintenanceOrderDetail() {
     finally { setSaving(false); }
   }
 
-  async function handleDeletePhoto(card, phase, filename) {
+  async function handleDeletePhoto(card, phase, filename, sourceOrderId = id) {
     if (!window.confirm('هل تريد حذف هذه الصورة نهائياً من كارت الفحص؟')) return false;
     setSaving(true);
     try {
-      await api.delete(`/api/maintenance/orders/${id}/cards/${card.id}/photos/${phase}/${encodeURIComponent(filename)}`);
-      await reload();
+      await api.delete(`/api/maintenance/orders/${sourceOrderId}/cards/${card.id}/photos/${phase}/${encodeURIComponent(filename)}`);
+      if (Number(sourceOrderId) === Number(id)) await reload();
       showToast('تم حذف الصورة بنجاح.');
       return true;
     } catch (caught) {
@@ -413,16 +413,23 @@ export default function MaintenanceOrderDetail() {
     }
   }
 
-  async function handleMovePhoto(card, fromPhase, toPhase, filename) {
+  async function handleMovePhoto(card, fromPhase, toPhase, filename, assignment = {}) {
+    const sourceOrderId = Number(assignment.sourceOrderId ?? id);
+    const targetOrderId = Number(assignment.targetOrderId ?? sourceOrderId);
+    const targetCardId = Number(assignment.targetCardId ?? card.id);
     setSaving(true);
     try {
-      await api.post(`/api/maintenance/orders/${id}/cards/${card.id}/photos/move`, {
+      await api.post(`/api/maintenance/orders/${sourceOrderId}/cards/${card.id}/photos/move`, {
         fromPhase,
         toPhase,
         filename,
+        targetOrderId,
+        targetCardId,
       });
-      await reload();
-      showToast(`تم نقل الصورة إلى مرحلة ${toPhase === 'before' ? 'قبل الصيانة' : 'بعد الصيانة'}.`);
+      if (sourceOrderId === Number(id) || targetOrderId === Number(id)) await reload();
+      showToast(targetOrderId !== sourceOrderId || targetCardId !== Number(card.id)
+        ? 'تم تغيير أمر/ماكينة الصورة بنجاح.'
+        : `تم نقل الصورة إلى مرحلة ${toPhase === 'before' ? 'قبل الصيانة' : 'بعد الصيانة'}.`);
       return true;
     } catch (caught) {
       showToast(errorMessage(caught), 'error');
@@ -1654,6 +1661,7 @@ export default function MaintenanceOrderDetail() {
           canEditMachineCode={order.status !== 'archived'}
           canEditReasons={order.canEditReasons === true}
           canRotatePhotos={order.canRotatePhotos === true}
+          canTagPhotos={order.canRotatePhotos === true}
           rotationBusy={saving}
         />
       )}
@@ -1828,6 +1836,7 @@ function PhotoLightboxModal({
   canEditMachineCode = true,
   canEditReasons = false,
   canRotatePhotos = false,
+  canTagPhotos = false,
   rotationBusy = false,
   orderId,
   reasons = [],
@@ -1836,12 +1845,18 @@ function PhotoLightboxModal({
   const [rotationAngle, setRotationAngle] = useState(0);
   const [isRotating, setIsRotating] = useState(false);
   const [photoCacheBuster, setPhotoCacheBuster] = useState(0);
+  const [viewerOrderId, setViewerOrderId] = useState(orderId);
+  const [viewerCards, setViewerCards] = useState(cards);
+  const [tagTargets, setTagTargets] = useState([]);
+  const [tagTargetKey, setTagTargetKey] = useState('');
+  const [tagTargetPhase, setTagTargetPhase] = useState('before');
+  const [tagTargetsLoading, setTagTargetsLoading] = useState(false);
   const currentCardIndex = lightboxState
-    ? cards.findIndex((card) => card.id === lightboxState.cardId)
+    ? viewerCards.findIndex((card) => card.id === lightboxState.cardId)
     : -1;
-  const currentCard = currentCardIndex >= 0 ? cards[currentCardIndex] : null;
-  const prevCard = currentCardIndex > 0 ? cards[currentCardIndex - 1] : null;
-  const nextCard = currentCardIndex >= 0 && currentCardIndex < cards.length - 1 ? cards[currentCardIndex + 1] : null;
+  const currentCard = currentCardIndex >= 0 ? viewerCards[currentCardIndex] : null;
+  const prevCard = currentCardIndex > 0 ? viewerCards[currentCardIndex - 1] : null;
+  const nextCard = currentCardIndex >= 0 && currentCardIndex < viewerCards.length - 1 ? viewerCards[currentCardIndex + 1] : null;
   const beforeUrls = currentCard?.before_photo_urls ?? [];
   const afterUrls = currentCard?.after_photo_urls ?? [];
   const allPhotos = [
@@ -1861,7 +1876,27 @@ function PhotoLightboxModal({
 
   useEffect(() => {
     setRotationAngle(0);
+    if (currentPhoto) {
+      setTagTargetKey(`${viewerOrderId}:${currentCard?.id ?? ''}`);
+      setTagTargetPhase(currentPhoto.phase);
+    }
   }, [currentPhotoKey]);
+
+  useEffect(() => {
+    setViewerOrderId(orderId);
+    setViewerCards(cards);
+  }, [orderId]);
+
+  useEffect(() => {
+    if (!canTagPhotos || !lightboxState) return undefined;
+    let active = true;
+    setTagTargetsLoading(true);
+    api.get(`/api/maintenance/orders/${orderId}/photos/tag-targets`)
+      .then((result) => { if (active) setTagTargets(result.orders ?? []); })
+      .catch(() => { if (active) setTagTargets([]); })
+      .finally(() => { if (active) setTagTargetsLoading(false); });
+    return () => { active = false; };
+  }, [canTagPhotos, orderId, Boolean(lightboxState)]);
 
   function goToMachine(targetCard) {
     if (!targetCard) return;
@@ -1916,18 +1951,40 @@ function PhotoLightboxModal({
   if (!currentCard || !currentPhoto) return null;
 
   const currentFilename = maintenancePhotoFilename(currentPhoto.url);
-  const targetMovePhase = currentPhoto.phase === 'before' ? 'after' : 'before';
   const phasePhotoCount = currentPhoto.phase === 'before' ? beforeUrls.length : afterUrls.length;
 
-  async function moveCurrentPhoto() {
-    const moved = await onMovePhoto(currentCard, currentPhoto.phase, targetMovePhase, currentFilename);
+  async function savePhotoTag() {
+    const [targetOrderText, targetCardText] = tagTargetKey.split(':');
+    const targetOrderId = Number(targetOrderText);
+    const targetCardId = Number(targetCardText);
+    if (!Number.isSafeInteger(targetOrderId) || !Number.isSafeInteger(targetCardId)) return;
+    const changedAssociation = targetOrderId !== Number(viewerOrderId) || targetCardId !== Number(currentCard.id);
+    if (changedAssociation && !window.confirm('سيتم نقل الصورة وربطها ببطاقة الماكينة المحددة. هل تريد المتابعة؟')) return;
+    const moved = await onMovePhoto(currentCard, currentPhoto.phase, tagTargetPhase, currentFilename, {
+      sourceOrderId: viewerOrderId,
+      targetOrderId,
+      targetCardId,
+    });
     if (!moved) return;
-    const targetIndex = targetMovePhase === 'before' ? beforeUrls.length : afterUrls.length;
-    onClose({ cardId: currentCard.id, phase: targetMovePhase, photoIndex: targetIndex });
+    try {
+      const targetOrder = await api.get(`/api/maintenance/orders/${targetOrderId}`);
+      const nextCards = targetOrder.cards ?? [];
+      const nextCard = nextCards.find((card) => Number(card.id) === targetCardId);
+      const nextPhotos = tagTargetPhase === 'before'
+        ? nextCard?.before_photo_urls ?? []
+        : nextCard?.after_photo_urls ?? [];
+      const nextPhotoIndex = Math.max(0, nextPhotos.findIndex((url) => maintenancePhotoFilename(url) === currentFilename));
+      setViewerOrderId(targetOrderId);
+      setViewerCards(nextCards);
+      onClose({ cardId: targetCardId, phase: tagTargetPhase, photoIndex: nextPhotoIndex });
+    } catch (caught) {
+      onShowToast?.(`تم نقل الصورة، لكن تعذر تحديث المعاينة: ${errorMessage(caught)}`, 'error');
+      onClose(null);
+    }
   }
 
   async function deleteCurrentPhoto() {
-    const deleted = await onDeletePhoto(currentCard, currentPhoto.phase, currentFilename);
+      const deleted = await onDeletePhoto(currentCard, currentPhoto.phase, currentFilename, viewerOrderId);
     if (!deleted) return;
     const remainingPhotos = allPhotos.filter((_, index) => index !== currentPhotoIndex);
     if (!remainingPhotos.length) {
@@ -1945,7 +2002,9 @@ function PhotoLightboxModal({
     if (!currentPhoto || !rotationAngle || !canRotatePhotos || isRotating) return;
     setIsRotating(true);
     try {
-      await api.post(`/api/maintenance/orders/${orderId}/cards/${currentCard.id}/photos/rotate`, {
+      await api.post('/api/maintenance/photos/rotate', {
+        orderId: viewerOrderId,
+        cardId: currentCard.id,
         phase: currentPhoto.phase,
         filename: currentFilename,
         angle: rotationAngle,
@@ -2076,6 +2135,45 @@ function PhotoLightboxModal({
               })}
             </div>
           </div>
+          {canTagPhotos && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }} aria-label="تغيير أمر أو مرحلة الصورة">
+              <strong style={{ fontSize: '11px', color: '#cbd5e1' }}>ربط الصورة:</strong>
+              <select
+                aria-label="أمر الصيانة والماكينة المرتبطان بالصورة"
+                value={tagTargetKey}
+                disabled={disabled || tagTargetsLoading || !tagTargets.length}
+                onChange={(event) => setTagTargetKey(event.target.value)}
+                style={{ minWidth: '220px', maxWidth: 'min(360px, 70vw)', fontSize: '12px', padding: '4px 8px' }}
+              >
+                {tagTargets.map((targetOrder) => (
+                  <optgroup key={targetOrder.id} label={`أمر ${targetOrder.orderCode}`}>
+                    {targetOrder.cards.map((targetCard) => (
+                      <option key={`${targetOrder.id}:${targetCard.id}`} value={`${targetOrder.id}:${targetCard.id}`}>
+                        {targetCard.machineCode} · {targetCard.machineNameAr}{targetCard.area ? ` · ${targetCard.area}` : ''}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+              <select
+                aria-label="مرحلة الصورة"
+                value={tagTargetPhase}
+                disabled={disabled}
+                onChange={(event) => setTagTargetPhase(event.target.value)}
+                style={{ fontSize: '12px', padding: '4px 8px' }}
+              >
+                <option value="before">قبل الصيانة</option>
+                <option value="after">بعد الصيانة</option>
+              </select>
+              <button
+                type="button"
+                className="madar-button madar-button-small madar-button-secondary"
+                disabled={disabled || tagTargetsLoading || !tagTargetKey
+                  || (tagTargetKey === `${viewerOrderId}:${currentCard.id}` && tagTargetPhase === currentPhoto.phase)}
+                onClick={() => { void savePhotoTag(); }}
+              >{tagTargetsLoading ? 'جارٍ تحميل الأوامر…' : 'حفظ ربط الصورة'}</button>
+            </div>
+          )}
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
@@ -2102,15 +2200,6 @@ function PhotoLightboxModal({
 
           {!disabled && (
             <>
-              <button
-                type="button"
-                className="madar-button madar-button-small"
-                style={{ background: 'rgba(14, 165, 233, 0.2)', color: '#38bdf8', border: '1px solid #0284c7', fontSize: '11px', fontWeight: 'bold' }}
-                onClick={() => { void moveCurrentPhoto(); }}
-                title={`نقل الصورة إلى ${targetMovePhase === 'before' ? 'قبل الصيانة' : 'بعد الصيانة'}`}
-              >
-                ⇄ نقل إلى {targetMovePhase === 'before' ? 'قبل الصيانة' : 'بعد الصيانة'}
-              </button>
               <button
                 type="button"
                 className="madar-button madar-button-small"

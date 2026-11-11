@@ -1,0 +1,1301 @@
+{
+  "id": "e65f7b319ba84cb6a2e24071ad0a6b92",
+  "name": "MADAR V2 - Full Lifecycle Architecture & Evidence Map",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "d00d000000000001",
+      "name": "Run architecture map (manual only)",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        600
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { kind: 'static-architecture-documentation', reviewedOn: '2026-11-11', noLiveCalls: true, noCredentials: true, workflowActive: false, meaning: 'This manual execution emits only this static index. The separate architecture canvas is disconnected from the trigger; its wires are documented lineage, not live n8n data integrations.', statusLegend: { green: 'Source path and relevant automated test evidence; not a production uptime claim.', yellow: 'Code/configuration exists but device, production or broader operational verification is missing.', orange: 'A human review/approval is an explicit business gate.', red: 'Requested capability was not found in the inspected implementation.' }, verifiedPaths: ['Android visit bundle -> /api/rep/sync-visit -> visit record and configured storage -> supervisor approval -> maintenance card completion', 'Android native attendance/GPS queues -> acknowledged clock-out -> employee payroll -> treasury entries', 'Workshop order -> warehouse movements/offcuts -> unpaid delivery invoice -> separate receipt -> treasury entry', 'Purchase invoice -> stock receipt and supplier liability -> separate payment voucher -> treasury expense', 'Audit rows and bounded SQLite-backed SSE replay; daily local SQLite+storage ZIP backup/restore code'], knownGaps: ['Tailscale Funnel is enabled, so the configured path is not private-tailnet-only.', 'No structured serial tracking for ATM modules or warehouse materials was found; employee tool custody has a serial_number field.', 'Main-stock whole-unit/round-up behavior is implemented with transactional remainder-offcut accounting; existing fractional legacy balances still require reconciliation.', 'SSE replay is durable but bounded to 10,000 events; fan-out is single-process and persistence failure falls back to in-memory delivery.', 'No Android field-device or production restore drill was performed for this map.'] } }];"
+      },
+      "id": "d00d000000000002",
+      "name": "Static evidence index (no live calls)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        260,
+        600
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "d00d000000000003",
+      "name": "🗺 Architecture map only - wires are lineage, not execution",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        560,
+        900
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "d00d000000000054",
+      "name": "Static index emitted - diagram nodes are not executed",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        560,
+        600
+      ]
+    },
+    {
+      "parameters": {
+        "content": "# MADAR V2 — Full lifecycle map\n\n**Static documentation only.** Manual execution emits a fixed evidence index; it does not call MADAR APIs, query SQLite, transfer business data, or mutate records. The architecture canvas is deliberately disconnected from the manual trigger, so its conceptual lineage nodes are not executed. Diagram wires represent source-backed business hand-offs, not live n8n data integrations. This workflow is imported inactive and has no credentials or schedule.\n\n**Status key**\n- 🟢 Source path plus relevant automated test evidence (not a production guarantee).\n- 🟡 Implemented/configured, but device, deployment, or operational verification is incomplete.\n- 🟠 Human review/approval is a required gate.\n- 🔴 Gap or unsupported requested behavior.\n\nThe map reflects the checked-out source reviewed 2026-11-10; uncommitted source/build changes existed. Confirm the deployed release separately.",
+        "height": 360,
+        "width": 760
+      },
+      "id": "d00d000000000004",
+      "name": "Read me - evidence legend and boundary",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -20,
+        20
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Visit lifecycle facts\n\n- Android requires exactly **3 Before** photos and accepts **0–3 optional After** photos; six are not all mandatory.\n- The native path applies EXIF orientation/portrait correction and a watermark, saves the result locally, and queues it for WorkManager multipart upload with a bearer token.\n- Server ingestion is idempotent by visit UUID plus payload SHA-256 and saves the visit/photos while review is pending.\n- `rep_visits.status='completed'` means the bundle was received; `rep_visit_reviews.status='pending'` is still a supervisor gate. Only approval commits the maintenance card to `completed`. Reshoot is a separate branch back to field work.\n- Visit comments/history are recorded at successful sync; approval adds approved photo/reason references and does not overwrite a newer note.",
+        "height": 330,
+        "width": 600
+      },
+      "id": "d00d000000000005",
+      "name": "Visit status and photo cardinality",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2220,
+        20
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Confirmed / corrected status claims\n\n- Area-maintenance selective comments export is implemented: UI filters include area/machine, notes-only, and latest/all history; API/export tests cover it. **Not a pending implementation.**\n- Manual photo rotation writes durable upright JPEG derivatives and is applied to viewer, thumbnail, and export; cross-order/card/phase reassignment moves derivatives and metadata. Tests cover audit and unchanged source bytes. **Not a pending implementation.**\n- Backup uses SQLite's `database.backup(snapshotPath)` then a ZIP of the snapshot and storage tree; it does **not** use `VACUUM INTO`. Temporary-database create/restore tests do not prove a production restore drill or zero-loss/permanent retention.\n- Rep/supervisor SSE uses a SQLite event log and `Last-Event-ID` replay, bounded to 10,000 retained events. Fan-out is single-process; on persistence failure delivery falls back to live memory and API refresh remains the recovery path.\n- Local `tailscale funnel status` on 2026-11-10 showed Funnel on for `https://carlos-pc.tail852ef0.ts.net` proxying to `127.0.0.1:3000`; this is public HTTPS ingress, not private-tailnet-only transport.",
+        "height": 450,
+        "width": 760
+      },
+      "id": "d00d000000000006",
+      "name": "Evidence corrections to proposed green and yellow labels",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2860,
+        20
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Open gaps / boundaries\n\n🔴 No structured serial-number tracking was found for warehouse materials, machines, or ATM modules. The schema has `serial_number` only for employee tool custody. Workshop orders are MFG production jobs; field ATM maintenance is tracked separately through maintenance orders/cards.\n\n🟢 Main-warehouse issue, purchase, opening stock, and physical counts enforce whole units. A fractional issue requires an explicit round-up choice, debits the next whole unit, and records the remainder as a secondary offcut in the same transaction. Existing fractional legacy balances are not silently rounded and require reconciliation.\n\n🟡 Android camera, EXIF, biometric prompt, WorkManager, offline maps, background GPS, and mock-location behavior were inspected in source, not verified on a field device. Offline attendance is durable and clock-out waits for acknowledged GPS breadcrumbs before stopping tracking. The API persists a client-supplied `biometricVerified` value; this is not hardware attestation.\n\n🟡 Backups are local to the configured backup root. No off-site copy, permanent-retention guarantee, or production restore drill is established here.\n\n🟡 Finance routes are guarded and cash-ledger paths exist, but ledger entries are not proof of physical cash settlement; no external bank/payment rail is mapped. Funnel exposure must be treated as public ingress.",
+        "height": 470,
+        "width": 760
+      },
+      "id": "d00d000000000007",
+      "name": "Open implementation and operational gaps",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2860,
+        520
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Evidence index\n\nRepresentative source: `server/modules/rep/{routes,service}.js`, `server/modules/supervisor/service.js`, Android `MadarSyncWorker.java`, `RepLocalStore.java`, `RepNativeEnginePlugin.java`; `server/modules/employees/{attendance,service}.js`; `server/modules/{maintenance,workshop,warehouse,finance,system}`; `server/modules/operations-events.js`; `server/database/connection.js`.\n\nRepresentative tests: `test/rep-api.test.js`, `test/attendance-engine.test.js`, `test/phase2-operations.test.js`, `test/phase3-warehouse.test.js`, `test/phase4-finance.test.js`, `test/phase6-parity.test.js`, `test/maintenance-multi-area.test.js`, `test/operations-events.test.js`, `test/maintenance-order-deletion.test.js`.\n\nSee `madar-v2/n8n/MADAR_V2_FULL_LIFECYCLE_ARCHITECTURE.md` for the evidence matrix, exact path semantics, and limitations.",
+        "height": 350,
+        "width": 760
+      },
+      "id": "d00d000000000008",
+      "name": "Source and test references",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2860,
+        1040
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "d00d000000000009",
+      "name": "🟡 Transport - Tailscale HTTPS plus Funnel",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        0,
+        1050
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "d00d000000000010",
+      "name": "🟢 MADAR V2 Express API boundary",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        300,
+        1050
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "d00d000000000011",
+      "name": "🟢 Rep login - session cookie and Android bearer token",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        600,
+        1050
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "d00d000000000012",
+      "name": "🟢 Assigned route and offline map-pack APIs",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        900,
+        1050
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "d00d000000000013",
+      "name": "🟡 Local route, reason and map caches",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1200,
+        850
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "d00d000000000014",
+      "name": "🟡 Native GPS duty tracking and mock detection",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1200,
+        1050
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "d00d000000000015",
+      "name": "🟡 Camera - EXIF orientation, portrait and watermark",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1200,
+        1250
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "d00d000000000016",
+      "name": "🟡 Local SQLite queue and WorkManager multipart upload",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1500,
+        1250
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "d00d000000000017",
+      "name": "🟢 POST /api/rep/sync-visit",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1800,
+        1250
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "d00d000000000018",
+      "name": "🟢 UUID plus payload hash idempotency and file staging",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        2100,
+        1250
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "d00d000000000019",
+      "name": "🟠 Visit received; supervisor review is pending",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        2400,
+        1250
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "d00d000000000020",
+      "name": "🟠 Supervisor QA - approve or request reshoot",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        2700,
+        1250
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "d00d000000000021",
+      "name": "🟢 Reshoot branch back to field operations",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        3000,
+        1150
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "d00d000000000022",
+      "name": "🟢 Approval commits maintenance card completed",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        3000,
+        1350
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "d00d000000000023",
+      "name": "🟢 Visit note history written at successful sync",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        2700,
+        1550
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "d00d000000000024",
+      "name": "🟢 Area notes timeline and selective XLSX export",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        3300,
+        1550
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "d00d000000000025",
+      "name": "🟢 Sharp-derived viewer, thumbnails and exports",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        3300,
+        1750
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "d00d000000000053",
+      "name": "🟢 Durable upright photo rotation derivatives and audited reassignment",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        3000,
+        1750
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "d00d000000000026",
+      "name": "🟢 Employee master and linked login identities",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        0,
+        1850
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "d00d000000000027",
+      "name": "🟡 Attendance - Cairo shift, GPS and biometricVerified",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        300,
+        1850
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "d00d000000000028",
+      "name": "🟢 Overtime review and monthly payroll calculation",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        600,
+        1850
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "d00d000000000029",
+      "name": "🟢 Payroll finalization posts treasury expense",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        900,
+        1850
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "d00d000000000030",
+      "name": "🟢 Maintenance orders, cards and rep assignments",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        0,
+        2200
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "d00d000000000031",
+      "name": "🟢 Maintenance petty cash, actuals and archive refund",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        300,
+        2200
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "d00d000000000032",
+      "name": "🟢 Workshop MFG production order and technicians",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        0,
+        2550
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "d00d000000000033",
+      "name": "🟢 Main material or secondary offcut issue to production",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        300,
+        2550
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "d00d000000000034",
+      "name": "🟢 Inventory movements and stock audit",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        600,
+        2550
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "d00d000000000035",
+      "name": "🟢 Ready transition registers reusable offcuts",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        900,
+        2550
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "d00d000000000036",
+      "name": "🟢 Secondary warehouse offcut reuse",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1200,
+        2550
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "d00d000000000037",
+      "name": "🟢 Workshop delivery - sales invoice then separate receipt",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1200,
+        2750
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "d00d000000000038",
+      "name": "🟢 Purchase invoice - stock receipt then payment voucher",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        0,
+        2900
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "d00d000000000039",
+      "name": "🟢 Treasury cash ledger and Finance/Admin RBAC",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1600,
+        2200
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "d00d000000000040",
+      "name": "🟢 Persistent audit log - Admin-only browsing",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1900,
+        2200
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "d00d000000000041",
+      "name": "🟢 SQLite event log with in-process fan-out",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1900,
+        800
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "d00d000000000042",
+      "name": "🟢 Rep and supervisor SSE streams",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        2200,
+        800
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "d00d000000000043",
+      "name": "🟢 SQLite database - WAL enabled",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        2200,
+        2200
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "d00d000000000044",
+      "name": "🟢 Configured local storage root - Areas and business files",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        2500,
+        2200
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "d00d000000000045",
+      "name": "🟢 Daily local snapshot plus storage ZIP backup",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        2800,
+        2200
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "d00d000000000046",
+      "name": "🟡 Restore endpoint - temporary integration tests only",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        3100,
+        2200
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "d00d000000000047",
+      "name": "🟢 Restored database and files (separate recovery target)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        3400,
+        2200
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "d00d000000000048",
+      "name": "🔴 GAP - no structured ATM module or warehouse serial tracking",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        0,
+        3250
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "d00d000000000049",
+      "name": "🟢 Main-stock whole-unit rounding and remainder-offcut loop",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        400,
+        3250
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "d00d000000000050",
+      "name": "🟡 LIMIT - no Android field-device verification",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        800,
+        3250
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "d00d000000000051",
+      "name": "🟡 LIMIT - bounded SSE replay and single-process fan-out",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1200,
+        3250
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "d00d000000000052",
+      "name": "🟡 LIMIT - no permanent/off-site backup proof",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1600,
+        3250
+      ]
+    }
+  ],
+  "connections": {
+    "Run architecture map (manual only)": {
+      "main": [
+        [
+          {
+            "node": "Static evidence index (no live calls)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Static evidence index (no live calls)": {
+      "main": [
+        [
+          {
+            "node": "Static index emitted - diagram nodes are not executed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Static index emitted - diagram nodes are not executed": {},
+    "🗺 Architecture map only - wires are lineage, not execution": {
+      "main": [
+        [
+          {
+            "node": "🟡 Transport - Tailscale HTTPS plus Funnel",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🟢 Employee master and linked login identities",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🟢 Maintenance orders, cards and rep assignments",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🟢 Workshop MFG production order and technicians",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🟢 Purchase invoice - stock receipt then payment voucher",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🟢 Durable upright photo rotation derivatives and audited reassignment",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🟢 Persistent audit log - Admin-only browsing",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🔴 GAP - no structured ATM module or warehouse serial tracking",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🟢 Main-stock whole-unit rounding and remainder-offcut loop",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🟡 LIMIT - no Android field-device verification",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🟡 LIMIT - bounded SSE replay and single-process fan-out",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🟡 LIMIT - no permanent/off-site backup proof",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🟡 Transport - Tailscale HTTPS plus Funnel": {
+      "main": [
+        [
+          {
+            "node": "🟢 MADAR V2 Express API boundary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🟢 MADAR V2 Express API boundary": {
+      "main": [
+        [
+          {
+            "node": "🟢 Rep login - session cookie and Android bearer token",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🟢 SQLite database - WAL enabled",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🟢 Rep login - session cookie and Android bearer token": {
+      "main": [
+        [
+          {
+            "node": "🟢 Assigned route and offline map-pack APIs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🟢 Assigned route and offline map-pack APIs": {
+      "main": [
+        [
+          {
+            "node": "🟡 Local route, reason and map caches",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🟡 Native GPS duty tracking and mock detection",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🟡 Camera - EXIF orientation, portrait and watermark",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🟡 Local route, reason and map caches": {
+      "main": [
+        [
+          {
+            "node": "🟡 Camera - EXIF orientation, portrait and watermark",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🟡 Native GPS duty tracking and mock detection": {
+      "main": [
+        [
+          {
+            "node": "🟢 SQLite event log with in-process fan-out",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🟡 Attendance - Cairo shift, GPS and biometricVerified",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🟡 Camera - EXIF orientation, portrait and watermark": {
+      "main": [
+        [
+          {
+            "node": "🟡 Local SQLite queue and WorkManager multipart upload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🟡 Local SQLite queue and WorkManager multipart upload": {
+      "main": [
+        [
+          {
+            "node": "🟢 POST /api/rep/sync-visit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🟢 POST /api/rep/sync-visit": {
+      "main": [
+        [
+          {
+            "node": "🟢 UUID plus payload hash idempotency and file staging",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🟢 UUID plus payload hash idempotency and file staging": {
+      "main": [
+        [
+          {
+            "node": "🟠 Visit received; supervisor review is pending",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🟢 Configured local storage root - Areas and business files",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🟢 Visit note history written at successful sync",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🟢 SQLite event log with in-process fan-out",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🟢 Persistent audit log - Admin-only browsing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🟠 Visit received; supervisor review is pending": {
+      "main": [
+        [
+          {
+            "node": "🟠 Supervisor QA - approve or request reshoot",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🟢 SQLite database - WAL enabled",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🟠 Supervisor QA - approve or request reshoot": {
+      "main": [
+        [
+          {
+            "node": "🟢 Reshoot branch back to field operations",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🟢 Approval commits maintenance card completed",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🟢 SQLite event log with in-process fan-out",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🟢 Persistent audit log - Admin-only browsing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🟢 Approval commits maintenance card completed": {
+      "main": [
+        [
+          {
+            "node": "🟢 SQLite database - WAL enabled",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🟢 Visit note history written at successful sync": {
+      "main": [
+        [
+          {
+            "node": "🟢 SQLite database - WAL enabled",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🟢 Employee master and linked login identities": {
+      "main": [
+        [
+          {
+            "node": "🟡 Attendance - Cairo shift, GPS and biometricVerified",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🟢 Workshop MFG production order and technicians",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🟢 SQLite database - WAL enabled",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🟢 Persistent audit log - Admin-only browsing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🟡 Attendance - Cairo shift, GPS and biometricVerified": {
+      "main": [
+        [
+          {
+            "node": "🟢 Overtime review and monthly payroll calculation",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🟢 SQLite event log with in-process fan-out",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🟢 SQLite database - WAL enabled",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🟢 Persistent audit log - Admin-only browsing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🟢 Overtime review and monthly payroll calculation": {
+      "main": [
+        [
+          {
+            "node": "🟢 Payroll finalization posts treasury expense",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🟢 Payroll finalization posts treasury expense": {
+      "main": [
+        [
+          {
+            "node": "🟢 Treasury cash ledger and Finance/Admin RBAC",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🟢 Persistent audit log - Admin-only browsing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🟢 Maintenance orders, cards and rep assignments": {
+      "main": [
+        [
+          {
+            "node": "🟢 Assigned route and offline map-pack APIs",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🟢 Maintenance petty cash, actuals and archive refund",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🟢 SQLite database - WAL enabled",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🟢 Persistent audit log - Admin-only browsing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🟢 Maintenance petty cash, actuals and archive refund": {
+      "main": [
+        [
+          {
+            "node": "🟢 Treasury cash ledger and Finance/Admin RBAC",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🟢 SQLite database - WAL enabled",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🟢 Persistent audit log - Admin-only browsing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🟢 Workshop MFG production order and technicians": {
+      "main": [
+        [
+          {
+            "node": "🟢 Main material or secondary offcut issue to production",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🟢 Ready transition registers reusable offcuts",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🟢 Persistent audit log - Admin-only browsing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🟢 Main material or secondary offcut issue to production": {
+      "main": [
+        [
+          {
+            "node": "🟢 Inventory movements and stock audit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🟢 Inventory movements and stock audit": {
+      "main": [
+        [
+          {
+            "node": "🟢 SQLite database - WAL enabled",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🟢 Persistent audit log - Admin-only browsing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🟢 Ready transition registers reusable offcuts": {
+      "main": [
+        [
+          {
+            "node": "🟢 Secondary warehouse offcut reuse",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🟢 Workshop delivery - sales invoice then separate receipt",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🟢 SQLite database - WAL enabled",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🟢 Persistent audit log - Admin-only browsing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🟢 Secondary warehouse offcut reuse": {
+      "main": [
+        [
+          {
+            "node": "🟢 Inventory movements and stock audit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🟢 Workshop delivery - sales invoice then separate receipt": {
+      "main": [
+        [
+          {
+            "node": "🟢 Treasury cash ledger and Finance/Admin RBAC",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🟢 SQLite database - WAL enabled",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🟢 Persistent audit log - Admin-only browsing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🟢 Purchase invoice - stock receipt then payment voucher": {
+      "main": [
+        [
+          {
+            "node": "🟢 Inventory movements and stock audit",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🟢 Treasury cash ledger and Finance/Admin RBAC",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🟢 Persistent audit log - Admin-only browsing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🟢 Treasury cash ledger and Finance/Admin RBAC": {
+      "main": [
+        [
+          {
+            "node": "🟢 SQLite database - WAL enabled",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🟢 Persistent audit log - Admin-only browsing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🟢 Persistent audit log - Admin-only browsing": {
+      "main": [
+        [
+          {
+            "node": "🟢 SQLite database - WAL enabled",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🟢 SQLite database - WAL enabled": {
+      "main": [
+        [
+          {
+            "node": "🟢 Area notes timeline and selective XLSX export",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🟢 Sharp-derived viewer, thumbnails and exports",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🟢 Daily local snapshot plus storage ZIP backup",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🟢 Configured local storage root - Areas and business files": {
+      "main": [
+        [
+          {
+            "node": "🟢 Sharp-derived viewer, thumbnails and exports",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🟢 Daily local snapshot plus storage ZIP backup",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🟢 Daily local snapshot plus storage ZIP backup": {
+      "main": [
+        [
+          {
+            "node": "🟡 Restore endpoint - temporary integration tests only",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🟡 Restore endpoint - temporary integration tests only": {
+      "main": [
+        [
+          {
+            "node": "🟢 Restored database and files (separate recovery target)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🟢 Durable upright photo rotation derivatives and audited reassignment": {
+      "main": [
+        [
+          {
+            "node": "🟢 SQLite database - WAL enabled",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🟢 Persistent audit log - Admin-only browsing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🟢 SQLite event log with in-process fan-out": {
+      "main": [
+        [
+          {
+            "node": "🟢 Rep and supervisor SSE streams",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Africa/Cairo"
+  },
+  "pinData": {},
+  "staticData": null,
+  "tags": []
+}

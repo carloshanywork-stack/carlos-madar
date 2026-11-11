@@ -18,7 +18,7 @@ import java.util.Set;
 /** Native SQLite cache and durable queue. Source photos live under filesDir/MADAR/uploads. */
 final class RepLocalStore extends SQLiteOpenHelper {
     private static final String DATABASE_NAME = "madar_rep_local.db";
-    private static final int DATABASE_VERSION = 1;
+    private static final int DATABASE_VERSION = 3;
 
     RepLocalStore(Context context) {
         super(context.getApplicationContext(), DATABASE_NAME, null, DATABASE_VERSION);
@@ -33,11 +33,38 @@ final class RepLocalStore extends SQLiteOpenHelper {
         database.execSQL("CREATE TABLE pending_visits (visit_uuid TEXT PRIMARY KEY, rep_id INTEGER NOT NULL, rep_username TEXT NOT NULL, payload_json TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL)");
         database.execSQL("CREATE INDEX pending_visits_by_rep_status_created ON pending_visits(rep_id, status, created_at)");
         database.execSQL("CREATE TABLE visit_photos (visit_uuid TEXT NOT NULL REFERENCES pending_visits(visit_uuid) ON DELETE CASCADE, phase TEXT NOT NULL, photo_index INTEGER NOT NULL, path TEXT NOT NULL, captured_at TEXT NOT NULL, PRIMARY KEY(visit_uuid, phase, photo_index))");
+        createAttendanceQueue(database);
+        createMachineActionQueue(database);
     }
 
     @Override
     public void onUpgrade(SQLiteDatabase database, int oldVersion, int newVersion) {
-        // Local business evidence is preserved; future native schema changes are additive.
+        if (oldVersion < 2) createAttendanceQueue(database);
+        if (oldVersion < 3) createMachineActionQueue(database);
+    }
+
+    private static void createAttendanceQueue(SQLiteDatabase database) {
+        database.execSQL("CREATE TABLE IF NOT EXISTS pending_attendance_actions ("
+            + "action_uuid TEXT PRIMARY KEY, rep_id INTEGER NOT NULL, action TEXT NOT NULL CHECK (action IN ('in', 'out')), "
+            + "payload_json TEXT NOT NULL, occurred_at TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending_attendance_sync', "
+            + "attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL)");
+        database.execSQL("CREATE INDEX IF NOT EXISTS pending_attendance_by_rep_created "
+            + "ON pending_attendance_actions(rep_id, occurred_at, created_at)");
+    }
+
+    private static void createMachineActionQueue(SQLiteDatabase database) {
+        database.execSQL("CREATE TABLE IF NOT EXISTS pending_machine_actions ("
+            + "action_uuid TEXT PRIMARY KEY, rep_id INTEGER NOT NULL, action_type TEXT NOT NULL "
+            + "CHECK (action_type IN ('confirm_location', 'report_correction')), "
+            + "machine_id INTEGER NOT NULL, card_id INTEGER NOT NULL, payload_json TEXT NOT NULL, "
+            + "evidence_path TEXT NOT NULL DEFAULT '', evidence_content_type TEXT NOT NULL DEFAULT '', "
+            + "status TEXT NOT NULL DEFAULT 'queued', attempts INTEGER NOT NULL DEFAULT 0, "
+            + "last_error TEXT NOT NULL DEFAULT '', correction_id INTEGER, server_status TEXT NOT NULL DEFAULT '', "
+            + "review_note TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL)");
+        database.execSQL("CREATE INDEX IF NOT EXISTS pending_machine_actions_by_rep_status "
+            + "ON pending_machine_actions(rep_id, status, created_at)");
+        database.execSQL("CREATE INDEX IF NOT EXISTS pending_machine_actions_by_card "
+            + "ON pending_machine_actions(rep_id, card_id, status)");
     }
 
     synchronized void cacheRoute(long repId, String routeJson) throws Exception {
@@ -195,11 +222,27 @@ final class RepLocalStore extends SQLiteOpenHelper {
         }
     }
 
-    synchronized Visit nextVisit(long repId) throws Exception {
+    synchronized Visit nextVisit(long repId, Set<Long> excludedCardIds) throws Exception {
+        String filter = "";
+        List<String> arguments = new ArrayList<>();
+        arguments.add(String.valueOf(repId));
+        if (excludedCardIds != null && !excludedCardIds.isEmpty()) {
+            StringBuilder placeholders = new StringBuilder();
+            for (Long cardId : excludedCardIds) {
+                if (cardId == null || cardId < 1L) continue;
+                if (placeholders.length() > 0) placeholders.append(", ");
+                placeholders.append('?');
+                arguments.add(String.valueOf(cardId));
+            }
+            if (placeholders.length() > 0) {
+                filter = " AND CAST(json_extract(payload_json, '$.cardId') AS INTEGER) NOT IN (" + placeholders + ")";
+            }
+        }
         SQLiteDatabase database = getWritableDatabase();
         try (Cursor cursor = database.rawQuery(
-            "SELECT visit_uuid, rep_id, payload_json FROM pending_visits WHERE rep_id = ? AND status IN ('pending', 'uploading') ORDER BY created_at ASC LIMIT 1",
-            new String[] { String.valueOf(repId) }
+            "SELECT visit_uuid, rep_id, payload_json FROM pending_visits WHERE rep_id = ? AND status IN ('pending', 'uploading')"
+                + filter + " ORDER BY created_at ASC LIMIT 1",
+            arguments.toArray(new String[0])
         )) {
             if (!cursor.moveToFirst()) return null;
             String uuid = cursor.getString(0);
@@ -240,6 +283,310 @@ final class RepLocalStore extends SQLiteOpenHelper {
         return getWritableDatabase().update("pending_visits", values,
             "visit_uuid = ? AND rep_id = ? AND status = 'blocked'",
             new String[] { visitUuid, String.valueOf(repId) }) == 1;
+    }
+
+    synchronized void enqueueAttendanceAction(JSONObject action) throws Exception {
+        String actionUuid = action.getString("actionUuid");
+        if (!actionUuid.matches("(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")) {
+            throw new IllegalArgumentException("A valid attendance action UUID is required.");
+        }
+        long repId = action.getLong("repId");
+        String kind = action.getString("action");
+        if (repId < 1L || !("in".equals(kind) || "out".equals(kind))) {
+            throw new IllegalArgumentException("The representative and attendance action are invalid.");
+        }
+        if (!action.optBoolean("biometricVerified", false)) throw new IllegalArgumentException("Device authentication is required.");
+        String occurredAt = action.getString("occurredAt");
+        if (occurredAt.length() < 20 || !occurredAt.matches("^\\d{4}-\\d{2}-\\d{2}T.*(?:Z|[+-]\\d{2}:?\\d{2})$")) {
+            throw new IllegalArgumentException("The attendance timestamp is invalid.");
+        }
+        JSONObject location = action.optJSONObject("location");
+        if (location == null) throw new IllegalArgumentException("A GPS fix is required for attendance.");
+        double latitude = location.optDouble("latitude", Double.NaN);
+        double longitude = location.optDouble("longitude", Double.NaN);
+        double accuracy = location.optDouble("accuracy", Double.NaN);
+        if (!Double.isFinite(latitude) || latitude < -90 || latitude > 90
+            || !Double.isFinite(longitude) || longitude < -180 || longitude > 180
+            || !Double.isFinite(accuracy) || accuracy < 0 || accuracy > 250) {
+            throw new IllegalArgumentException("The attendance GPS fix must be accurate to 250 meters or better.");
+        }
+
+        SQLiteDatabase database = getWritableDatabase();
+        database.beginTransaction();
+        try {
+            try (Cursor existing = database.rawQuery(
+                "SELECT rep_id, payload_json FROM pending_attendance_actions WHERE action_uuid = ?",
+                new String[] { actionUuid }
+            )) {
+                if (existing.moveToFirst()) {
+                    if (existing.getLong(0) != repId || !existing.getString(1).equals(action.toString())) {
+                        throw new IllegalStateException("This attendance action UUID already has different local data.");
+                    }
+                    database.setTransactionSuccessful();
+                    return;
+                }
+            }
+            ContentValues values = new ContentValues();
+            values.put("action_uuid", actionUuid);
+            values.put("rep_id", repId);
+            values.put("action", kind);
+            values.put("payload_json", action.toString());
+            values.put("occurred_at", occurredAt);
+            values.put("status", "pending_attendance_sync");
+            java.text.SimpleDateFormat createdAtFormat = new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US);
+            createdAtFormat.setTimeZone(java.util.TimeZone.getTimeZone("UTC"));
+            values.put("created_at", createdAtFormat.format(new java.util.Date()));
+            database.insertOrThrow("pending_attendance_actions", null, values);
+            database.setTransactionSuccessful();
+        } finally {
+            database.endTransaction();
+        }
+    }
+
+    synchronized AttendanceAction nextAttendanceAction(long repId) throws Exception {
+        try (Cursor cursor = getReadableDatabase().rawQuery(
+            "SELECT action_uuid, rep_id, payload_json, attempts FROM pending_attendance_actions "
+                + "WHERE rep_id = ? AND status = 'pending_attendance_sync' ORDER BY occurred_at, created_at LIMIT 1",
+            new String[] { String.valueOf(repId) }
+        )) {
+            if (!cursor.moveToFirst()) return null;
+            return new AttendanceAction(cursor.getString(0), cursor.getLong(1), new JSONObject(cursor.getString(2)), cursor.getInt(3));
+        }
+    }
+
+    synchronized JSONArray listAttendanceActions(long repId) throws Exception {
+        JSONArray actions = new JSONArray();
+        try (Cursor cursor = getReadableDatabase().rawQuery(
+            "SELECT action_uuid, payload_json, status, attempts, last_error, created_at "
+                + "FROM pending_attendance_actions WHERE rep_id = ? ORDER BY occurred_at, created_at LIMIT 500",
+            new String[] { String.valueOf(repId) }
+        )) {
+            while (cursor.moveToNext()) {
+                JSONObject action = new JSONObject(cursor.getString(1));
+                action.put("status", cursor.getString(2));
+                action.put("attempts", cursor.getInt(3));
+                action.put("lastError", cursor.getString(4));
+                action.put("createdAt", cursor.getString(5));
+                actions.put(action);
+            }
+        }
+        return actions;
+    }
+
+    synchronized void markAttendanceRetry(String actionUuid, String error) {
+        getWritableDatabase().execSQL("UPDATE pending_attendance_actions SET attempts = attempts + 1, last_error = ? WHERE action_uuid = ?",
+            new Object[] { error == null ? "" : error, actionUuid });
+    }
+
+    /**
+     * Permanently rejected attendance must not be retried ahead of every later
+     * visit. Keep the row and its reason for review while unblocking the worker.
+     */
+    synchronized void markAttendanceRejected(String actionUuid, String error) {
+        getWritableDatabase().execSQL("UPDATE pending_attendance_actions SET status = 'attendance_rejected', "
+                + "attempts = attempts + 1, last_error = ? WHERE action_uuid = ?",
+            new Object[] { error == null ? "" : error, actionUuid });
+    }
+
+    synchronized void enqueueMachineAction(Context context, JSONObject action) throws Exception {
+        String actionUuid = action.getString("actionUuid");
+        if (!actionUuid.matches("(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")) {
+            throw new IllegalArgumentException("A valid machine action UUID is required.");
+        }
+        long repId = action.getLong("repId");
+        String type = action.getString("type");
+        long machineId = action.getLong("machineId");
+        JSONObject payload = action.getJSONObject("payload");
+        long cardId = payload.optLong("cardId", 0L);
+        if (repId < 1L || machineId < 1L || cardId < 1L
+            || !("confirm_location".equals(type) || "report_correction".equals(type))) {
+            throw new IllegalArgumentException("The representative, machine, card, or action type is invalid.");
+        }
+        String createdAt = action.optString("createdAt", "");
+        if (createdAt.isEmpty()) {
+            java.text.SimpleDateFormat format = new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US);
+            format.setTimeZone(java.util.TimeZone.getTimeZone("UTC"));
+            createdAt = format.format(new java.util.Date());
+        }
+
+        String evidencePath = "";
+        String evidenceContentType = action.optString("evidenceMimeType", "");
+        String evidenceBase64 = action.optString("evidenceBase64", "");
+        if (!evidenceBase64.isEmpty()) {
+            if (!("report_correction".equals(type))) {
+                throw new IllegalArgumentException("Only machine correction reports may carry evidence.");
+            }
+            if (!("image/jpeg".equals(evidenceContentType) || "image/png".equals(evidenceContentType)
+                || "image/webp".equals(evidenceContentType))) {
+                throw new IllegalArgumentException("Evidence must be a JPEG, PNG, or WebP image.");
+            }
+            byte[] evidence = android.util.Base64.decode(evidenceBase64, android.util.Base64.DEFAULT);
+            if (evidence.length < 1 || evidence.length > 4L * 1024L * 1024L) {
+                throw new IllegalArgumentException("Evidence must be between 1 byte and 4 MiB.");
+            }
+            File directory = new File(new File(context.getFilesDir(), "MADAR"), "machine-actions");
+            if (!directory.isDirectory() && !directory.mkdirs()) {
+                throw new IllegalStateException("Could not create the machine-action evidence directory.");
+            }
+            String extension = "image/png".equals(evidenceContentType) ? "png"
+                : "image/webp".equals(evidenceContentType) ? "webp" : "jpg";
+            File evidenceFile = new File(directory, actionUuid + "." + extension).getCanonicalFile();
+            if (!evidenceFile.getPath().startsWith(directory.getCanonicalPath() + File.separator)) {
+                throw new IllegalArgumentException("Evidence path is outside app storage.");
+            }
+            try (java.io.FileOutputStream output = new java.io.FileOutputStream(evidenceFile)) {
+                output.write(evidence);
+                output.getFD().sync();
+            }
+            evidencePath = evidenceFile.getAbsolutePath();
+        }
+
+        SQLiteDatabase database = getWritableDatabase();
+        database.beginTransaction();
+        try {
+            try (Cursor existing = database.rawQuery(
+                "SELECT rep_id, machine_id, card_id, payload_json FROM pending_machine_actions WHERE action_uuid = ?",
+                new String[] { actionUuid }
+            )) {
+                if (existing.moveToFirst()) {
+                    if (existing.getLong(0) != repId || existing.getLong(1) != machineId
+                        || existing.getLong(2) != cardId || !existing.getString(3).equals(payload.toString())) {
+                        throw new IllegalStateException("This machine action UUID already has different local data.");
+                    }
+                    database.setTransactionSuccessful();
+                    return;
+                }
+            }
+            ContentValues values = new ContentValues();
+            values.put("action_uuid", actionUuid);
+            values.put("rep_id", repId);
+            values.put("action_type", type);
+            values.put("machine_id", machineId);
+            values.put("card_id", cardId);
+            values.put("payload_json", payload.toString());
+            values.put("evidence_path", evidencePath);
+            values.put("evidence_content_type", evidenceContentType);
+            values.put("status", "queued");
+            values.put("created_at", createdAt);
+            database.insertOrThrow("pending_machine_actions", null, values);
+            database.setTransactionSuccessful();
+        } finally {
+            database.endTransaction();
+        }
+    }
+
+    synchronized MachineAction nextMachineAction(long repId) throws Exception {
+        try (Cursor cursor = getReadableDatabase().rawQuery(
+            "SELECT action_uuid, rep_id, action_type, machine_id, card_id, payload_json, evidence_path, "
+                + "evidence_content_type, attempts FROM pending_machine_actions "
+                + "WHERE rep_id = ? AND status = 'queued' ORDER BY created_at, action_uuid LIMIT 1",
+            new String[] { String.valueOf(repId) }
+        )) {
+            if (!cursor.moveToFirst()) return null;
+            return new MachineAction(cursor.getString(0), cursor.getLong(1), cursor.getString(2),
+                cursor.getLong(3), cursor.getLong(4), new JSONObject(cursor.getString(5)),
+                cursor.getString(6), cursor.getString(7), cursor.getInt(8));
+        }
+    }
+
+    synchronized void markMachineActionSyncing(String actionUuid) {
+        getWritableDatabase().execSQL("UPDATE pending_machine_actions SET status = 'syncing', attempts = attempts + 1 WHERE action_uuid = ?",
+            new Object[] { actionUuid });
+    }
+
+    synchronized void markMachineActionPendingApproval(String actionUuid, long correctionId, String serverStatus) {
+        ContentValues values = new ContentValues();
+        values.put("status", "pending_approval");
+        values.put("correction_id", correctionId);
+        values.put("server_status", serverStatus == null ? "" : serverStatus);
+        values.put("last_error", "");
+        getWritableDatabase().update("pending_machine_actions", values, "action_uuid = ?", new String[] { actionUuid });
+    }
+
+    synchronized void updateMachineActionReview(String actionUuid, String status, long correctionId, String reviewNote) {
+        ContentValues values = new ContentValues();
+        values.put("status", status);
+        values.put("correction_id", correctionId);
+        values.put("server_status", status);
+        values.put("review_note", reviewNote == null ? "" : reviewNote);
+        getWritableDatabase().update("pending_machine_actions", values, "action_uuid = ?", new String[] { actionUuid });
+    }
+
+    synchronized void markMachineActionRetry(String actionUuid, String error) {
+        ContentValues values = new ContentValues();
+        values.put("status", "queued");
+        values.put("last_error", error == null ? "" : error);
+        getWritableDatabase().update("pending_machine_actions", values, "action_uuid = ?", new String[] { actionUuid });
+    }
+
+    synchronized void markMachineActionBlocked(String actionUuid, String error) {
+        ContentValues values = new ContentValues();
+        values.put("status", "blocked");
+        values.put("last_error", error == null ? "" : error);
+        getWritableDatabase().update("pending_machine_actions", values, "action_uuid = ?", new String[] { actionUuid });
+    }
+
+    synchronized void deleteMachineAction(String actionUuid, long repId) {
+        try (Cursor cursor = getReadableDatabase().rawQuery(
+            "SELECT evidence_path FROM pending_machine_actions WHERE action_uuid = ? AND rep_id = ?",
+            new String[] { actionUuid, String.valueOf(repId) }
+        )) {
+            if (cursor.moveToFirst()) {
+                String path = cursor.getString(0);
+                if (path != null && !path.isEmpty()) new File(path).delete();
+            }
+        }
+        getWritableDatabase().delete("pending_machine_actions", "action_uuid = ? AND rep_id = ?",
+            new String[] { actionUuid, String.valueOf(repId) });
+    }
+
+    synchronized Set<Long> blockingMachineCardIds(long repId) {
+        Set<Long> cardIds = new HashSet<>();
+        try (Cursor cursor = getReadableDatabase().rawQuery(
+            "SELECT card_id FROM pending_machine_actions WHERE rep_id = ? AND ("
+                + "(action_type = 'confirm_location' AND status IN ('queued', 'syncing', 'pending_approval', 'blocked', 'rejected')) "
+                + "OR (action_type = 'report_correction' AND status IN ('queued', 'syncing', 'blocked')))",
+            new String[] { String.valueOf(repId) }
+        )) {
+            while (cursor.moveToNext()) cardIds.add(cursor.getLong(0));
+        }
+        return cardIds;
+    }
+
+    synchronized JSONArray listMachineActions(long repId) throws Exception {
+        JSONArray actions = new JSONArray();
+        try (Cursor cursor = getReadableDatabase().rawQuery(
+            "SELECT action_uuid, action_type, machine_id, card_id, payload_json, evidence_path, "
+                + "evidence_content_type, status, attempts, last_error, correction_id, server_status, "
+                + "review_note, created_at FROM pending_machine_actions WHERE rep_id = ? "
+                + "ORDER BY created_at, action_uuid LIMIT 500",
+            new String[] { String.valueOf(repId) }
+        )) {
+            while (cursor.moveToNext()) {
+                JSONObject action = new JSONObject();
+                action.put("actionUuid", cursor.getString(0));
+                action.put("repId", repId);
+                action.put("type", cursor.getString(1));
+                action.put("machineId", cursor.getLong(2));
+                action.put("payload", new JSONObject(cursor.getString(4)));
+                action.put("status", cursor.getString(7));
+                action.put("attempts", cursor.getInt(8));
+                action.put("lastError", cursor.getString(9));
+                if (!cursor.isNull(10)) action.put("correctionId", cursor.getLong(10));
+                action.put("serverStatus", cursor.getString(11));
+                action.put("reviewNote", cursor.getString(12));
+                action.put("createdAt", cursor.getString(13));
+                action.put("evidencePath", cursor.getString(5));
+                action.put("evidenceContentType", cursor.getString(6));
+                actions.put(action);
+            }
+        }
+        return actions;
+    }
+
+    synchronized boolean deleteAttendanceAction(String actionUuid, long repId) {
+        return getWritableDatabase().delete("pending_attendance_actions", "action_uuid = ? AND rep_id = ?",
+            new String[] { actionUuid, String.valueOf(repId) }) == 1;
     }
 
     synchronized List<String> markSynced(String visitUuid) {
@@ -322,6 +669,43 @@ final class RepLocalStore extends SQLiteOpenHelper {
         final List<Photo> photos;
         Visit(String visitUuid, long repId, JSONObject payload, List<Photo> photos) {
             this.visitUuid = visitUuid; this.repId = repId; this.payload = payload; this.photos = photos;
+        }
+    }
+
+    static final class AttendanceAction {
+        final String actionUuid;
+        final long repId;
+        final JSONObject payload;
+        final int attempts;
+        AttendanceAction(String actionUuid, long repId, JSONObject payload, int attempts) {
+            this.actionUuid = actionUuid;
+            this.repId = repId;
+            this.payload = payload;
+            this.attempts = attempts;
+        }
+    }
+
+    static final class MachineAction {
+        final String actionUuid;
+        final long repId;
+        final String type;
+        final long machineId;
+        final long cardId;
+        final JSONObject payload;
+        final String evidencePath;
+        final String evidenceContentType;
+        final int attempts;
+        MachineAction(String actionUuid, long repId, String type, long machineId, long cardId,
+            JSONObject payload, String evidencePath, String evidenceContentType, int attempts) {
+            this.actionUuid = actionUuid;
+            this.repId = repId;
+            this.type = type;
+            this.machineId = machineId;
+            this.cardId = cardId;
+            this.payload = payload;
+            this.evidencePath = evidencePath;
+            this.evidenceContentType = evidenceContentType;
+            this.attempts = attempts;
         }
     }
 }

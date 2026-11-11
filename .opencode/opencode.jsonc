@@ -1,19 +1,35 @@
 {
   "$schema": "https://opencode.ai/config.json",
+  "permissions": [
+    { "action": "skill", "resource": "*", "effect": "deny" },
+    { "action": "skill", "resource": "chrome-devtools", "effect": "allow" },
+    { "action": "skill", "resource": "capacitor-android-engineer", "effect": "allow" },
+    { "action": "skill", "resource": "sqlite-wal-dba", "effect": "allow" },
+    { "action": "skill", "resource": "code-review", "effect": "allow" },
+    { "action": "skill", "resource": "madar-closed-loop-refactor", "effect": "allow" },
+    { "action": "skill", "resource": "madar-erp-core-guidelines", "effect": "allow" }
+  ],
   "instructions": [
     ".opencode/skills/madar-erp-core-guidelines/SKILL.md"
   ],
   "mcp": {
     "servers": {
-      "madar-filesystem": {
+      "chrome-devtools": {
         "type": "local",
         "command": [
           "npx",
           "-y",
-          "@modelcontextprotocol/server-filesystem@2.0.1",
-          "C:\\Users\\Carlos.wok\\Desktop\\MADAR"
+          "chrome-devtools-mcp@1.12.0",
+          "--no-usage-statistics",
+          "--no-performance-crux"
         ],
-        "cwd": "C:\\Users\\Carlos.wok\\Desktop\\MADAR"
+        "environment": {
+          "CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS": "1"
+        }
+      },
+      "context7": {
+        "type": "remote",
+        "url": "https://mcp.context7.com/mcp/oauth"
       }
     }
   }

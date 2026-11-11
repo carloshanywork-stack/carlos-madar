@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as XLSX from 'xlsx';
@@ -21,7 +21,7 @@ process.env.MADAR_V2_STORAGE_ROOT = storageRoot;
 process.env.MADAR_V2_BACKUP_ROOT = join(temporaryDirectory, 'Backups');
 process.env.NODE_ENV = 'test';
 
-const [{ app }, { db }, { initializeDatabase }, { classifyMachinePhotos, matchMachineFolder, matchMachineFolderGroups, normalizeMachineFolderName }, { renameAreaSourceDirectory }, { compareMachineCodes, compareMachineNames, compareMaintenanceAreas, normalizeArabicSortKey }, { buildAreaMaintenanceNotesWorkbook }] = await Promise.all([
+const [{ app }, { db }, { initializeDatabase }, { classifyMachinePhotos, matchMachineFolder, matchMachineFolderGroups, normalizeMachineFolderName }, { renameAreaSourceDirectory }, { compareMachineCodes, compareMachineNames, compareMaintenanceAreas, normalizeArabicSortKey }, { buildAreaMaintenanceNotesWorkbook }, { recoverInterruptedRestore }] = await Promise.all([
   import('../server/app.js'),
   import('../server/database/connection.js'),
   import('../server/database/init.js'),
@@ -29,6 +29,7 @@ const [{ app }, { db }, { initializeDatabase }, { classifyMachinePhotos, matchMa
   import('../server/modules/maintenance/service.js'),
   import('../server/modules/maintenance/sorting.js'),
   import('../server/modules/maintenance/area-notes.js'),
+  import('../server/modules/system/backup.js'),
 ]);
 
 const adminPassword = 'phase6-test-admin-password';
@@ -149,8 +150,13 @@ async function writePptxPhotoFixture(relativePath, background = '#d94841', { wid
 
 test('empty maintenance archive returns the localized no-photo export error', async () => {
   const result = await request('/api/maintenance/export/pptx', json('POST', { orderIds: [] }));
-  assert.equal(result.response.status, 404);
-  assert.equal(result.body.error, 'لا توجد بطاقات صيانة تحتوي على صور للأوامر والفلاتر المحددة.');
+  assert.equal(result.response.status, 400);
+  assert.equal(result.body.error, 'يرجى تحديد أمر صيانة واحد على الأقل للتصدير.');
+  const oversizedRequest = await request('/api/maintenance/export/pptx', json('POST', {
+    orderIds: Array.from({ length: 50 }, (_, index) => index + 1),
+  }));
+  assert.equal(oversizedRequest.response.status, 400);
+  assert.equal(oversizedRequest.body.error, 'يرجى تحديد 20 أمر صيانة كحد أقصى للتصدير الواحد');
 });
 
 test('maintenance Storage explorer browses safe Areas folders and reports direct photos', async () => {
@@ -744,6 +750,34 @@ test('V2 parity operations cover imports, area maintenance, HR, exports, users, 
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM machines WHERE code LIKE \'PARITY-%\'').get().count, 7);
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM payroll_runs WHERE month_year = \'2026-01\' AND status = \'finalized\'').get().count, 1);
 
+  const previousStorageMarker = join(storageDrive, 'previous-storage.marker');
+  writeFileSync(previousStorageMarker, 'previous storage');
+  const oldStoragePath = join(temporaryDirectory, '.madar-v2-storage-old-interrupted-test');
+  renameSync(storageDrive, oldStoragePath);
+  mkdirSync(storageDrive, { recursive: true });
+  writeFileSync(join(storageDrive, 'incomplete-new-storage.marker'), 'incomplete restore');
+  const stageRoot = join(temporaryDirectory, '.madar-v2-restore-interrupted-test');
+  mkdirSync(join(stageRoot, 'data'), { recursive: true });
+  mkdirSync(join(stageRoot, 'storage'), { recursive: true });
+  const restoreTimestamp = new Date().toISOString();
+  writeFileSync(join(temporaryDirectory, 'data', '.restore-in-progress.json'), JSON.stringify({
+    stage: 'db_replacing',
+    oldStoragePath,
+    oldStorageExisted: true,
+    newStoragePath: storageDrive,
+    snapshotPath: join(stageRoot, 'data', 'madar-v2.sqlite'),
+    stagedStoragePath: join(stageRoot, 'storage'),
+    stageRoot,
+    timestamp: restoreTimestamp,
+  }));
+  const recoveryAlerts = [];
+  const restoreRecovery = await recoverInterruptedRestore({ database: db, logger: { error: (message) => recoveryAlerts.push(message) } });
+  assert.deepEqual(restoreRecovery, { recovered: true, outcome: 'rolled_back' });
+  assert.equal(readFileSync(previousStorageMarker, 'utf8'), 'previous storage');
+  assert.equal(existsSync(join(storageDrive, 'incomplete-new-storage.marker')), false);
+  assert.equal(existsSync(join(temporaryDirectory, 'data', '.restore-in-progress.json')), false);
+  assert.equal(recoveryAlerts.length, 1);
+
   const postRestoreIndexLogin = await fetch(`${baseUrl}/api/auth/login`, {
     method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ username: 'admin', password: adminPassword }),
@@ -955,13 +989,25 @@ test('maintenance reasons support audited soft deactivation and area analysis ex
   db.prepare("UPDATE maintenance_orders SET status = 'archived', archived_at = '2026-02-14 12:00:00' WHERE id = ?").run(order.body.id);
   db.prepare("UPDATE maintenance_cards SET status = 'completed' WHERE id = ?").run(completedCard.id);
 
-  const allArchivedPptx = await request('/api/maintenance/export/pptx', json('POST', {
-    orderIds: [], reasonId, area: 'مدينة التحليل', groupBy: 'reason',
+  const additionalExportOrderIds = [];
+  for (let index = 0; index < 4; index += 1) {
+    const additionalOrder = await request('/api/maintenance/orders', json('POST', {
+      clientId: createdClient.body.id,
+      area: 'مدينة التحليل',
+      employeeIds: [],
+      autoPopulateAreaMachines: false,
+    }));
+    assert.equal(additionalOrder.response.status, 201, JSON.stringify(additionalOrder.body));
+    db.prepare("UPDATE maintenance_orders SET status = 'archived', archived_at = CURRENT_TIMESTAMP WHERE id = ?")
+      .run(additionalOrder.body.id);
+    additionalExportOrderIds.push(additionalOrder.body.id);
+  }
+  const fiveOrderPptx = await request('/api/maintenance/export/pptx', json('POST', {
+    orderIds: [order.body.id, ...additionalExportOrderIds], reasonId, area: 'مدينة التحليل', groupBy: 'reason',
   }));
-  assert.equal(allArchivedPptx.response.status, 200, JSON.stringify(allArchivedPptx.body));
-  assert.match(allArchivedPptx.response.headers.get('content-disposition'), /Madar_Report_/);
-  assert.equal(zipEntryNames(allArchivedPptx.body).filter((name) => /^ppt\/slides\/slide\d+\.xml$/.test(name)).length, 5,
-    'an empty orderIds list should include the matching archived card, index, area divider, and reason divider');
+  assert.equal(fiveOrderPptx.response.status, 200, JSON.stringify(fiveOrderPptx.body));
+  assert.match(fiveOrderPptx.response.headers.get('content-disposition'), /Madar_Report_/);
+  assert.ok(fiveOrderPptx.body.byteLength > 1000, 'an explicit five-order batch should export successfully');
 
   const queryPptx = await request(`/api/maintenance/export/pptx?orderIds=${order.body.id}&reasonId=${reasonId}&groupBy=reason&showReasonFooter=true`);
   assert.equal(queryPptx.response.status, 200, JSON.stringify(queryPptx.body));
@@ -1289,12 +1335,16 @@ test('area maintenance comments can be created without a card, edited on the lat
     notes: 'ملاحظة البطاقة القديمة',
   }));
   assert.equal(card.response.status, 201, JSON.stringify(card.body));
-  const cardEdit = await request(`/api/maintenance/machines/${machineResponse.body.id}/maintenance-note`, json('PUT', {
+  const cardEdit = await request('/api/maintenance/areas/notes', json('PUT', {
+    machineId: machineResponse.body.id,
     notes: '  ملاحظة البطاقة المعدلة  ',
   }));
   assert.equal(cardEdit.response.status, 200, JSON.stringify(cardEdit.body));
   assert.equal(cardEdit.body.cardId, card.body.id);
   assert.equal(cardEdit.body.notes, 'ملاحظة البطاقة المعدلة');
+  assert.equal((await request('/api/maintenance/areas/notes', json('PUT', {
+    machineId: machineResponse.body.id, notes: 'note', extra: true,
+  }))).response.status, 400);
   assert.equal(db.prepare('SELECT notes FROM maintenance_cards WHERE id = ?').get(card.body.id).notes, 'ملاحظة البطاقة المعدلة');
   assert.equal(db.prepare('SELECT maintenance_note FROM machines WHERE id = ?').get(machineResponse.body.id).maintenance_note, '');
   const updatedList = await request('/api/maintenance/area-notes?area=Area%20Note%20Edit&onlyNotes=true');

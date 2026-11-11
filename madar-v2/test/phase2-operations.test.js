@@ -403,6 +403,7 @@ test('Phase 2 client, maintenance, and workshop flows remain isolated and transa
   });
   assert.equal(profile.body.machines.some((entry) => entry.id === machine.id), true);
 
+  const treasuryEntriesBeforeDelivery = db.prepare('SELECT COUNT(*) AS count FROM treasury_entries').get().count;
   const delivered = await request(
     `/api/workshop/orders/${workshopOrder.id}/deliver`,
     jsonOptions('POST', {}),
@@ -414,7 +415,11 @@ test('Phase 2 client, maintenance, and workshop flows remain isolated and transa
   assert.equal(delivered.body.invoice.workshop_order_id, workshopOrder.id);
   assert.equal(delivered.body.invoice.client_id, client.id);
   assert.equal(delivered.body.invoice.total_cents, 54000);
+  assert.equal(delivered.body.invoice.paid_total_cents, 0);
+  assert.equal(delivered.body.invoice.remaining_cents, 54000);
+  assert.equal(delivered.body.invoice.payment_status, 'unpaid');
   assert.equal(delivered.body.order.sales_invoice_id, delivered.body.invoice.id);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM treasury_entries').get().count, treasuryEntriesBeforeDelivery);
   assert.equal((await request(`/api/workshop/orders/${workshopOrder.id}/deliver`, jsonOptions('POST', {}))).response.status, 409);
   assert.deepEqual(
     (await request('/api/workshop/orders?status=delivered_archived')).body.map((entry) => entry.order_code),

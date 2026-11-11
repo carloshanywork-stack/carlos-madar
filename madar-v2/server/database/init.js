@@ -28,6 +28,9 @@ const maintenanceUnmatchedFolderDeletionMigration = '20261031-maintenance-unmatc
 const maintenanceCardMultiReasonMigration = '20261031-maintenance-card-multi-reasons';
 const maintenanceUnmatchedFolderDuplicateMigration = '20261101-maintenance-unmatched-folder-duplicate-flags';
 const maintenancePhotoRotationMigration = '20261109-maintenance-photo-rotation-metadata';
+const maintenancePhysicalPhotoRotationMigration = '20261110-maintenance-photo-rotation-derivatives';
+const durableOperationsEventsMigration = '20261110-durable-operations-events';
+const wholeUnitMainWarehouseMigration = '20261110-main-warehouse-whole-units';
 const machineMaintenanceNotesMigration = '20261109-machine-maintenance-notes';
 const machineNotesHistoryMigration = '20261110-machine-notes-history';
 const repUserProfileMigration = '20261102-rep-user-profile';
@@ -47,7 +50,9 @@ const staffPayrollRulesMigration = '20261103-staff-payroll-shift-and-settlement'
 const adminClockOutNoteMigration = '20261104-attendance-admin-clockout-note';
 const attendanceClockLocationMigration = '20261105-attendance-clock-gps';
 const attendanceBiometricMigration = '20261105-attendance-biometric-confirmation';
+const repAttendanceSyncMigration = '20261110-rep-offline-attendance-sync';
 const machineVerificationCorrectionsMigration = '20261104-machine-verification-corrections';
+const machineLocationConfirmationReviewMigration = '20261110-machine-location-confirmation-review';
 const machineCorrectionRenameRecoveryMigration = '20261104-machine-correction-rename-recovery';
 const clientProfileCrudMigration = '20261105-client-profile-crud';
 const financeAccountRolesMigration = '20261105-finance-account-roles';
@@ -457,6 +462,94 @@ export function migrateMaintenancePhotoRotations(database) {
   `);
   database.prepare('INSERT INTO schema_migrations (version) VALUES (?)')
     .run(maintenancePhotoRotationMigration);
+}
+
+export function migrateMaintenancePhysicalPhotoRotations(database) {
+  const migrate = database.transaction(() => {
+    const applied = database.prepare('SELECT 1 FROM schema_migrations WHERE version = ?')
+      .get(maintenancePhysicalPhotoRotationMigration);
+    if (applied) return;
+    if (!tableExists(database, 'maintenance_card_photo_rotations')) {
+      migrateMaintenancePhotoRotations(database);
+    }
+    const columns = new Set(database.pragma('table_info(maintenance_card_photo_rotations)').map((column) => column.name));
+    if (!columns.has('rotated_path')) {
+      database.exec('ALTER TABLE maintenance_card_photo_rotations ADD COLUMN rotated_path TEXT');
+    }
+    database.prepare('INSERT INTO schema_migrations (version) VALUES (?)')
+      .run(maintenancePhysicalPhotoRotationMigration);
+  });
+  migrate.immediate();
+}
+
+export function migrateDurableOperationsEvents(database) {
+  const migrate = database.transaction(() => {
+    if (database.prepare('SELECT 1 FROM schema_migrations WHERE version = ?')
+      .get(durableOperationsEventsMigration)) return;
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS operations_events (
+        event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        event_type TEXT NOT NULL,
+        payload_json TEXT NOT NULL CHECK (json_valid(payload_json)),
+        occurred_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_operations_events_occurred_at
+        ON operations_events(occurred_at, event_id);
+    `);
+    database.prepare('INSERT INTO schema_migrations (version) VALUES (?)')
+      .run(durableOperationsEventsMigration);
+  });
+  migrate.immediate();
+}
+
+export function migrateWholeUnitMainWarehouse(database) {
+  const migrate = database.transaction(() => {
+    if (database.prepare('SELECT 1 FROM schema_migrations WHERE version = ?')
+      .get(wholeUnitMainWarehouseMigration)) return;
+    database.exec(`
+      CREATE TABLE inventory_movements_rebuild (
+        id INTEGER PRIMARY KEY,
+        material_id INTEGER REFERENCES materials(id),
+        offcut_id INTEGER REFERENCES secondary_warehouse_offcuts(id),
+        kind TEXT NOT NULL CHECK (kind IN ('purchase', 'issue', 'offcut_return', 'scrap_sale', 'variance_gain', 'variance_loss')),
+        quantity REAL NOT NULL CHECK (quantity > 0),
+        warehouse TEXT NOT NULL CHECK (warehouse IN ('main', 'secondary')),
+        reference TEXT,
+        source_type TEXT CHECK (source_type IN ('workshop_order', 'maintenance_custody', 'manual', 'stock_count')),
+        source_id INTEGER,
+        notes TEXT,
+        created_by INTEGER REFERENCES users(id),
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CHECK (material_id IS NOT NULL OR offcut_id IS NOT NULL)
+      );
+      INSERT INTO inventory_movements_rebuild (
+        id, material_id, offcut_id, kind, quantity, warehouse, reference,
+        source_type, source_id, notes, created_by, created_at
+      )
+      SELECT id, material_id, offcut_id, kind, quantity, warehouse, reference,
+        source_type, source_id, notes, created_by, created_at
+      FROM inventory_movements;
+      DROP TABLE inventory_movements;
+      ALTER TABLE inventory_movements_rebuild RENAME TO inventory_movements;
+      CREATE INDEX idx_inventory_movements_material_created
+        ON inventory_movements(material_id, created_at);
+      CREATE INDEX idx_inventory_movements_offcut_created
+        ON inventory_movements(offcut_id, created_at);
+      CREATE INDEX idx_inventory_movements_source
+        ON inventory_movements(source_type, source_id, created_at);
+      CREATE TRIGGER IF NOT EXISTS trg_materials_main_stock_whole_insert
+      BEFORE INSERT ON materials
+      WHEN NEW.stock <> CAST(NEW.stock AS INTEGER)
+      BEGIN SELECT RAISE(ABORT, 'Main-warehouse material stock must be whole units.'); END;
+      CREATE TRIGGER IF NOT EXISTS trg_materials_main_stock_whole_update
+      BEFORE UPDATE OF stock ON materials
+      WHEN NEW.stock <> CAST(NEW.stock AS INTEGER)
+      BEGIN SELECT RAISE(ABORT, 'Main-warehouse material stock must be whole units.'); END;
+    `);
+    database.prepare('INSERT INTO schema_migrations (version) VALUES (?)')
+      .run(wholeUnitMainWarehouseMigration);
+  });
+  migrate.immediate();
 }
 
 export function migrateMachineMaintenanceNotes(database) {
@@ -893,6 +986,30 @@ export function migrateAttendanceBiometricConfirmation(database) {
   migrate.immediate();
 }
 
+export function migrateRepAttendanceSync(database) {
+  const migrate = database.transaction(() => {
+    const applied = database.prepare('SELECT 1 FROM schema_migrations WHERE version = ?')
+      .get(repAttendanceSyncMigration);
+    if (applied) return;
+
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS rep_attendance_sync_actions (
+        action_uuid TEXT PRIMARY KEY,
+        rep_user_id INTEGER NOT NULL REFERENCES users(id),
+        attendance_id INTEGER NOT NULL REFERENCES employee_daily_attendance(id) ON DELETE RESTRICT,
+        action TEXT NOT NULL CHECK (action IN ('in', 'out')),
+        payload_sha256 TEXT NOT NULL CHECK (length(payload_sha256) = 64),
+        occurred_at TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_rep_attendance_sync_rep_created
+        ON rep_attendance_sync_actions(rep_user_id, created_at);
+    `);
+    database.prepare('INSERT INTO schema_migrations (version) VALUES (?)').run(repAttendanceSyncMigration);
+  });
+  migrate.immediate();
+}
+
 export function migrateUserEmployeeLinks(database) {
   const migrate = database.transaction(() => {
     const applied = database.prepare('SELECT 1 FROM schema_migrations WHERE version = ?')
@@ -1081,6 +1198,26 @@ export function migrateMachineVerificationAndCorrections(database) {
 
     database.prepare('INSERT INTO schema_migrations (version) VALUES (?)')
       .run(machineVerificationCorrectionsMigration);
+  });
+  migrate.immediate();
+}
+
+/** Distinguish field-submitted identity reports from geofence location approvals. */
+export function migrateMachineLocationConfirmationReview(database) {
+  const migrate = database.transaction(() => {
+    const applied = database.prepare('SELECT 1 FROM schema_migrations WHERE version = ?')
+      .get(machineLocationConfirmationReviewMigration);
+    const columns = new Set(database.pragma('table_info(machine_correction_requests)').map((column) => column.name));
+    if (!columns.has('request_type')) {
+      database.exec(`ALTER TABLE machine_correction_requests ADD COLUMN request_type TEXT NOT NULL
+        DEFAULT 'machine_identity' CHECK (request_type IN ('machine_identity', 'location_confirmation'))`);
+    }
+    database.exec(`CREATE INDEX IF NOT EXISTS idx_machine_correction_requests_type_status
+      ON machine_correction_requests(request_type, status, created_at, id)`);
+    if (!applied) {
+      database.prepare('INSERT INTO schema_migrations (version) VALUES (?)')
+        .run(machineLocationConfirmationReviewMigration);
+    }
   });
   migrate.immediate();
 }
@@ -1430,6 +1567,7 @@ export function initializeDatabase({ database = db, initialAdminPassword = env.i
     migrateOptionalOffcutMaterial(database);
     migrateClientMachineDeployments(database);
     migrateWarehouseLifecycle(database);
+    migrateWholeUnitMainWarehouse(database);
     migrateFinanceLifecycle(database);
     migrateV2FeatureParity(database);
     migrateRepVisitIngestion(database);
@@ -1437,6 +1575,7 @@ export function initializeDatabase({ database = db, initialAdminPassword = env.i
     migrateCairoTimezone(database);
     migrateMachineGeofenceAndBreadcrumbs(database);
     migrateMachineVerificationAndCorrections(database);
+    migrateMachineLocationConfirmationReview(database);
     migrateMachineCorrectionRenameRecovery(database);
     migrateGpsRetentionIndex(database);
     migrateStaffPayrollRules(database);
@@ -1447,6 +1586,7 @@ export function initializeDatabase({ database = db, initialAdminPassword = env.i
     migrateAttendanceAdminClockOutNote(database);
     migrateAttendanceClockLocations(database);
     migrateAttendanceBiometricConfirmation(database);
+    migrateRepAttendanceSync(database);
     migrateClientProfileCrud(database);
     migrateUserEmployeeLinks(database);
     migrateUserEmployeeProfileSync(database);
@@ -1457,6 +1597,8 @@ export function initializeDatabase({ database = db, initialAdminPassword = env.i
     migrateMaintenanceUnmatchedFolderDeletion(database);
     migrateMaintenanceCardMultiReasons(database);
     migrateMaintenancePhotoRotations(database);
+    migrateMaintenancePhysicalPhotoRotations(database);
+    migrateDurableOperationsEvents(database);
     migrateMachineMaintenanceNotes(database);
     migrateMachineNotesHistory(database);
     migrateMaintenanceUnmatchedFolderDuplicates(database);

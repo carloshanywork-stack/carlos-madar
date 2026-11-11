@@ -93,9 +93,13 @@ function normalizePurchaseItems(value) {
       throw new HttpError(400, 'A material can appear only once per purchase invoice.');
     }
     seenMaterialIds.add(materialId);
+    const purchaseQuantity = positiveQuantity(item.quantity, `items[${index}].quantity`);
+    if (!Number.isInteger(purchaseQuantity)) {
+      throw new HttpError(400, `items[${index}].quantity must be a whole-unit main-warehouse quantity.`);
+    }
     const normalized = {
       materialId,
-      quantity: positiveQuantity(item.quantity, `items[${index}].quantity`),
+      quantity: purchaseQuantity,
       unitCostCents: nonNegativeInteger(item.unitCostCents, `items[${index}].unitCostCents`),
     };
     normalized.lineTotalCents = calculateLineTotalCents(normalized);
@@ -141,14 +145,13 @@ export function createPurchaseInvoice(input, actorId = null, database = db) {
 
   const invoiceId = database.transaction(() => {
     assertActiveEmployee(employeeId, database);
-    assertCashAvailable(totalCents, database);
     const invoiceCode = nextInvoiceCode('PUR', database);
     const invoiceResult = database.prepare(`
       INSERT INTO invoices
         (code, kind, supplier, employee_id, subtotal_cents, tax_cents,
          total_cents, paid_total_cents, remaining_cents, payment_status,
          status, notes, created_by)
-      VALUES (?, 'purchase', ?, ?, ?, 0, ?, ?, 0, 'paid', 'approved', ?, ?)
+      VALUES (?, 'purchase', ?, ?, ?, 0, ?, 0, ?, 'unpaid', 'approved', ?, ?)
     `).run(invoiceCode, supplier, employeeId, totalCents, totalCents, totalCents, notes, actorId);
     const id = Number(invoiceResult.lastInsertRowid);
     const getMaterial = database.prepare(`
@@ -171,6 +174,9 @@ export function createPurchaseInvoice(input, actorId = null, database = db) {
     for (const [index, item] of items.entries()) {
       const material = getMaterial.get(item.materialId);
       if (!material) throw new HttpError(404, `Active material ${item.materialId} was not found.`);
+      if (!Number.isInteger(material.stock)) {
+        throw new HttpError(409, `Main stock for ${material.code} has a fractional legacy balance; reconcile a physical stock count before receiving more.`);
+      }
       const nextStock = material.stock + item.quantity;
       if (!Number.isFinite(nextStock) || nextStock > MAX_QUANTITY) {
         throw new HttpError(400, `Purchase quantity would exceed stock capacity for ${material.code}.`);
@@ -207,17 +213,6 @@ export function createPurchaseInvoice(input, actorId = null, database = db) {
       });
     }
 
-    const treasuryEntryId = insertTreasuryEntry({
-      database,
-      kind: 'expense',
-      category: PURCHASE_CATEGORY,
-      amountCents: totalCents,
-      invoiceId: id,
-      employeeId,
-      reference: invoiceCode,
-      notes: supplier,
-      actorId,
-    });
     recordAudit({
       database,
       actorId,
@@ -229,8 +224,10 @@ export function createPurchaseInvoice(input, actorId = null, database = db) {
         kind: 'purchase',
         supplier,
         total_cents: totalCents,
+        paid_total_cents: 0,
+        remaining_cents: totalCents,
+        payment_status: 'unpaid',
         items: auditItems,
-        treasury_entry_id: treasuryEntryId,
       },
     });
     return id;
@@ -259,7 +256,7 @@ export function insertSalesInvoiceForWorkshopOrder(workshopOrderId, actorId = nu
       (code, kind, client_id, workshop_order_id, subtotal_cents, tax_cents,
        total_cents, paid_total_cents, remaining_cents, payment_status,
        status, notes, created_by)
-    VALUES (?, 'sales', ?, ?, ?, 0, ?, ?, 0, 'paid', 'approved', ?, ?)
+    VALUES (?, 'sales', ?, ?, ?, 0, ?, 0, ?, 'unpaid', 'approved', ?, ?)
   `).run(
     code,
     order.client_id,
@@ -271,18 +268,6 @@ export function insertSalesInvoiceForWorkshopOrder(workshopOrderId, actorId = nu
     actorId,
   );
   const invoiceId = Number(result.lastInsertRowid);
-  const treasuryEntryId = totalCents > 0
-    ? insertTreasuryEntry({
-      database,
-      kind: 'income',
-      category: RECEIPT_CATEGORY,
-      amountCents: totalCents,
-      invoiceId,
-      reference: code,
-      notes: `Cash sale for workshop order ${order.order_code}`,
-      actorId,
-    })
-    : null;
   recordAudit({
     database,
     actorId,
@@ -294,13 +279,83 @@ export function insertSalesInvoiceForWorkshopOrder(workshopOrderId, actorId = nu
       client_id: order.client_id,
       workshop_order_id: order.id,
       total_cents: totalCents,
-      paid_total_cents: totalCents,
-      remaining_cents: 0,
-      payment_status: 'paid',
-      treasury_entry_id: treasuryEntryId,
+      paid_total_cents: 0,
+      remaining_cents: totalCents,
+      payment_status: 'unpaid',
     },
   });
   return readInvoice(invoiceId, database);
+}
+
+export function recordPurchasePayment(invoiceId, input, actorId = null, database = db) {
+  const id = positiveId(invoiceId, 'invoiceId');
+  const body = requireObject(input);
+  allowOnlyKeys(body, ['amountCents', 'notes']);
+  const amountCents = nonNegativeInteger(body.amountCents, 'amountCents');
+  if (amountCents < 1) throw new HttpError(400, 'amountCents must be greater than zero.');
+  const notes = optionalText(body.notes, 'notes', { maxLength: 2000 });
+
+  const result = database.transaction(() => {
+    const invoice = database.prepare(`
+      SELECT id, code, kind, status, supplier, employee_id,
+        total_cents, paid_total_cents, remaining_cents
+      FROM invoices WHERE id = ? AND deleted_at IS NULL
+    `).get(id);
+    if (!invoice) throw new HttpError(404, 'Invoice was not found.');
+    if (invoice.kind !== 'purchase' || invoice.status !== 'approved') {
+      throw new HttpError(409, 'Payments can only be applied to approved purchase invoices.');
+    }
+    if (amountCents > invoice.remaining_cents) {
+      throw new HttpError(409, 'Payment amount cannot exceed the invoice remaining balance.');
+    }
+    const paidCents = BigInt(invoice.paid_total_cents) + BigInt(amountCents);
+    if (paidCents > MAX_SAFE_CENTS || paidCents > BigInt(invoice.total_cents)) {
+      throw new HttpError(400, 'Payment would exceed the invoice total or safe integer-cents range.');
+    }
+    assertCashAvailable(amountCents, database);
+    const remainingCents = BigInt(invoice.total_cents) - paidCents;
+    const paymentStatus = remainingCents === 0n ? 'paid' : paidCents === 0n ? 'unpaid' : 'partial';
+    database.prepare(`
+      UPDATE invoices
+      SET paid_total_cents = ?, remaining_cents = ?, payment_status = ?
+      WHERE id = ?
+    `).run(Number(paidCents), Number(remainingCents), paymentStatus, id);
+    const treasuryEntryId = insertTreasuryEntry({
+      database,
+      kind: 'expense',
+      category: PURCHASE_CATEGORY,
+      amountCents,
+      invoiceId: id,
+      employeeId: invoice.employee_id,
+      reference: invoice.code,
+      notes: notes ?? invoice.supplier,
+      actorId,
+    });
+    recordAudit({
+      database,
+      actorId,
+      action: 'purchase_payment',
+      entityType: 'invoice',
+      entityId: id,
+      oldValues: {
+        paid_total_cents: invoice.paid_total_cents,
+        remaining_cents: invoice.remaining_cents,
+        payment_status: invoice.remaining_cents === invoice.total_cents ? 'unpaid' : 'partial',
+      },
+      newValues: {
+        paid_total_cents: Number(paidCents),
+        remaining_cents: Number(remainingCents),
+        payment_status: paymentStatus,
+        treasury_entry_id: treasuryEntryId,
+      },
+    });
+    return { treasuryEntryId };
+  }).immediate();
+
+  return {
+    invoice: readInvoice(id, database),
+    treasuryEntry: database.prepare('SELECT * FROM treasury_entries WHERE id = ?').get(result.treasuryEntryId),
+  };
 }
 
 export function recordSalesReceipt(invoiceId, input, actorId = null, database = db) {

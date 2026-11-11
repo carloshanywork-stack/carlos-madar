@@ -3,7 +3,7 @@ import { env } from './config/env.js';
 import { db } from './database/connection.js';
 import { initializeDatabase } from './database/init.js';
 import { startDatabaseMaintenanceScheduler, stopDatabaseMaintenanceScheduler } from './database/maintenance.js';
-import { startSystemBackupScheduler, stopSystemBackupScheduler } from './modules/system/backup.js';
+import { recoverInterruptedRestore, startSystemBackupScheduler, stopSystemBackupScheduler } from './modules/system/backup.js';
 import {
   recoverMaintenanceCardDeletions,
   recoverMachineCorrectionRenames,
@@ -16,6 +16,7 @@ import { publishOperationsEvent } from './modules/operations-events.js';
 
 const initialization = initializeDatabase();
 try {
+  await recoverInterruptedRestore();
   const recovery = await recoverMaintenanceOrderDeletions();
   if (recovery.recoveredCount) {
     console.log(`Recovered ${recovery.recoveredCount} staged maintenance order deletion(s).`);

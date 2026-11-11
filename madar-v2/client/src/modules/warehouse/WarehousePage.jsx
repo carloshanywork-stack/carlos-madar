@@ -33,6 +33,7 @@ export default function WarehousePage({ canMutate = false, canViewFinancialDetai
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState('');
   const [sourceWarehouse, setSourceWarehouse] = useState('main');
+  const [issueQuantity, setIssueQuantity] = useState('');
   const [selectedOffcutIds, setSelectedOffcutIds] = useState([]);
   const [stockCount, setStockCount] = useState(null);
   const [countValues, setCountValues] = useState({});
@@ -96,13 +97,22 @@ export default function WarehousePage({ canMutate = false, canViewFinancialDetai
       quantity: Number(form.get('quantity')),
       notes: form.get('notes') || undefined,
     };
-    if (sourceWarehouse === 'main') payload.materialId = Number(form.get('materialId'));
+    if (sourceWarehouse === 'main') {
+      payload.materialId = Number(form.get('materialId'));
+      if (!Number.isInteger(payload.quantity)) {
+        payload.mainWithdrawalMode = form.get('mainWithdrawalMode');
+        payload.offcutName = form.get('offcutName');
+        payload.offcutDimensions = form.get('offcutDimensions');
+      }
+    }
     else payload.offcutId = Number(form.get('offcutId'));
     try {
-      await api.post('/api/warehouse/issue', payload);
+      const result = await api.post('/api/warehouse/issue', payload);
       setModal('');
       await refreshInventory();
-      showToast('تم صرف المادة وربط الحركة بأمر الورشة.');
+      showToast(result.offcutMovement
+        ? `تم صرف ${result.requested_quantity} وتسجيل المتبقي (${result.remainder_quantity}) في المخزن الثانوي.`
+        : 'تم صرف المادة وربط الحركة بأمر الورشة.');
     } catch (caught) { setFormError(errorMessage(caught)); }
     finally { setSaving(false); }
   }
@@ -167,7 +177,7 @@ export default function WarehousePage({ canMutate = false, canViewFinancialDetai
         <Tabs items={inventoryTabs} value={tab} onChange={(value) => { setTab(value); setSearch(''); }} ariaLabel="أقسام المخزون" />
         <label className="madar-field madar-search"><Icon name="search" size={15} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="بحث في سجل المخزون" aria-label="بحث المخزون" /></label>
         <div className="madar-inline-wrap">
-          {canMutate && tab !== 'movements' && <Button variant="secondary" size="small" icon="arrow" onClick={() => { setFormError(''); setSourceWarehouse('main'); setModal('issue'); }}>صرف لأمر ورشة</Button>}
+          {canMutate && tab !== 'movements' && <Button variant="secondary" size="small" icon="arrow" onClick={() => { setFormError(''); setSourceWarehouse('main'); setIssueQuantity(''); setModal('issue'); }}>صرف لأمر ورشة</Button>}
           {canMutate && tab === 'offcuts' && <Button variant="secondary" size="small" icon="wallet" onClick={() => { setSelectedOffcutIds([]); setFormError(''); setModal('scrap'); }}>بيع خردة محددة</Button>}
         </div>
       </div>
@@ -209,11 +219,17 @@ export default function WarehousePage({ canMutate = false, canViewFinancialDetai
       <Modal open={modal === 'issue'} onClose={() => setModal('')} title="صرف خامة لأمر ورشة" description="يُسجل الصرف على أمر في مرحلة الإنتاج فقط.">
         <form onSubmit={issueMaterial}><div className="madar-form-stack">
           <Select label="أمر الورشة *" name="workshopOrderId" required defaultValue=""><option value="" disabled>اختر أمر الإنتاج</option>{(productionOrders ?? []).map((order) => <option key={order.id} value={order.id}>{order.order_code} · {order.product_name} · {order.client_name}</option>)}</Select>
-          <Select label="المخزن المصدر *" value={sourceWarehouse} onChange={(event) => setSourceWarehouse(event.target.value)}><option value="main">المخزن الرئيسي</option><option value="secondary">المخزن الثانوي</option></Select>
+          <Select label="طريقة الصرف *" value={sourceWarehouse} onChange={(event) => setSourceWarehouse(event.target.value)}><option value="main">وحدات كاملة من الرئيسي (تقريب لأعلى وتسجيل المتبقي كباقٍ)</option><option value="secondary">باقٍ جزئي موجود في المخزن الثانوي</option></Select>
           {sourceWarehouse === 'main' ? <Select label="المادة *" name="materialId" required defaultValue=""><option value="" disabled>اختر المادة</option>{(materials ?? []).map((item) => <option key={item.id} value={item.id}>{item.code} · {item.name} ({item.stock} {item.unit})</option>)}</Select> : <Select label="الباقي *" name="offcutId" required defaultValue=""><option value="" disabled>اختر الباقي</option>{(offcuts ?? []).map((item) => <option key={item.id} value={item.id}>{item.name} · {item.quantity} {item.unit}</option>)}</Select>}
-          <Input label="الكمية *" name="quantity" type="number" min="0.000001" step={sourceWarehouse === 'main' ? '1' : 'any'} required />
+          <Input label="الكمية المطلوبة *" name="quantity" type="number" min="0.000001" step="any" required value={issueQuantity} onChange={(event) => setIssueQuantity(event.target.value)} />
+          {sourceWarehouse === 'main' && Number(issueQuantity) > 0 && !Number.isInteger(Number(issueQuantity)) && <>
+            <Alert tone="info">سيُسحب العدد الكامل التالي من المخزن الرئيسي؛ سيُحفظ الفرق كباقٍ قابل لإعادة الاستخدام في المخزن الثانوي.</Alert>
+            <Input label="اسم الباقي المسجل *" name="offcutName" required maxLength={200} placeholder="مثال: لوح أكريليك شفاف 3 مم — باقي" />
+            <Input label="الأبعاد أو وصف الباقي *" name="offcutDimensions" required maxLength={200} placeholder="مثال: 30×20 سم" />
+            <input type="hidden" name="mainWithdrawalMode" value="round_up" />
+          </>}
           <Textarea label="ملاحظات" name="notes" maxLength={2000} />
-          <Alert tone="info">الصرف من المخزن الرئيسي يكون بوحدات صحيحة. استخدم المخزن الثانوي للقصاصات الجزئية.</Alert>
+          {sourceWarehouse === 'secondary' && <Alert tone="info">استخدم هذا الخيار لصرف كمية جزئية من باقٍ مسجل مسبقاً؛ تُحدّث كمية الباقي في المخزن الثانوي.</Alert>}
         </div>{formError && <div className="madar-form-error"><Alert tone="error">{formError}</Alert></div>}<div className="madar-form-actions"><Button variant="secondary" onClick={() => setModal('')}>إلغاء</Button><Button type="submit" disabled={saving || !productionOrders?.length}>{saving ? 'جارٍ الصرف…' : 'تأكيد الصرف'}</Button></div></form>
       </Modal>
 
@@ -238,8 +254,8 @@ export default function WarehousePage({ canMutate = false, canViewFinancialDetai
 }
 
 function MovementBadge({ kind }) {
-  const labels = { purchase: 'شراء / استلام', issue: 'صرف للإنتاج', scrap_sale: 'بيع خردة', variance_gain: 'زيادة جرد', variance_loss: 'نقص جرد' };
-  const tones = { purchase: 'success', issue: 'info', scrap_sale: 'warning', variance_gain: 'success', variance_loss: 'danger' };
+  const labels = { purchase: 'شراء / استلام', issue: 'صرف للإنتاج', offcut_return: 'إرجاع باقي للمخزن الثانوي', scrap_sale: 'بيع خردة', variance_gain: 'زيادة جرد', variance_loss: 'نقص جرد' };
+  const tones = { purchase: 'success', issue: 'info', offcut_return: 'warning', scrap_sale: 'warning', variance_gain: 'success', variance_loss: 'danger' };
   return <Badge tone={tones[kind] ?? 'info'}>{labels[kind] ?? kind}</Badge>;
 }
 
@@ -250,7 +266,7 @@ function CountSection({ title, rows, keyPrefix, countValues, setCountValues }) {
         const rowId = keyPrefix === 'main' ? row.material_id : row.offcut_id;
         const id = `${keyPrefix}:${rowId}`;
         const label = keyPrefix === 'main' ? `${row.material_code} · ${row.material_name}` : `${row.name} · ${row.dimensions}`;
-        return <div className="madar-count-row" key={id}><div><strong>{label}</strong><small>الرصيد بالنظام: {row.snapshot_quantity} {row.unit}</small></div><label className="madar-field"><span>المعدود</span><input type="number" min="0" step="any" required value={countValues[id] ?? ''} onChange={(event) => setCountValues((current) => ({ ...current, [id]: event.target.value }))} /></label></div>;
+        return <div className="madar-count-row" key={id}><div><strong>{label}</strong><small>الرصيد بالنظام: {row.snapshot_quantity} {row.unit}</small></div><label className="madar-field"><span>المعدود</span><input type="number" min="0" step={keyPrefix === 'main' ? '1' : 'any'} required value={countValues[id] ?? ''} onChange={(event) => setCountValues((current) => ({ ...current, [id]: event.target.value }))} /></label></div>;
       })}</div> : <div className="madar-picker-empty">لا توجد عناصر في هذا المخزن.</div>}
     </section>
   );

@@ -54,6 +54,43 @@ export async function authenticateNativeAttendance(action) {
   return result;
 }
 
+export async function enqueueNativeAttendanceAction(action) {
+  if (!isNativeRepApp()) throw new Error('تسجيل الحضور المحلي متاح داخل تطبيق MADAR على أندرويد فقط.');
+  return RepEngine.enqueueAttendanceAction(action);
+}
+
+export async function enqueueNativeMachineAction(action, evidence = null) {
+  if (!isNativeRepApp()) return null;
+  if (evidence && !(evidence instanceof Blob)) {
+    throw new Error('صورة إثبات بلاغ الماكينة غير صالحة للحفظ الأصلي.');
+  }
+  const payload = { ...action };
+  delete payload.evidence;
+  if (evidence) {
+    payload.evidenceMimeType = evidence.type || 'image/jpeg';
+    payload.evidenceBase64 = await blobToBase64(evidence);
+  }
+  return RepEngine.enqueueMachineAction(payload);
+}
+
+export async function listNativeMachineActions(repId) {
+  if (!isNativeRepApp()) return [];
+  const result = await RepEngine.listMachineActions({ repId: Number(repId) });
+  return Array.isArray(result.actions) ? result.actions : [];
+}
+
+export async function listNativeAttendanceActions(repId) {
+  if (!isNativeRepApp()) return [];
+  const result = await RepEngine.listAttendanceActions({ repId: Number(repId) });
+  return Array.isArray(result.actions) ? result.actions : [];
+}
+
+export async function acknowledgeNativeAttendanceAction(actionUuid, repId) {
+  if (!isNativeRepApp()) return false;
+  const result = await RepEngine.acknowledgeAttendanceAction({ actionUuid, repId: Number(repId) });
+  return Boolean(result.removed);
+}
+
 export async function requestNativeBackgroundPermission() {
   if (!isNativeRepApp()) return null;
   return RepEngine.requestBackgroundPermission();
@@ -392,13 +429,18 @@ export async function exportPendingQueue(repId, repUsername) {
   ]);
 
   let nativeVisits = [];
+  let attendanceActions = [];
   if (isNative) {
     try {
-      const result = await RepEngine.exportPendingVisits({ repId: numericRepId });
+      const [result, pendingAttendance] = await Promise.all([
+        RepEngine.exportPendingVisits({ repId: numericRepId }),
+        listNativeAttendanceActions(numericRepId),
+      ]);
       const parsed = JSON.parse(result?.json ?? '{}');
       nativeVisits = Array.isArray(parsed.visits) ? parsed.visits : [];
+      attendanceActions = pendingAttendance;
     } catch (error) {
-      throw new Error('تعذر تجهيز نسخة JSON من زيارات أندرويد المحلية. حاول مرة أخرى قبل الخروج.');
+      throw new Error('تعذر تجهيز نسخة JSON من طابور أندرويد المحلي. حاول مرة أخرى قبل الخروج.');
     }
   }
 
@@ -410,7 +452,7 @@ export async function exportPendingQueue(repId, repUsername) {
   }
   const machineActions = await Promise.all(indexedActions.map(serializeMachineAction));
   const payload = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     type: 'madar-rep-pending-queue',
     exportedAt: new Date().toISOString(),
     repId: numericRepId,
@@ -418,6 +460,7 @@ export async function exportPendingQueue(repId, repUsername) {
     source: isNative ? 'android-sqlite' : 'indexeddb',
     visits,
     machineActions,
+    attendanceActions,
   };
   return savePendingQueueExport(payload, exportTimestamp());
 }
@@ -437,7 +480,7 @@ async function savePendingQueueExport(payload, stamp) {
       directory: Directory.Documents,
       encoding: 'utf8',
     });
-    return { filename, path: `Documents/MADAR/Exports/${filename}`, visits: payload.visits.length, machineActions: payload.machineActions.length };
+  return { filename, path: `Documents/MADAR/Exports/${filename}`, visits: payload.visits.length, machineActions: payload.machineActions.length, attendanceActions: payload.attendanceActions.length };
   }
 
   const blob = new Blob([json], { type: 'application/json;charset=utf-8' });
@@ -449,5 +492,5 @@ async function savePendingQueueExport(payload, stamp) {
   anchor.click();
   anchor.remove();
   URL.revokeObjectURL(url);
-  return { filename, path: filename, visits: payload.visits.length, machineActions: payload.machineActions.length };
+  return { filename, path: filename, visits: payload.visits.length, machineActions: payload.machineActions.length, attendanceActions: payload.attendanceActions.length };
 }
