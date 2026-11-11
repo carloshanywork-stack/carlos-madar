@@ -1933,3 +1933,399 @@ Keep defaults conservative. A server restart should not break old clients.
 - [ ] `npm test`, `npm run check`, `npm run build`, and `android-packaging.test.js` pass.
 - [ ] Two-device manual test passes on the Tailscale Funnel URL.
 - [ ] No Firebase, no cloud storage, no embedded `server.url` in the APK.
+
+---
+
+## 21. Test Machine Generation (new requirement)
+
+### 21.1 Design goal and invariants
+
+Add an admin-only **“Test Machine”** action beside **“إنشاء أمر صيانة”** in `client/src/modules/maintenance/MaintenancePage.jsx`. The admin selects one active representative from the existing `/api/maintenance/representatives` list. Confirmation creates a synthetic test work item and immediately assigns it to that representative.
+
+The test machine must travel through the same representative route, machine lock, photo capture, upload, idempotency, offline queue, and real-time event behavior as a real card. However, it must never be mistaken for customer equipment or contaminate normal customer/maintenance/financial reports.
+
+**Recommended implementation:** create test-tagged rows in the existing `machines`, `maintenance_orders`, and `maintenance_cards` tables, linked to one durable `rep_test_runs` record. This deliberately reuses the existing rep route and `syncRepVisit` pipeline instead of building a second test-only upload stack. The `rep_test_runs` relation is the authoritative test marker; flags on base rows make filtering/indexing easy.
+
+Do not model a test machine as an untagged real machine. Do not reuse a real customer or real maintenance order. Do not use a production machine code or a QR value that grants access.
+
+### 21.2 Additive schema changes
+
+Additive columns:
+
+```sql
+ALTER TABLE clients ADD COLUMN is_test INTEGER NOT NULL DEFAULT 0
+  CHECK (is_test IN (0, 1));
+ALTER TABLE machines ADD COLUMN is_test INTEGER NOT NULL DEFAULT 0
+  CHECK (is_test IN (0, 1));
+ALTER TABLE maintenance_orders ADD COLUMN is_test INTEGER NOT NULL DEFAULT 0
+  CHECK (is_test IN (0, 1));
+ALTER TABLE maintenance_cards ADD COLUMN is_test INTEGER NOT NULL DEFAULT 0
+  CHECK (is_test IN (0, 1));
+```
+
+For fresh installs, add the columns directly to `schema.sql`; for existing installs, add them in one `schema_migrations`-tracked transaction. Existing records default to `0`, preserving their behavior and IDs.
+
+Test-run metadata:
+
+```sql
+CREATE TABLE IF NOT EXISTS rep_test_runs (
+  id INTEGER PRIMARY KEY,
+  test_uuid TEXT NOT NULL UNIQUE,
+  qr_payload TEXT NOT NULL UNIQUE,
+  created_by_user_id INTEGER NOT NULL REFERENCES users(id),
+  assigned_rep_user_id INTEGER NOT NULL REFERENCES users(id),
+  client_id INTEGER NOT NULL REFERENCES clients(id),
+  order_id INTEGER NOT NULL UNIQUE REFERENCES maintenance_orders(id),
+  machine_id INTEGER NOT NULL UNIQUE REFERENCES machines(id),
+  card_id INTEGER NOT NULL UNIQUE REFERENCES maintenance_cards(id),
+  status TEXT NOT NULL DEFAULT 'assigned'
+    CHECK (status IN ('assigned', 'in_progress', 'submitted', 'cancelled', 'expired')),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  submitted_at TEXT,
+  expires_at TEXT,
+  cancelled_at TEXT,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_rep_test_runs_rep_status_created
+  ON rep_test_runs(assigned_rep_user_id, status, created_at);
+CREATE INDEX IF NOT EXISTS idx_rep_test_runs_expiry
+  ON rep_test_runs(status, expires_at);
+```
+
+The test run references the normal order/card/machine rows so existing code can validate and upload them. The generated client, machine, order, and card carry `is_test = 1`; the test run carries the selected rep, admin actor, unguessable test UUID, QR payload, and test-only lifecycle. `rep_card_work_state` remains the common lock/state record keyed by `card_id`; test cards do not get a parallel locking implementation.
+
+### 21.3 Synthetic client and region
+
+`maintenance_orders.client_id` is required. Use a dedicated, lazily-created synthetic client such as:
+
+```text
+code: MADAR-TEST
+name: MADAR Test Workspace
+is_test: 1
+```
+
+Create/find it inside the test-machine transaction using a reserved code and a unique constraint. Never select a real client for a test order. The test client is hidden from normal client pickers and APIs unless an explicit admin test view is requested.
+
+The rep route also requires the machine area to intersect the representative’s assigned regions, and the order must include that area. Determine the test region server-side:
+
+1. If the rep has one or more explicit assigned regions, choose the first normalized region in the rep’s assigned-region order (or an optional region in the request, validated against that rep’s assignment).
+2. If the rep has universal access, use a configured active machine area; if none exists, require an admin-supplied area or return a clear 409.
+3. If the rep has no valid area, reject generation with `REP_HAS_NO_TEST_REGION` and direct the admin to assign a region first.
+
+The basic UI remains the requested representative dropdown. If representatives can have multiple regions and selecting the intended region matters, add an optional region dropdown after the rep is selected. Never accept an arbitrary area without checking it against the target rep’s assigned regions.
+
+### 21.4 Name, ID, and QR payload
+
+Generate all identifiers on the server using a cryptographically secure UUID/random source:
+
+```text
+testUuid   = random UUID
+machineCode = "TST-" + short uppercase base32/UUID suffix
+machineName = "ماكينة اختبار · " + short suffix
+orderCode   = unique `MT-TEST-<date>-<suffix>` (not the normal MN sequence)
+qrPayload   = "MADAR-TEST:" + testUuid
+```
+
+The `machineCode` is the human-readable dummy ID shown in route cards and can be used for lookup. `qrPayload` is the unique machine/test identity encoded in a QR. It is an identifier only—not an authentication credential or access token. Do not put bearer tokens, lock tokens, or personal data in the QR.
+
+The backend should return `qrPayload`; a local client QR renderer can render it to SVG/canvas for the admin modal. No external QR API or network service is allowed. If the product requires the server to return a QR image instead, use a locally installed QR library and generate PNG/SVG in-process. Current code has no QR-generation/scanning feature, so add the renderer as an explicit dependency only if an actual scannable image (rather than a QR ID string) is required.
+
+### 21.5 Admin UI
+
+In `MaintenancePage.jsx`:
+
+```jsx
+actions={view === 'orders' && <div className="madar-inline-wrap">
+  <Button icon="plus" onClick={openCreateOrder}>إنشاء أمر صيانة</Button>
+  {isAdmin && <Button icon="qr" variant="secondary" onClick={openTestMachine}>
+    ماكينة اختبار
+  </Button>}
+</div>}
+```
+
+The test modal should:
+
+- Load active representatives from `/api/maintenance/representatives` (already used by the page).
+- Show a dropdown with the rep’s full name, username, and assigned-region summary.
+- Optionally show an area selector when that rep has multiple assigned areas or universal access.
+- Explain that this creates one temporary test task and is excluded from customer/financial reports.
+- Require an explicit confirmation button.
+- Disable submit while loading/saving and show server validation errors.
+- On success, display the generated machine name, machine code, QR payload/QR image, assigned rep, and expiry if enabled.
+- Refresh any admin test-run list if present, then close or leave a success receipt.
+
+Do not add the button to non-admin users. The API must independently enforce `requireRole('admin')`; client-only hiding is not authorization.
+
+### 21.6 Test generation API
+
+```http
+POST /api/maintenance/test-machines
+Content-Type: application/json
+
+{ "repUserId": 27, "area": "المنطقة الشرقية" }
+```
+
+`area` is optional when it can be resolved deterministically. The API is admin-only and returns `201`:
+
+```json
+{
+  "success": true,
+  "testRun": {
+    "id": 15,
+    "testUuid": "...",
+    "status": "assigned",
+    "assignedRep": { "id": 27, "username": "rep-nour", "fullName": "نور" },
+    "machine": {
+      "id": 902,
+      "code": "TST-7K4P2M",
+      "nameAr": "ماكينة اختبار · 7K4P2M",
+      "area": "المنطقة الشرقية",
+      "qrPayload": "MADAR-TEST:...",
+      "isTest": true
+    },
+    "order": { "id": 501, "code": "MT-TEST-20261111-7K4P2M" },
+    "cardId": 804,
+    "expiresAt": "..."
+  }
+}
+```
+
+Suggested route/service placement:
+
+- `server/modules/maintenance/routes.js`: `POST /test-machines`, guarded by `requireRole('admin')`.
+- `server/modules/maintenance/service.js`: `createRepTestMachine(input, actorId, database)`.
+- Reuse `listMaintenanceRepresentatives()` or validate with `assertActiveRepresentatives([repUserId])`.
+- Validate target user is active, not deleted, and `role='rep'` inside the write transaction.
+
+### 21.7 Transactional creation algorithm
+
+Generation must be atomic; never create an orphan machine if card/order/assignment creation fails.
+
+```text
+createRepTestMachine(admin, input):
+  validate only repUserId and optional area
+  validate rep is active role=rep
+  resolve and validate test region against rep.assignedRegions
+  allocate testUuid, unique machineCode, display name, orderCode, qrPayload
+
+  BEGIN IMMEDIATE
+    find or create the reserved synthetic client (is_test=1)
+    insert machines(code, name_ar, area, active, is_test)
+    insert maintenance_orders(
+      order_code, client_id, area, notes, created_by, is_test
+    ) with notes identifying the test run, no petty cash
+    insert maintenance_order_reps(order_id, user_id, assigned_by=admin.id)
+    insert maintenance_cards(order_id, machine_id, status='pending', is_test=1)
+    insert rep_test_runs(
+      test_uuid, qr_payload, created_by_user_id, assigned_rep_user_id,
+      client_id, order_id, machine_id, card_id, status='assigned', expires_at
+    )
+    insert rep_card_work_state(card_id, machine_id, state='available')
+    insert audit_log event `create_test_machine` with actor, rep, machine/order/card IDs
+    stage durable `rep.test-machine.created` operations event with
+      recipientUserIds=[repUserId], card/machine/order IDs, code, region, isTest=true
+  COMMIT
+
+  broadcast event after commit
+  return safe testRun representation (never internal secrets)
+```
+
+The `operations_events` event is staged inside the SQLite transaction and broadcast only after commit, following the existing event-log design. If event persistence fails, the normal route refresh remains the reconciliation path.
+
+The event should be recipient-filtered to the selected rep. If the same test order is intentionally assigned to multiple representatives later, derive recipients from `maintenance_order_reps`; do not broadcast test events to every rep in the region by default.
+
+### 21.8 Route, visibility, and immediate push
+
+The generated maintenance order is assigned to the selected representative and has status `in_progress`. Its single card is created immediately. Therefore `getRepTodayRoute()` can expose it through the existing order-assignment join once its query also supports the new test work state.
+
+On `rep.test-machine.created`, the rep app:
+
+```js
+if (event.type === 'rep.test-machine.created') {
+  void refreshData();
+  setToast(`أُضيفت ماكينة اختبار ${event.machineCode} إلى مسارك.`);
+}
+```
+
+The route refresh is the source of truth. Do not synthesize a card entirely on the client from the event payload, since the backend may reject it due to changed assignment/region or expiration. A cached route is refreshed immediately when the SSE event arrives.
+
+The route card includes:
+
+```json
+{
+  "isTest": true,
+  "testRunId": 15,
+  "machineCode": "TST-7K4P2M",
+  "machineName": "ماكينة اختبار · 7K4P2M",
+  "qrPayload": "MADAR-TEST:...",
+  "workState": "available"
+}
+```
+
+Never expose `qrPayload` as authorization. It can be omitted from the rep route if no scanner needs it; `machineCode` is sufficient for display. If a future scanner uses the payload, it must resolve it through an authenticated server endpoint and still enforce assignment, state, and lock checks.
+
+### 21.9 Test submission and auto-removal
+
+Test cards use the same `openMachine` lock, heartbeat, `syncRepVisit`, server lock consume, durable state event, and offline conflict behavior as real cards. No test-specific lock endpoint or upload endpoint is added.
+
+On a successful test visit:
+
+1. The normal visit row and photo rows are written, linked to the test order/card/machine.
+2. The common `rep_card_work_state` transitions to `submitted` and the lock is consumed atomically.
+3. `rep_test_runs.status` becomes `submitted`, `submitted_at` is recorded.
+4. Publish `rep.card.state` for the assigned recipient so the test card is removed instantly from that rep’s active list. If there are multiple order assignees, all receive the event.
+5. Publish `rep.test-machine.submitted` (or include `isTest: true` on the canonical state event) for admin test-run monitoring.
+
+Recommended supervisor behavior: keep test submissions out of the default real-customer QA queue, but preserve uploaded files and visit metadata for a separate admin test-run detail/verification screen. This avoids fake photos being mixed with field approval workload. The test run can stay in `submitted` as a completed test result; it does not need a real maintenance approval.
+
+If the business specifically wants supervisors to validate test uploads using the ordinary QA screen, show an explicit `TEST` badge and provide a filter. Do not silently mix test and real customer visits.
+
+### 21.10 Isolation from ordinary business data
+
+Every query that lists real operational data must exclude test rows by default. At minimum review:
+
+- `/api/clients` and client selectors: `client.is_test = 0`.
+- Machine directory, machine import matching, area lists, auto-populated maintenance orders, and machine exports: `machine.is_test = 0` unless an explicit admin test filter is requested.
+- Maintenance order list/detail counts and business analytics: `order.is_test = 0` by default.
+- Supervisor visit/QA queue, approved-visit workbook, photo analytics, and customer exports: exclude test orders by default.
+- Dashboard summaries and maintenance/order financial reports: exclude `is_test = 1`.
+- Customer-machine deployment (`client_machines`): do not create a deployment for the synthetic client unless existing constraints require it; if created, ensure all such queries exclude test client/machine rows.
+- Search endpoints: do not return test records in ordinary machine/customer search.
+
+Admin may use a separate test-run endpoint to see test records:
+
+```http
+GET /api/maintenance/test-machines?status=assigned
+GET /api/maintenance/test-machines/:testRunId
+POST /api/maintenance/test-machines/:testRunId/cancel
+```
+
+All are admin-only. Cancellation is a soft lifecycle transition (`cancelled`) plus work-state release; do not physically delete rows or visit history. A test-run cleanup job may mark unsubmitted runs `expired` and set their order/machine inactive/deleted through the project’s existing soft-delete conventions. Never remove submitted test photos as part of ordinary cleanup.
+
+### 21.11 Expiration and resource cleanup
+
+Recommended default test lifetime: **24 hours**, configurable by `REP_TEST_MACHINE_TTL_HOURS`. Expiration is not part of the user’s explicit requirement, so make it configurable and confirm product expectations before enabling automatic expiration.
+
+When a run expires:
+
+- Atomically change `rep_test_runs.status` from `assigned`/`in_progress` to `expired` if not submitted.
+- Release an active work-state lock and publish `rep.card.state` as available/expired or a dedicated `rep.test-machine.expired` event to its recipients.
+- Hide it from the active route (`expired` test runs are not eligible).
+- Soft-delete or deactivate its test order/machine/card only if the approved retention policy says so; preserve audit and any captured data.
+- Do not physically delete a submitted test run or photos. Retention cleanup must be a separate, explicit policy.
+
+The backend should use an expiry predicate in route and lock validation even if a scheduler is delayed. A cleanup timer is housekeeping, not correctness.
+
+### 21.12 Test-specific event payloads
+
+Creation:
+
+```json
+{
+  "type": "rep.test-machine.created",
+  "testRunId": 15,
+  "cardId": 804,
+  "machineId": 902,
+  "orderId": 501,
+  "machineCode": "TST-7K4P2M",
+  "machineName": "ماكينة اختبار · 7K4P2M",
+  "regionName": "المنطقة الشرقية",
+  "isTest": true,
+  "recipientUserIds": [27]
+}
+```
+
+Submitted:
+
+```json
+{
+  "type": "rep.card.state",
+  "cardId": 804,
+  "machineId": 902,
+  "machineCode": "TST-7K4P2M",
+  "state": "submitted",
+  "isTest": true,
+  "testRunId": 15,
+  "version": 2,
+  "recipientUserIds": [27]
+}
+```
+
+The SSE recipient filter already understands `recipientUserIds`; no new transport is needed. Browser clients refresh on creation and remove the card on submission. Native clients handle the same JSON event through the native SSE listener.
+
+### 21.13 Test Machine tests
+
+Backend/API:
+
+- Non-admin cannot call `POST /api/maintenance/test-machines` even if it crafts the request.
+- Invalid/inactive/non-rep user → 400/404; no rows created.
+- Rep with no suitable assigned region → structured 409; no rows created.
+- Generation transaction creates exactly one test machine/order/card/run and one order assignment.
+- Every generated row is marked `is_test=1` where the column exists.
+- Codes, test UUID, QR payload, and order code are unique under concurrent requests.
+- Test client is unique and never substituted with a real client.
+- Exactly one `rep.test-machine.created` event is durable and delivered to the selected rep; unrelated reps do not receive it.
+- The selected rep’s `today-route` contains the card immediately; an unassigned rep’s route does not.
+- Normal client, machine, maintenance-order, QA, export, and financial endpoints exclude the test rows by default.
+- Admin test-run endpoint can retrieve the generated code and QR payload.
+- Lock, upload, submission, and conflict tests run identically for test and real cards.
+- Successful test submission updates `rep_test_runs`, removes the card from active route, and keeps the test record visible to admin.
+- Cancel/expiry releases locks, hides the card, and preserves audit history.
+
+Frontend:
+
+- “ماكينة اختبار” button appears beside “إنشاء أمر صيانة” for admins only.
+- Modal loads active reps, shows region summary, validates selection, and disables double submission.
+- Success receipt shows machine code, name, QR payload/QR image, assigned rep, and expiry.
+- Creation event makes the selected rep refresh without manual action.
+- Submission event removes the test card instantly; lock conflict UI names the lock owner.
+
+### 21.14 Updated implementation file list
+
+In addition to §18:
+
+- `client/src/modules/maintenance/MaintenancePage.jsx`
+  - Add adjacent admin-only test-machine button and modal using the existing representatives API.
+- `server/database/schema.sql` and `server/database/init.js`
+  - Add `is_test` flags and the transactional `rep_test_runs` migration.
+- `server/modules/maintenance/service.js`
+  - Add `createRepTestMachine`, `listRepTestRuns`, and soft-cancel/expiry operations.
+- `server/modules/maintenance/routes.js`
+  - Add admin-only generate/list/detail/cancel endpoints.
+- `server/modules/rep/service.js`
+  - Include assigned unexpired test cards in the route; expose `isTest`; reject expired/cancelled test runs on lock and upload.
+- `server/modules/rep/routes.js`
+  - Emit `rep.test-machine.created` through durable operations events (or service returns an event for broadcast after commit).
+- `server/modules/supervisor/service.js`
+  - Exclude test visits from default real-customer QA and reports; optionally provide a test-specific admin inspection view.
+- `client/src/modules/rep/RepApp.jsx`
+  - Handle creation event by refreshing; use same lock/submit flow for test and real cards; show a test badge.
+- `client/src/modules/maintenance/TestMachineModal.jsx` (optional extraction)
+  - Representative selection, optional region, success/QR receipt.
+- Tests:
+  - Extend `test/rep-api.test.js`, maintenance API/service tests, migration/schema tests, and add a test-machine focused test file.
+
+### 21.15 Updated rollout order
+
+Integrate this feature into the previous rollout as follows:
+
+1. **Schema foundation:** test flags, `rep_test_runs`, and work-state schema/backfill. Verify all default business queries exclude test rows before generating any.
+2. **Test generator:** endpoint + admin modal + durable assignment event; confirm a selected rep sees the test card through the existing route.
+3. **Shared active-state route:** apply submit/approval filtering and common state events to test and real cards.
+4. **Locking:** same lock endpoints and token consumption for both kinds of card.
+5. **Native SSE/offline:** native event stream and durable queue conflict handling for both kinds.
+6. **Test run diagnostics/retention:** admin details, cancellation, optional expiry, and metrics.
+
+Do not enable the UI generator before query isolation tests pass. This prevents test rows from appearing in customer or finance views during a partially deployed rollout.
+
+### 21.16 Product choices for Test Machine
+
+Recommended defaults; confirm any that differ before implementation:
+
+1. **Test-run expiry:** 24 hours for unsubmitted runs, with soft expiration only; submitted test history is retained.
+2. **Region selection:** infer a valid assigned region when unambiguous; show an area selector if multiple regions are assigned; reject if no valid region exists.
+3. **QR output:** generate a unique QR payload server-side and render a local QR image in the admin UI only if a scannable image is required. No external QR API.
+4. **Test QA:** do not place test submissions in the normal supervisor QA queue; expose a separate admin test-run result/detail view.
+5. **Visibility:** a generated run is assigned only to the selected representative. Other reps receive no test card unless explicitly assigned to the same test order or a region-wide shared-pool requirement is approved.
+6. **Multiple active test runs:** allow multiple distinct test runs per rep, each with its own card and QR ID; optionally add a per-rep active-run limit if operationally needed.
