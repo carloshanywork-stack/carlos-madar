@@ -22,6 +22,7 @@ import {
 } from './offline-store.js';
 import {
   addNativeAppStateListener,
+  getNativeAppInfo,
   addNativeBackListener,
   addNativeNetworkListener,
   acknowledgeNativeDutyTracking,
@@ -271,6 +272,7 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
   const [toast, setToast] = useState('');
   const [tutorialOpen, setTutorialOpen] = useState(false);
   const [storagePersistent, setStoragePersistent] = useState(null);
+  const [appVersion, setAppVersion] = useState('');
   const [storageError, setStorageError] = useState('');
   const [pendingExportBusy, setPendingExportBusy] = useState(false);
   const syncingRef = useRef(false);
@@ -756,7 +758,12 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
     void refreshData();
     void refreshAttendance();
     void requestPersistentStorage().then(setStoragePersistent);
-  }, [loadLocalSnapshots, refreshAttendance, refreshData]);
+    if (nativeApp) {
+      void getNativeAppInfo().then((info) => {
+        if (info?.version) setAppVersion(`${info.version} (${info.build ?? ''})`.replace(' ()', ''));
+      }).catch(() => undefined);
+    }
+  }, [loadLocalSnapshots, nativeApp, refreshAttendance, refreshData]);
 
   useEffect(() => {
     let active = true;
@@ -1776,7 +1783,7 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
           <button type="button" className="rep-button rep-button-primary rep-sync-now" disabled={!pendingQueueCount || serverState !== 'online' || offlineOnly} onClick={() => { if (nativeApp && pendingAttendanceActions.length) void requestNativeSync().catch(() => undefined); void drainQueue(); }}>{serverState === 'online' ? 'مزامنة الآن ↻' : 'ستتم المزامنة عند الاتصال'}</button>
        </section>}
 
-        <footer className="rep-app-footer"><span>مَــدَارْ · تطبيق المندوب الميداني</span><span>{gps ? `آخر GPS: ${formatGps(gps)}` : onDuty ? gpsError : nativeApp ? 'فعّل الحضور لتسجيل GPS أثناء الوردية' : 'يُسجّل GPS مع الحضور والانصراف والزيارة'}</span></footer>
+        <footer className="rep-app-footer"><span>مَــدَارْ · تطبيق المندوب الميداني{appVersion ? ` · إصدار ${appVersion}` : ''}</span><span>{gps ? `آخر GPS: ${formatGps(gps)}` : onDuty ? gpsError : nativeApp ? 'فعّل الحضور لتسجيل GPS أثناء الوردية' : 'يُسجّل GPS مع الحضور والانصراف والزيارة'}</span></footer>
 
         {selectedMachine && <MachineVisitSheet machine={{ ...selectedMachine, ...(route?.regions ?? []).flatMap((region) => region.machines).find((machine) => machine.cardId === selectedMachine.cardId) }} repName={user.fullName} reasons={reasons} gps={gps} gpsError={gpsError} captureLocation={captureVisitLocation} onClose={() => setSelectedMachine(null)} onSave={saveVisit} onConfirmLocation={confirmSelectedMachineLocation} onReportCorrection={submitSelectedMachineCorrection} />}
       {tutorialOpen && <Tutorial nativeApp={nativeApp} onFinish={finishTutorial} />}

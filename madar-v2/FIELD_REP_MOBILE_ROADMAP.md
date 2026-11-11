@@ -64,6 +64,8 @@
 
 **Gate:** verify battery behavior and Android background execution on target devices; define location retention and employee notice before enabling continuous tracking.
 
+**Implementation status (2026-11-11):** native GPS rows are rep-scoped (`rep_id`), legacy rows stay unattributed (`rep_id = 0`) and are never uploaded under a later account; the server returns per-point `accepted`/`duplicate`/`rejected` results with reasons, and the worker acknowledges only stored/duplicate points and preserves rejected points locally for review. Machine confirmations/corrections have a durable native queue that drains before visits and blocks dependent cards until review; permanently rejected attendance is isolated as `attendance_rejected`. The device battery/background/retention gate and a native SSE/push channel remain open.
+
 ### Phase 6 — Public access and production operations
 
 - Only after Phase 1 authorization and security testing, expose the app through the explicitly requested Cloudflare Tunnel. Keep the origin bound to loopback and do not publish port 3000. A tunnel provides HTTPS transport, not MADAR authorization by itself; all requests still require app authentication and role checks.

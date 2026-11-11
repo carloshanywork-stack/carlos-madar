@@ -888,7 +888,14 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
     }
   })();
   const tracking = await request('/api/rep/track-location', jsonOptions('POST', {
-    onDuty: true, location: { ...trackPoints[1], updatedAt: new Date(now).toISOString() }, trail: trackPoints,
+    onDuty: true,
+    location: {
+      latitude: trackPoints[1].latitude,
+      longitude: trackPoints[1].longitude,
+      accuracy: trackPoints[1].accuracy,
+      updatedAt: new Date(now).toISOString(),
+    },
+    trail: trackPoints,
   }), login.cookie);
   assert.equal(tracking.response.status, 200);
   assert.equal(tracking.body.onDuty, true);
@@ -948,7 +955,14 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
     ['too-new', 'rejected', 'future_timestamp'],
   ]);
   const duplicateTracking = await request('/api/rep/tracking', jsonOptions('POST', {
-    onDuty: true, location: { ...trackPoints[1], updatedAt: new Date(now).toISOString() }, trail: trackPoints,
+    onDuty: true,
+    location: {
+      latitude: trackPoints[1].latitude,
+      longitude: trackPoints[1].longitude,
+      accuracy: trackPoints[1].accuracy,
+      updatedAt: new Date(now).toISOString(),
+    },
+    trail: trackPoints,
   }), login.cookie);
   assert.equal(duplicateTracking.response.status, 200);
   assert.ok(duplicateTracking.body.points.every((point) => point.status === 'duplicate'));
