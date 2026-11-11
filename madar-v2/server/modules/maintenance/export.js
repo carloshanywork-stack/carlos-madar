@@ -20,6 +20,7 @@ import { projectRoot } from '../../config/paths.js';
 import { allowOnlyKeys, HttpError, integerIdArray, optionalText, positiveId, requireObject } from '../http.js';
 import { resolveStorageFile } from '../storage.js';
 import { getMaintenanceOrder } from './service.js';
+import { applyPhotoRotation } from './photo-images.js';
 import { compareMachineCodes, compareMaintenanceAreas } from './sorting.js';
 
 const PPTX_MIME = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
@@ -98,7 +99,7 @@ export function getCompletedExportReport(exportId) {
   return completedReport;
 }
 
-async function loadImage(storedPath, { ensurePortrait = false } = {}) {
+async function loadImage(storedPath, { ensurePortrait = false, rotation = 0 } = {}) {
   const extension = extname(storedPath).toLowerCase();
   const contentType = IMAGE_TYPES.get(extension);
   if (!contentType) return null;
@@ -107,9 +108,18 @@ async function loadImage(storedPath, { ensurePortrait = false } = {}) {
     const source = await readFile(absolutePath);
     const metadata = await sharp(source, { failOn: 'none', fastShrinkOnLoad: true }).metadata();
     const orientationSwapsDimensions = [5, 6, 7, 8].includes(metadata.orientation);
-    const orientedWidth = orientationSwapsDimensions ? metadata.height : metadata.width;
-    const orientedHeight = orientationSwapsDimensions ? metadata.width : metadata.height;
-    let pipeline = sharp(source, { failOn: 'none', fastShrinkOnLoad: true }).rotate();
+    let orientedWidth = orientationSwapsDimensions ? metadata.height : metadata.width;
+    let orientedHeight = orientationSwapsDimensions ? metadata.width : metadata.height;
+    let pipelineSource = source;
+    if (rotation) {
+      pipelineSource = await applyPhotoRotation(source, rotation);
+      const rotatedMetadata = await sharp(pipelineSource, { failOn: 'none' }).metadata();
+      orientedWidth = rotatedMetadata.width;
+      orientedHeight = rotatedMetadata.height;
+    }
+    let pipeline = rotation
+      ? sharp(pipelineSource, { failOn: 'none', fastShrinkOnLoad: true })
+      : sharp(source, { failOn: 'none', fastShrinkOnLoad: true }).rotate();
     if (ensurePortrait && orientedWidth && orientedHeight && orientedWidth > orientedHeight) {
       pipeline = pipeline.rotate(90);
     }
@@ -159,10 +169,10 @@ async function loadFixedReportLogo() {
   return null;
 }
 
-async function loadCardImages(paths) {
+async function loadCardImages(paths, rotations = []) {
   const topPaths = paths.slice(0, 4);
   const results = await Promise.all(
-    topPaths.map((path) => loadImage(path, { ensurePortrait: true })),
+    topPaths.map((path, index) => loadImage(path, { ensurePortrait: true, rotation: rotations[index] ?? 0 })),
   );
   return results.filter(Boolean);
 }
@@ -566,7 +576,10 @@ async function addMaintenanceCardSlide(pptx, order, card, clientLogo, fixedLogo,
       rtlMode: true,
     });
   }
-  const [before, after] = await Promise.all([loadCardImages(card.before_photos), loadCardImages(card.after_photos)]);
+  const [before, after] = await Promise.all([
+    loadCardImages(card.before_photos, card.before_photo_rotations),
+    loadCardImages(card.after_photos, card.after_photo_rotations),
+  ]);
   const photoGridHeight = 5.1;
   slide.addShape(pptx.ShapeType.roundRect, { x: 0.48, y: 1.35, w: 6.05, h: 0.43, rectRadius: 0.1, line: { color: 'DDE6EF' }, fill: { color: 'EAF4F4' } });
   slide.addText('After', { x: 0.6, y: 1.45, w: 5.8, h: 0.2, fontFace: 'Arial', fontSize: 13, bold: true, color: primary, align: 'center' });
@@ -1010,7 +1023,8 @@ export async function buildMaintenanceDocx(orderId, database) {
     content.push(rtlParagraph(`الفنيون: ${order.technicians.map((technician) => technician.name).join('، ') || 'غير معيّنين'}    ·    تاريخ الزيارة: ${String(order.created_at ?? '').slice(0, 10) || '—'}`));
     for (const [label, paths] of [['قبل الصيانة', card.before_photos], ['بعد الصيانة', card.after_photos]]) {
       content.push(rtlParagraph(label, { heading: HeadingLevel.HEADING_3 }));
-      const images = await loadCardImages(paths);
+      const rotations = label === 'قبل الصيانة' ? card.before_photo_rotations : card.after_photo_rotations;
+      const images = await loadCardImages(paths, rotations);
       if (!images.length) {
         content.push(rtlParagraph('لا توجد صور مرفقة.'));
       } else {

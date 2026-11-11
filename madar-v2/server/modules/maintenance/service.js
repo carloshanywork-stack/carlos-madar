@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { basename, extname, join } from 'node:path';
 import { lstat, mkdtemp, readFile, readdir, rename, rm, stat } from 'node:fs/promises';
+import sharp from 'sharp';
 import * as XLSX from 'xlsx';
 import { db } from '../../database/connection.js';
 import { recordAudit } from '../audit.js';
@@ -34,6 +35,8 @@ import {
 } from '../storage.js';
 import { withMachineStorageLock, withMaintenanceOrderStorageLock } from './deletion-lock.js';
 import { compressFieldImage } from '../upload.js';
+import { getMaintenanceThumbnail, invalidateMaintenanceThumbnail } from './thumbnails.js';
+import { getMachineNotesHistory as listMachineNotesHistory } from './note-history.js';
 
 const MAINTENANCE_STATUSES = ['in_progress', 'review', 'archived'];
 const PHOTO_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.heic', '.heif']);
@@ -1198,14 +1201,29 @@ export function deactivateMachine(machineId, actorId = null, database = db) {
   return { id, active: 0 };
 }
 
+function appendMachineNoteHistory({ database, machineId, cardId = null, orderId = null, actorId = null, note }) {
+  const text = String(note ?? '').trim();
+  if (!text) return null;
+  const actor = actorId === null ? null : database.prepare('SELECT full_name, role FROM users WHERE id = ?').get(actorId);
+  const role = actor?.role === 'rep' ? 'rep' : actor?.role === 'admin' ? 'admin' : 'supervisor';
+  const authorName = actor?.full_name ?? (role === 'rep' ? 'مندوب ميداني' : role === 'supervisor' ? 'مشرف' : 'إدارة');
+  const result = database.prepare(`
+    INSERT INTO machine_notes_history
+      (machine_id, card_id, order_id, author_id, author_name, author_role, note)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(machineId, cardId, orderId, actorId, authorName, role, text);
+  return Number(result.lastInsertRowid);
+}
+
 export function clearMachineMaintenanceNotes(machineId, actorId = null, database = db) {
   const id = positiveId(machineId, 'machineId');
-  const machine = database.prepare('SELECT id FROM machines WHERE id = ? AND deleted_at IS NULL').get(id);
+  const machine = database.prepare('SELECT id, maintenance_note FROM machines WHERE id = ? AND deleted_at IS NULL').get(id);
   if (!machine) throw new HttpError(404, 'Machine was not found.');
 
   return database.transaction(() => {
     const cards = database.prepare('SELECT id, notes FROM maintenance_cards WHERE machine_id = ? AND deleted_at IS NULL').all(id);
     database.prepare("UPDATE maintenance_cards SET notes = '' WHERE machine_id = ? AND deleted_at IS NULL").run(id);
+    database.prepare("UPDATE machines SET maintenance_note = '' WHERE id = ?").run(id);
 
     for (const card of cards) {
       if (card.notes === null || card.notes === '') continue;
@@ -1220,11 +1238,87 @@ export function clearMachineMaintenanceNotes(machineId, actorId = null, database
       });
     }
 
+    const machineNote = String(machine.maintenance_note ?? '');
+    if (machineNote.trim()) {
+      recordAudit({
+        database,
+        actorId,
+        action: 'clear_notes',
+        entityType: 'machine',
+        entityId: id,
+        oldValues: { notes: machineNote },
+        newValues: { notes: '' },
+      });
+    }
+
     return {
       id,
-      clearedCount: cards.filter((card) => card.notes !== null && card.notes !== '').length,
+      clearedCount: cards.filter((card) => card.notes !== null && card.notes !== '').length + Number(Boolean(machineNote.trim())),
     };
   }).immediate();
+}
+
+export function recordMachineNote({ machineId, note, actorId = null }, database = db) {
+  const id = positiveId(machineId, 'machineId');
+  const machine = database.prepare(`
+    SELECT id, maintenance_note
+    FROM machines
+    WHERE id = ? AND deleted_at IS NULL
+  `).get(id);
+  if (!machine) throw new HttpError(404, 'Machine was not found.');
+  const text = requireText(note, 'notes', { maxLength: 2000 });
+
+  return database.transaction(() => {
+    const latestCard = database.prepare(`
+      SELECT card.id, card.notes, card.order_id
+      FROM maintenance_cards card
+      JOIN maintenance_orders order_record ON order_record.id = card.order_id
+      WHERE card.machine_id = ?
+        AND order_record.deleted_at IS NULL
+        AND card.deleted_at IS NULL
+      ORDER BY COALESCE(order_record.archived_at, order_record.updated_at, order_record.created_at) DESC,
+        order_record.id DESC, card.id DESC
+      LIMIT 1
+    `).get(id);
+
+    if (latestCard) {
+      database.prepare('UPDATE maintenance_cards SET notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+        .run(text, latestCard.id);
+      // Card comments are authoritative when a card exists. Clear any prior
+      // machine-level fallback so it cannot unexpectedly reappear later.
+      database.prepare("UPDATE machines SET maintenance_note = '' WHERE id = ?").run(id);
+      const historyId = appendMachineNoteHistory({
+        database, machineId: id, cardId: latestCard.id, orderId: latestCard.order_id, actorId, note: text,
+      });
+      recordAudit({
+        database,
+        actorId,
+        action: 'update_notes',
+        entityType: 'maintenance_card',
+        entityId: latestCard.id,
+        oldValues: { notes: latestCard.notes ?? '' },
+        newValues: { notes: text },
+      });
+      return { success: true, machineId: id, cardId: latestCard.id, notes: text, historyId };
+    }
+
+    database.prepare('UPDATE machines SET maintenance_note = ? WHERE id = ?').run(text, id);
+    const historyId = appendMachineNoteHistory({ database, machineId: id, actorId, note: text });
+    recordAudit({
+      database,
+      actorId,
+      action: 'update_notes',
+      entityType: 'machine',
+      entityId: id,
+      oldValues: { notes: machine.maintenance_note ?? '' },
+      newValues: { notes: text },
+    });
+    return { success: true, machineId: id, cardId: null, notes: text, historyId };
+  }).immediate();
+}
+
+export function getMachineNotesHistory(machineId, database = db) {
+  return listMachineNotesHistory(machineId, database);
 }
 
 function normalizeImportHeader(value) {
@@ -2169,29 +2263,21 @@ function readActiveMaintenanceOrderForDeletion(orderId, database) {
   `).get(orderId);
 }
 
-function softDeleteMaintenanceOrder(order, actorId, operationId, database) {
+function softDeleteMaintenanceOrder(order, actorId, database) {
   return database.transaction(() => {
     const current = readActiveMaintenanceOrderForDeletion(order.id, database);
     if (!current) throw new HttpError(404, 'Maintenance order was not found.');
-    if (current.status !== 'archived') throw new HttpError(409, 'Only archived maintenance orders can be removed from the archive.');
+    if (current.status !== 'review') throw new HttpError(409, 'Only maintenance orders awaiting review can be deleted.');
     if (current.order_code !== order.order_code || current.client_storage_code !== order.client_storage_code) {
-      throw new HttpError(409, 'Maintenance order changed while its archived files were being staged.');
+      throw new HttpError(409, 'Maintenance order changed before it could be deleted.');
     }
 
     const result = database.prepare(`
       UPDATE maintenance_orders
       SET deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-      WHERE id = ? AND deleted_at IS NULL
+      WHERE id = ? AND status = 'review' AND deleted_at IS NULL
     `).run(order.id);
-    if (result.changes !== 1) throw new HttpError(409, 'Maintenance order was already removed from the archive.');
-    if (operationId) {
-      const journalUpdate = database.prepare(`
-        UPDATE maintenance_order_deletion_operations
-        SET state = 'committed'
-        WHERE operation_id = ? AND order_id = ? AND state = 'prepared'
-      `).run(operationId, order.id);
-      if (journalUpdate.changes !== 1) throw new HttpError(500, 'Maintenance photo recovery journal was not found.');
-    }
+    if (result.changes !== 1) throw new HttpError(409, 'Maintenance order was already deleted or is no longer awaiting review.');
     const deleted = database.prepare('SELECT deleted_at FROM maintenance_orders WHERE id = ?').get(order.id);
     recordAudit({
       database,
@@ -2204,11 +2290,11 @@ function softDeleteMaintenanceOrder(order, actorId, operationId, database) {
         client_code: current.client_code,
         status: current.status,
         archived_at: current.archived_at,
-         card_count: database.prepare('SELECT COUNT(*) AS count FROM maintenance_cards WHERE order_id = ? AND deleted_at IS NULL').get(order.id).count,
+        card_count: database.prepare('SELECT COUNT(*) AS count FROM maintenance_cards WHERE order_id = ? AND deleted_at IS NULL').get(order.id).count,
       },
       newValues: {
         deleted_at: deleted.deleted_at,
-        archived_photo_folder_staged: Boolean(operationId),
+        files_preserved: true,
       },
     });
     return deleted;
@@ -2230,79 +2316,9 @@ export async function deleteMaintenanceOrder(orderId, actorId = null, database =
 
     const order = readActiveMaintenanceOrderForDeletion(id, database);
     if (!order) throw new HttpError(404, 'Maintenance order was not found.');
-    if (order.status !== 'archived') throw new HttpError(409, 'Only archived maintenance orders can be removed from the archive.');
-    const operationId = randomUUID();
-    const paths = maintenanceOrderDeletionPaths(order, operationId);
-    const sourceDirectory = await resolveStorageDirectoryIfPresent(paths.originalPath);
-    if (!sourceDirectory) {
-      softDeleteMaintenanceOrder(order, actorId, null, database);
-      return { ok: true, deletedOrderCode: order.order_code };
-    }
-
-    database.transaction(() => {
-      const current = readActiveMaintenanceOrderForDeletion(id, database);
-      if (!current) throw new HttpError(404, 'Maintenance order was not found.');
-      if (current.status !== 'archived') throw new HttpError(409, 'Only archived maintenance orders can be removed from the archive.');
-      database.prepare(`
-        INSERT INTO maintenance_order_deletion_operations
-          (operation_id, order_id, client_code, order_code, original_path, staged_path, state)
-        VALUES (?, ?, ?, ?, ?, ?, 'prepared')
-      `).run(operationId, id, order.client_storage_code, order.order_code, paths.originalPath, paths.stagedPath);
-    }).immediate();
-
-    let stageDirectory = null;
-    let folderStaged = false;
-    try {
-      stageDirectory = await ensureStorageDirectory(...MAINTENANCE_ORDER_DELETION_STAGE_ROOT, operationId);
-      const stagedPath = join(stageDirectory, 'payload');
-      await rename(sourceDirectory, stagedPath);
-      folderStaged = true;
-
-      softDeleteMaintenanceOrder(order, actorId, operationId, database);
-
-      let cleanupPending = false;
-      try {
-        await rm(stageDirectory, { recursive: true, force: true });
-        removeMaintenanceOrderDeletionOperation(operationId, database);
-      } catch (error) {
-        cleanupPending = true;
-        console.error(`Archived photo cleanup for ${order.order_code} remains staged for recovery: ${error.message}`);
-      }
-      return {
-        ok: true,
-        deletedOrderCode: order.order_code,
-        ...(cleanupPending ? { photoCleanupPending: true } : {}),
-      };
-    } catch (error) {
-      if (folderStaged) {
-        try {
-          const originalSegments = paths.originalPath.split('/');
-          await ensureStorageDirectory(...originalSegments.slice(0, -1));
-          await rename(join(stageDirectory, 'payload'), sourceDirectory);
-          folderStaged = false;
-        } catch (restoreError) {
-          console.error(`Archived photo restoration for ${order.order_code} is pending: ${restoreError.message}`);
-          throw new HttpError(500, 'The order was not removed, but photo-folder recovery is pending. Restart the server before continuing.');
-        }
-      }
-
-      let stageCleaned = !stageDirectory;
-      if (stageDirectory) {
-        try {
-          await rm(stageDirectory, { recursive: true, force: true });
-          stageCleaned = true;
-        } catch (cleanupError) {
-          console.error(`Archived photo staging cleanup for ${order.order_code} is pending: ${cleanupError.message}`);
-        }
-      }
-      if (stageCleaned) {
-        try { removeMaintenanceOrderDeletionOperation(operationId, database); }
-        catch (cleanupError) {
-          console.error(`Archived photo recovery journal cleanup for ${order.order_code} is pending: ${cleanupError.message}`);
-        }
-      }
-      throw error;
-    }
+    if (order.status !== 'review') throw new HttpError(409, 'Only maintenance orders awaiting review can be deleted.');
+    softDeleteMaintenanceOrder(order, actorId, database);
+    return { ok: true, deletedOrderCode: order.order_code, filesPreserved: true };
   });
 }
 
@@ -2370,8 +2386,13 @@ export async function recoverMaintenanceOrderDeletions(database = db) {
         }
         if (operationDirectory) await rm(operationDirectory, { recursive: true, force: true });
       } else if (operation.state === 'committed') {
-        if (current.deleted_at === null || sourceDirectory) {
-          throw new HttpError(500, 'A committed maintenance photo deletion conflicts with the active archive; startup was stopped for safety.');
+        if (current.deleted_at === null || (sourceDirectory && stagedDirectory) || (!sourceDirectory && !stagedDirectory)) {
+          throw new HttpError(500, 'A committed maintenance-order recovery conflicts with its retained files; startup was stopped for safety.');
+        }
+        if (stagedDirectory) {
+          const originalSegments = operation.original_path.split('/');
+          const originalParent = await ensureStorageDirectory(...originalSegments.slice(0, -1));
+          await rename(stagedDirectory, join(originalParent, originalSegments.at(-1)));
         }
         if (operationDirectory) await rm(operationDirectory, { recursive: true, force: true });
       } else {
@@ -2998,9 +3019,23 @@ export function getMaintenanceOrder(orderId, database = db) {
     LEFT JOIN maintenance_reasons reason ON reason.id = card.reason_id
     WHERE card.order_id = ? AND card.deleted_at IS NULL
     ORDER BY card.id
-  `).all(order.id).map((card) => {
+  `).all(order.id);
+  const rotationsByCard = new Map();
+  const rotationRows = database.prepare(`
+    SELECT rotation.card_id, rotation.phase, rotation.filename, rotation.angle
+    FROM maintenance_card_photo_rotations rotation
+    JOIN maintenance_cards card ON card.id = rotation.card_id
+    WHERE card.order_id = ? AND card.deleted_at IS NULL
+  `).all(order.id);
+  for (const rotation of rotationRows) {
+    const cardId = Number(rotation.card_id);
+    if (!rotationsByCard.has(cardId)) rotationsByCard.set(cardId, new Map());
+    rotationsByCard.get(cardId).set(`${rotation.phase}\0${rotation.filename}`, rotation.angle);
+  }
+  const mappedCards = cards.map((card) => {
     const beforePhotos = parsePhotoJson(card.before_photos_json);
     const afterPhotos = parsePhotoJson(card.after_photos_json);
+    const photoRotations = rotationsByCard.get(Number(card.id)) ?? new Map();
     const repPhotoMetadata = {};
     for (const photo of repPhotosByCard.get(Number(card.id)) ?? []) {
       const list = photo.phase === 'before' ? beforePhotos : afterPhotos;
@@ -3013,6 +3048,12 @@ export function getMaintenanceOrder(orderId, database = db) {
         phase: photo.phase,
       };
     }
+    const beforePhotoRotations = beforePhotos.map((storedPath) => (
+      photoRotations.get(`before\0${storedPath.split('/').at(-1)}`) ?? 0
+    ));
+    const afterPhotoRotations = afterPhotos.map((storedPath) => (
+      photoRotations.get(`after\0${storedPath.split('/').at(-1)}`) ?? 0
+    ));
     let reasonIds = [];
     try {
       reasonIds = JSON.parse(card.reason_ids_json || '[]');
@@ -3035,6 +3076,8 @@ export function getMaintenanceOrder(orderId, database = db) {
       reason_name: compositeReasonName,
       before_photos: beforePhotos,
       after_photos: afterPhotos,
+      before_photo_rotations: beforePhotoRotations,
+      after_photo_rotations: afterPhotoRotations,
       rep_photo_metadata: repPhotoMetadata,
       before_photo_urls: beforePhotos.map((storedPath) =>
         `/api/maintenance/orders/${order.id}/cards/${card.id}/photos/before/${encodeURIComponent(storedPath.split('/').at(-1))}`),
@@ -3046,6 +3089,7 @@ export function getMaintenanceOrder(orderId, database = db) {
         `/api/maintenance/orders/${order.id}/cards/${card.id}/photos/after/${encodeURIComponent(storedPath.split('/').at(-1))}/thumbnail`),
     };
   });
+  const cardsResult = mappedCards;
   const client = database.prepare(`
     SELECT id, code, name, contact_name, phone, email, address, primary_color, secondary_color, logo_path
     FROM clients WHERE id = ?
@@ -3103,7 +3147,7 @@ export function getMaintenanceOrder(orderId, database = db) {
     client,
     technicians,
     representatives,
-    cards,
+    cards: cardsResult,
     unmatched_folders: unmatchedFolders,
     unmatched_machine_candidates: unmatchedMachineCandidates,
   };
@@ -3913,6 +3957,7 @@ export function addMaintenanceCard(orderId, input, actorId = null, database = db
       INSERT INTO maintenance_cards (order_id, machine_id, notes) VALUES (?, ?, ?)
     `).run(id, machineId, notes);
     const cardId = Number(result.lastInsertRowid);
+    appendMachineNoteHistory({ database, machineId, cardId, orderId: id, actorId, note: notes });
     database.prepare(`
       INSERT INTO client_machines (client_id, machine_id, site_area)
       SELECT ?, id, area FROM machines WHERE id = ?
@@ -4212,6 +4257,17 @@ async function updateMaintenanceCardUnlocked(orderId, cardId, input, actorId = n
       SET before_photos_json = ?, after_photos_json = ?, notes = ?, reason_id = ?, reason_ids_json = ?, updated_at = CURRENT_TIMESTAMP
       WHERE id = ? AND order_id = ? AND deleted_at IS NULL
     `).run(JSON.stringify(beforePhotos), JSON.stringify(afterPhotos), notes, reasonId, reasonIdsJson, targetCardId, id);
+    if (body.notes !== undefined && String(notes ?? '').trim()
+        && String(notes).trim() !== String(card.notes ?? '').trim()) {
+      appendMachineNoteHistory({
+        database,
+        machineId: replacementMachine?.id ?? card.machine_id,
+        cardId: targetCardId,
+        orderId: id,
+        actorId,
+        note: notes,
+      });
+    }
     recordAudit({
       database,
       actorId,
@@ -4373,6 +4429,14 @@ export async function deleteCardPhoto(orderId, cardId, phase, filename, actorId 
         WHERE id = ? AND order_id = ? AND deleted_at IS NULL
       `).run(JSON.stringify(beforePaths), JSON.stringify(afterPaths), nextStatus, targetCardId, id);
       if (update.changes !== 1) throw new HttpError(404, 'Active inspection card was not found.');
+      const previousRotation = database.prepare(`
+        SELECT angle FROM maintenance_card_photo_rotations
+        WHERE card_id = ? AND phase = ? AND filename = ?
+      `).get(targetCardId, phase, name)?.angle ?? 0;
+      database.prepare(`
+        DELETE FROM maintenance_card_photo_rotations
+        WHERE card_id = ? AND phase = ? AND filename = ?
+      `).run(targetCardId, phase, name);
 
       recordAudit({
         database,
@@ -4380,7 +4444,7 @@ export async function deleteCardPhoto(orderId, cardId, phase, filename, actorId 
         action: 'photo_delete',
         entityType: 'maintenance_card',
         entityId: targetCardId,
-        oldValues: { phase, photo: removedStoredPath, previous_status: card.status },
+        oldValues: { phase, photo: removedStoredPath, rotation: previousRotation, previous_status: card.status },
         newValues: { status: nextStatus, remaining_before: beforePaths.length, remaining_after: afterPaths.length },
       });
       return { removedStoredPath, status: nextStatus, beforeCount: beforePaths.length, afterCount: afterPaths.length };
@@ -4482,6 +4546,17 @@ export async function moveCardPhoto(orderId, cardId, input, actorId = null, data
           WHERE id = ? AND order_id = ? AND deleted_at IS NULL
         `).run(JSON.stringify(beforePaths), JSON.stringify(afterPaths), nextStatus, targetCardId, id);
         if (result.changes !== 1) throw new HttpError(404, 'Active inspection card was not found.');
+        const rotation = database.prepare(`
+          SELECT angle FROM maintenance_card_photo_rotations
+          WHERE card_id = ? AND phase = ? AND filename = ?
+        `).get(targetCardId, fromPhase, name);
+        if (rotation) {
+          database.prepare(`
+            UPDATE maintenance_card_photo_rotations
+            SET phase = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE card_id = ? AND phase = ? AND filename = ?
+          `).run(toPhase, targetCardId, fromPhase, name);
+        }
 
         recordAudit({
           database,
@@ -4489,8 +4564,8 @@ export async function moveCardPhoto(orderId, cardId, input, actorId = null, data
           action: 'photo_move',
           entityType: 'maintenance_card',
           entityId: targetCardId,
-          oldValues: { fromPhase, toPhase, photo: sourceStoredPath, status: card.status },
-          newValues: { photo: movedStoredPath, status: nextStatus, before_count: beforePaths.length, after_count: afterPaths.length },
+          oldValues: { fromPhase, toPhase, photo: sourceStoredPath, rotation: rotation?.angle ?? 0, status: card.status },
+          newValues: { photo: movedStoredPath, rotation: rotation?.angle ?? 0, status: nextStatus, before_count: beforePaths.length, after_count: afterPaths.length },
         });
       });
       update.immediate();
@@ -4502,7 +4577,7 @@ export async function moveCardPhoto(orderId, cardId, input, actorId = null, data
   });
 }
 
-export async function getMaintenancePhoto(orderId, cardId, phase, filename, database = db) {
+function findMaintenancePhotoMetadata(orderId, cardId, phase, filename, database) {
   const id = positiveId(orderId, 'orderId');
   const targetCardId = positiveId(cardId, 'cardId');
   if (!['before', 'after'].includes(phase)) throw new HttpError(400, 'Photo phase must be before or after.');
@@ -4536,7 +4611,103 @@ export async function getMaintenancePhoto(orderId, cardId, phase, filename, data
   if (!PHOTO_EXTENSIONS.has(extname(name).toLowerCase()) || !attachedStoredPath) {
     throw new HttpError(404, 'Photo is not attached to this inspection card.');
   }
-  return resolveStorageFile(attachedStoredPath);
+  const rotation = database.prepare(`
+    SELECT angle FROM maintenance_card_photo_rotations
+    WHERE card_id = ? AND phase = ? AND filename = ?
+  `).get(targetCardId, phase, name)?.angle ?? 0;
+  return { id, cardId: targetCardId, phase, filename: name, storedPath: attachedStoredPath, rotation };
+}
+
+export async function getMaintenancePhotoDetails(orderId, cardId, phase, filename, database = db) {
+  const photo = findMaintenancePhotoMetadata(orderId, cardId, phase, filename, database);
+  return { ...photo, absolutePath: await resolveStorageFile(photo.storedPath) };
+}
+
+export async function getMaintenancePhoto(orderId, cardId, phase, filename, database = db) {
+  return (await getMaintenancePhotoDetails(orderId, cardId, phase, filename, database)).absolutePath;
+}
+
+export async function rotateMaintenanceCardPhoto(orderId, cardId, input, actorId = null, database = db) {
+  const id = positiveId(orderId, 'orderId');
+  const targetCardId = positiveId(cardId, 'cardId');
+  const body = requireObject(input);
+  allowOnlyKeys(body, ['phase', 'filename', 'angle']);
+  const phase = requireText(body.phase, 'phase');
+  if (!['before', 'after'].includes(phase)) throw new HttpError(400, 'phase must be before or after.');
+  const filename = requireText(body.filename, 'filename', { maxLength: 200 });
+  if (filename.includes('/') || filename.includes('\\')) throw new HttpError(400, 'Invalid photo filename.');
+  const delta = Number(body.angle);
+  if (![90, 180, 270, -90].includes(delta)) {
+    throw new HttpError(400, 'angle must be 90, 180, 270, or -90.');
+  }
+
+  return withMaintenanceOrderStorageLock(async () => {
+    assertNoPendingMaintenanceFileRecovery(database);
+    const actor = actorId === null ? null : database.prepare(`
+      SELECT role FROM users WHERE id = ? AND active = 1 AND deleted_at IS NULL
+    `).get(actorId);
+    if (!['admin', 'operations'].includes(actor?.role)) {
+      throw new HttpError(403, 'Administrator or Operations access is required to rotate maintenance photos.');
+    }
+
+    const order = database.prepare(`
+      SELECT status FROM maintenance_orders
+      WHERE id = ? AND deleted_at IS NULL
+    `).get(id);
+    if (!order) throw new HttpError(404, 'Maintenance order was not found.');
+    if (order.status === 'archived' && actor.role !== 'admin') {
+      throw new HttpError(403, 'Administrator access is required to rotate archived maintenance photos.');
+    }
+
+    const photo = findMaintenancePhotoMetadata(id, targetCardId, phase, filename, database);
+    const absolutePath = await resolveStorageFile(photo.storedPath);
+    try {
+      const metadata = await sharp(absolutePath, { failOn: 'none' }).metadata();
+      if (!metadata.format) throw new Error('Image format could not be identified.');
+    } catch {
+      throw new HttpError(415, 'This photo could not be rotated as a supported image.');
+    }
+
+    const previousRotation = photo.rotation;
+    const nextRotation = ((previousRotation + delta) % 360 + 360) % 360;
+    const save = database.transaction(() => {
+      database.prepare(`
+        INSERT INTO maintenance_card_photo_rotations
+          (card_id, phase, filename, angle, updated_by, updated_at)
+        VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(card_id, phase, filename) DO UPDATE SET
+          angle = excluded.angle,
+          updated_by = excluded.updated_by,
+          updated_at = CURRENT_TIMESTAMP
+      `).run(targetCardId, phase, filename, nextRotation, actorId);
+      recordAudit({
+        database,
+        actorId,
+        action: 'rotate_maintenance_photo',
+        entityType: 'maintenance_card',
+        entityId: targetCardId,
+        oldValues: { phase, filename, rotation: previousRotation },
+        newValues: { phase, filename, rotation: nextRotation, rotation_delta: delta },
+      });
+    });
+    save.immediate();
+
+    try {
+      await invalidateMaintenanceThumbnail(absolutePath, previousRotation);
+      await getMaintenanceThumbnail(absolutePath, nextRotation);
+    } catch (error) {
+      // The new cache key includes the saved angle, so a stale derived thumbnail
+      // cannot be served even if best-effort removal of the previous one fails.
+      console.warn(`Maintenance thumbnail cleanup for ${filename} is pending: ${error.message}`);
+    }
+
+    return {
+      success: true,
+      filename,
+      rotatedAt: Date.now(),
+      angle: nextRotation,
+    };
+  });
 }
 
 export function transitionMaintenanceToReview(orderId, actorId = null, database = db) {

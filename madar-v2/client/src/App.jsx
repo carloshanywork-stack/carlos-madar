@@ -70,7 +70,7 @@ function BusinessRoutes({ user }) {
         <Route path="/finance" element={canViewFinance ? <FinancePage /> : <Navigate to="/" replace />} />
         <Route path="/accounting" element={canViewFinance ? <AccountingPage isAdmin={role === 'admin'} canViewPayroll /> : <Navigate to="/" replace />} />
         <Route path="/staff" element={user?.role === 'admin' ? <StaffDirectoryPage /> : <Navigate to="/" replace />} />
-        <Route path="/archive" element={<ArchivePage isAdmin={user?.role === 'admin'} />} />
+        <Route path="/archive" element={<ArchivePage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

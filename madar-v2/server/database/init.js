@@ -27,6 +27,9 @@ const maintenanceMachineDecommissionMigration = '20261031-maintenance-machine-de
 const maintenanceUnmatchedFolderDeletionMigration = '20261031-maintenance-unmatched-folder-purge-recovery';
 const maintenanceCardMultiReasonMigration = '20261031-maintenance-card-multi-reasons';
 const maintenanceUnmatchedFolderDuplicateMigration = '20261101-maintenance-unmatched-folder-duplicate-flags';
+const maintenancePhotoRotationMigration = '20261109-maintenance-photo-rotation-metadata';
+const machineMaintenanceNotesMigration = '20261109-machine-maintenance-notes';
+const machineNotesHistoryMigration = '20261110-machine-notes-history';
 const repUserProfileMigration = '20261102-rep-user-profile';
 const repVisitIngestionMigration = '20261102-rep-offline-visit-ingestion';
 const repSupervisorRadarMigration = '20261102-rep-supervisor-radar-qa';
@@ -432,6 +435,145 @@ export function migrateMaintenanceCardMultiReasons(database) {
 
   database.prepare('INSERT INTO schema_migrations (version) VALUES (?)')
     .run(maintenanceCardMultiReasonMigration);
+}
+
+export function migrateMaintenancePhotoRotations(database) {
+  const applied = database.prepare('SELECT 1 FROM schema_migrations WHERE version = ?')
+    .get(maintenancePhotoRotationMigration);
+  if (applied) return;
+
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS maintenance_card_photo_rotations (
+      card_id INTEGER NOT NULL REFERENCES maintenance_cards(id),
+      phase TEXT NOT NULL CHECK (phase IN ('before', 'after')),
+      filename TEXT NOT NULL,
+      angle INTEGER NOT NULL CHECK (angle IN (0, 90, 180, 270)),
+      updated_by INTEGER REFERENCES users(id),
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (card_id, phase, filename)
+    );
+    CREATE INDEX IF NOT EXISTS idx_maintenance_card_photo_rotations_card
+      ON maintenance_card_photo_rotations(card_id, phase);
+  `);
+  database.prepare('INSERT INTO schema_migrations (version) VALUES (?)')
+    .run(maintenancePhotoRotationMigration);
+}
+
+export function migrateMachineMaintenanceNotes(database) {
+  const migrate = database.transaction(() => {
+    const applied = database.prepare('SELECT 1 FROM schema_migrations WHERE version = ?')
+      .get(machineMaintenanceNotesMigration);
+    if (applied) return;
+
+    const machineColumns = new Set(database.pragma('table_info(machines)').map((column) => column.name));
+    if (!machineColumns.has('maintenance_note')) {
+      database.exec("ALTER TABLE machines ADD COLUMN maintenance_note TEXT NOT NULL DEFAULT ''");
+    }
+    database.prepare('INSERT INTO schema_migrations (version) VALUES (?)')
+      .run(machineMaintenanceNotesMigration);
+  });
+  migrate.immediate();
+}
+
+export function migrateMachineNotesHistory(database) {
+  const migrate = database.transaction(() => {
+    const applied = database.prepare('SELECT 1 FROM schema_migrations WHERE version = ?')
+      .get(machineNotesHistoryMigration);
+    if (applied) return;
+
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS machine_notes_history (
+        id INTEGER PRIMARY KEY,
+        machine_id INTEGER NOT NULL REFERENCES machines(id) ON DELETE CASCADE,
+        card_id INTEGER REFERENCES maintenance_cards(id) ON DELETE SET NULL,
+        order_id INTEGER REFERENCES maintenance_orders(id) ON DELETE SET NULL,
+        author_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        author_name TEXT NOT NULL,
+        author_role TEXT NOT NULL DEFAULT 'admin',
+        note TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_machine_notes_machine_created
+        ON machine_notes_history(machine_id, created_at DESC);
+    `);
+
+    const repVisitNotes = database.prepare(`
+      SELECT visit.id, visit.machine_id, visit.card_id, visit.order_id, visit.rep_user_id,
+        visit.captured_at, TRIM(visit.notes) AS note, COALESCE(user.full_name, 'مندوب ميداني') AS author_name
+      FROM rep_visits visit
+      LEFT JOIN users user ON user.id = visit.rep_user_id
+      WHERE visit.status = 'completed' AND visit.machine_id IS NOT NULL
+        AND TRIM(COALESCE(visit.notes, '')) <> ''
+      ORDER BY datetime(visit.captured_at), visit.id
+    `).all();
+    const notesByCard = new Map();
+    const insertRepNote = database.prepare(`
+      INSERT INTO machine_notes_history
+        (machine_id, card_id, order_id, author_id, author_name, author_role, note, created_at)
+      SELECT ?, ?, ?, ?, ?, 'rep', ?, ?
+      WHERE NOT EXISTS (
+        SELECT 1 FROM machine_notes_history history
+        WHERE history.machine_id = ? AND history.card_id IS ? AND history.author_id = ?
+          AND history.author_role = 'rep' AND history.note = ? AND history.created_at = ?
+      )
+    `);
+    for (const visit of repVisitNotes) {
+      insertRepNote.run(
+        visit.machine_id, visit.card_id, visit.order_id, visit.rep_user_id, visit.author_name, visit.note, visit.captured_at,
+        visit.machine_id, visit.card_id, visit.rep_user_id, visit.note, visit.captured_at,
+      );
+      if (visit.card_id) {
+        const notes = notesByCard.get(Number(visit.card_id)) ?? [];
+        notes.push(visit);
+        notesByCard.set(Number(visit.card_id), notes);
+      }
+    }
+
+    const insertCardNote = database.prepare(`
+      INSERT INTO machine_notes_history
+        (machine_id, card_id, order_id, author_id, author_name, author_role, note, created_at)
+      SELECT ?, ?, ?, NULL, 'إدارة', 'admin', ?, ?
+      WHERE NOT EXISTS (
+        SELECT 1 FROM machine_notes_history history
+        WHERE history.card_id = ? AND history.author_role = 'admin'
+          AND history.note = ? AND history.created_at = ?
+      )
+    `);
+    const cardsWithNotes = database.prepare(`
+      SELECT id, machine_id, order_id, notes, created_at
+      FROM maintenance_cards WHERE TRIM(COALESCE(notes, '')) <> ''
+    `).all();
+    for (const card of cardsWithNotes) {
+      let residual = String(card.notes).trim();
+      for (const visit of notesByCard.get(Number(card.id)) ?? []) {
+        const legacyVisitNote = `[مندوب · ${visit.captured_at}] ${visit.note}`;
+        residual = residual.split(legacyVisitNote).join('');
+      }
+      residual = residual.replace(/\r/g, '').replace(/\n{2,}/g, '\n').trim();
+      if (!residual) continue;
+      insertCardNote.run(card.machine_id, card.id, card.order_id, residual, card.created_at, card.id, residual, card.created_at);
+    }
+
+    // A prior additive migration allowed notes on machines that have no card.
+    // Preserve those notes too; their original edit time was not stored.
+    database.prepare(`
+      INSERT INTO machine_notes_history
+        (machine_id, card_id, order_id, author_id, author_name, author_role, note)
+      SELECT machine.id, NULL, NULL, NULL, 'إدارة', 'admin', TRIM(machine.maintenance_note)
+      FROM machines machine
+      WHERE TRIM(COALESCE(machine.maintenance_note, '')) <> ''
+        AND NOT EXISTS (
+          SELECT 1 FROM machine_notes_history history
+          WHERE history.machine_id = machine.id
+            AND history.card_id IS NULL
+            AND history.note = TRIM(machine.maintenance_note)
+        )
+    `).run();
+
+    database.prepare('INSERT INTO schema_migrations (version) VALUES (?)')
+      .run(machineNotesHistoryMigration);
+  });
+  migrate.immediate();
 }
 
 export function migrateMaintenanceUnmatchedFolderDuplicates(database) {
@@ -1314,6 +1456,9 @@ export function initializeDatabase({ database = db, initialAdminPassword = env.i
     migrateMaintenanceMachineDecommission(database);
     migrateMaintenanceUnmatchedFolderDeletion(database);
     migrateMaintenanceCardMultiReasons(database);
+    migrateMaintenancePhotoRotations(database);
+    migrateMachineMaintenanceNotes(database);
+    migrateMachineNotesHistory(database);
     migrateMaintenanceUnmatchedFolderDuplicates(database);
 
     const hasUsers = database.prepare('SELECT 1 FROM users LIMIT 1').get();

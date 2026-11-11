@@ -4,8 +4,11 @@ system/node_modules/
 system/dist/
 system/data/*.sqlite*
 system/data/thumbnails/
+storage
 storage/*
 !storage/.gitkeep
+storage_pre_migration_backup
+storagecd/
 Backups/
 *.log
 Thumbs.db

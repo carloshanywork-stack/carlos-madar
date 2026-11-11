@@ -772,6 +772,29 @@ body.madar-document { min-width: 320px; min-height: 100vh; margin: 0; background
 #madar-app .madar-export-progress-card progress::-webkit-progress-value { border-radius: 999px; background: linear-gradient(90deg, #0ea5e9, #38bdf8); transition: width .35s ease; }
 #madar-app .madar-export-progress-card progress::-moz-progress-bar { border-radius: 999px; background: linear-gradient(90deg, #0ea5e9, #38bdf8); }
 #madar-app .madar-export-progress-details { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 14px; color: #94a3b8; font-size: 11px; }
+
+#madar-app .madar-link { display: inline-flex; align-items: center; gap: 5px; margin-top: 7px; padding: 0; border: 0; color: var(--madar-accent); background: transparent; font: inherit; font-size: 11px; font-weight: 750; cursor: pointer; }
+#madar-app .madar-link:hover { text-decoration: underline; }
+#madar-app .madar-note-history { max-height: min(62vh, 620px); overflow: auto; padding: 2px 3px; }
+#madar-app .madar-note-timeline { display: grid; gap: 0; margin: 0; padding: 0 22px 0 0; list-style: none; }
+#madar-app .madar-note-timeline-entry { position: relative; min-width: 0; padding: 0 14px 20px 0; border-right: 2px solid color-mix(in srgb, var(--madar-accent) 36%, var(--madar-border)); }
+#madar-app .madar-note-timeline-entry::before { position: absolute; top: 3px; right: -7px; width: 10px; height: 10px; border: 2px solid var(--madar-surface); border-radius: 50%; background: var(--madar-accent); content: ''; }
+#madar-app .madar-note-timeline-entry:last-child { padding-bottom: 2px; border-right-color: transparent; }
+#madar-app .madar-note-timeline-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 9px; color: var(--madar-muted); font-size: 11px; }
+#madar-app .madar-note-timeline-meta strong { color: var(--madar-text); }
+#madar-app .madar-note-author { padding: 3px 8px; border-radius: 999px; color: #14532d; background: #dcfce7; font-size: 10px; font-weight: 750; }
+#madar-app .madar-note-author-rep { color: #075985; background: #e0f2fe; }
+#madar-app .madar-note-author-supervisor { color: #854d0e; background: #fef3c7; }
+#madar-app .madar-note-timeline-entry p { margin: 9px 0 0; padding: 11px 12px; border: 1px solid var(--madar-border); border-radius: 10px; color: var(--madar-text); background: var(--madar-surface-alt); line-height: 1.8; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+#madar-app[data-theme="dark"] .madar-note-author { color: #bbf7d0; background: #14532d; }
+#madar-app[data-theme="dark"] .madar-note-author-rep { color: #bae6fd; background: #0c4a6e; }
+#madar-app[data-theme="dark"] .madar-note-author-supervisor { color: #fde68a; background: #713f12; }
+
+@media (max-width: 720px) {
+  #madar-app .madar-note-timeline-meta { align-items: flex-start; }
+  #madar-app .madar-note-timeline-entry p { font-size: 12px; }
+}
 @media (max-width: 760px) {
   #madar-app .madar-export-scope-options,
   #madar-app .madar-export-group-options { grid-template-columns: 1fr; }

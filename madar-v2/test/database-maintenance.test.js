@@ -10,7 +10,7 @@ process.env.MADAR_V2_STORAGE_ROOT = join(temporaryDirectory, 'storage');
 process.env.NODE_ENV = 'test';
 process.env.COOKIE_SECURE = 'false';
 
-const [{ db, createConnection }, { initializeDatabase, migrateAccountLoginProtection, migrateAttendanceAdminClockOutNote, migrateAttendanceBiometricConfirmation, migrateAttendanceClockLocations, migrateCairoTimezone }, { runDatabaseMaintenance }] = await Promise.all([
+const [{ db, createConnection }, { initializeDatabase, migrateAccountLoginProtection, migrateAttendanceAdminClockOutNote, migrateAttendanceBiometricConfirmation, migrateAttendanceClockLocations, migrateCairoTimezone, migrateMaintenancePhotoRotations, migrateMachineMaintenanceNotes, migrateMachineNotesHistory }, { runDatabaseMaintenance }] = await Promise.all([
   import('../server/database/connection.js'),
   import('../server/database/init.js'),
   import('../server/database/maintenance.js'),
@@ -33,6 +33,18 @@ test('database initialization sets Cairo and adds account lockout fields', () =>
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE version = '20261103-account-login-protection'").get().count, 1);
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE version = '20261103-gps-retention-index'").get().count, 1);
   assert.ok(db.pragma('table_info(employee_daily_attendance)').some((column) => column.name === 'clock_out_admin_note'));
+  assert.ok(db.pragma('table_info(maintenance_card_photo_rotations)').some((column) => column.name === 'angle'));
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE version = '20261109-maintenance-photo-rotation-metadata'").get().count, 1);
+  migrateMaintenancePhotoRotations(db);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE version = '20261109-maintenance-photo-rotation-metadata'").get().count, 1);
+  assert.ok(db.pragma('table_info(machines)').some((column) => column.name === 'maintenance_note'));
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE version = '20261109-machine-maintenance-notes'").get().count, 1);
+  migrateMachineMaintenanceNotes(db);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE version = '20261109-machine-maintenance-notes'").get().count, 1);
+  assert.ok(db.pragma('table_info(machine_notes_history)').some((column) => column.name === 'author_role'));
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE version = '20261110-machine-notes-history'").get().count, 1);
+  migrateMachineNotesHistory(db);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE version = '20261110-machine-notes-history'").get().count, 1);
   migrateAttendanceAdminClockOutNote(db);
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE version = '20261104-attendance-admin-clockout-note'").get().count, 1);
   const attendanceColumns = new Set(db.pragma('table_info(employee_daily_attendance)').map((column) => column.name));
@@ -49,6 +61,103 @@ test('database initialization sets Cairo and adds account lockout fields', () =>
   assert.ok(biometricColumns.has('clock_out_biometric_verified'));
   migrateAttendanceBiometricConfirmation(db);
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE version = '20261105-attendance-biometric-confirmation'").get().count, 1);
+});
+
+test('machine notes history migration backfills card and fallback notes additively and is idempotent', () => {
+  const legacy = createConnection(':memory:');
+  try {
+    legacy.exec(`
+      CREATE TABLE schema_migrations (version TEXT PRIMARY KEY);
+      CREATE TABLE users (id INTEGER PRIMARY KEY, full_name TEXT NOT NULL);
+      CREATE TABLE machines (id INTEGER PRIMARY KEY, code TEXT NOT NULL, maintenance_note TEXT NOT NULL DEFAULT '');
+      CREATE TABLE maintenance_orders (id INTEGER PRIMARY KEY, order_code TEXT NOT NULL);
+      CREATE TABLE maintenance_cards (
+        id INTEGER PRIMARY KEY, machine_id INTEGER NOT NULL REFERENCES machines(id),
+        order_id INTEGER NOT NULL REFERENCES maintenance_orders(id), notes TEXT, created_at TEXT NOT NULL
+      );
+      CREATE TABLE rep_visits (
+        id INTEGER PRIMARY KEY, visit_uuid TEXT, rep_user_id INTEGER, order_id INTEGER, card_id INTEGER,
+        machine_id INTEGER, notes TEXT, captured_at TEXT, status TEXT
+      );
+      INSERT INTO users (id, full_name) VALUES (13, 'محمود المندوب');
+      INSERT INTO machines (id, code, maintenance_note) VALUES
+        (71, 'LEGACY-NOTE-MACHINE', ''), (72, 'LEGACY-FALLBACK-MACHINE', 'Fallback history note');
+      INSERT INTO maintenance_orders (id, order_code) VALUES (81, 'MNT-0081');
+      INSERT INTO maintenance_cards (id, machine_id, order_id, notes, created_at)
+        VALUES (91, 71, 81, 'Preserved card note' || char(10) || '[مندوب · 2026-10-02T09:00:00.000Z] Field visit note', '2026-10-02 09:15:00');
+      INSERT INTO rep_visits (id, visit_uuid, rep_user_id, order_id, card_id, machine_id, notes, captured_at, status)
+        VALUES (101, 'legacy-visit-101', 13, 81, 91, 71, 'Field visit note', '2026-10-02T09:00:00.000Z', 'completed');
+      INSERT INTO schema_migrations (version) VALUES ('prior-version');
+    `);
+    migrateMachineNotesHistory(legacy);
+    migrateMachineNotesHistory(legacy);
+
+    assert.deepEqual(legacy.prepare(`SELECT machine_id, card_id, order_id, author_name, author_role, note, created_at
+      FROM machine_notes_history WHERE card_id IS NOT NULL AND author_role = 'admin'`).get(), {
+      machine_id: 71,
+      card_id: 91,
+      order_id: 81,
+      author_name: 'إدارة',
+      author_role: 'admin',
+      note: 'Preserved card note',
+      created_at: '2026-10-02 09:15:00',
+    });
+    assert.deepEqual(legacy.prepare(`SELECT machine_id, card_id, order_id, author_id, author_name, author_role, note, created_at
+      FROM machine_notes_history WHERE author_role = 'rep'`).get(), {
+      machine_id: 71,
+      card_id: 91,
+      order_id: 81,
+      author_id: 13,
+      author_name: 'محمود المندوب',
+      author_role: 'rep',
+      note: 'Field visit note',
+      created_at: '2026-10-02T09:00:00.000Z',
+    });
+    assert.deepEqual(legacy.prepare(`SELECT machine_id, card_id, order_id, author_name, author_role, note
+      FROM machine_notes_history WHERE card_id IS NULL`).get(), {
+      machine_id: 72,
+      card_id: null,
+      order_id: null,
+      author_name: 'إدارة',
+      author_role: 'admin',
+      note: 'Fallback history note',
+    });
+    assert.equal(legacy.prepare('SELECT COUNT(*) AS count FROM machine_notes_history').get().count, 3);
+    assert.equal(legacy.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get().count, 2);
+  } finally {
+    legacy.close();
+  }
+});
+
+test('maintenance photo rotation migration is additive, preserves records, and is idempotent', () => {
+  const legacy = createConnection(':memory:');
+  try {
+    legacy.exec(`
+      CREATE TABLE schema_migrations (version TEXT PRIMARY KEY);
+      CREATE TABLE users (id INTEGER PRIMARY KEY);
+      CREATE TABLE maintenance_cards (id INTEGER PRIMARY KEY);
+      INSERT INTO users (id) VALUES (8);
+      INSERT INTO maintenance_cards (id) VALUES (31);
+      INSERT INTO schema_migrations (version) VALUES ('prior-version');
+    `);
+    migrateMaintenancePhotoRotations(legacy);
+    legacy.prepare(`
+      INSERT INTO maintenance_card_photo_rotations (card_id, phase, filename, angle, updated_by)
+      VALUES (31, 'before', 'field-photo.jpg', 270, 8)
+    `).run();
+    migrateMaintenancePhotoRotations(legacy);
+
+    assert.deepEqual(legacy.prepare('SELECT card_id, phase, filename, angle, updated_by FROM maintenance_card_photo_rotations').get(), {
+      card_id: 31,
+      phase: 'before',
+      filename: 'field-photo.jpg',
+      angle: 270,
+      updated_by: 8,
+    });
+    assert.equal(legacy.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get().count, 2);
+  } finally {
+    legacy.close();
+  }
 });
 
 test('attendance GPS migration is additive, preserves existing records, and is idempotent', () => {
@@ -133,7 +242,7 @@ test('account lockout migration preserves user identity and can run repeatedly',
   }
 });
 
-test('weekly maintenance removes only breadcrumbs older than 90 days and checkpoints SQLite', () => {
+test('weekly maintenance retains every breadcrumb forever and checkpoints SQLite', () => {
   const now = new Date('2026-11-03T12:00:00.000Z');
   const oldDate = new Date(now.valueOf() - (91 * 24 * 60 * 60 * 1000)).toISOString();
   const cutoff = new Date(now.valueOf() - (90 * 24 * 60 * 60 * 1000)).toISOString();
@@ -147,8 +256,9 @@ test('weekly maintenance removes only breadcrumbs older than 90 days and checkpo
   insert.run(userId, recentDate);
 
   const result = runDatabaseMaintenance(db, now);
-  assert.equal(result.deletedBreadcrumbs, 1);
+  assert.equal(result.deletedBreadcrumbs, 0);
+  assert.equal(result.retainedBreadcrumbs, 3);
   assert.ok(result.checkpoint);
-  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM rep_location_breadcrumbs').get().count, 2);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM rep_location_breadcrumbs').get().count, 3);
   assert.deepEqual(db.pragma('foreign_key_check'), []);
 });

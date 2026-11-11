@@ -74,7 +74,7 @@ function zipEntryNames(buffer) {
   });
 }
 
-test('Admin archive removal soft-deletes, audits, safely stages photos, and recovers interrupted operations', async () => {
+test('Admin can soft-delete a review order while retaining files/history; archived orders remain undeletable', async () => {
   const clientId = Number(db.prepare('INSERT INTO clients (code, name) VALUES (?, ?)').run('C-DELETE-1', 'Delete Test Client').lastInsertRowid);
   const machineId = Number(db.prepare('INSERT INTO machines (code, name_ar, area) VALUES (?, ?, ?)').run('DELETE-01', 'ماكينة الحذف', 'Delete Area').lastInsertRowid);
   const createOrder = (orderCode, status = 'archived') => {
@@ -89,7 +89,14 @@ test('Admin archive removal soft-deletes, audits, safely stages photos, and reco
     return { id, cardId, orderCode, photoDirectory };
   };
 
-  const order = createOrder('MN-DELETE-1');
+  const order = createOrder('MN-DELETE-REVIEW', 'review');
+  const archivedOrder = createOrder('MN-KEEP-ARCHIVED');
+  const inProgressOrder = createOrder('MN-KEEP-IN-PROGRESS', 'in_progress');
+  const adminId = Number(db.prepare("SELECT id FROM users WHERE username = 'admin'").get().id);
+  const treasuryEntryId = Number(db.prepare(`
+    INSERT INTO treasury_entries (kind, category, amount_cents, maintenance_order_id, reference, created_by)
+    VALUES ('income', 'Test balance fixture', 2500, ?, ?, ?)
+  `).run(order.id, order.orderCode, adminId).lastInsertRowid);
   const operationsUserId = Number(db.prepare(`
     INSERT INTO users (username, password_hash, full_name, role)
     VALUES (?, ?, ?, 'operations')
@@ -105,44 +112,68 @@ test('Admin archive removal soft-deletes, audits, safely stages photos, and reco
   cookie = (operationsLogin.headers.getSetCookie?.()[0] ?? operationsLogin.headers.get('set-cookie'))?.split(';', 1)[0];
   assert.ok(cookie);
 
+  const operationsOrder = await request(`/api/maintenance/orders/${order.id}`);
+  assert.equal(operationsOrder.body.canDelete, false);
   const forbidden = await request(`/api/maintenance/orders/${order.id}`, { method: 'DELETE' });
   assert.equal(forbidden.response.status, 403);
   assert.equal(existsSync(order.photoDirectory), true);
   assert.equal(db.prepare('SELECT deleted_at FROM maintenance_orders WHERE id = ?').get(order.id).deleted_at, null);
 
   cookie = adminCookie;
-  const abortTrigger = 'test_abort_maintenance_archive_removal';
+  assert.equal((await request(`/api/maintenance/orders/${order.id}`)).body.canDelete, true);
+  assert.equal((await request(`/api/maintenance/orders/${archivedOrder.id}`)).body.canDelete, false);
+  assert.equal((await request(`/api/maintenance/orders/${archivedOrder.id}`, { method: 'DELETE' })).response.status, 409);
+  assert.equal(existsSync(archivedOrder.photoDirectory), true, 'archived order photos remain retained');
+  assert.equal(db.prepare('SELECT deleted_at FROM maintenance_orders WHERE id = ?').get(archivedOrder.id).deleted_at, null);
+  assert.equal((await request(`/api/maintenance/orders/${inProgressOrder.id}`, { method: 'DELETE' })).response.status, 409);
+
+  const abortTrigger = 'test_abort_maintenance_review_order_delete';
   db.exec(`CREATE TRIGGER ${abortTrigger} BEFORE UPDATE OF deleted_at ON maintenance_orders
     WHEN OLD.id = ${order.id} AND NEW.deleted_at IS NOT NULL
-    BEGIN SELECT RAISE(ABORT, 'forced isolated deletion rollback'); END`);
-  let failedRemoval;
+    BEGIN SELECT RAISE(ABORT, 'forced isolated delete rollback'); END`);
+  let failedDelete;
   try {
-    failedRemoval = await request(`/api/maintenance/orders/${order.id}`, { method: 'DELETE' });
+    failedDelete = await request(`/api/maintenance/orders/${order.id}`, { method: 'DELETE' });
   } finally {
     db.exec(`DROP TRIGGER IF EXISTS ${abortTrigger}`);
   }
-  assert.equal(failedRemoval.response.status, 500);
-  assert.equal(existsSync(order.photoDirectory), true, 'a database failure restores the staged archive folder');
+  assert.equal(failedDelete.response.status, 500);
+  assert.equal(existsSync(order.photoDirectory), true, 'a database failure leaves retained files untouched');
   assert.equal(db.prepare('SELECT deleted_at FROM maintenance_orders WHERE id = ?').get(order.id).deleted_at, null);
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM maintenance_order_deletion_operations').get().count, 0);
 
   const removed = await request(`/api/maintenance/orders/${order.id}`, { method: 'DELETE' });
   assert.equal(removed.response.status, 200, JSON.stringify(removed.body));
-  assert.deepEqual(removed.body, { ok: true, deletedOrderCode: order.orderCode });
-  assert.equal(existsSync(order.photoDirectory), false);
+  assert.deepEqual(removed.body, { ok: true, deletedOrderCode: order.orderCode, filesPreserved: true });
+  assert.equal(existsSync(order.photoDirectory), true, 'the request photo directory remains in storage');
+  assert.equal(readFileSync(join(order.photoDirectory, 'archive-photo.jpg'), 'utf8'), 'synthetic archived photo');
   assert.ok(db.prepare('SELECT deleted_at FROM maintenance_orders WHERE id = ?').get(order.id).deleted_at);
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM maintenance_cards WHERE order_id = ?').get(order.id).count, 1,
     'soft deletion retains the historical maintenance card');
-  assert.deepEqual(db.prepare(`
-    SELECT actor_id, action, entity_type, entity_id
+  assert.deepEqual(db.prepare('SELECT maintenance_order_id, amount_cents FROM treasury_entries WHERE id = ?').get(treasuryEntryId), {
+    maintenance_order_id: order.id,
+    amount_cents: 2500,
+  }, 'soft deletion retains linked treasury history');
+  const deletionAudit = db.prepare(`
+    SELECT actor_id, action, entity_type, entity_id, old_values_json, new_values_json
     FROM audit_log WHERE action = 'delete_maintenance_order' AND entity_id = ?
-  `).get(order.id), {
-    actor_id: Number(db.prepare("SELECT id FROM users WHERE username = 'admin'").get().id),
+  `).get(order.id);
+  assert.deepEqual({
+    actor_id: deletionAudit.actor_id,
+    action: deletionAudit.action,
+    entity_type: deletionAudit.entity_type,
+    entity_id: deletionAudit.entity_id,
+  }, {
+    actor_id: adminId,
     action: 'delete_maintenance_order',
     entity_type: 'maintenance_order',
     entity_id: order.id,
   });
+  assert.equal(JSON.parse(deletionAudit.old_values_json).status, 'review');
+  assert.equal(JSON.parse(deletionAudit.new_values_json).files_preserved, true);
   assert.equal((await request('/api/maintenance/orders?status=archived')).body.some((item) => item.id === order.id), false);
+  assert.equal((await request('/api/maintenance/orders?status=archived')).body.some((item) => item.id === archivedOrder.id), true);
+  assert.equal((await request('/api/maintenance/orders?status=review')).body.some((item) => item.id === order.id), false);
   assert.equal((await request(`/api/maintenance/orders/${order.id}`)).response.status, 404);
 
   const backup = await request('/api/system/backup', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
@@ -183,7 +214,8 @@ test('Admin archive removal soft-deletes, audits, safely stages photos, and reco
     `Clients/C-DELETE-1/Archived_Orders/${interruptedCleanup.orderCode}`,
     `.madar-recovery/maintenance-order-deletions/${committedId}/payload`);
   assert.deepEqual(await recoverMaintenanceOrderDeletions(db), { recoveredCount: 1 });
-  assert.equal(existsSync(interruptedCleanup.photoDirectory), false, 'startup recovery finishes cleanup for a soft-deleted order');
+  assert.equal(existsSync(interruptedCleanup.photoDirectory), true, 'startup recovery restores archived files instead of purging them');
+  assert.equal(readFileSync(join(interruptedCleanup.photoDirectory, 'archive-photo.jpg'), 'utf8'), 'synthetic archived photo');
   assert.equal(existsSync(committedStageDirectory), false);
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM maintenance_order_deletion_operations WHERE operation_id = ?').get(committedId).count, 0);
 });

@@ -2,16 +2,18 @@ import XLSX from 'xlsx-js-style';
 import { ZipArchive } from 'archiver';
 import yauzl from 'yauzl';
 import { db as defaultDb } from '../../database/connection.js';
-import { HttpError, requireText } from '../http.js';
+import { HttpError, positiveId, requireText } from '../http.js';
 import { compareMachineCodes, compareMachineNames, compareMaintenanceAreas } from './sorting.js';
+import { formatMachineNoteDate, getMachineNotesHistory } from './note-history.js';
 
 const AREA_NOTE_HEADERS = ['كود الماكينة', 'الاسم بالعربي', 'الاسم بالإنجليزي', 'الملاحظات'];
-const MACHINES_PER_A4_PAGE = 22;
-const ROWS_PER_A4_PAGE = MACHINES_PER_A4_PAGE + 2;
-
-function addWorksheetPrintSetup(sheetXml, totalRows) {
+function addWorksheetPrintSetup(sheetXml) {
   const sheetProperties = '<sheetPr><pageSetUpPr fitToPage="1" autoPageBreaks="0"/></sheetPr>';
-  let xml = sheetXml.replace(/(<worksheet\b[^>]*>)/, `$1${sheetProperties}`);
+  let xml = /<sheetPr\b/.test(sheetXml)
+    ? sheetXml.replace(/<sheetPr\b[^>]*>(.*?)<\/sheetPr>/s, (_match, contents) => (
+      `<sheetPr>${contents.replace(/<pageSetUpPr\b[^>]*\/?\s*>/g, '')}<pageSetUpPr fitToPage="1" autoPageBreaks="0"/></sheetPr>`
+    ))
+    : sheetXml.replace(/(<worksheet\b[^>]*>)/, `$1${sheetProperties}`);
   if (/<sheetViews\b[^>]*>/.test(xml)) {
     if (/<sheetView\b/.test(xml)) {
       xml = xml.replace(/<sheetView\b([^>]*?)(\/?)>/g, (_match, attributes, selfClosing) => {
@@ -25,14 +27,6 @@ function addWorksheetPrintSetup(sheetXml, totalRows) {
     xml = xml.replace(/(<sheetPr\b[^>]*>.*?<\/sheetPr>)/s, '$1<sheetViews><sheetView workbookViewId="0" rightToLeft="1"/></sheetViews>');
   }
   const pageSetup = '<pageSetup paperSize="9" orientation="portrait" scale="100" fitToWidth="1" fitToHeight="0"/>';
-  const rowBreaks = [];
-  for (let row = ROWS_PER_A4_PAGE; row < totalRows; row += ROWS_PER_A4_PAGE) {
-    rowBreaks.push(`<brk id="${row}" max="16383" man="1"/>`);
-  }
-  const rowBreaksXml = rowBreaks.length
-    ? `<rowBreaks count="${rowBreaks.length}" manualBreakCount="${rowBreaks.length}">${rowBreaks.join('')}</rowBreaks>`
-    : '';
-
   if (/<pageSetup\b/.test(xml)) {
     xml = xml.replace(/<pageSetup\b[^>]*\/>/, pageSetup);
   } else if (/<pageMargins\b[^>]*\/>/.test(xml)) {
@@ -40,17 +34,14 @@ function addWorksheetPrintSetup(sheetXml, totalRows) {
   } else {
     xml = xml.replace('</worksheet>', `${pageSetup}</worksheet>`);
   }
-  if (rowBreaksXml) {
-    xml = xml.replace(/(<pageSetup\b[^>]*\/>)/, `$1${rowBreaksXml}`);
-  }
   return xml;
 }
 
-function applyA4PrintSetup(workbookBuffer, totalRows) {
+function applyA4PrintSetup(workbookBuffer) {
   return new Promise((resolve, reject) => {
     const outputChunks = [];
     const archive = new ZipArchive({ zlib: { level: 6 } });
-    let worksheetFound = false;
+    let worksheetsFound = 0;
     let zipfile;
     let settled = false;
     const fail = (error) => {
@@ -76,7 +67,7 @@ function applyA4PrintSetup(workbookBuffer, totalRows) {
       zipfile = openedZip;
       zipfile.once('error', fail);
       zipfile.once('end', () => {
-        if (!worksheetFound) {
+        if (!worksheetsFound) {
           fail(new Error('The area maintenance workbook worksheet was not found.'));
           return;
         }
@@ -90,12 +81,12 @@ function applyA4PrintSetup(workbookBuffer, totalRows) {
           }
           stream.once('error', fail);
           const options = { name: entry.fileName, date: entry.getLastModDate() };
-          if (entry.fileName === 'xl/worksheets/sheet1.xml') {
-            worksheetFound = true;
+          if (/^xl\/worksheets\/sheet\d+\.xml$/.test(entry.fileName)) {
+            worksheetsFound += 1;
             const xmlChunks = [];
             stream.on('data', (chunk) => xmlChunks.push(chunk));
             stream.once('end', () => {
-              archive.append(addWorksheetPrintSetup(Buffer.concat(xmlChunks).toString('utf8'), totalRows), options);
+              archive.append(addWorksheetPrintSetup(Buffer.concat(xmlChunks).toString('utf8')), options);
               zipfile.readEntry();
             });
           } else {
@@ -118,31 +109,92 @@ function normalizeAreaFilter(input = {}) {
 
 export function getAreaMaintenanceNotes(input = {}, database = defaultDb) {
   const area = normalizeAreaFilter(input);
+  const machineId = input?.machineId === undefined || input?.machineId === null || input?.machineId === ''
+    ? null
+    : positiveId(input.machineId, 'machineId');
+  const onlyNotesValue = input?.onlyNotes ?? input?.onlyWithNotes;
+  if (onlyNotesValue !== undefined && ![true, false, 'true', 'false'].includes(onlyNotesValue)) {
+    throw new HttpError(400, 'onlyNotes must be true or false.');
+  }
+  const onlyNotes = onlyNotesValue === true || onlyNotesValue === 'true';
+  const historyMode = input?.historyMode ?? 'latest';
+  if (!['latest', 'all'].includes(historyMode)) throw new HttpError(400, 'historyMode must be latest or all.');
   const parameters = [];
   const areaCondition = area === null ? '' : 'AND machine.area = ? COLLATE NOCASE';
   if (area !== null) parameters.push(area);
+  const machineCondition = machineId === null ? '' : 'AND machine.id = ?';
+  if (machineId !== null) parameters.push(machineId);
 
   const machines = database.prepare(`
-    SELECT machine.id, machine.code, machine.name_ar, machine.name_en, machine.area,
-      COALESCE((
-        SELECT card.notes
-        FROM maintenance_cards card
-        JOIN maintenance_orders order_record ON order_record.id = card.order_id
-        WHERE card.machine_id = machine.id
-          AND order_record.deleted_at IS NULL
-          AND card.deleted_at IS NULL
-          AND TRIM(COALESCE(card.notes, '')) <> ''
-        ORDER BY COALESCE(order_record.archived_at, order_record.updated_at, order_record.created_at) DESC,
-          order_record.id DESC, card.id DESC
-        LIMIT 1
-      ), '') AS notes
-    FROM machines machine
-    WHERE machine.active = 1 AND machine.deleted_at IS NULL ${areaCondition}
-     ORDER BY machine.area COLLATE NOCASE, machine.name_ar COLLATE NOCASE, machine.code COLLATE NOCASE, machine.id
+    WITH listed_machines AS (
+      SELECT machine.id, machine.code, machine.name_ar, machine.name_en, machine.area,
+        COALESCE((
+          SELECT card.notes
+          FROM maintenance_cards card
+          JOIN maintenance_orders order_record ON order_record.id = card.order_id
+          WHERE card.machine_id = machine.id
+            AND order_record.deleted_at IS NULL
+            AND card.deleted_at IS NULL
+            AND TRIM(COALESCE(card.notes, '')) <> ''
+          ORDER BY COALESCE(order_record.archived_at, order_record.updated_at, order_record.created_at) DESC,
+            order_record.id DESC, card.id DESC
+          LIMIT 1
+        ), NULLIF(TRIM(COALESCE(machine.maintenance_note, '')), ''), '') AS current_note,
+        (SELECT COUNT(*) FROM machine_notes_history note_history WHERE note_history.machine_id = machine.id) AS history_count
+      FROM machines machine
+      WHERE machine.active = 1 AND machine.deleted_at IS NULL ${areaCondition} ${machineCondition}
+    )
+    SELECT id, code, name_ar, name_en, area, current_note, history_count
+    FROM listed_machines
+    ORDER BY area COLLATE NOCASE, name_ar COLLATE NOCASE, code COLLATE NOCASE, id
   `).all(...parameters);
 
+  if (machineId !== null && machines.length === 0) throw new HttpError(404, 'Active machine was not found.');
+
+  const historyByMachine = new Map();
+  if (historyMode === 'all') {
+    const historyRows = database.prepare(`
+      SELECT history.id, history.machine_id, history.card_id, history.order_id,
+        history.author_id, history.author_name, history.author_role, history.note,
+        history.created_at, COALESCE(order_record.order_code, '') AS order_code
+      FROM machine_notes_history history
+      JOIN machines machine ON machine.id = history.machine_id
+      LEFT JOIN maintenance_orders order_record ON order_record.id = history.order_id
+      WHERE machine.active = 1 AND machine.deleted_at IS NULL ${areaCondition} ${machineCondition}
+      ORDER BY history.machine_id, datetime(history.created_at), history.id
+    `).all(...parameters);
+    for (const entry of historyRows) {
+      const id = Number(entry.machine_id);
+      const history = historyByMachine.get(id) ?? [];
+      history.push({ ...entry, formatted_date: formatMachineNoteDate(entry.created_at) });
+      historyByMachine.set(id, history);
+    }
+  }
+
+  const listedMachines = machines.map((machine) => {
+    const history = historyByMachine.get(Number(machine.id)) ?? [];
+    const currentNote = String(machine.current_note ?? '').trim();
+    const historyCount = Math.max(Number(machine.history_count) || 0, history.length);
+    const historicalNotes = history.map((entry) => {
+      const authorRole = entry.author_role === 'rep' ? 'مندوب ميداني'
+        : entry.author_role === 'supervisor' ? 'مشرف' : 'إدارة';
+      const order = entry.order_code ? ` · أمر ${entry.order_code}` : '';
+      return `[${entry.formatted_date}] ${entry.author_name} (${authorRole})${order}: ${entry.note}`;
+    }).join('\n');
+    return {
+      ...machine,
+      current_note: currentNote,
+      notes: historyMode === 'all' ? (historicalNotes || currentNote) : currentNote,
+      history_count: historyCount,
+      has_history: historyCount > 0,
+      ...(historyMode === 'all' ? { history } : {}),
+    };
+  }).filter((machine) => machineId !== null || !onlyNotes || Boolean(
+    machine.current_note || (historyMode === 'all' && machine.history_count),
+  ));
+
   const areas = new Map();
-  for (const machine of machines) {
+  for (const machine of listedMachines) {
     let group = areas.get(machine.area);
     if (!group) {
       group = { area: machine.area, machines: [] };
@@ -158,89 +210,29 @@ export function getAreaMaintenanceNotes(input = {}, database = defaultDb) {
          || compareMachineCodes(left.code, right.code)
          || left.id - right.id
        )),
-    }))
+     }))
+     .filter((group) => group.machines.length > 0)
     .sort((left, right) => compareMaintenanceAreas(left.area, right.area));
 }
 
 export async function buildAreaMaintenanceNotesWorkbook(input = {}, database = defaultDb) {
   const groups = getAreaMaintenanceNotes(input, database);
-  const rows = [];
-  const bannerRows = [];
-  const headerRows = [];
-  const contentRows = [];
-
-  for (const group of groups) {
-    const totalMachines = group.machines.length;
-    let machineIndex = 0;
-    let pageInArea = 1;
-
-    while (machineIndex < totalMachines || totalMachines === 0) {
-      const isContinuation = pageInArea > 1;
-      const bannerRow = rows.length;
-      rows.push([`المنطقة: ${group.area}${isContinuation ? ' (تابع)' : ''}`, '', '', '']);
-      bannerRows.push(bannerRow);
-
-      const headerRow = rows.length;
-      rows.push(AREA_NOTE_HEADERS);
-      headerRows.push(headerRow);
-
-      const pageMachines = group.machines.slice(machineIndex, machineIndex + MACHINES_PER_A4_PAGE);
-      for (const machine of pageMachines) {
-        contentRows.push(rows.length);
-        rows.push([machine.code, machine.name_ar, machine.name_en ?? '', machine.notes ?? '']);
-      }
-      machineIndex += pageMachines.length;
-
-      const remainingSlots = MACHINES_PER_A4_PAGE - pageMachines.length;
-      for (let index = 0; index < remainingSlots; index += 1) {
-        contentRows.push(rows.length);
-        rows.push(['', '', '', '']);
-      }
-
-      pageInArea += 1;
-      if (totalMachines === 0) break;
-    }
-  }
-
-  const worksheet = XLSX.utils.aoa_to_sheet(rows);
-  worksheet['!cols'] = [{ wch: 18 }, { wch: 32 }, { wch: 30 }, { wch: 48 }];
-  worksheet['!rows'] = rows.map((_, index) => {
-    if (bannerRows.includes(index)) return { hpt: 26 };
-    if (headerRows.includes(index)) return { hpt: 22 };
-    if (contentRows.includes(index)) return { hpt: 30 };
-    return { hpt: 30 };
-  });
-  worksheet['!pageSetup'] = {
-    paperSize: 9,
-    orientation: 'portrait',
-    fitToWidth: 1,
-    fitToHeight: 0,
-    scale: 100,
-  };
-  worksheet['!margins'] = {
-    left: 0.5,
-    right: 0.5,
-    top: 0.5,
-    bottom: 0.5,
-    header: 0.3,
-    footer: 0.3,
-  };
-  if (headerRows.length > 0) {
-    const firstHeader = headerRows[0];
-    worksheet['!autofilter'] = { ref: `A${firstHeader + 1}:D${rows.length}` };
-  }
-  worksheet['!merges'] = bannerRows.map((row) => ({ s: { r: row, c: 0 }, e: { r: row, c: 3 } }));
-  worksheet['!views'] = [{ RTL: true }];
-
+  const workbook = XLSX.utils.book_new();
   const bannerStyle = {
     fill: { patternType: 'solid', fgColor: { rgb: '174F63' } },
     font: { bold: true, color: { rgb: 'FFFFFF' }, sz: 15 },
     alignment: { horizontal: 'right', vertical: 'center', readingOrder: 2 },
+    border: {
+      top: { style: 'medium', color: { rgb: '174F63' } },
+      bottom: { style: 'medium', color: { rgb: '174F63' } },
+      left: { style: 'medium', color: { rgb: '174F63' } },
+      right: { style: 'medium', color: { rgb: '174F63' } },
+    },
   };
   const headerStyle = {
     fill: { patternType: 'solid', fgColor: { rgb: 'DCEBF0' } },
-    font: { bold: true, color: { rgb: '17394A' }, sz: 13 },
-    alignment: { horizontal: 'right', vertical: 'center', readingOrder: 2 },
+    font: { bold: true, color: { rgb: '17394A' }, sz: 12 },
+    alignment: { horizontal: 'right', vertical: 'center', readingOrder: 2, wrapText: true },
     border: {
       bottom: { style: 'thin', color: { rgb: '9BB9C4' } },
       top: { style: 'thin', color: { rgb: '9BB9C4' } },
@@ -255,40 +247,153 @@ export async function buildAreaMaintenanceNotesWorkbook(input = {}, database = d
     right: { style: 'thin', color: { rgb: 'CBD5E1' } },
   };
   const contentStyle = {
-    font: { sz: 12, bold: false, color: { rgb: '0F172A' } },
-    alignment: { horizontal: 'right', vertical: 'center', readingOrder: 2 },
+    font: { sz: 11, color: { rgb: '0F172A' } },
+    alignment: { horizontal: 'right', vertical: 'top', readingOrder: 2, wrapText: true },
     border: cellBorder,
   };
   const noteStyle = {
-    font: { sz: 12, bold: false, color: { rgb: '0F172A' } },
+    fill: { patternType: 'solid', fgColor: { rgb: 'FFF9E8' } },
+    font: { sz: 11, color: { rgb: '0F172A' } },
     alignment: { horizontal: 'right', vertical: 'top', wrapText: true, readingOrder: 2 },
     border: cellBorder,
   };
 
-  for (const row of bannerRows) {
-    for (let column = 0; column < 4; column += 1) {
-      const address = XLSX.utils.encode_cell({ r: row, c: column });
-      worksheet[address].s = bannerStyle;
+  if (input?.machineId !== undefined && input.machineId !== null && input.machineId !== '') {
+    const machine = groups.flatMap((group) => group.machines)[0];
+    if (!machine) throw new HttpError(404, 'Active machine was not found.');
+    const history = getMachineNotesHistory(machine.id, database);
+    const visibleHistory = input.historyMode === 'all'
+      ? history
+      : history.filter((entry) => entry.note === machine.current_note).slice(0, 1);
+    const latestEntry = history.find((entry) => entry.note === machine.current_note);
+    const rows = [
+      [`سجل ملاحظات الماكينة: ${machine.code}`, '', '', '', ''],
+      ['كود الماكينة', machine.code, 'الاسم بالعربي', machine.name_ar, ''],
+      ['المنطقة', machine.area, 'الاسم بالإنجليزي', machine.name_en ?? '', ''],
+      ['الملاحظة الحالية', machine.current_note || '—', '', '', ''],
+      ['التاريخ والوقت', 'اسم الكاتب', 'الدور', 'أمر الصيانة', 'الملاحظة'],
+      ...visibleHistory.map((entry) => [
+        entry.formatted_date,
+        entry.author_name,
+        entry.author_role === 'rep' ? 'مندوب ميداني' : entry.author_role === 'supervisor' ? 'مشرف' : 'إدارة',
+        entry.order_code || '—',
+        entry.note,
+      ]),
+    ];
+    if (input.historyMode !== 'all' && machine.current_note && !visibleHistory.length) {
+      rows.push(['—', '—', '—', latestEntry?.order_code || '—', machine.current_note]);
     }
-  }
-  for (const row of headerRows) {
-    for (let column = 0; column < 4; column += 1) {
-      worksheet[XLSX.utils.encode_cell({ r: row, c: column })].s = headerStyle;
+    const worksheet = XLSX.utils.aoa_to_sheet(rows);
+    worksheet['!cols'] = [{ wch: 22 }, { wch: 26 }, { wch: 18 }, { wch: 24 }, { wch: 58 }];
+    worksheet['!rows'] = rows.map((row, index) => {
+      if (index === 0) return { hpt: 30 };
+      if (index === 4) return { hpt: 26 };
+      const longest = Math.max(...row.map((value) => String(value ?? '').length));
+      return { hpt: Math.min(180, Math.max(28, Math.ceil(longest / 58) * 18 + 10)) };
+    });
+    worksheet['!pageSetup'] = { paperSize: 9, orientation: 'portrait', fitToWidth: 1, fitToHeight: 0, scale: 100 };
+    worksheet['!margins'] = { left: 0.35, right: 0.35, top: 0.45, bottom: 0.45, header: 0.2, footer: 0.2 };
+    worksheet['!autofilter'] = { ref: `A5:E${Math.max(5, rows.length)}` };
+    worksheet['!merges'] = [
+      { s: { r: 0, c: 0 }, e: { r: 0, c: 4 } },
+      { s: { r: 1, c: 3 }, e: { r: 1, c: 4 } },
+      { s: { r: 2, c: 3 }, e: { r: 2, c: 4 } },
+      { s: { r: 3, c: 1 }, e: { r: 3, c: 4 } },
+    ];
+    worksheet['!views'] = [{ RTL: true }];
+    for (let column = 0; column < 5; column += 1) {
+      worksheet[XLSX.utils.encode_cell({ r: 0, c: column })].s = bannerStyle;
+      worksheet[XLSX.utils.encode_cell({ r: 4, c: column })].s = headerStyle;
     }
-  }
-  for (const row of contentRows) {
-    for (let column = 0; column < 3; column += 1) {
-      const address = XLSX.utils.encode_cell({ r: row, c: column });
-      worksheet[address] ??= { t: 's', v: '' };
-      worksheet[address].s = contentStyle;
+    for (let row = 1; row < 4; row += 1) {
+      for (let column = 0; column < 5; column += 1) {
+        const address = XLSX.utils.encode_cell({ r: row, c: column });
+        worksheet[address] ??= { t: 's', v: '' };
+        worksheet[address].s = column % 2 === 0 ? headerStyle : contentStyle;
+      }
     }
-    const noteAddress = XLSX.utils.encode_cell({ r: row, c: 3 });
-    worksheet[noteAddress] ??= { t: 's', v: '' };
-    worksheet[noteAddress].s = noteStyle;
+    for (let row = 5; row < rows.length; row += 1) {
+      for (let column = 0; column < 5; column += 1) {
+        const address = XLSX.utils.encode_cell({ r: row, c: column });
+        worksheet[address] ??= { t: 's', v: '' };
+        worksheet[address].s = column === 4 ? noteStyle : contentStyle;
+      }
+    }
+    const sheetName = String(machine.code).replace(/[\\/?*:[\]]/g, ' ').slice(0, 31) || 'سجل الماكينة';
+    XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
+    return applyA4PrintSetup(XLSX.write(workbook, { bookType: 'xlsx', type: 'buffer', cellStyles: true }));
   }
 
-  const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, worksheet, 'صيانات المناطق');
+  const sheetGroups = groups.length ? groups : [{ area: 'صيانات المناطق', machines: [] }];
+  const usedSheetNames = new Set();
+  for (const group of sheetGroups) {
+    const notedMachineCount = group.machines.filter((machine) => String(machine.notes ?? '').trim()).length;
+    const areaName = String(group.area || 'غير محددة');
+    const bannerText = group.machines.length
+      ? `المنطقة: ${areaName} - ${notedMachineCount} ملاحظة`
+      : (input?.onlyNotes === true || input?.onlyNotes === 'true' || input?.onlyWithNotes === true || input?.onlyWithNotes === 'true'
+        ? 'لا توجد ملاحظات مسجلة'
+        : 'لا توجد ماكينات نشطة');
+    const rows = [
+      [bannerText, '', '', ''],
+      AREA_NOTE_HEADERS,
+      ...group.machines.map((machine) => [machine.code, machine.name_ar, machine.name_en ?? '', machine.notes ?? '']),
+    ];
+    const worksheet = XLSX.utils.aoa_to_sheet(rows);
+    worksheet['!cols'] = [{ wch: 18 }, { wch: 30 }, { wch: 28 }, { wch: 52 }];
+    worksheet['!rows'] = rows.map((row, index) => {
+      if (index === 0) return { hpt: 30 };
+      if (index === 1) return { hpt: 26 };
+      const values = [row[0], row[1], row[2], row[3]];
+      const widths = [18, 30, 28, 52];
+      const estimatedLines = Math.max(...values.map((value, column) => (
+        String(value ?? '').split(/\r?\n/).reduce((count, line) => count + Math.max(1, Math.ceil([...line].length / widths[column])), 0)
+      )));
+      return { hpt: Math.min(180, Math.max(32, estimatedLines * 16 + 10)) };
+    });
+    worksheet['!pageSetup'] = {
+      paperSize: 9,
+      orientation: 'portrait',
+      fitToWidth: 1,
+      fitToHeight: 0,
+      scale: 100,
+    };
+    worksheet['!margins'] = {
+      left: 0.35,
+      right: 0.35,
+      top: 0.45,
+      bottom: 0.45,
+      header: 0.2,
+      footer: 0.2,
+    };
+    worksheet['!autofilter'] = { ref: `A2:D${Math.max(2, rows.length)}` };
+    worksheet['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 3 } }];
+    worksheet['!views'] = [{ RTL: true }];
+
+    for (let column = 0; column < 4; column += 1) {
+      worksheet[XLSX.utils.encode_cell({ r: 0, c: column })].s = bannerStyle;
+      worksheet[XLSX.utils.encode_cell({ r: 1, c: column })].s = headerStyle;
+    }
+    for (let row = 2; row < rows.length; row += 1) {
+      for (let column = 0; column < 4; column += 1) {
+        const address = XLSX.utils.encode_cell({ r: row, c: column });
+        worksheet[address] ??= { t: 's', v: '' };
+        worksheet[address].s = column === 3 ? noteStyle : contentStyle;
+      }
+    }
+
+    const normalizedName = areaName.replace(/[\\/?*:[\]]/g, ' ').trim() || 'منطقة';
+    let sheetName = normalizedName.slice(0, 31);
+    let suffix = 2;
+    while (usedSheetNames.has(sheetName.toLocaleLowerCase())) {
+      const ending = ` (${suffix})`;
+      sheetName = `${normalizedName.slice(0, 31 - ending.length)}${ending}`;
+      suffix += 1;
+    }
+    usedSheetNames.add(sheetName.toLocaleLowerCase());
+    XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
+  }
+
   const workbookBuffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'buffer', cellStyles: true });
-  return applyA4PrintSetup(workbookBuffer, rows.length);
+  return applyA4PrintSetup(workbookBuffer);
 }

@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ZipArchive } from 'archiver';
+import bcrypt from 'bcryptjs';
 import sharp from 'sharp';
+import yauzl from 'yauzl';
 import test, { after } from 'node:test';
 
 const temporaryDirectory = mkdtempSync(join(tmpdir(), 'madar-v2-multi-area-'));
@@ -19,11 +21,12 @@ const [{ app }, { db }, { initializeDatabase }, {
   recoverMaintenanceCardDeletions,
   recoverMaintenanceMachineDecommissions,
   recoverUnmatchedMaintenanceFolderDeletions,
-}] = await Promise.all([
+}, { buildMaintenanceDocx, buildMaintenancePptx }] = await Promise.all([
   import('../server/app.js'),
   import('../server/database/connection.js'),
   import('../server/database/init.js'),
   import('../server/modules/maintenance/service.js'),
+  import('../server/modules/maintenance/export.js'),
 ]);
 
 const adminPassword = 'multi-area-admin-password';
@@ -49,10 +52,10 @@ after(async () => {
   rmSync(temporaryDirectory, { recursive: true, force: true });
 });
 
-async function request(path, options = {}) {
+async function request(path, options = {}, requestCookie = cookie) {
   const response = await fetch(`${baseUrl}${path}`, {
     ...options,
-    headers: { ...(options.headers ?? {}), cookie },
+    headers: { ...(options.headers ?? {}), cookie: requestCookie },
   });
   const contentType = response.headers.get('content-type') ?? '';
   const body = contentType.includes('application/json')
@@ -72,6 +75,38 @@ function assertNoCache(response) {
   }
   assert.equal(response.headers.get('pragma'), 'no-cache');
   assert.equal(response.headers.get('expires'), '0');
+}
+
+function readZipImageDimensions(buffer, directory) {
+  return new Promise((resolve, reject) => {
+    yauzl.fromBuffer(buffer, { lazyEntries: true }, (openError, zipfile) => {
+      if (openError) return reject(openError);
+      const dimensions = [];
+      zipfile.once('error', reject);
+      zipfile.on('entry', (entry) => {
+        if (!entry.fileName.startsWith(directory) || !/\.(?:jpe?g|png|webp)$/i.test(entry.fileName)) {
+          zipfile.readEntry();
+          return;
+        }
+        zipfile.openReadStream(entry, (streamError, stream) => {
+          if (streamError) return reject(streamError);
+          const chunks = [];
+          stream.on('data', (chunk) => chunks.push(chunk));
+          stream.once('error', reject);
+          stream.once('end', async () => {
+            try {
+              dimensions.push(await sharp(Buffer.concat(chunks)).metadata());
+              zipfile.readEntry();
+            } catch (error) {
+              reject(error);
+            }
+          });
+        });
+      });
+      zipfile.once('end', () => resolve(dimensions));
+      zipfile.readEntry();
+    });
+  });
 }
 
 function createZip(entries) {
@@ -591,6 +626,153 @@ test('maintenance card photos can be moved or deleted without losing files on DB
   assert.equal(deleteAudit.action, 'photo_delete');
   assert.equal(JSON.parse(deleteAudit.old_values_json).phase, 'after');
   assert.equal(JSON.parse(deleteAudit.old_values_json).photo, afterPhoto.path);
+});
+
+test('maintenance photo rotation is audited metadata applied to viewer, thumbnails, and exports without changing source bytes', async () => {
+  const clientId = Number(db.prepare('INSERT INTO clients (code, name) VALUES (?, ?)')
+    .run('PHOTO-ROTATION-CLIENT', 'Photo Rotation Client').lastInsertRowid);
+  const machineResponse = await request('/api/maintenance/machines', json('POST', {
+    code: 'PHOTO-ROTATION-01',
+    name_ar: 'ماكينة اختبار الاتجاه',
+    area: 'Photo Rotation Area',
+  }));
+  assert.equal(machineResponse.response.status, 201, JSON.stringify(machineResponse.body));
+  const orderResponse = await request('/api/maintenance/orders', json('POST', {
+    clientId,
+    areas: ['Photo Rotation Area'],
+    employeeIds: [],
+    autoPopulateAreaMachines: true,
+  }));
+  assert.equal(orderResponse.response.status, 201, JSON.stringify(orderResponse.body));
+  const card = orderResponse.body.cards.find((item) => item.machine_id === machineResponse.body.id);
+  assert.ok(card);
+  const reasonId = Number(db.prepare('INSERT INTO maintenance_reasons (name) VALUES (?)')
+    .run('اختبار أسباب الصيانة').lastInsertRowid);
+
+  const operationsUsername = `photo-rotation-ops-${randomUUID()}`;
+  const operationsPassword = 'rotation-operations-password';
+  db.prepare(`INSERT INTO users (username, password_hash, full_name, role)
+    VALUES (?, ?, ?, 'operations')`)
+    .run(operationsUsername, bcrypt.hashSync(operationsPassword, 4), 'Photo Rotation Operations');
+  const operationsLogin = await fetch(`${baseUrl}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ username: operationsUsername, password: operationsPassword }),
+  });
+  assert.equal(operationsLogin.status, 200);
+  const operationsCookie = (operationsLogin.headers.getSetCookie?.()[0] ?? operationsLogin.headers.get('set-cookie'))?.split(';', 1)[0];
+  assert.ok(operationsCookie);
+
+  const purchasingUsername = `photo-rotation-purchasing-${randomUUID()}`;
+  const purchasingPassword = 'rotation-purchasing-password';
+  db.prepare(`INSERT INTO users (username, password_hash, full_name, role)
+    VALUES (?, ?, ?, 'purchasing')`)
+    .run(purchasingUsername, bcrypt.hashSync(purchasingPassword, 4), 'Photo Rotation Purchasing');
+  const purchasingLogin = await fetch(`${baseUrl}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ username: purchasingUsername, password: purchasingPassword }),
+  });
+  assert.equal(purchasingLogin.status, 200);
+  const purchasingCookie = (purchasingLogin.headers.getSetCookie?.()[0] ?? purchasingLogin.headers.get('set-cookie'))?.split(';', 1)[0];
+  assert.ok(purchasingCookie);
+
+  const imageBytes = await sharp({
+    create: { width: 32, height: 24, channels: 3, background: '#2277aa' },
+  }).jpeg().toBuffer();
+  const form = new FormData();
+  form.append('photo', new Blob([imageBytes], { type: 'image/jpeg' }), 'rotation-source.jpg');
+  const upload = await request(`/api/maintenance/orders/${orderResponse.body.id}/cards/${card.id}/photos/before`, {
+    method: 'POST',
+    body: form,
+  });
+  assert.equal(upload.response.status, 201, JSON.stringify(upload.body));
+  const filename = upload.body.path.split('/').at(-1);
+  const absoluteSourcePath = join(storageRoot, ...upload.body.path.split('/'));
+  const originalStoredBytes = readFileSync(absoluteSourcePath);
+  const photoUrl = `/api/maintenance/orders/${orderResponse.body.id}/cards/${card.id}/photos/before/${encodeURIComponent(filename)}`;
+  const rotationUrl = `/api/maintenance/orders/${orderResponse.body.id}/cards/${card.id}/photos/rotate`;
+
+  const operationsOrder = await request(`/api/maintenance/orders/${orderResponse.body.id}`, {}, operationsCookie);
+  assert.equal(operationsOrder.body.canEditReasons, true);
+  const updatedReasons = await request(`/api/maintenance/orders/${orderResponse.body.id}/cards/${card.id}`, json('PATCH', {
+    reasonIds: [reasonId],
+  }), operationsCookie);
+  assert.equal(updatedReasons.response.status, 200, JSON.stringify(updatedReasons.body));
+  assert.deepEqual(updatedReasons.body.reason_ids, [reasonId]);
+  const deniedReasonEdit = await request(`/api/maintenance/orders/${orderResponse.body.id}/cards/${card.id}`, json('PATCH', {
+    reasonIds: [],
+  }), purchasingCookie);
+  assert.equal(deniedReasonEdit.response.status, 403);
+
+  const initialPhoto = await request(photoUrl);
+  assert.equal(initialPhoto.response.status, 200);
+  assert.deepEqual(await sharp(initialPhoto.body).metadata().then(({ width, height }) => ({ width, height })), { width: 32, height: 24 });
+  const thumbnailUrl = `${photoUrl}/thumbnail`;
+  const initialThumbnail = await request(thumbnailUrl);
+  assert.equal(initialThumbnail.response.status, 200);
+  assertNoCache(initialThumbnail.response);
+  assert.deepEqual(await sharp(initialThumbnail.body).metadata().then(({ width, height }) => ({ width, height })), { width: 32, height: 24 });
+
+  const invalidRotation = await request(rotationUrl, json('POST', {
+    phase: 'before', filename, angle: 45,
+  }));
+  assert.equal(invalidRotation.response.status, 400);
+  const deniedRotation = await request(rotationUrl, json('POST', {
+    phase: 'before', filename, angle: 90,
+  }), purchasingCookie);
+  assert.equal(deniedRotation.response.status, 403);
+
+  const savedRotation = await request(rotationUrl, json('POST', {
+    phase: 'before', filename, angle: 90,
+  }), operationsCookie);
+  assert.equal(savedRotation.response.status, 200, JSON.stringify(savedRotation.body));
+  assert.equal(savedRotation.body.success, true);
+  assert.equal(savedRotation.body.angle, 90);
+  assert.equal(savedRotation.body.filename, filename);
+  assert.equal(typeof savedRotation.body.rotatedAt, 'number');
+  assert.deepEqual(readFileSync(absoluteSourcePath), originalStoredBytes, 'rotation must not modify archived/source file bytes');
+  db.prepare("UPDATE maintenance_cards SET status = 'completed' WHERE id = ?").run(card.id);
+
+  const rotatedPhoto = await request(photoUrl);
+  assert.equal(rotatedPhoto.response.status, 200);
+  assert.equal(rotatedPhoto.response.headers.get('content-type'), 'image/jpeg');
+  assert.deepEqual(await sharp(rotatedPhoto.body).metadata().then(({ width, height }) => ({ width, height })), { width: 24, height: 32 });
+  const rotatedThumbnail = await request(thumbnailUrl);
+  assert.equal(rotatedThumbnail.response.status, 200);
+  assert.deepEqual(await sharp(rotatedThumbnail.body).metadata().then(({ format, width, height }) => ({ format, width, height })), {
+    format: 'webp', width: 24, height: 32,
+  });
+
+  const rotatedOrder = await request(`/api/maintenance/orders/${orderResponse.body.id}`);
+  const rotatedCard = rotatedOrder.body.cards.find((item) => item.id === card.id);
+  assert.deepEqual(rotatedCard.before_photo_rotations, [90]);
+  assert.deepEqual(rotatedCard.reason_ids, [reasonId]);
+  const audit = db.prepare(`
+    SELECT actor_id, action, old_values_json, new_values_json
+    FROM audit_log
+    WHERE entity_type = 'maintenance_card' AND entity_id = ? AND action = 'rotate_maintenance_photo'
+    ORDER BY id DESC LIMIT 1
+  `).get(card.id);
+  assert.equal(audit.actor_id, Number(db.prepare('SELECT id FROM users WHERE username = ?').get(operationsUsername).id));
+  assert.deepEqual(JSON.parse(audit.old_values_json), { phase: 'before', filename, rotation: 0 });
+  assert.deepEqual(JSON.parse(audit.new_values_json), { phase: 'before', filename, rotation: 90, rotation_delta: 90 });
+
+  const pptx = await buildMaintenancePptx(orderResponse.body.id, db);
+  const pptxDimensions = await readZipImageDimensions(pptx.buffer, 'ppt/media/');
+  assert.ok(pptxDimensions.some(({ width, height }) => width === 24 && height === 32), 'PPTX embeds the saved orientation');
+  const docx = await buildMaintenanceDocx(orderResponse.body.id, db);
+  const docxDimensions = await readZipImageDimensions(docx.buffer, 'word/media/');
+  assert.ok(docxDimensions.some(({ width, height }) => width === 24 && height === 32), 'DOCX embeds the saved orientation');
+
+  const afterPhoto = await request(`/api/maintenance/orders/${orderResponse.body.id}/cards/${card.id}/photos/move`, json('POST', {
+    fromPhase: 'before', toPhase: 'after', filename,
+  }), operationsCookie);
+  assert.equal(afterPhoto.response.status, 200, JSON.stringify(afterPhoto.body));
+  assert.equal(db.prepare(`SELECT angle FROM maintenance_card_photo_rotations
+    WHERE card_id = ? AND phase = 'after' AND filename = ?`).get(card.id, filename).angle, 90);
+  const movedPhoto = await request(`/api/maintenance/orders/${orderResponse.body.id}/cards/${card.id}/photos/after/${encodeURIComponent(filename)}`);
+  assert.deepEqual(await sharp(movedPhoto.body).metadata().then(({ width, height }) => ({ width, height })), { width: 24, height: 32 });
 });
 
 test('maintenance card startup recovery restores staged folders for an uncommitted deletion', async () => {

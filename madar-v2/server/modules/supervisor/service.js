@@ -378,12 +378,11 @@ export function reviewRepVisit(visitIdInput, input, actorId, database = defaultD
     if (!incomingAfter.length && visit.after_path) incomingAfter.push(visit.after_path);
     const nextBefore = [...new Set([...beforePhotos, ...incomingBefore])];
     const nextAfter = [...new Set([...afterPhotos, ...incomingAfter])];
-    let notes = visit.card_notes;
-    if (visit.notes) {
-      const visitNote = `[مندوب · ${visit.captured_at}] ${visit.notes}`;
-      notes = notes ? `${notes}\n${visitNote}` : visitNote;
-      if (notes.length > 10000) throw new HttpError(409, 'The maintenance-card notes are full.');
-    }
+    // The submitted field comment is committed to the card and immutable
+    // history during sync; approval updates photos/reasons only and must not
+    // append or resurrect an older note over a newer comment.
+    const notes = visit.card_notes;
+    if (notes && notes.length > 10000) throw new HttpError(409, 'The maintenance-card notes are full.');
     const changed = database.prepare(`
       UPDATE maintenance_cards SET before_photos_json = ?, after_photos_json = ?,
         reason_ids_json = ?, reason_id = ?, notes = ?, status = 'completed', updated_at = CURRENT_TIMESTAMP

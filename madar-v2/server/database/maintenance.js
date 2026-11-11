@@ -1,27 +1,22 @@
 import { db as defaultDatabase } from './connection.js';
 
-export const GPS_BREADCRUMB_RETENTION_DAYS = 90;
+// Business data is retained forever. GPS breadcrumbs are never purged by time.
 export const DATABASE_MAINTENANCE_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
 
 let scheduler = null;
 let maintenanceRunning = false;
 
 export function runDatabaseMaintenance(database = defaultDatabase, now = new Date()) {
-  const cutoff = new Date(now.valueOf() - GPS_BREADCRUMB_RETENTION_DAYS * 24 * 60 * 60 * 1000);
-  if (!Number.isFinite(cutoff.valueOf())) throw new TypeError('A valid maintenance timestamp is required.');
+  if (!Number.isFinite(now.valueOf())) throw new TypeError('A valid maintenance timestamp is required.');
   const table = database.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'rep_location_breadcrumbs'").get();
-  let deletedBreadcrumbs = 0;
-  if (table) {
-    const prune = database.transaction(() => database.prepare(`
-      DELETE FROM rep_location_breadcrumbs WHERE julianday(recorded_at) < julianday(?)
-    `).run(cutoff.toISOString()).changes);
-    deletedBreadcrumbs = prune.immediate();
-  }
+  const retainedBreadcrumbs = table
+    ? database.prepare('SELECT COUNT(*) AS count FROM rep_location_breadcrumbs').get().count
+    : 0;
   const optimize = database.pragma('optimize');
   const checkpoint = database.pragma('wal_checkpoint(TRUNCATE)')[0] ?? null;
   return {
-    cutoff: cutoff.toISOString(),
-    deletedBreadcrumbs,
+    deletedBreadcrumbs: 0,
+    retainedBreadcrumbs,
     optimize,
     checkpoint,
   };
@@ -35,7 +30,7 @@ export function startDatabaseMaintenanceScheduler({ database = defaultDatabase, 
     maintenanceRunning = true;
     try {
       const result = runDatabaseMaintenance(database);
-      console.log(`Weekly SQLite maintenance complete; purged ${result.deletedBreadcrumbs} GPS point(s).`);
+      console.log(`Weekly SQLite maintenance complete; retained ${result.retainedBreadcrumbs} GPS point(s).`);
     } catch (error) {
       console.error('Weekly SQLite maintenance failed:', error);
     } finally {
