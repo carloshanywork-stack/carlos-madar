@@ -1637,7 +1637,6 @@ export function initializeDatabase({ database = db, initialAdminPassword = env.i
     migrateAttendanceClockLocations(database);
     migrateAttendanceBiometricConfirmation(database);
     migrateRepAttendanceSync(database);
-    migrateAttendanceCancellation(database);
     migrateClientProfileCrud(database);
     migrateUserEmployeeLinks(database);
     migrateUserEmployeeProfileSync(database);
@@ -1680,6 +1679,9 @@ export function initializeDatabase({ database = db, initialAdminPassword = env.i
   });
 
   initialize();
+  // This rebuild must run outside the initialization transaction: SQLite ignores
+  // PRAGMA foreign_keys changes while a transaction is active.
+  migrateAttendanceCancellation(database);
   const setupRequired = database
     .prepare('SELECT COUNT(*) AS count FROM users WHERE deleted_at IS NULL')
     .get().count === 0;

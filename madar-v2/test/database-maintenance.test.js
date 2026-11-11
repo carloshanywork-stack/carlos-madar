@@ -18,6 +18,34 @@ const [{ db, createConnection }, { initializeDatabase, migrateAccountLoginProtec
 
 initializeDatabase({ initialAdminPassword: 'Maintenance-test-password-2026!' });
 
+test('startup upgrades legacy attendance with referenced offline actions without losing history', () => {
+  const legacy = createConnection(join(temporaryDirectory, 'legacy-referenced-attendance.sqlite'));
+  try {
+    initializeDatabase({ database: legacy, initialAdminPassword: 'Isolated-migration-password-2026!' });
+    const sql = legacy.prepare("SELECT sql FROM sqlite_master WHERE name = 'employee_daily_attendance'").get().sql;
+    legacy.pragma('foreign_keys = OFF');
+    legacy.exec(sql.replace('employee_daily_attendance', 'legacy_attendance_copy').replace(", 'cancelled'", ''));
+    legacy.exec('DROP TABLE employee_daily_attendance; ALTER TABLE legacy_attendance_copy RENAME TO employee_daily_attendance');
+    legacy.pragma('foreign_keys = ON');
+    legacy.prepare('DELETE FROM schema_migrations WHERE version = ?').run('20261111-attendance-cancellation-status');
+    const employee = legacy.prepare('SELECT id, user_id FROM employees WHERE user_id IS NOT NULL LIMIT 1').get();
+    const attendanceId = Number(legacy.prepare(`INSERT INTO employee_daily_attendance
+      (employee_id, work_date, status) VALUES (?, '2026-11-10', 'present')`).run(employee.id).lastInsertRowid);
+    legacy.prepare(`INSERT INTO rep_attendance_sync_actions
+      (action_uuid, rep_user_id, attendance_id, action, payload_sha256, occurred_at)
+      VALUES ('legacy-action', ?, ?, 'in', ?, '2026-11-10T09:00:00Z')`).run(employee.user_id, attendanceId, 'a'.repeat(64));
+    const before = legacy.prepare('SELECT * FROM employee_daily_attendance').all();
+    const actions = legacy.prepare('SELECT * FROM rep_attendance_sync_actions').all();
+    initializeDatabase({ database: legacy });
+    initializeDatabase({ database: legacy });
+    assert.deepEqual(legacy.prepare('SELECT * FROM employee_daily_attendance').all(), before);
+    assert.deepEqual(legacy.prepare('SELECT * FROM rep_attendance_sync_actions').all(), actions);
+    assert.deepEqual(legacy.pragma('foreign_key_check'), []);
+    assert.equal(legacy.pragma('foreign_keys', { simple: true }), 1);
+    legacy.prepare("UPDATE employee_daily_attendance SET status = 'cancelled' WHERE id = ?").run(attendanceId);
+  } finally { legacy.close(); }
+});
+
 after(() => {
   if (db.open) db.close();
   rmSync(temporaryDirectory, { recursive: true, force: true });
