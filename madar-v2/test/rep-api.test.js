@@ -346,7 +346,10 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
     username: 'rep-nour',
     password: 'Rep-Nour-Password-2026!',
   }));
-  assert.equal(regularLogin.response.status, 401);
+  assert.equal(regularLogin.response.status, 200, JSON.stringify(regularLogin.body));
+  assert.equal(regularLogin.body.role, 'rep');
+  assert.equal(regularLogin.body.user.role, 'rep');
+  assert.match(regularLogin.body.token, /^eyJ/, 'the unified login returns a bearer token alongside its session cookie');
 
   const login = await request('/api/rep/login', jsonOptions('POST', {
     username: 'rep-nour',

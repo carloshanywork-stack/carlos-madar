@@ -126,6 +126,7 @@ test('auth status, one-time setup, protected APIs, login and revocable sessions'
     ok: true,
     user: { id: 1, username: 'root', fullName: 'Root Administrator', role: 'admin' },
     token: login.body.token,
+    role: 'admin',
   });
   assert.equal(typeof login.body.token, 'string');
   assert.deepEqual(verifyToken(login.body.token), login.body.user);
@@ -189,6 +190,41 @@ test('auth status, one-time setup, protected APIs, login and revocable sessions'
   assert.equal(disabledSession.body.authenticated, false);
   assert.equal(disabledSession.body.setupRequired, false);
   assert.equal((await request('/api/clients', {}, reloginCookie)).response.status, 401);
+});
+
+test('unified sign-in authenticates representatives, returns cookie and bearer credentials, and rejects disabled reps distinctly', async () => {
+  const repPassword = 'Unified-rep-password-2026!';
+  const repId = Number(db.prepare(`INSERT INTO users (username, password_hash, full_name, role)
+    VALUES (?, ?, ?, 'rep')`).run('unified-rep', bcrypt.hashSync(repPassword, 4), 'Unified Representative').lastInsertRowid);
+  const loginWithIsolatedIp = (username, password) => request('/api/auth/login', {
+    ...jsonOptions('POST', { username, password }),
+    headers: { 'content-type': 'application/json', 'x-forwarded-for': '198.51.100.22' },
+  });
+  const login = await loginWithIsolatedIp(' UNIFIED-REP ', repPassword);
+  assert.equal(login.response.status, 200, JSON.stringify(login.body));
+  assert.equal(login.body.ok, true);
+  assert.equal(login.body.role, 'rep');
+  assert.deepEqual(login.body.user, {
+    id: repId, username: 'unified-rep', fullName: 'Unified Representative', role: 'rep',
+    assignedRegions: [], isOnline: true, lastLocation: null,
+  });
+  assert.equal(typeof login.body.token, 'string');
+  const cookie = cookieValue(login.setCookie);
+  assert.ok(cookie);
+  assert.equal(decodeURIComponent(cookie.slice('madar_token='.length)), login.body.token);
+  const cookieSession = await request('/api/auth/status', {}, cookie);
+  assert.equal(cookieSession.body.user.role, 'rep');
+  const bearerSession = await request('/api/auth/status', { headers: { authorization: `Bearer ${login.body.token}` } });
+  assert.equal(bearerSession.body.user.role, 'rep');
+
+  db.prepare('UPDATE users SET active = 0 WHERE id = ?').run(repId);
+  const disabled = await loginWithIsolatedIp('unified-rep', repPassword);
+  assert.equal(disabled.response.status, 403);
+  assert.equal(disabled.body.message, 'تم تعطيل حسابك من قبل الإدارة');
+  assert.match(disabled.setCookie, /madar_token=;/);
+  const incorrect = await loginWithIsolatedIp('unified-rep', 'incorrect-password');
+  assert.equal(incorrect.response.status, 401);
+  assert.equal(incorrect.body.error, 'اسم المستخدم أو كلمة المرور غير صحيحة');
 });
 
 test('CORS permits the local UI, the request host, trusted forwarded hosts, and HTTPS Tailscale origins', async () => {
