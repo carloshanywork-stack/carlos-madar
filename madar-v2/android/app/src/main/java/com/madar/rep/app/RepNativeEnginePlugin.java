@@ -839,6 +839,7 @@ private JSONArray exportPhasePhotos(JSONArray entries, String phase, String visi
 
     private File writeWatermarkedPhoto(String visitUuid, String phase, int index, String sourceUri,
         JSONObject watermark, JSONObject location) throws Exception {
+        String governorate = RepGovernorateResolver.resolve(getContext(), location);
         Uri uri = sourceUri.startsWith("file:") || sourceUri.startsWith("content:")
             ? Uri.parse(sourceUri) : Uri.fromFile(new File(sourceUri));
         BitmapFactory.Options bounds = new BitmapFactory.Options();
@@ -879,7 +880,7 @@ private JSONArray exportPhasePhotos(JSONArray entries, String phase, String visi
                 Math.max(1, Math.round(oriented.getHeight() * scale)), true);
             oriented.recycle();
         }
-        Bitmap stamped = drawWatermark(scaled, watermark, location, phase);
+        Bitmap stamped = drawWatermark(scaled, watermark, location, phase, governorate);
         if (stamped != scaled) scaled.recycle();
 
         File directory = visitPhotoDirectory(visitUuid, phase, watermark);
@@ -981,7 +982,8 @@ private JSONArray exportPhasePhotos(JSONArray entries, String phase, String visi
         return Bitmap.createBitmap(source, 0, 0, source.getWidth(), source.getHeight(), matrix, true);
     }
 
-    private Bitmap drawWatermark(Bitmap source, JSONObject data, JSONObject location, String phase) throws Exception {
+    private Bitmap drawWatermark(Bitmap source, JSONObject data, JSONObject location, String phase,
+        String governorate) throws Exception {
         Bitmap output = source.copy(Bitmap.Config.ARGB_8888, true);
         Canvas canvas = new Canvas(output);
         int width = output.getWidth();
@@ -1030,7 +1032,8 @@ private JSONArray exportPhasePhotos(JSONArray entries, String phase, String visi
             data.optString("machineCode", "") + " | " + dateFormat.format(timestamp) + " " + timeFormat.format(timestamp),
             gps + " | " + (repName.isEmpty() ? "مندوب ميداني" : repName),
             location == null ? "دقة GPS غير متاحة" : "دقة GPS: ±" + Math.round(location.optDouble("accuracy")) + "م",
-            "المحافظة: غير متاحة · المنطقة المسجلة: " + (region.isEmpty() ? "غير متاحة" : region) + (area.isEmpty() ? "" : " · " + area),
+            "المحافظة: " + (governorate == null ? "غير متاحة" : governorate)
+                + " · المنطقة المسجلة: " + (region.isEmpty() ? "غير متاحة" : region) + (area.isEmpty() ? "" : " · " + area),
             data.optString("machineName", ""),
         };
         float maxWidth = Math.max(40f, panelWidth - padding * 2f);

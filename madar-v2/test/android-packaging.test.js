@@ -142,7 +142,7 @@ test('native rep gate, private SQLite queue, and WorkManager upload contract are
   assert.match(photoProcessor, /ExifInterface\(input\)\.getAttributeInt\(ExifInterface\.TAG_ORIENTATION/);
   assert.match(photoProcessor, /Bitmap oriented = orient\(decoded, orientation\)/);
   assert.match(photoProcessor, /oriented\.getWidth\(\) > oriented\.getHeight\(\)[\s\S]*?portraitMatrix\.setRotate\(90f\)/);
-  assert.match(photoProcessor, /drawWatermark\(scaled, watermark, location, phase\)/);
+  assert.match(photoProcessor, /drawWatermark\(scaled, watermark, location, phase, governorate\)/);
   const watermarkRenderer = engine.slice(engine.indexOf('private Bitmap drawWatermark'));
   for (const watermarkField of ['machineCode', 'machineName', 'repName', 'capturedAt', 'latitude', 'longitude', 'accuracy']) {
     assert.match(watermarkRenderer, new RegExp(watermarkField));
@@ -159,7 +159,8 @@ test('native rep gate, private SQLite queue, and WorkManager upload contract are
   assert.match(cameraSequence, /stream\.getFD\(\)\.sync\(\)/);
   assert.match(manifest, /android:name="\.RepCameraSequenceActivity"[\s\S]*?android:exported="false"/);
   assert.match(watermarkRenderer, /getAssets\(\)\.open\("public\/icon-192\.png"\)/);
-  assert.match(watermarkRenderer, /المحافظة: غير متاحة/);
+  assert.match(photoProcessor, /RepGovernorateResolver\.resolve\(getContext\(\), location\)/);
+  assert.match(watermarkRenderer, /governorate == null \? "غير متاحة" : governorate/);
   assert.match(nativeBridges, /enqueueNativeAttendanceAction/);
   assert.match(repApp, /attendance\/sync/);
   assert.match(repApp, /pendingAttendanceActions/);
