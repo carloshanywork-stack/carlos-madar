@@ -126,7 +126,7 @@ test('native rep gate, private SQLite queue, and WorkManager upload contract are
   assert.match(trackStore, /rep_id INTEGER NOT NULL DEFAULT 0/);
   assert.match(trackStore, /pendingTrail\(long repId\)/);
   assert.match(trackStore, /rejected_breadcrumbs/);
-  assert.match(trackStore, /DATABASE_VERSION = 3/);
+  assert.match(trackStore, /DATABASE_VERSION = 4/);
   assert.match(scheduler, /NetworkType\.CONNECTED/);
   assert.match(scheduler, /15,\s*TimeUnit\.MINUTES/);
   assert.match(worker, /addFormDataPart\("visit"/);

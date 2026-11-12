@@ -21,17 +21,21 @@ For each representative before uninstalling or replacing the app:
 5. If any item cannot synchronize, keep the JSON export and the old app installed; do not clear data or uninstall it until the owner accepts the remaining data.
 6. Verify the server visit count and image paths for a sample of exported records; do not accept a screenshot as proof.
 
-The JSON export contains the queued visits and correction actions, with image bytes when they are locally available. It is a recovery backup, not automatic re-import; an operator still restores or reconciles it manually.
+Current version-3 recovery exports include visits/photos, machine actions/evidence, attendance, and GPS queues, with ownership and hash validation. Import must use the same representative and preserve original identities; repeated imports must not resurrect synchronized work. Check `complete` and every omission before relying on an export. Pending external photo-archive snapshots are reported as omissions; finish mirroring them first. Export JSON is saved through the user-selected local folder under `RecoveryExports`, then read back for verification.
+
+Older APKs may not support this importer/export format. If an in-place transition build is required, its package ID and certificate must match the currently installed app, and its versionCode must increase. Test export/reinstall/import on a disposable device before any field transition.
 
 ## 3. Signing, version, and identity gate
 
 - [ ] `android/app/build.gradle`, Gradle namespace, Capacitor `appId`, native package, and FileProvider authority all use `com.madar.rep.app`.
 - [ ] `versionCode` is an integer greater than every previously distributed `com.madar.rep.app` build; `versionName` is human-reviewable.
 - [ ] The release APK is signed with the approved release key, not the debug key. Record its SHA-256 fingerprint and compare the old/new artifacts.
-- [ ] Do not rotate the release key. A replacement key can only install as a new package and will abandon the previous signing identity.
+- [ ] Do not rotate or regenerate the approved release key. The current Android Debug and MADAR release certificates are unrelated; no authorized signing lineage exists for a direct in-place transition. A deliberate reinstall requires a verified recovery export first.
 - [ ] Android backup remains disabled; native database, session preferences, and visit photos remain app-private.
 
 ## 4. Build and device acceptance
+
+Owner decision (12 November 2026): additional physical-device acceptance is waived for this implementation. That waiver does not mean the checks below passed and does not waive the signing-identity or recovery safeguards. Do not uninstall/clear a field app or claim camera, biometric, SAF-provider, battery/reboot, network, or export/reinstall/import acceptance from emulator evidence.
 
 Run the normal packaging workflow, then perform these physical-device checks on representative Android versions and OEM skins:
 

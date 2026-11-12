@@ -19,12 +19,27 @@ const RepLocation = registerPlugin('RepLocation');
 
 export { isNativeRepApp };
 
+/** Native transport owns the bearer token; it is never placed in an event URL. */
+export async function subscribeNativeOperations(onEvent, onStatus) {
+  const eventHandle = await RepEngine.addListener('operations', onEvent);
+  const statusHandle = await RepEngine.addListener('realtimeStatus', onStatus);
+  const queueHandle = await RepEngine.addListener('queueChanged', () => onStatus({state:'queue_changed',reconcile:true}));
+  try { await RepEngine.startRealtime(); }
+  catch (error) { await eventHandle.remove(); await statusHandle.remove(); await queueHandle.remove(); throw error; }
+  return { remove: async () => { await RepEngine.stopRealtime(); await eventHandle.remove(); await statusHandle.remove(); await queueHandle.remove(); } };
+}
+
 function isPermissionGranted(permissionStatus) {
   return permissionStatus === 'granted' || permissionStatus === 'limited';
 }
 
+export async function getNativePhotoArchiveStatus() { return RepEngine.getPhotoArchiveStatus(); }
+export async function chooseNativePhotoArchiveFolder() { return RepEngine.choosePhotoArchiveFolder(); }
+
 export async function captureNativeCameraPhoto() {
   if (!isNativeRepApp()) throw new Error('الكاميرا الأصلية متاحة داخل تطبيق أندرويد فقط.');
+  const archive = await getNativePhotoArchiveStatus();
+  if (!archive?.configured) await chooseNativePhotoArchiveFolder();
   const photo = await Camera.getPhoto({
     source: CameraSource.Camera,
     resultType: CameraResultType.Uri,
@@ -516,6 +531,7 @@ export async function exportPendingQueue(repId, repUsername) {
     indexedReadError = error;
   }
 
+  let photoArchivePending = 0;
   let nativeVisits = [];
   let nativeMachineActions = [];
   let attendanceActions = [];
@@ -530,6 +546,7 @@ export async function exportPendingQueue(repId, repUsername) {
         getNativeRecoveryGps(numericRepId),
       ]);
       const parsed = JSON.parse(result?.json ?? '{}');
+      photoArchivePending = Number(parsed.photoArchivePending ?? 0);
       nativeVisits = Array.isArray(parsed.visits) ? parsed.visits : [];
       attendanceActions = pendingAttendance;
       nativeMachineActions = Array.isArray(parsed.machineActions) ? parsed.machineActions : [];
@@ -570,6 +587,7 @@ export async function exportPendingQueue(repId, repUsername) {
     pendingGpsPoints: gps.filter((point) => point.status !== 'rejected'),
     rejectedGpsPoints: gps.filter((point) => point.status === 'rejected'),
   };
+  if (photoArchivePending > 0) payload.omissions.push({type:'phone-photo-archive',count:photoArchivePending,reason:'توجد صور بانتظار النسخ إلى المجلد المختار؛ أكمل النسخ قبل الاعتماد على حزمة نقل التطبيق.'});
   for (const visit of payload.visits) {
     for (const [phase, photos] of [['before', visit.beforePhotos], ['after', visit.afterPhotos]]) {
       for (const [index, photo] of photos.entries()) if (photo.omitted) {
@@ -643,18 +661,10 @@ async function savePendingQueueExport(payload, stamp) {
   const json = JSON.stringify(payload);
   const filename = `madar-rep-pending-queue-${stamp}.json`;
   if (isNativeRepApp()) {
-    try {
-      await Filesystem.mkdir({ path: 'MADAR/Exports', directory: Directory.Documents, recursive: true });
-    } catch {
-      // The export directory usually exists; writeFile reports a real failure below.
-    }
-    await Filesystem.writeFile({
-      path: `MADAR/Exports/${filename}`,
-      data: json,
-      directory: Directory.Documents,
-      encoding: 'utf8',
-    });
-  return { filename, path: `Documents/MADAR/Exports/${filename}`, visits: payload.visits.length, machineActions: payload.machineActions.length, attendanceActions: payload.attendanceActions.length, totalItems: payload.visits.length + payload.machineActions.length + payload.attendanceActions.length + payload.pendingGpsPoints.length + payload.rejectedGpsPoints.length, complete: payload.complete, omittedItems: payload.omissions.length };
+    const archive = await getNativePhotoArchiveStatus();
+    if (!archive?.configured) await chooseNativePhotoArchiveFolder();
+    const saved = await RepEngine.saveRecoveryExport({ packageJson: json });
+  return { filename: saved.filename, path: saved.path, visits: payload.visits.length, machineActions: payload.machineActions.length, attendanceActions: payload.attendanceActions.length, totalItems: payload.visits.length + payload.machineActions.length + payload.attendanceActions.length + payload.pendingGpsPoints.length + payload.rejectedGpsPoints.length, complete: payload.complete, omittedItems: payload.omissions.length };
   }
 
   const blob = new Blob([json], { type: 'application/json;charset=utf-8' });

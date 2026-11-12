@@ -66,7 +66,10 @@ public final class MadarSyncWorker extends Worker {
 
         String baseUrl = BuildConfig.REP_SERVER_URL.replaceAll("/+$", "");
         OkHttpClient client = new OkHttpClient.Builder()
-            .addInterceptor(chain -> withBearerToken(chain, token))
+            .addInterceptor(chain -> {
+                if (repId != RepAuthStore.repId(context) || !token.equals(RepAuthStore.token(context))) throw new IOException("Representative session changed; queues preserved");
+                return withBearerToken(chain, token);
+            })
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(75, TimeUnit.SECONDS)
             .writeTimeout(75, TimeUnit.SECONDS)
@@ -79,12 +82,8 @@ public final class MadarSyncWorker extends Worker {
                 if (!response.isSuccessful()) return Result.retry();
             }
 
+            boolean retryIndependentQueues = processMachineActions(baseUrl, client, store, repId) != null;
             while (!isStopped()) {
-                Result machineResult = processMachineActions(baseUrl, client, store, repId);
-                if (machineResult != null) return machineResult;
-
-                Result trackResult = flushTracking(context, baseUrl, client, store, repId);
-                if (trackResult != null) return trackResult;
                 RepLocalStore.AttendanceAction attendanceAction = store.nextAttendanceAction(repId);
                 if (attendanceAction == null) break;
                 JSONObject attendancePayload = new JSONObject()
@@ -106,6 +105,13 @@ public final class MadarSyncWorker extends Worker {
                         && result.optJSONObject("attendance") != null;
                     if (committed) {
                         store.deleteAttendanceAction(attendanceAction.actionUuid, repId);
+                        RepQueueSignals.emit(repId);
+                        if ("out".equals(attendanceAction.payload.optString("action")) && store.nextAttendanceAction(repId)==null
+                            && RepAuthStore.repId(context)==repId
+                            && context.getSharedPreferences(RepLocationService.PREFERENCES_NAME,Context.MODE_PRIVATE).getLong("duty_rep_id",0L)==repId) {
+                            context.getSharedPreferences(RepLocationService.PREFERENCES_NAME,Context.MODE_PRIVATE).edit().putBoolean("duty_active",false).apply();
+                            context.stopService(new android.content.Intent(context,RepLocationService.class));
+                        }
                         continue;
                     }
                     String serverMessage = result == null ? ""
@@ -113,7 +119,8 @@ public final class MadarSyncWorker extends Worker {
                     if (response.code() == 401 || response.code() == 403) {
                         store.markAttendanceRetry(attendanceAction.actionUuid,
                             "الجلسة غير صالحة أو تحتاج مراجعة؛ أعد تسجيل الدخول للمزامنة.");
-                        return Result.success();
+                        retryIndependentQueues = true;
+                        break;
                     }
                     if (response.code() >= 400 && response.code() < 500
                         && response.code() != 408 && response.code() != 425 && response.code() != 429) {
@@ -129,18 +136,22 @@ public final class MadarSyncWorker extends Worker {
                         response.code() == 202
                             ? "الخادم ما زال يعالج تسجيل الحضور؛ سيُعاد بنفس رقم العملية."
                             : "لم يؤكد الخادم تسجيل الحضور؛ سيبقى محفوظاً على الهاتف.");
-                    return Result.retry();
+                    retryIndependentQueues = true;
+                    break;
                 } catch (IOException error) {
                     store.markAttendanceRetry(attendanceAction.actionUuid,
                         "انقطع الاتصال أثناء مزامنة الحضور؛ سيُعاد بنفس رقم العملية.");
-                    return Result.retry();
+                    retryIndependentQueues = true;
+                    break;
                 }
             }
+
+            if (flushTracking(context, baseUrl, client, store, repId) != null) retryIndependentQueues = true;
 
             Set<Long> blockedCardIds = store.blockingMachineCardIds(repId);
             while (!isStopped()) {
                 RepLocalStore.Visit visit = store.nextVisit(repId, blockedCardIds);
-                if (visit == null) return Result.success();
+                if (visit == null) return retryIndependentQueues ? Result.retry() : Result.success();
                 for (RepLocalStore.Photo photo : visit.photos) {
                     File file = new File(photo.path);
                     if (!file.isFile() || file.length() < 1L || file.length() > MAX_FILE_BYTES) {
@@ -194,7 +205,16 @@ public final class MadarSyncWorker extends Worker {
                         && result.optBoolean("success", false)
                         && visit.visitUuid.equalsIgnoreCase(result.optString("visitUuid", ""))
                         && isCommittedStatus(result.optString("status", ""))) {
+                        try {
+                            for (RepLocalStore.Photo photo : visit.photos)
+                                RepPhotoArchive.preserveBeforeRemoval(context,repId,new File(photo.path));
+                        } catch(Exception archiveError) {
+                            store.markRetry(visit.visitUuid,"الزيارة وصلت للخادم؛ الصور محفوظة لحين نجاح تجهيز نسختها المحلية. سيتم التأكيد بنفس رقم الزيارة.");
+                            RepQueueSignals.emit(repId);
+                            return Result.retry();
+                        }
                         List<String> paths = store.markSynced(visit.visitUuid);
+                        RepQueueSignals.emit(repId);
                         for (String path : paths) {
                             File photo = new File(path);
                             File parent = photo.getParentFile();
@@ -386,9 +406,8 @@ public final class MadarSyncWorker extends Worker {
     private Result flushTracking(Context context, String baseUrl, OkHttpClient client,
         RepLocalStore localStore, long repId) {
         try (RepTrackStore trackStore = new RepTrackStore(context)) {
-            RepLocalStore.AttendanceAction pendingAttendance = localStore.nextAttendanceAction(repId);
-            boolean closeDuty = pendingAttendance != null && "out".equals(pendingAttendance.payload.optString("action"));
-            boolean startDuty = pendingAttendance != null && "in".equals(pendingAttendance.payload.optString("action"));
+            // Wait for the chronological attendance prerequisite, without blocking independent visit queues.
+            if (localStore.nextAttendanceAction(repId) != null) return Result.retry();
             JSONArray trail = trackStore.pendingTrail(repId);
             for (int offset = 0; offset < trail.length(); offset += 450) {
                 JSONArray batch = new JSONArray();
@@ -398,7 +417,7 @@ public final class MadarSyncWorker extends Worker {
                 for (int index = offset; index < end; index += 1) {
                     JSONObject source = trail.getJSONObject(index);
                     long trackId = source.getLong("trackId");
-                    String clientPointId = "rep-" + repId + "-track-" + trackId;
+                    String clientPointId = "rep-" + repId + "-" + trackStore.queueIdentity() + "-track-" + trackId;
                     SimpleDateFormat iso = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US);
                     iso.setTimeZone(TimeZone.getTimeZone("UTC"));
                     JSONObject point = new JSONObject()
@@ -412,55 +431,13 @@ public final class MadarSyncWorker extends Worker {
                     batchSources.put(new JSONObject().put("trackId", trackId).put("clientPointId", clientPointId));
                     lastTrackId = trackId;
                 }
-                JSONObject payload = new JSONObject().put("onDuty", true).put("trail", batch);
+                JSONObject payload = new JSONObject().put("trail", batch);
                 JSONObject response = postTracking(client, baseUrl, payload);
                 if (response == null) return Result.retry();
                 acknowledgeTrackingBatch(trackStore, response, batchSources, batch.length(), lastTrackId, repId);
             }
 
-            // Points may be appended while the initial snapshot is uploading.
-            // Never close duty or stop the service until every row is acked.
-            if (trackStore.pendingCount(repId) > 0) return Result.retry();
-
-            if (startDuty) {
-                JSONObject sourceLocation = pendingAttendance.payload.optJSONObject("location");
-                if (sourceLocation != null) {
-                    JSONObject startPayload = new JSONObject()
-                        .put("onDuty", true)
-                        .put("trail", new JSONArray())
-                        .put("location", new JSONObject()
-                            .put("latitude", sourceLocation.getDouble("latitude"))
-                            .put("longitude", sourceLocation.getDouble("longitude"))
-                            .put("accuracy", sourceLocation.getDouble("accuracy"))
-                            .put("updatedAt", sourceLocation.getString("updatedAt")));
-                    if (postTracking(client, baseUrl, startPayload) == null) return Result.retry();
-                }
-            }
-
-            if (closeDuty) {
-                JSONObject closePayload = new JSONObject()
-                    .put("onDuty", false)
-                    .put("trail", new JSONArray());
-                JSONObject location = pendingAttendance.payload.optJSONObject("location");
-                if (location != null) {
-                    closePayload.put("location", new JSONObject()
-                        .put("latitude", location.getDouble("latitude"))
-                        .put("longitude", location.getDouble("longitude"))
-                        .put("accuracy", location.getDouble("accuracy"))
-                        .put("updatedAt", location.getString("updatedAt")));
-                }
-                if (postTracking(client, baseUrl, closePayload) == null) return Result.retry();
-                Intent stopTracking = new Intent(context, RepLocationService.class);
-                stopTracking.setAction(RepLocationService.ACTION_STOP);
-                try {
-                    context.startService(stopTracking);
-                } catch (Exception error) {
-                    // The service also guards its STOP action against an
-                    // unacknowledged queue and retries through WorkManager.
-                    return Result.retry();
-                }
-            }
-            return null;
+            return trackStore.pendingCount(repId) > 0 ? Result.retry() : null;
         } catch (Exception error) {
             return Result.retry();
         }
@@ -473,12 +450,7 @@ public final class MadarSyncWorker extends Worker {
     private void acknowledgeTrackingBatch(RepTrackStore trackStore, JSONObject response,
         JSONArray sources, int batchSize, long lastTrackId, long repId) throws Exception {
         JSONArray results = response.optJSONArray("points");
-        if (results == null) {
-            if (response.optInt("acceptedPoints", 0) == batchSize && lastTrackId > 0L) {
-                trackStore.acknowledgeThrough(lastTrackId, repId);
-            }
-            return;
-        }
+        if (results == null) return; // Keep every point unless its own durable acknowledgment is present.
         Map<String, JSONObject> byPointId = new HashMap<>();
         for (int index = 0; index < results.length(); index += 1) {
             JSONObject result = results.optJSONObject(index);

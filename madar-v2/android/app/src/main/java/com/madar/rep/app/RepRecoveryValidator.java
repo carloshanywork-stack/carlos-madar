@@ -56,6 +56,14 @@ final class RepRecoveryValidator {
         require(bytes.length > 0 && bytes.length <= limit && bytes.length == file.getLong("byteSize"), "Recovery evidence size mismatch.");
         require(hash(bytes).equals(file.getString("sha256")), "Recovery evidence SHA-256 mismatch.");
     }
+    static long parseTime(String value) {
+        for(String pattern:new String[]{"yyyy-MM-dd'T'HH:mm:ss.SSSXXX","yyyy-MM-dd'T'HH:mm:ssXXX"}) {
+            java.text.SimpleDateFormat format=new java.text.SimpleDateFormat(pattern,java.util.Locale.US);format.setLenient(false);
+            java.text.ParsePosition position=new java.text.ParsePosition(0);java.util.Date parsed=format.parse(value,position);
+            if(parsed!=null&&position.getIndex()==value.length())return parsed.getTime();
+        }
+        throw new IllegalArgumentException("Invalid ISO recovery timestamp");
+    }
     static JSONObject validate(String json, long repId) throws Exception {
         require(json != null && json.getBytes(StandardCharsets.UTF_8).length <= 128L * 1024 * 1024, "Recovery package exceeds size limit.");
         JSONObject recovery = new JSONObject(json);
@@ -110,7 +118,7 @@ final class RepRecoveryValidator {
                     JSONObject payload = item.getJSONObject("payload"); same(payload, identity.getJSONObject("payload"));
                     same(item.get("actionUuid"), payload.get("actionUuid")); same(repId, payload.get("repId")); same(item.get("action"), payload.get("action"));
                     require(payload.getString("action").matches("in|out") && payload.optBoolean("biometricVerified"), "Invalid attendance payload.");
-                    java.time.Instant.parse(payload.getString("occurredAt"));
+                    parseTime(payload.getString("occurredAt"));
                     JSONObject location = payload.getJSONObject("location");
                     require(Double.isFinite(location.getDouble("latitude")) && Math.abs(location.getDouble("latitude")) <= 90
                         && Double.isFinite(location.getDouble("longitude")) && Math.abs(location.getDouble("longitude")) <= 180
@@ -122,7 +130,7 @@ final class RepRecoveryValidator {
                     double lat = item.getDouble("latitude"), lon = item.getDouble("longitude"), accuracy = item.getDouble("accuracy");
                     require(Double.isFinite(lat) && Math.abs(lat) <= 90 && Double.isFinite(lon) && Math.abs(lon) <= 180
                         && Double.isFinite(accuracy) && accuracy >= 0 && accuracy <= 100000 && Double.isFinite(item.optDouble("speed", 0)), "Invalid GPS point.");
-                    require(item.getLong("timestamp") > 0 && java.time.Instant.parse(item.getString("capturedAt")).toEpochMilli() == item.getLong("timestamp"), "GPS timestamp mismatch.");
+                    require(item.getLong("timestamp") > 0 && parseTime(item.getString("capturedAt")) == item.getLong("timestamp"), "GPS timestamp mismatch.");
                 }
             }
         }

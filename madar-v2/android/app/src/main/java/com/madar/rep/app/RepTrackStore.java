@@ -15,7 +15,7 @@ import org.json.JSONObject;
 /** Durable, acknowledged-on-delivery GPS queue for native background tracking. */
 public final class RepTrackStore extends SQLiteOpenHelper {
     private static final String DATABASE_NAME = "madar_rep_tracking.db";
-    private static final int DATABASE_VERSION = 3;
+    private static final int DATABASE_VERSION = 4;
     private static final String TABLE = "breadcrumbs";
     private static final String REJECTED_TABLE = "rejected_breadcrumbs";
     private static final int READ_BATCH_LIMIT = 20000;
@@ -34,6 +34,7 @@ public final class RepTrackStore extends SQLiteOpenHelper {
     public void onCreate(SQLiteDatabase database) {
         createBreadcrumbTable(database);
         createRejectedTable(database);
+        createQueueIdentity(database);
     }
 
     private static void createBreadcrumbTable(SQLiteDatabase database) {
@@ -80,6 +81,12 @@ public final class RepTrackStore extends SQLiteOpenHelper {
             createRejectedTable(database);
             migrateBreadcrumbIdentity(database);
         }
+        if (oldVersion < 4) createQueueIdentity(database);
+    }
+
+    private static void createQueueIdentity(SQLiteDatabase database) {
+        database.execSQL("CREATE TABLE IF NOT EXISTS queue_identity (id INTEGER PRIMARY KEY CHECK(id=1), value TEXT NOT NULL)");
+        database.execSQL("INSERT OR IGNORE INTO queue_identity(id,value) VALUES (1,?)",new Object[] {java.util.UUID.randomUUID().toString()});
     }
 
     /**
@@ -118,6 +125,12 @@ public long append(Location location, long repId) {
         values.put("accuracy", (double) location.getAccuracy());
         values.put("speed", location.hasSpeed() ? (double) location.getSpeed() : 0.0);
         return getWritableDatabase().insertWithOnConflict(TABLE, null, values, SQLiteDatabase.CONFLICT_IGNORE);
+    }
+
+    public String queueIdentity() {
+        // Kept in the tracking database so account changes and process restarts cannot change point identities.
+        SQLiteDatabase database = getWritableDatabase();
+        try (Cursor cursor=database.rawQuery("SELECT value FROM queue_identity WHERE id=1",null)) {cursor.moveToFirst();return cursor.getString(0);}
     }
 
     public JSONArray pendingTrail(long repId) throws JSONException {

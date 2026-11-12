@@ -235,7 +235,7 @@ export default function SupervisorRadarPage() {
     const timer = window.setInterval(refresh, 60_000);
     const onOperationsEvent = (message) => {
       const event = message.detail;
-      if (['rep.tracking.updated', 'rep.visit.submitted', 'rep.visit.reviewed', 'attendance.changed', 'overtime.pending'].includes(event?.type)) {
+      if (['system.reconcile-required', 'rep.machine.location-requested', 'rep.machine.location-reviewed', 'rep.machine.correction-submitted', 'rep.tracking.updated', 'rep.visit.submitted', 'rep.visit.reviewed', 'attendance.changed', 'overtime.pending'].includes(event?.type)) {
         void refresh();
       }
     };

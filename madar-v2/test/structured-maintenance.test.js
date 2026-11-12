@@ -331,7 +331,7 @@ test('end-to-end representative visit with multiple quantities, validation, offl
   assert.match(auditEntry.new_values_json, /تم التأكد من الصور/);
 });
 
-test('PowerPoint export formats user-entered quantities and omits historical defaults (Option A)', async () => {
+test('PowerPoint export includes explicit and historical quantities with action wording', async () => {
   const admin = db.prepare("SELECT id FROM users WHERE username = 'admin'").get();
   const client = db.prepare("INSERT INTO clients (code, name, storage_code) VALUES ('CL-PPTX', 'Client PPTX', 'CL-PPTX')").run();
   const clientId = Number(client.lastInsertRowid);
@@ -368,20 +368,14 @@ test('PowerPoint export formats user-entered quantities and omits historical def
 
   const reason4Name = db.prepare('SELECT name FROM maintenance_reasons WHERE id = 4').get().name;
   const reason1Name = db.prepare('SELECT name FROM maintenance_reasons WHERE id = 1').get().name;
-  // User-entered countable item must include (العدد: 4)
-  const userEnteredMatch = allTexts.find((t) => t.includes('(العدد: 4)'));
-  assert.ok(userEnteredMatch, `Expected "(العدد: 4)" in PPTX texts, found: ${JSON.stringify(allTexts)}`);
-  assert.match(userEnteredMatch, new RegExp(`1\\.\\s+${reason4Name}\\s+\\(العدد:\\s*4\\)`));
+  const userEnteredMatch = allTexts.find((t) => /تم تغيير عدد 4 .*سبوت/u.test(t));
+  assert.ok(userEnteredMatch, `Expected explicit spotlight quantity in PPTX: ${JSON.stringify(allTexts)}`);
+  const nonCountableMatch = allTexts.find((t) => t.startsWith('2.'));
+  assert.ok(nonCountableMatch);
+  assert.ok(!nonCountableMatch.includes('العدد:') && !nonCountableMatch.includes('عدد 1'));
+  const legacyDefaultMatch = allTexts.find((t) => /تم تغيير عدد 1 .*ترانس/u.test(t));
+  assert.ok(legacyDefaultMatch, `Historical quantity one must remain visible: ${JSON.stringify(allTexts)}`);
 
-  // Non-countable item should NOT have (العدد: ...)
-  const nonCountableMatch = allTexts.find((t) => t.includes('2.'));
-  assert.ok(nonCountableMatch, `Expected non-countable reason #2 in PPTX texts, found: ${JSON.stringify(allTexts)}`);
-  assert.ok(!nonCountableMatch.includes('العدد:'), 'Non-countable item must not display quantity');
-
-  // Historical default (Option A): MUST NOT include (العدد: 1)
-  const legacyDefaultMatch = allTexts.find((t) => t.includes(reason1Name));
-  assert.ok(legacyDefaultMatch, `Expected "${reason1Name}" in PPTX texts, found: ${JSON.stringify(allTexts)}`);
-  assert.ok(!legacyDefaultMatch.includes('العدد:'), 'Historical default must omit quantity (Option A)');
 });
 
 test('analytics records and workbook aggregate quantities and include summary sheets', () => {
@@ -530,8 +524,8 @@ test('Word DOCX export carries replacement quantities and formats correctly', as
   assert.equal(docxResult.contentType, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
 
   const docxTexts = await readAllDocxTexts(docxResult.buffer);
-  const hasQtyText = docxTexts.some((t) => t.includes('تغيير سبوت (العدد: 7)'));
-  assert.ok(hasQtyText, `Expected "تغيير سبوت (العدد: 7)" in DOCX texts, found: ${JSON.stringify(docxTexts)}`);
+  const hasQtyText = docxTexts.some((t) => t.includes('تم تغيير عدد 7 سبوت'));
+  assert.ok(hasQtyText, `Expected "تم تغيير عدد 7 سبوت" in DOCX texts, found: ${JSON.stringify(docxTexts)}`);
 });
 
 test('explicit user submission transitions legacy_default to user_entered', async () => {
@@ -583,6 +577,28 @@ test('PowerPoint export correctly handles filtered reasons and maintains reason 
   }, db);
 
   const allTexts = await readAllSlideTexts(pptxResult.buffer);
-  const match = allTexts.find((t) => t.includes('(العدد: 12)'));
-  assert.ok(match, `Expected "(العدد: 12)" despite first reason being filtered, found: ${JSON.stringify(allTexts)}`);
+  const match = allTexts.find((t) => /تم تغيير عدد 12 .*سبوت/u.test(t));
+  assert.ok(match, `Expected explicit quantity 12 despite first reason being filtered, found: ${JSON.stringify(allTexts)}`);
+});
+
+
+test('secondary reasons remain searchable while replaced totals exclude pending and required work', () => {
+  const clientId = Number(db.prepare("INSERT INTO clients(code,name,storage_code) VALUES ('Q-REG','Quantity Regression','Q-REG')").run().lastInsertRowid);
+  const orderId = Number(db.prepare("INSERT INTO maintenance_orders(order_code,client_id,area) VALUES ('Q-REG-O',?,'Q-REG')").run(clientId).lastInsertRowid);
+  db.prepare("UPDATE maintenance_orders SET created_at='2099-01-01T00:00:00.000Z' WHERE id=?").run(orderId);
+  const machineId = Number(db.prepare("INSERT INTO machines(code,name_ar,area) VALUES ('Q-REG-M','Quantity Machine','Q-REG')").run().lastInsertRowid);
+  const cardId = Number(db.prepare("INSERT INTO maintenance_cards(order_id,machine_id,status,reason_id,reason_ids_json) VALUES (?,?,'pending',4,'[4,1]')").run(orderId,machineId).lastInsertRowid);
+  const insert = db.prepare("INSERT INTO maintenance_card_lines(card_id,reason_id,reason_label_snapshot,category_snapshot,action_meaning_snapshot,quantity,unit_snapshot,quantity_provenance) VALUES (?,?,?,?,?,?,?,?)");
+  insert.run(cardId,4,'Regression spot','lighting','executed_work',3,'piece','user_entered');
+  insert.run(cardId,1,'Regression required transformer','lighting','required_work',2,'piece','legacy_default');
+  assert.ok(analysisModule.getMaintenanceAnalysisRecords({reasonId:1},db).some(r=>r.card_id===cardId));
+  const summary = () => {
+    const wb = XLSX.read(analysisModule.buildMaintenanceAnalysisWorkbook({from:'2099-01-01',to:'2099-01-01'},db),{type:'buffer'});
+    return XLSX.utils.sheet_to_json(wb.Sheets['ملخص القطع المستبدلة']);
+  };
+  assert.ok(!summary().some(r=>r['بند الصيانة / القطعة']==='Regression spot'));
+  db.prepare("UPDATE maintenance_cards SET status='completed' WHERE id=?").run(cardId);
+  const completed = summary();
+  assert.ok(completed.some(r=>r['بند الصيانة / القطعة']==='Regression spot' && r['إجمالي الكمية المستبدلة']===3));
+  assert.ok(!completed.some(r=>r['بند الصيانة / القطعة']==='Regression required transformer'));
 });

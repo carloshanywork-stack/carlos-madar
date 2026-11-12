@@ -9,6 +9,7 @@ import * as yauzl from 'yauzl';
 import multer from 'multer';
 import { Router } from 'express';
 import { db } from '../../database/connection.js';
+import { initializeDatabase } from '../../database/init.js';
 import { backupRoot, dataDirectory, repApkPath, storageMountPath, storageRoot } from '../../config/paths.js';
 import { recordAudit } from '../audit.js';
 import { requestActorId } from '../actor.js';
@@ -257,6 +258,49 @@ function validateSnapshot(snapshotPath) {
   } finally {
     snapshot?.close();
   }
+}
+
+/** Upgrade only an isolated extracted copy; never migrate the live database or original archive. */
+export async function prepareRestorableSnapshot(snapshotPath, { database = db, stageDirectory = dirname(snapshotPath) } = {}) {
+  if (!readFileSyncHeader(snapshotPath).equals(SQLITE_HEADER)) throw new HttpError(400, 'Backup database does not have a valid SQLite header.');
+  let source;
+  const migratedPath = join(stageDirectory, `restore-migrated-${randomUUID()}.sqlite`);
+  try {
+    source = new Database(snapshotPath, { readonly: true, fileMustExist: true });
+    if (source.pragma('integrity_check', { simple: true }) !== 'ok' || source.pragma('foreign_key_check').length) {
+      throw new HttpError(400, 'Backup database failed integrity or relationship checks.');
+    }
+    const required = ['users', 'employees', 'settings', 'schema_migrations'];
+    if (required.some((name) => !source.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name))) {
+      throw new HttpError(409, 'Backup format is not a supported MADAR V2 database.');
+    }
+    const known = new Set(database.prepare('SELECT version FROM schema_migrations').all().map((row) => row.version));
+    if (source.prepare('SELECT version FROM schema_migrations').all().some((row) => !known.has(row.version))) {
+      throw new HttpError(409, 'Backup contains a newer or unsupported migration. Upgrade MADAR before restoring it.');
+    }
+    await source.backup(migratedPath);
+    source.close(); source = null;
+    const upgraded = new Database(migratedPath);
+    try {
+      upgraded.pragma('foreign_keys = ON');
+      upgraded.pragma('journal_mode = WAL');
+      upgraded.pragma('busy_timeout = 5000');
+      initializeDatabase({ database: upgraded, initialAdminPassword: '' });
+      if (upgraded.pragma('integrity_check', { simple: true }) !== 'ok' || upgraded.pragma('foreign_key_check').length) {
+        throw new HttpError(400, 'Migrated backup failed integrity or relationship checks.');
+      }
+      // Keep unknown schema changes out of the replacement path. Supported migrations must produce the current schema.
+      if (JSON.stringify(schemaFingerprint(upgraded)) !== JSON.stringify(schemaFingerprint(database))) {
+        throw new HttpError(409, 'Backup cannot be safely upgraded to this installation schema. The original backup was preserved.');
+      }
+      upgraded.pragma('wal_checkpoint(TRUNCATE)');
+    } finally { upgraded.close(); }
+    return migratedPath;
+  } catch (error) {
+    await rm(migratedPath, { force: true });
+    if (error instanceof HttpError) throw error;
+    throw new HttpError(409, 'Backup migration failed in isolated staging; the running database and storage were not replaced.');
+  } finally { source?.close(); }
 }
 
 function readFileSyncHeader(filePath) {
@@ -569,8 +613,9 @@ async function restoreBackupFile(uploadedPath, actorId) {
     const stageRoot = await mkdtemp(join(storageParent, '.madar-v2-restore-'));
     try {
       const { databaseFile, storageDirectory } = await extractBackupArchive(uploadedPath, stageRoot);
-      validateSnapshot(databaseFile);
-      await restoreStorageFromStage(storageDirectory, { snapshotPath: databaseFile, actorId, stageRoot });
+      const migratedPath = await prepareRestorableSnapshot(databaseFile, { stageDirectory: stageRoot });
+      validateSnapshot(migratedPath);
+      await restoreStorageFromStage(storageDirectory, { snapshotPath: migratedPath, actorId, stageRoot });
       return { restored: true, restoredAt: new Date().toISOString() };
     } finally {
       await rm(stageRoot, { recursive: true, force: true });

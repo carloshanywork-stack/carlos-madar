@@ -4,7 +4,7 @@ import { db } from '../../database/connection.js';
 import { asyncHandler, allowOnlyKeys, HttpError, requireObject, requireText } from '../http.js';
 import { diskUploadMany, memoryUpload } from '../upload.js';
 import { ensureStorageDirectory, removeStorageFile } from '../storage.js';
-import { getOperationsEventsAfter, publishOperationsEvent, subscribeOperationsEvents } from '../operations-events.js';
+import { getOperationsReplayCursor, getOperationsEventsAfter, publishOperationsEvent, subscribeOperationsEvents } from '../operations-events.js';
 import { loginRateLimiter } from '../auth/login-rate-limit.js';
 import { getOfflineMapPackCatalog, getOfflineMapPackManifest, readOfflineMapPackTile } from '../supervisor/offline-tiles.js';
 import {
@@ -83,7 +83,8 @@ router.use(requireActiveRep);
 router.get('/events', (req, res) => {
   const repId = Number(req.user.id);
   const cursor = Number(req.get('Last-Event-ID') ?? req.query.lastEventId ?? 0);
-  const safeCursor = Number.isSafeInteger(cursor) && cursor >= 0 ? cursor : 0;
+  const replay = getOperationsReplayCursor(cursor);
+  const safeCursor = replay.cursor;
   res.status(200).set({
     'Cache-Control': 'private, no-cache, no-transform',
     Connection: 'keep-alive',
@@ -92,20 +93,21 @@ router.get('/events', (req, res) => {
   });
   res.flushHeaders?.();
   res.write('retry: 3000\n\n');
+  if (replay.reconcile) res.write('event: operations\ndata: {"type":"system.reconcile-required","cursorReset":true}\n\n');
   let lastEventId = safeCursor;
   const dispatch = (event) => {
-    const eventId = Number(event.id);
+    const eventId = event.id == null ? NaN : Number(event.id);
     if (Number.isSafeInteger(eventId) && eventId <= lastEventId) return;
     if (Number.isSafeInteger(eventId)) lastEventId = eventId;
     if (event.type === 'system.shutdown') {
-      res.write(`id: ${event.id}\nevent: operations\ndata: ${JSON.stringify(event)}\n\n`);
+      res.write(`${Number.isSafeInteger(eventId) ? `id: ${eventId}\n` : ''}event: operations\ndata: ${JSON.stringify(event)}\n\n`);
       res.end();
       return;
     }
     const recipients = Array.isArray(event.recipientUserIds) ? event.recipientUserIds.map(Number) : [];
     const isDirectRecipient = Number(event.userId) === repId;
     if (!recipients.includes(repId) && !isDirectRecipient) return;
-    res.write(`id: ${event.id}\nevent: operations\ndata: ${JSON.stringify(event)}\n\n`);
+    res.write(`${Number.isSafeInteger(eventId) ? `id: ${eventId}\n` : ''}event: operations\ndata: ${JSON.stringify(event)}\n\n`);
   };
   for (const event of getOperationsEventsAfter(safeCursor, { limit: 10_000 })) dispatch(event);
   const unsubscribe = subscribeOperationsEvents((event) => {
@@ -130,6 +132,7 @@ router.post('/attendance/clock-in', (req, res) => {
   const attendance = clockInForRep(req.user.id, req.body);
   publishOperationsEvent('attendance.changed', {
     userId: req.user.id,
+    action: attendance.clock_out_time ? 'out' : 'in',
     employeeId: attendance.employee_id,
     workDate: attendance.work_date,
   });
@@ -140,6 +143,7 @@ router.post('/attendance/clock-out', (req, res) => {
   const attendance = clockOutForRep(req.user.id, req.body);
   publishOperationsEvent('attendance.changed', {
     userId: req.user.id,
+    action: attendance.clock_out_time ? 'out' : 'in',
     employeeId: attendance.employee_id,
     workDate: attendance.work_date,
   });
@@ -158,12 +162,13 @@ router.post('/attendance/clock-out', (req, res) => {
 router.post('/attendance/sync', (req, res, next) => {
   try {
     const result = syncRepAttendanceAction(req.user.id, req.body);
-    publishOperationsEvent('attendance.changed', {
+    if (!result.idempotent) publishOperationsEvent('attendance.changed', {
       userId: req.user.id,
+      action: req.body.action,
       employeeId: result.attendance.employee_id,
       workDate: result.attendance.work_date,
     });
-    if (result.attendance.overtime_status === 'pending' && Number(result.attendance.overtime_hours) > 0) {
+    if (!result.idempotent && result.attendance.overtime_status === 'pending' && Number(result.attendance.overtime_hours) > 0) {
       publishOperationsEvent('overtime.pending', {
         userId: req.user.id,
         employeeId: result.attendance.employee_id,
@@ -322,7 +327,7 @@ router.post('/sync-visit', syncVisitUpload.any(), asyncHandler(async (req, res) 
       beforePhotos: files.filter((file) => file.fieldname === 'beforePhoto'),
       afterPhotos: files.filter((file) => file.fieldname === 'afterPhoto'),
     });
-    if (result.status !== 'processing') {
+    if (result.status !== 'processing' && !result.idempotent) {
       publishOperationsEvent('rep.visit.submitted', {
         userId: req.user.id,
         visitUuid: result.visitUuid,

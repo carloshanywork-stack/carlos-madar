@@ -36,8 +36,8 @@ function addFilters(conditions, parameters, filters, dateExpression) {
     parameters.push(filters.to);
   }
   if (filters.reasonId !== null) {
-    conditions.push('card.reason_id = ?');
-    parameters.push(filters.reasonId);
+    conditions.push(`(card.reason_id = ? OR EXISTS (SELECT 1 FROM json_each(COALESCE(card.reason_ids_json, '[]')) selected WHERE CAST(selected.value AS INTEGER) = ?) OR EXISTS (SELECT 1 FROM maintenance_card_lines selected_line WHERE selected_line.card_id = card.id AND selected_line.reason_id = ?))`);
+    parameters.push(filters.reasonId, filters.reasonId, filters.reasonId);
   }
 }
 
@@ -109,6 +109,7 @@ export function getMaintenanceAnalysisRecords(input = {}, database = defaultDb) 
       order_record.order_code,
       reason.name AS reason_name,
       card.id AS card_id,
+      card.status AS card_status,
       card.reason_ids_json,
       COALESCE(card.notes, '') AS notes,
       ${SERVICE_DATE} AS service_date,
@@ -208,19 +209,23 @@ export function buildMaintenanceAnalysisWorkbook(input = {}, database = defaultD
 
   const totalsByItem = new Map();
   for (const record of records) {
+    if (record.card_status !== 'completed') continue;
     for (const line of record.maintenance_lines || []) {
-      const key = `${line.label}\0${line.unit}`;
-      const current = totalsByItem.get(key) || { label: line.label, unit: line.unit, total: 0 };
+      if (line.actionMeaning !== 'executed_work') continue;
+      const key = `${line.reasonId}\0${line.unit}`;
+      const current = totalsByItem.get(key) || { label: line.label, unit: line.unit, total: 0, historical: 0 };
       current.total += line.quantity;
+      if (line.quantityProvenance === 'legacy_default') current.historical += line.quantity;
       totalsByItem.set(key, current);
     }
   }
   const summaryRows = [
-    ['بند الصيانة / القطعة', 'الوحدة', 'إجمالي الكمية المستبدلة'],
+    ['بند الصيانة / القطعة', 'الوحدة', 'إجمالي الكمية المستبدلة', 'منها كمية تاريخية افتراضية'],
     ...[...totalsByItem.values()].map((item) => [
       item.label,
       item.unit === 'piece' ? 'قطعة' : item.unit === 'set' ? 'طقم' : (item.unit || '—'),
       item.total,
+      item.historical,
     ]),
   ];
   const summarySheet = XLSX.utils.aoa_to_sheet(summaryRows);

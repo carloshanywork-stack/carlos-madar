@@ -167,6 +167,12 @@ final class RepLocalStore extends SQLiteOpenHelper {
         return result;
     }
 
+    synchronized void assertVisitPhotoEditable(String visitUuid) {
+        try(Cursor row=getReadableDatabase().rawQuery("SELECT 1 FROM pending_visits WHERE visit_uuid=? AND status!='synced'",new String[]{visitUuid})) {
+            if(row.moveToFirst())throw new IllegalStateException("الصور مرتبطة بزيارة محفوظة للمزامنة؛ أرسل زيارة جديدة عند طلب إعادة التصوير.");
+        }
+    }
+
     synchronized void enqueueVisit(Context context, JSONObject visit) throws Exception {
         String visitUuid = visit.getString("visitUuid");
         if (!visitUuid.matches("(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")) {
@@ -503,14 +509,11 @@ private static void collectPhotos(Context context, String visitUuid, String phas
             }
             String extension = "image/png".equals(evidenceContentType) ? "png"
                 : "image/webp".equals(evidenceContentType) ? "webp" : "jpg";
-            File evidenceFile = new File(directory, actionUuid + "." + extension).getCanonicalFile();
+            File evidenceFile = new File(directory, actionUuid + "_" + RepRecoveryValidator.hash(evidence) + "." + extension).getCanonicalFile();
             if (!evidenceFile.getPath().startsWith(directory.getCanonicalPath() + File.separator)) {
                 throw new IllegalArgumentException("Evidence path is outside app storage.");
             }
-            try (java.io.FileOutputStream output = new java.io.FileOutputStream(evidenceFile)) {
-                output.write(evidence);
-                output.getFD().sync();
-            }
+            RepEvidenceFile.write(evidenceFile, evidence);
             evidencePath = evidenceFile.getAbsolutePath();
         }
 
@@ -518,13 +521,18 @@ private static void collectPhotos(Context context, String visitUuid, String phas
         database.beginTransaction();
         try {
             try (Cursor existing = database.rawQuery(
-                "SELECT rep_id, machine_id, card_id, payload_json FROM pending_machine_actions WHERE action_uuid = ?",
+                "SELECT rep_id, machine_id, card_id, payload_json, evidence_path, evidence_content_type, action_type FROM pending_machine_actions WHERE action_uuid = ?",
                 new String[] { actionUuid }
             )) {
                 if (existing.moveToFirst()) {
                     if (existing.getLong(0) != repId || existing.getLong(1) != machineId
                         || existing.getLong(2) != cardId || !RepRecoveryValidator.canonical(new JSONObject(existing.getString(3))).equals(RepRecoveryValidator.canonical(payload))) {
                         throw new IllegalStateException("This machine action UUID already has different local data.");
+                    }
+                    if (!type.equals(existing.getString(6)) || !evidenceContentType.equals(existing.getString(5))
+                        || (!evidencePath.isEmpty() && !java.util.Arrays.equals(readEvidenceBytes(new File(evidencePath)),readEvidenceBytes(new File(existing.getString(4)))))
+                        || (evidencePath.isEmpty() != existing.getString(4).isEmpty())) {
+                        throw new IllegalStateException("This machine action UUID already has different evidence or type.");
                     }
                     database.setTransactionSuccessful();
                     return false;

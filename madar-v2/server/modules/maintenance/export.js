@@ -1,3 +1,4 @@
+import { maintenanceLineText } from './line-text.js';
 import PptxGenJS from 'pptxgenjs';
 import {
   AlignmentType,
@@ -565,14 +566,7 @@ async function addMaintenanceCardSlide(pptx, order, card, clientLogo, fixedLogo,
       const reasonText = entry.name;
       const line = (entry.id !== null && linesByReasonId.get(entry.id))
         || linesByLabel.get(reasonText);
-      let formattedText = reasonText;
-      if (line && line.quantity > 0) {
-        if (line.quantityProvenance === 'legacy_default') {
-          formattedText = reasonText;
-        } else {
-          formattedText = `${reasonText} (العدد: ${line.quantity})`;
-        }
-      }
+      const formattedText = maintenanceLineText(line?.label || reasonText, line);
       return {
         text: `${index + 1}. ${formattedText}`,
         options: {
@@ -1013,8 +1007,8 @@ export async function buildMaintenanceDocx(orderId, database) {
       new TableRow({ tableHeader: true, children: [cell('الكود', true), cell('الآلة', true), cell('المنطقة', true), cell('الحالة / السبب', true)] }),
       ...cards.map((card) => {
         const isCompleted = card.status === 'completed';
-        const activeLines = (card.maintenance_lines || []).filter((l) => l.quantity > 0 && l.quantityProvenance !== 'legacy_default');
-        const partsSummary = activeLines.map((l) => `${l.label} (العدد: ${l.quantity})`).join('، ');
+        const activeLines = (card.maintenance_lines || []).filter((l) => l.quantity > 0);
+        const partsSummary = activeLines.map((l) => maintenanceLineText(l.label, l)).join('، ');
         const statusLabel = isCompleted
           ? `مكتمل (${card.reason_name || 'فحص دوري'}${partsSummary ? ` [${partsSummary}]` : ''})`
           : 'لم يتم الفحص (ناقص)';
@@ -1035,8 +1029,8 @@ export async function buildMaintenanceDocx(orderId, database) {
   }
   for (const card of completedCards) {
     content.push(rtlParagraph(`${card.machine_code} · ${card.machine_name_ar}`, { heading: HeadingLevel.HEADING_2, pageBreakBefore: true }));
-    const activeLines = (card.maintenance_lines || []).filter((l) => l.quantity > 0 && l.quantityProvenance !== 'legacy_default');
-    const partsSummary = activeLines.map((l) => `${l.label} (العدد: ${l.quantity})`).join('، ');
+    const activeLines = (card.maintenance_lines || []).filter((l) => l.quantity > 0);
+    const partsSummary = activeLines.map((l) => maintenanceLineText(l.label, l)).join('، ');
     content.push(rtlParagraph(`المنطقة: ${card.machine_area || '—'}    ·    سبب العطل: ${card.reason_name || 'غير محدد'}${partsSummary ? `    ·    القطع المستبدلة: ${partsSummary}` : ''}`));
     content.push(rtlParagraph(`الفنيون: ${order.technicians.map((technician) => technician.name).join('، ') || 'غير معيّنين'}    ·    تاريخ الزيارة: ${String(order.created_at ?? '').slice(0, 10) || '—'}`));
     for (const [label, paths] of [['قبل الصيانة', card.before_photos], ['بعد الصيانة', card.after_photos]]) {

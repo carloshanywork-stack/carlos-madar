@@ -29,6 +29,8 @@ import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
+import com.getcapacitor.annotation.ActivityCallback;
+import androidx.activity.result.ActivityResult;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -58,6 +60,57 @@ public final class RepNativeEnginePlugin extends Plugin {
         Manifest.permission.ACCESS_COARSE_LOCATION
     };
     private static final long MAX_PHOTO_BYTES = 3L * 1024L * 1024L;
+
+    private final java.util.function.LongConsumer queueListener=owner->{
+        if(owner==RepAuthStore.repId(getContext()))notifyListeners("queueChanged",new JSObject().put("repId",owner));
+    };
+    @Override public void load() {super.load();RepQueueSignals.add(queueListener);}
+    private RepRealtimeConnection realtime;
+    private boolean realtimeWanted;
+    @PluginMethod public void startRealtime(PluginCall call) {
+        if (RepAuthStore.repId(getContext()) < 1L) {call.reject("يلزم تسجيل الدخول.");return;}
+        realtimeWanted=true;
+        if(realtime==null) realtime=new RepRealtimeConnection(getContext(),event->notifyListeners("operations",event),state->notifyListeners("realtimeStatus",state));
+        realtime.start();call.resolve(new JSObject().put("started",true));
+    }
+    @PluginMethod public void stopRealtime(PluginCall call) {realtimeWanted=false;if(realtime!=null)realtime.stop();call.resolve();}
+    @Override protected void handleOnPause() {if(realtime!=null)realtime.stop();}
+    @Override protected void handleOnResume() {if(realtimeWanted && realtime!=null)realtime.start();}
+    @Override protected void handleOnDestroy() {RepQueueSignals.remove(queueListener);realtimeWanted=false;if(realtime!=null)realtime.destroy();}
+
+    @PluginMethod public void getPhotoArchiveStatus(PluginCall call) {
+        long owner=RepAuthStore.repId(getContext());
+        if(owner<1) {call.reject("يلزم تسجيل الدخول.");return;}
+        IO.execute(()->{RepPhotoArchive.flush(getContext(),owner);call.resolve(RepPhotoArchive.status(getContext(),owner));});
+    }
+    @PluginMethod public void saveRecoveryExport(PluginCall call) {
+        long owner=RepAuthStore.repId(getContext());String json=call.getString("packageJson");
+        if(owner<1||json==null||json.length()>128*1024*1024) {call.reject("بيانات نسخة الاسترداد غير صالحة.");return;}
+        IO.execute(()->{try {
+            JSONObject payload=new JSONObject(json);if(payload.optLong("repId",0L)!=owner||!"madar-rep-recovery".equals(payload.optString("type")))throw new SecurityException("حزمة مملوكة لحساب آخر.");
+            String filename="madar-rep-pending-queue-"+System.currentTimeMillis()+"-"+java.util.UUID.randomUUID()+".json";
+            String uri=RepPhotoArchive.saveRecoveryExport(getContext(),owner,json,filename);
+            call.resolve(new JSObject().put("filename",filename).put("path","المجلد المختار/RecoveryExports/"+filename).put("uri",uri));
+        } catch(Exception error) {call.reject("تعذر حفظ نسخة الاسترداد والتحقق منها في المجلد المختار.","RECOVERY_EXPORT_WRITE_FAILED",error);}});
+    }
+
+    @PluginMethod public void choosePhotoArchiveFolder(PluginCall call) {
+        long owner=RepAuthStore.repId(getContext());if(owner<1) {call.reject("يلزم تسجيل الدخول.");return;}
+        call.getData().put("archiveOwner",owner);
+        Intent intent=new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+        intent.putExtra(Intent.EXTRA_LOCAL_ONLY,true);
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_WRITE_URI_PERMISSION|Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION|Intent.FLAG_GRANT_PREFIX_URI_PERMISSION);
+        startActivityForResult(call,intent,"photoArchiveChosen");
+    }
+    @ActivityCallback private void photoArchiveChosen(PluginCall call,ActivityResult result) {
+        if(call==null)return;
+        if(result.getResultCode()!=android.app.Activity.RESULT_OK || result.getData()==null || result.getData().getData()==null) {call.reject("لم يتم اختيار مجلد لحفظ الصور.","PHOTO_ARCHIVE_CANCELLED");return;}
+        long owner=call.getData().optLong("archiveOwner",0L);
+        if(owner<1||owner!=RepAuthStore.repId(getContext())) {call.reject("تغير الحساب؛ أعد اختيار المجلد.");return;}
+        try {RepPhotoArchive.select(getContext(),owner,result.getData().getData(),result.getData().getFlags());
+            IO.execute(()->{RepPhotoArchive.flush(getContext(),owner);call.resolve(RepPhotoArchive.status(getContext(),owner));});
+        } catch(Exception error) {call.reject("تعذر الاحتفاظ بإذن المجلد. اختر مجلداً محلياً قابلاً للكتابة.","PHOTO_ARCHIVE_PERMISSION_FAILED",error);}
+    }
 
     @PluginMethod
     public void getPermissionState(PluginCall call) {
@@ -274,7 +327,9 @@ public final class RepNativeEnginePlugin extends Plugin {
             return;
         }
         try {
+            if(realtime!=null)realtime.stop();
             RepAuthStore.save(getContext(), token, rep.getLong("id"), rep.optString("username", ""));
+            if(realtimeWanted && realtime!=null)realtime.start();
             MadarSyncScheduler.ensurePeriodic(getContext());
             MadarSyncScheduler.enqueueNow(getContext(), true);
             call.resolve(new JSObject().put("saved", true));
@@ -292,6 +347,8 @@ public final class RepNativeEnginePlugin extends Plugin {
     @PluginMethod
     public void clearSession(PluginCall call) {
         try {
+            realtimeWanted=false;
+            if(realtime!=null)realtime.stop();
             RepAuthStore.clear(getContext());
             MadarSyncScheduler.cancelImmediate(getContext());
             call.resolve(new JSObject().put("cleared", true));
@@ -348,14 +405,26 @@ public final class RepNativeEnginePlugin extends Plugin {
             call.reject("بيانات صورة الزيارة غير مكتملة.", "INVALID_VISIT_PHOTO");
             return;
         }
+        long photoOwner=RepAuthStore.repId(getContext());
+        if(photoOwner<1) {call.reject("يلزم تسجيل الدخول لحفظ الصور.");return;}
         IO.execute(() -> {
             try {
+                if(RepAuthStore.repId(getContext())!=photoOwner)throw new SecurityException("Representative changed while capturing photo");
                 JSONObject location = watermark.optJSONObject("location");
+                try (RepLocalStore store=new RepLocalStore(getContext())) {store.assertVisitPhotoEditable(visitUuid);}
                 File output = writeWatermarkedPhoto(visitUuid, phase, index, sourceUri, watermark, location);
                 JSObject result = new JSObject();
                 result.put("path", output.getAbsolutePath());
                 result.put("sizeBytes", output.length());
                 result.put("uri", Uri.fromFile(output).toString());
+                try {
+                    long owner=photoOwner;
+                    RepPhotoArchive.enqueue(getContext(),owner,output);
+                    RepPhotoArchive.flush(getContext(),owner);
+                    result.put("archive",RepPhotoArchive.status(getContext(),owner));
+                } catch(Exception archiveError) {
+                    result.put("archiveWarning","الصورة محفوظة داخل التطبيق؛ تعذر تجهيز نسختها في المجلد المختار.");
+                }
                 call.resolve(result);
             } catch (Exception error) {
                 call.reject("تعذر ضغط الصورة وختمها وحفظها داخل الهاتف.", "VISIT_PHOTO_SAVE_FAILED", error);
@@ -614,6 +683,7 @@ public void exportPendingVisits(PluginCall call) {
             payload.put("repId", repId);
             payload.put("repUsername", RepAuthStore.username(getContext()));
             payload.put("localSessionId", sessionId);
+                payload.put("photoArchivePending", RepPhotoArchive.status(getContext(),repId).optInt("pending",0));
             payload.put("visits", exportedVisits);
             payload.put("machineActions", actions);
             payload.put("attendanceActions", attendance);
@@ -774,8 +844,6 @@ private JSONArray exportPhasePhotos(JSONArray entries, String phase, String visi
         if (!directory.exists() && !directory.mkdirs()) throw new IllegalStateException("تعذر إنشاء مجلد الزيارة الداخلي.");
         String filename = visitPhotoFilename(visitUuid, index);
         File target = new File(directory, filename);
-        File temporary = new File(directory, filename + ".tmp");
-        boolean written = false;
         try {
             for (int quality : new int[] { 82, 76, 70 }) {
                 ByteArrayOutputStream bytes = new ByteArrayOutputStream();
@@ -783,18 +851,11 @@ private JSONArray exportPhasePhotos(JSONArray entries, String phase, String visi
                 byte[] image = bytes.toByteArray();
                 if (image.length > MAX_PHOTO_BYTES && quality > 70) continue;
                 if (image.length > MAX_PHOTO_BYTES) throw new IllegalArgumentException("حجم الصورة أكبر من الحد الذي يقبله الخادم.");
-                try (java.io.FileOutputStream output = new java.io.FileOutputStream(temporary)) {
-                    output.write(image);
-                    output.getFD().sync();
-                }
-                if (target.exists() && !target.delete()) throw new IllegalStateException("تعذر استبدال الصورة القديمة.");
-                if (!temporary.renameTo(target)) throw new IllegalStateException("تعذر تثبيت ملف الصورة النهائي.");
-                written = true;
+                RepEvidenceFile.write(target, image);
                 break;
             }
         } finally {
             stamped.recycle();
-            if (!written) temporary.delete();
         }
         return target;
     }
@@ -802,7 +863,7 @@ private JSONArray exportPhasePhotos(JSONArray entries, String phase, String visi
     private File visitPhotoDirectory(String visitUuid, String phase, JSONObject watermark) throws Exception {
         String region = safeStorageSegment(watermark.optString("regionName", ""));
         String machine = safeStorageSegment(watermark.optString("machineCode", "") + "_" + watermark.optString("machineName", ""));
-        Date capturedAt = parseCapturedAt(watermark.optString("capturedAt", ""));
+        Date capturedAt = parseCapturedAt(watermark.optString("visitCapturedAt", watermark.optString("capturedAt", "")));
         SimpleDateFormat yearFormat = new SimpleDateFormat("yyyy", Locale.US);
         SimpleDateFormat monthFormat = new SimpleDateFormat("MM", Locale.US);
         TimeZone cairo = TimeZone.getTimeZone("Africa/Cairo");

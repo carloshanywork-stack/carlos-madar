@@ -1,3 +1,5 @@
+import { getNativePhotoArchiveStatus, chooseNativePhotoArchiveFolder } from './native-bridges.js';
+import { subscribeNativeOperations } from './native-bridges.js';
 import { lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, apiUrl } from '../../lib/api.js';
 import { distanceBetweenGpsPointsMeters, getAdaptiveGpsInterval, GPS_POLLING } from './gps-adaptive.js';
@@ -293,6 +295,15 @@ const routeRef = useRef(null);
   const nativeBackStateRef = useRef({});
   const userId = Number(user.id);
   const nativeApp = isNativeRepApp();
+  const [photoArchive,setPhotoArchive] = useState(null);
+  const [photoArchiveBusy,setPhotoArchiveBusy] = useState(false);
+  useEffect(() => {
+    if (!nativeApp) return undefined;
+    let active=true;
+    const refresh=()=>void getNativePhotoArchiveStatus().then(state=>{if(active)setPhotoArchive(state);}).catch(()=>{if(active)setPhotoArchive({configured:false,error:'تعذر قراءة حالة مجلد الصور.'});});
+    refresh(); const timer=setInterval(refresh,30000);
+    return ()=>{active=false;clearInterval(timer);};
+  },[nativeApp,userId]);
   routeRef.current = route;
 
   const reportMockLocation = useCallback(async (action) => {
@@ -372,6 +383,9 @@ const routeRef = useRef(null);
   }, [nativeApp, userId]);
 
   const syncTracking = useCallback(async (options = {}) => {
+    if (nativeApp) {
+      try { await requestNativeSync(); return true; } catch { return false; }
+    }
     const duty = options.duty ?? onDuty;
     const hasLocationOverride = Object.hasOwn(options, 'location');
     if (offlineOnly || !navigator.onLine) return false;
@@ -403,6 +417,7 @@ const routeRef = useRef(null);
           accuracy: point.accuracy,
           speed: point.speed ?? 0,
           updatedAt: point.updatedAt ?? new Date(point.timestamp).toISOString(),
+          clientPointId: point.clientPointId || `web-${userId}-${point.sampleId}`,
           sampleId: point.sampleId,
           trackId: point.trackId,
         }));
@@ -417,7 +432,9 @@ const routeRef = useRef(null);
           trail: syncChunk,
         }, { timeoutMs: 4000 });
         if (!response?.success) return false;
-        if (chunk.length) await deleteGpsSamples(chunk.map((point) => point.sampleId).filter(Boolean));
+        const acknowledgments = new Map((response.points ?? []).map((point) => [point.clientPointId, point]));
+        const accepted = chunk.filter((point) => ['accepted', 'duplicate'].includes(acknowledgments.get(point.clientPointId)?.status));
+        if (accepted.length) await deleteGpsSamples(accepted.map((point) => point.sampleId).filter(Boolean));
         if (nativeApp && chunk.length) {
           const throughId = Number(chunk.at(-1).trackId);
           if (Number.isSafeInteger(throughId) && throughId > 0) await acknowledgeNativeDutyTracking(throughId);
@@ -801,14 +818,17 @@ const loadLocalSnapshots = useCallback(async () => {
   }, [checkServer, refreshAttendance, refreshData, syncTracking]);
 
   useEffect(() => {
-    // Standalone Android uses CapacitorHttp for credentialed API calls. Its native
-    // transport does not proxy EventSource, and periodic refresh already covers it.
-    if (offlineOnly || serverState !== 'online' || (nativeApp && apiUrl('/api').startsWith('https://'))) return undefined;
-    const events = new EventSource(apiUrl('/api/rep/events'), { withCredentials: true });
+    if (offlineOnly || serverState !== 'online') return undefined;
+    const events = nativeApp ? null : new EventSource(apiUrl('/api/rep/events'), { withCredentials: true });
+    let nativeHandle;
+    let stopped = false;
     const onOperationsEvent = (message) => {
       try {
         const event = JSON.parse(message.data);
-        if (event.type === 'maintenance.order.assigned') {
+        if (event.type === 'system.reconcile-required') { void refreshData(); void refreshAttendance(); void refreshPending(); }
+        else if (event.type === 'maintenance.changed' || event.type === 'rep.machine.location-reset') { void refreshData(); void refreshPending(); }
+        else if (event.type === 'rep.visit.submitted') { void refreshData(); void refreshPending(); }
+        else if (event.type === 'maintenance.order.assigned') {
           const areas = Array.isArray(event.areas) ? event.areas.filter(Boolean) : [];
           const assigned = !Array.isArray(event.assignedUserIds) || event.assignedUserIds.map(Number).includes(userId);
           const previouslyAssigned = Array.isArray(event.previousUserIds)
@@ -840,12 +860,15 @@ const loadLocalSnapshots = useCallback(async () => {
         // Ignore malformed frames; the regular route refresh remains a fallback.
       }
     };
-    events.addEventListener('operations', onOperationsEvent);
-    return () => {
-      events.removeEventListener('operations', onOperationsEvent);
-      events.close();
-    };
-  }, [attendance?.employee_id, nativeApp, offlineOnly, refreshAttendance, refreshData, serverState, user.employee_id]);
+    const reconcile = () => { void refreshData(); void refreshAttendance(); void refreshPending(); };
+    if (nativeApp) {
+      void subscribeNativeOperations((event) => onOperationsEvent({ data: JSON.stringify(event) }), (status) => {
+        if (status.reconcile) reconcile();
+        if (status.state === 'authentication_required') window.dispatchEvent(new Event('madar-auth-expired'));
+      }).then((handle) => { if (stopped) void handle.remove(); else nativeHandle = handle; }).catch(reconcile);
+    } else { events.addEventListener('operations', onOperationsEvent); events.addEventListener('open', reconcile); }
+    return () => { stopped = true; void nativeHandle?.remove(); events?.removeEventListener('operations', onOperationsEvent); events?.removeEventListener('open', reconcile); events?.close(); };
+  }, [attendance?.employee_id, nativeApp, offlineOnly, refreshAttendance, refreshData, refreshPending, serverState, user.employee_id]);
 
   useEffect(() => {
     if (!nativeApp) return undefined;
@@ -1893,6 +1916,13 @@ try {
    <button type="button" className="rep-button rep-button-primary rep-sync-now" disabled={!pendingQueueCount || serverState !== 'online' || offlineOnly} onClick={() => { if (nativeApp && pendingAttendanceActions.length) void requestNativeSync().catch(() => undefined); void drainQueue(); }}>{serverState === 'online' ? 'مزامنة الآن ↻' : 'ستتم المزامنة عند الاتصال'}</button>
 </section>}
 
+ {nativeApp && <section className="rep-queue-panel" aria-label="حفظ الصور على الهاتف">
+   <strong>نسخة الصور على الهاتف</strong>
+   <p>{photoArchive?.configured ? 'الحفظ التلقائي مفعّل في المجلد المختار بنفس ترتيب السيرفر.' : 'اختر مجلداً مرة واحدة لنسخ الصور تلقائياً حسب المنطقة والسنة والشهر والماكينة وقبل/بعد.'}</p>
+   {photoArchive?.pending > 0 && <p>صور محفوظة داخل التطبيق بانتظار النسخ: {photoArchive.pending}</p>}
+   {photoArchive?.error && <p role="alert">{photoArchive.error}</p>}
+   <button type="button" className="rep-button rep-button-light" disabled={photoArchiveBusy} onClick={async()=>{setPhotoArchiveBusy(true);try{setPhotoArchive(await chooseNativePhotoArchiveFolder());}catch(error){setToast(error.message);}finally{setPhotoArchiveBusy(false);}}}>{photoArchiveBusy ? 'جارٍ اختيار المجلد…' : photoArchive?.configured ? 'تغيير مجلد الصور' : 'اختيار مجلد الصور'}</button>
+ </section>}
  <footer className="rep-app-footer"><span>مَــدَارْ · تطبيق المندوب الميداني{appVersion ? ` · إصدار ${appVersion}` : ''}</span><span>{gps ? `آخر GPS: ${formatGps(gps)}` : onDuty ? gpsError : nativeApp ? 'فعّل الحضور لتسجيل GPS أثناء الوردية' : 'يُسجّل GPS مع الحضور والانصراف والزيارة'}</span></footer>
 
         {selectedMachine && <MachineVisitSheet machine={{ ...selectedMachine, ...(route?.regions ?? []).flatMap((region) => region.machines).find((machine) => machine.cardId === selectedMachine.cardId) }} repName={user.fullName} reasons={reasons} gps={gps} gpsError={gpsError} captureLocation={captureVisitLocation} onClose={() => setSelectedMachine(null)} onSave={saveVisit} onConfirmLocation={confirmSelectedMachineLocation} onReportCorrection={submitSelectedMachineCorrection} />}

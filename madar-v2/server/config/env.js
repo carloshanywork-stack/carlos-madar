@@ -1,3 +1,4 @@
+import { securePrivateFile } from './private-files.js';
 import dotenv from 'dotenv';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
@@ -6,6 +7,7 @@ const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 dotenv.config({ path: resolve(projectRoot, '.env'), quiet: true });
 // MADAR's shared deployment variables and JWT secret live in the repository-root .env.
 dotenv.config({ path: resolve(projectRoot, '../.env'), quiet: true });
+if(process.env.NODE_ENV!=='test') { securePrivateFile(resolve(projectRoot,'.env')); securePrivateFile(resolve(projectRoot,'../.env')); }
 
 function readPort(value) {
   const port = Number(value ?? 3000);

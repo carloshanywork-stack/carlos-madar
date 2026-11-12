@@ -1,4 +1,5 @@
-import { copyFileSync, existsSync, readFileSync, readdirSync, renameSync, rmSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { copyFileSync, existsSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { config as loadDotEnv } from 'dotenv';
@@ -7,6 +8,7 @@ const projectRoot = resolve(import.meta.dirname, '..');
 loadDotEnv({ path: resolve(projectRoot, '.env') });
 const syncOnly = process.argv.includes('--sync-only');
 const releaseBuild = process.argv.includes('--release');
+const artifactOnly = process.argv.includes('--artifact-only');
 const liveReloadBuild = process.argv.includes('--live-reload');
 const isWindows = process.platform === 'win32';
 const versionProperties = Object.fromEntries(
@@ -31,6 +33,8 @@ if (releaseBuild && !existsSync(resolve(projectRoot, 'android/key.properties')))
 process.env.MADAR_ANDROID_BUILD_TYPE = releaseBuild ? 'release' : 'debug';
 // A stale .env or terminal variable must never make an ordinary APK point at localhost.
 process.env.MADAR_REP_LIVE_RELOAD = liveReloadBuild ? 'true' : 'false';
+// Android's bundled service-worker cache key must be reproducible for a version.
+process.env.MADAR_BUILD_VERSION = `${versionName}-${versionCode}`;
 
 function run(command, args, options = {}) {
   console.log(`> ${command} ${args.join(' ')}`);
@@ -101,19 +105,27 @@ if (!syncOnly) {
     ? join(process.env.JAVA_HOME, 'bin', isWindows ? 'java.exe' : 'java')
     : 'java';
   const buildType = releaseBuild ? 'release' : 'debug';
-  const task = `assemble${releaseBuild ? 'Release' : 'Debug'}`;
-  run(java, ['-classpath', gradleWrapperJar, 'org.gradle.wrapper.GradleWrapperMain', task], { cwd: androidDirectory });
+  const task = `:app:assemble${releaseBuild ? 'Release' : 'Debug'}`;
+  run(java, ['-classpath', gradleWrapperJar, 'org.gradle.wrapper.GradleWrapperMain', task, '--no-daemon', '--max-workers=1', '-Dorg.gradle.jvmargs=-Xmx1024m'], { cwd: androidDirectory });
   const builtApk = resolve(projectRoot, `android/app/build/outputs/apk/${buildType}/app-${buildType}.apk`);
   if (!existsSync(builtApk)) throw new Error(`Gradle reported success but the APK is missing: ${builtApk}`);
   const publishedApk = resolve(projectRoot, releaseBuild ? 'madar-rep-release.apk' : 'madar-rep.apk');
   const temporaryApk = resolve(projectRoot, `${releaseBuild ? '.madar-rep-release' : '.madar-rep'}-${process.pid}.apk.tmp`);
-  try {
+  if (!artifactOnly) try {
     copyFileSync(builtApk, temporaryApk);
     renameSync(temporaryApk, publishedApk);
   } finally {
     rmSync(temporaryApk, { force: true });
   }
   console.log(`${releaseBuild ? 'Release' : 'Debug'} APK: ${builtApk}`);
-  console.log(`Published APK: ${publishedApk}`);
+  if (!artifactOnly) console.log(`Published APK: ${publishedApk}`);
+  const sourceRevision = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: projectRoot, encoding: 'utf8' }).trim();
+  const sourceTreeDirty = Boolean(execFileSync('git', ['status', '--porcelain', '--untracked-files=normal'], { cwd: projectRoot, encoding: 'utf8' }).trim());
+  const manifest = {
+    sourceRevision, sourceTreeDirty, builtAt: new Date().toISOString(), versionCode, versionName,
+    buildType, serverUrl: process.env.MADAR_REP_SERVER_URL || 'https://carlos-pc.tail852ef0.ts.net',
+    artifactOnly, apkSha256: createHash('sha256').update(readFileSync(builtApk)).digest('hex'),
+  };
+  writeFileSync(`${builtApk}.manifest.json`, `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o600 });
   console.log(`Android version: ${versionName} (versionCode ${versionCode})`);
 }

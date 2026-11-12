@@ -29,7 +29,7 @@ export default function LocationReviews() {
     void refresh();
     const timer = window.setInterval(refresh, 30000);
     const onEvent = (event) => {
-      if (['rep.machine.location-requested', 'rep.machine.location-reviewed'].includes(event.detail?.type)) void refresh();
+      if (['system.reconcile-required', 'rep.machine.location-requested', 'rep.machine.location-reviewed'].includes(event.detail?.type)) void refresh();
     };
     window.addEventListener('madar:operations-event', onEvent);
     return () => { window.clearInterval(timer); window.removeEventListener('madar:operations-event', onEvent); };

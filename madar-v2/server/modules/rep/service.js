@@ -1,3 +1,4 @@
+import { previousTrackingReceipt, persistTrackingPoint, trackingSessionForPoint } from './tracking-ledger.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { readFile } from 'node:fs/promises';
@@ -1284,7 +1285,7 @@ function refreshRepStops(userId, workDate, database) {
 }
 
 /** Persist duty state and idempotent GPS breadcrumbs reported by a representative device. */
-export function syncRepTracking(rep, input, database = db) {
+export function syncRepTracking(rep, input, database = db, { transitionDuty = true } = {}) {
   if (rep?.role !== 'rep') throw new HttpError(403, 'Field representative access is required.');
   const body = requireObject(input);
   allowOnlyKeys(body, ['onDuty', 'location', 'trail', 'is_mock', 'mock_flag']);
@@ -1331,7 +1332,7 @@ export function syncRepTracking(rep, input, database = db) {
     let session = database.prepare(`
       SELECT id, started_at FROM rep_duty_sessions WHERE rep_user_id = ? AND ended_at IS NULL
     `).get(rep.id);
-    if (body.onDuty && !session) {
+    if (transitionDuty && body.onDuty && !session) {
       const startedAt = location?.updatedAt ?? now;
       const result = database.prepare(`
         INSERT INTO rep_duty_sessions (rep_user_id, started_at, start_location_json)
@@ -1342,7 +1343,7 @@ export function syncRepTracking(rep, input, database = db) {
         newValues: { started_at: startedAt, location } });
     }
     let pointSessionId = session?.id ?? null;
-    if (!body.onDuty && session) {
+    if (transitionDuty && !body.onDuty && session) {
       database.prepare(`
         UPDATE rep_duty_sessions SET ended_at = ?, end_location_json = ?, updated_at = CURRENT_TIMESTAMP
         WHERE id = ? AND ended_at IS NULL
@@ -1382,6 +1383,9 @@ export function syncRepTracking(rep, input, database = db) {
     };
 
     const storePoint = (point, clientPointId, index = null) => {
+      const receipt = previousTrackingReceipt(database, rep.id, point);
+      if (receipt === 'duplicate') return recordResult(clientPointId, 'duplicate', null, index);
+      if (receipt === 'identity_conflict') return recordResult(clientPointId, 'rejected', 'identity_conflict', index);
       const ageMs = Date.now() - new Date(point.updatedAt).valueOf();
       if (ageMs > MAX_TRACK_POINT_AGE_MS) {
         return recordResult(clientPointId, 'rejected', 'older_than_retention', index);
@@ -1389,15 +1393,17 @@ export function syncRepTracking(rep, input, database = db) {
       if (ageMs < -5 * 60 * 1000) {
         return recordResult(clientPointId, 'rejected', 'future_timestamp', index);
       }
-      if (pointSessionId === null) {
+      const originalSessionId = trackingSessionForPoint(database, rep.id, point);
+      if (originalSessionId === null) {
         return recordResult(clientPointId, 'rejected', 'no_duty_session', index);
       }
       const pointDate = businessDate(point.updatedAt, database);
-      const legacyInsert = insertPoint.run(rep.id, pointSessionId, point.latitude, point.longitude,
+      const canonicalInsert = persistTrackingPoint(database, rep.id, originalSessionId, pointDate, point);
+      const legacyInsert = insertPoint.run(rep.id, originalSessionId, point.latitude, point.longitude,
         point.accuracy, point.updatedAt);
-      const breadcrumbInsert = insertBreadcrumb.run(rep.id, pointSessionId, pointDate,
+      const breadcrumbInsert = insertBreadcrumb.run(rep.id, originalSessionId, pointDate,
         point.latitude, point.longitude, point.accuracy, point.speed, point.updatedAt);
-      if (legacyInsert.changes || breadcrumbInsert.changes) {
+      if (canonicalInsert) {
         changedDates.add(pointDate);
         return recordResult(clientPointId, 'accepted', null, index);
       }
@@ -1445,7 +1451,7 @@ export function syncRepLocationPing(rep, input, database = db) {
   allowOnlyKeys(body, ['onDuty', 'location', 'trail', 'is_mock', 'mock_flag']);
   const session = database.prepare(`SELECT 1 FROM rep_duty_sessions
     WHERE rep_user_id = ? AND ended_at IS NULL`).get(rep?.id);
-  return syncRepTracking(rep, { ...body, onDuty: body.onDuty ?? Boolean(session) }, database);
+  return syncRepTracking(rep, { ...body, onDuty: Boolean(session) }, database, { transitionDuty: false });
 }
 
 export async function recoverRepVisitUploads(database = db) {

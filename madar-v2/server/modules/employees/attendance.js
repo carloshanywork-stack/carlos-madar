@@ -1,3 +1,4 @@
+import { recordAttendanceDuty } from '../rep/tracking-ledger.js';
 import { createHash } from 'node:crypto';
 import { db } from '../../database/connection.js';
 import { env } from '../../config/env.js';
@@ -421,7 +422,11 @@ export function clockInForRep(userId, input, database = db, options = {}) {
   }
   const location = normalizeLocation(body.location);
   const employee = employeeForRep(positiveId(userId, 'userId'), database);
-  return clockIn(employee.id, 'app', location, userId, database, { ...options, biometricVerified: true });
+  return database.transaction(() => {
+    const attendance = clockIn(employee.id, 'app', location, userId, database, { ...options, biometricVerified: true });
+    recordAttendanceDuty(database, userId, 'in', attendance.clock_in_time, location);
+    return attendance;
+  })();
 }
 
 export function clockOutForRep(userId, input, database = db, options = {}) {
@@ -432,7 +437,11 @@ export function clockOutForRep(userId, input, database = db, options = {}) {
   }
   const location = body.location === undefined || body.location === null ? null : normalizeLocation(body.location);
   const employee = employeeForRep(positiveId(userId, 'userId'), database);
-  return clockOut(employee.id, 'app', location, userId, database, { ...options, biometricVerified: true });
+  return database.transaction(() => {
+    const attendance = clockOut(employee.id, 'app', location, userId, database, { ...options, biometricVerified: true });
+    recordAttendanceDuty(database, userId, 'out', attendance.clock_out_time, location);
+    return attendance;
+  })();
 }
 
 export function syncRepAttendanceAction(userIdValue, input, database = db) {
@@ -499,6 +508,7 @@ export function syncRepAttendanceAction(userIdValue, input, database = db) {
       : clockOut(employee.id, 'app', location, userId, database, {
         now: occurredAt, biometricVerified: true, offlineSync: true, actionUuid,
       });
+    recordAttendanceDuty(database, userId, body.action, occurredAt.toISOString(), location);
     database.prepare(`
       INSERT INTO rep_attendance_sync_actions
         (action_uuid, rep_user_id, attendance_id, action, payload_sha256, occurred_at)

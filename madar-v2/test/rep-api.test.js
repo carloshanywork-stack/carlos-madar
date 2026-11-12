@@ -67,6 +67,7 @@ const baseUrl = `http://127.0.0.1:${server.address().port}`;
 let legacyDatabase;
 
 after(async () => {
+  server.closeAllConnections();
   await new Promise((resolve) => server.close(resolve));
   closeOfflineMap();
   if (tileDatabase.open) tileDatabase.close();
@@ -1009,6 +1010,8 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   assert.equal(idempotentRetry.body.status, 'approved');
 
   const now = Date.now();
+  // Fixture captures must lie inside the existing attendance-created duty interval.
+  db.prepare('UPDATE rep_duty_sessions SET started_at=?,ended_at=? WHERE rep_user_id=?').run(new Date(now-7200000).toISOString(),new Date(now-3600000).toISOString(),repId);
   const trackPoints = [
     { clientPointId: 'track-1', latitude: 24.8000, longitude: 46.7000, accuracy: 10, updatedAt: new Date(now - 20000).toISOString() },
     { clientPointId: 'track-2', latitude: 24.8010, longitude: 46.7010, accuracy: 10, updatedAt: new Date(now - 10000).toISOString() },
@@ -1046,14 +1049,14 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
       latitude: trackPoints[1].latitude,
       longitude: trackPoints[1].longitude,
       accuracy: trackPoints[1].accuracy,
-      updatedAt: new Date(now).toISOString(),
+      updatedAt: new Date(now - 600000).toISOString(),
     },
     trail: trackPoints,
   }), login.cookie);
   assert.equal(tracking.response.status, 200);
   assert.equal(tracking.body.onDuty, true);
   assert.deepEqual(tracking.body.points.map((point) => point.clientPointId), ['track-1', 'track-2', 'location']);
-  assert.deepEqual(tracking.body.points.map((point) => point.status), ['accepted', 'accepted', 'accepted']);
+  assert.deepEqual(tracking.body.points.map((point) => point.status), ['accepted', 'accepted', 'accepted'], JSON.stringify(tracking.body));
   assert.equal(tracking.body.rejectedPoints, 0);
   let timeoutId;
   let trackingEvent;
@@ -1085,6 +1088,8 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
     speed: 0,
     updatedAt: new Date(now - 2 * 24 * 60 * 60 * 1000).toISOString(),
   };
+  const historicalSessionId = Number(db.prepare('INSERT INTO rep_duty_sessions(rep_user_id,started_at,ended_at) VALUES (?,?,?)')
+    .run(repId,new Date(now-2*24*60*60*1000-3600000).toISOString(),new Date(now-2*24*60*60*1000+3600000).toISOString()).lastInsertRowid);
   const recoveredBacklog = await request('/api/rep/tracking', jsonOptions('POST', {
     onDuty: true,
     trail: [offlineBacklogPoint],
@@ -1093,6 +1098,7 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   assert.equal(recoveredBacklog.body.acceptedPoints, 1, 'offline breadcrumbs up to the local 90-day retention window should be accepted');
   assert.equal(recoveredBacklog.body.points[0].clientPointId, 'offline-backlog-1');
   assert.equal(recoveredBacklog.body.points[0].status, 'accepted');
+  assert.equal(db.prepare('SELECT duty_session_id FROM rep_gps_points WHERE recorded_at=?').get(offlineBacklogPoint.updatedAt).duty_session_id,historicalSessionId);
   const rejectedBacklog = await request('/api/rep/tracking', jsonOptions('POST', {
     onDuty: true,
     trail: [
@@ -1113,7 +1119,7 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
       latitude: trackPoints[1].latitude,
       longitude: trackPoints[1].longitude,
       accuracy: trackPoints[1].accuracy,
-      updatedAt: new Date(now).toISOString(),
+      updatedAt: new Date(now - 600000).toISOString(),
     },
     trail: trackPoints,
   }), login.cookie);
@@ -1126,6 +1132,7 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   stopBaseDate.setUTCHours(12, 0, 0, 0);
   stopBaseDate.setUTCDate(stopBaseDate.getUTCDate() - 1);
   const stopBase = stopBaseDate.getTime();
+  const stopSessionId=Number(db.prepare('INSERT INTO rep_duty_sessions(rep_user_id,started_at,ended_at) VALUES (?,?,?)').run(repId,new Date(stopBase-10*60000).toISOString(),new Date(stopBase+10*60000).toISOString()).lastInsertRowid);
   const stopTrail = [-7, -5, -3, -1].map((minutes) => ({
     latitude: 24.8020,
     longitude: 46.7020,
@@ -1181,7 +1188,7 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   const activeSession = db.prepare('SELECT id FROM rep_duty_sessions WHERE rep_user_id = ? AND ended_at IS NULL').get(repId);
   const finalTrailPoint = {
     latitude: 24.8020, longitude: 46.7020, accuracy: 8,
-    updatedAt: new Date(Date.now() + 1000).toISOString(),
+    updatedAt: new Date(Date.now() - 1000).toISOString(),
   };
   const stopTracking = await request('/api/rep/tracking', jsonOptions('POST', {
     onDuty: false, location: null, trail: [finalTrailPoint],
@@ -1190,7 +1197,9 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   assert.equal(stopTracking.body.onDuty, false);
   assert.equal(stopTracking.body.acceptedPoints, 1);
   assert.ok(db.prepare('SELECT ended_at FROM rep_duty_sessions WHERE id = ?').get(activeSession.id).ended_at);
-  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM rep_location_points WHERE duty_session_id = ?').get(activeSession.id).count, 9);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM rep_location_points WHERE duty_session_id = ?').get(activeSession.id).count, 4);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM rep_location_points WHERE duty_session_id=?').get(stopSessionId).count,4);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM rep_location_points WHERE duty_session_id=?').get(historicalSessionId).count,1);
 
   const approvedWorkbook = await fetch(`${baseUrl}/api/supervisor/reports/approved-visits.xlsx`, { headers: { cookie: adminCookie } });
   assert.equal(approvedWorkbook.status, 200);

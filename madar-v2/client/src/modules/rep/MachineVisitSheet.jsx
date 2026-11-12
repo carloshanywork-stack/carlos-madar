@@ -68,6 +68,7 @@ export default function MachineVisitSheet({ machine, repName = '', reasons, gps,
   const afterInput = useRef(null);
   const previewUrls = useRef(new Set());
   const draftVisitUuid = useRef(createDraftVisitUuid()).current;
+  const draftCapturedAt = useRef(new Date().toISOString()).current;
   const draftSaved = useRef(false);
   const autoCameraOpened = useRef(false);
   const photosRef = useRef(photos);
@@ -148,7 +149,7 @@ export default function MachineVisitSheet({ machine, repName = '', reasons, gps,
         note: correctionNote.trim(),
         evidence: correctionEvidence,
         location: locationPayload(currentLocation),
-        capturedAt: new Date().toISOString(),
+        capturedAt: draftCapturedAt,
       });
       onClose();
     } catch (correctionError) {
@@ -206,9 +207,12 @@ export default function MachineVisitSheet({ machine, repName = '', reasons, gps,
               areaName: activeMachine.areaName,
               phase,
               capturedAt: capturedAt.toISOString(),
+              visitCapturedAt: draftCapturedAt,
               location: locationPayload(currentLocation),
             },
           });
+          if (saved.archiveWarning) setError(saved.archiveWarning);
+          else if (saved.archive?.pending > 0) setError('الصورة محفوظة داخل التطبيق؛ توجد صور بانتظار نسخها إلى المجلد المختار.');
           preparedPhotos.push({
             path: saved.path,
             photoIndex,
@@ -387,7 +391,7 @@ export default function MachineVisitSheet({ machine, repName = '', reasons, gps,
         afterPhotos: photos.after.map(({ blob, path, sizeBytes, capturedAt: photoCapturedAt }) => blob ?? ({ path, sizeBytes, capturedAt: photoCapturedAt })),
         beforeCapturedAt: photos.before.map(({ capturedAt }) => capturedAt),
         afterCapturedAt: photos.after.map(({ capturedAt }) => capturedAt),
-        capturedAt: new Date().toISOString(),
+        capturedAt: draftCapturedAt,
         location: locationPayload(currentLocation),
       });
       draftSaved.current = true;

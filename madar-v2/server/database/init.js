@@ -1763,6 +1763,45 @@ function migrateFinanceSettlementIdempotency(database) {
     .run(financeSettlementIdempotencyMigration);
 }
 
+export function migrateTrackingIdentity(database) {
+  const version = '20261112-gps-point-identity';
+  if (database.prepare('SELECT 1 FROM schema_migrations WHERE version=?').get(version)) return;
+  database.transaction(() => {
+    database.exec(`
+      CREATE TABLE rep_gps_points (
+        id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id),
+        duty_session_id INTEGER NOT NULL REFERENCES rep_duty_sessions(id), work_date TEXT NOT NULL,
+        latitude REAL NOT NULL CHECK(latitude BETWEEN -90 AND 90), longitude REAL NOT NULL CHECK(longitude BETWEEN -180 AND 180),
+        accuracy REAL NOT NULL CHECK(accuracy>=0 AND accuracy<=100000), speed REAL NOT NULL CHECK(speed>=0), recorded_at TEXT NOT NULL,
+        UNIQUE(user_id,recorded_at,latitude,longitude,accuracy,speed));
+      CREATE INDEX idx_rep_gps_points_date ON rep_gps_points(user_id,work_date,recorded_at);
+      CREATE TABLE rep_gps_receipts (
+        user_id INTEGER NOT NULL REFERENCES users(id), client_point_id TEXT NOT NULL, payload_sha256 TEXT NOT NULL,
+        point_id INTEGER NOT NULL REFERENCES rep_gps_points(id) ON DELETE CASCADE,
+        PRIMARY KEY(user_id,client_point_id));
+      CREATE VIEW rep_tracking_breadcrumbs AS
+        SELECT COALESCE(b.id,-p.id) AS id,p.user_id,p.duty_session_id,p.work_date,p.latitude,p.longitude,p.accuracy,p.speed,p.recorded_at,
+          COALESCE(b.is_stop,0) AS is_stop,COALESCE(b.stop_duration_minutes,0) AS stop_duration_minutes,
+          b.stop_name,b.stop_arrived_at,b.stop_departed_at
+        FROM rep_gps_points p LEFT JOIN rep_location_breadcrumbs b
+          ON b.user_id=p.user_id AND b.recorded_at=p.recorded_at AND b.latitude=p.latitude AND b.longitude=p.longitude AND b.accuracy=p.accuracy AND b.speed=p.speed
+        UNION ALL SELECT b.* FROM rep_location_breadcrumbs b WHERE NOT EXISTS (
+          SELECT 1 FROM rep_gps_points p WHERE p.user_id=b.user_id AND p.recorded_at=b.recorded_at AND p.latitude=b.latitude AND p.longitude=b.longitude AND p.accuracy=b.accuracy AND p.speed=b.speed);
+    `);
+    database.prepare('INSERT INTO schema_migrations(version) VALUES (?)').run(version);
+  })();
+}
+
+export function migrateOperationsPublicationIdentity(database) {
+  const version='20261112-operations-publication-identity';
+  if(database.prepare('SELECT 1 FROM schema_migrations WHERE version=?').get(version))return;
+  database.transaction(()=>{
+    database.exec('ALTER TABLE operations_events ADD COLUMN publication_key TEXT');
+    database.exec('CREATE UNIQUE INDEX idx_operations_publication_key ON operations_events(publication_key) WHERE publication_key IS NOT NULL');
+    database.prepare('INSERT INTO schema_migrations(version) VALUES (?)').run(version);
+  })();
+}
+
 export function initializeDatabase({ database = db, initialAdminPassword = env.initialAdminPassword } = {}) {
   const schema = readFileSync(schemaPath, 'utf8');
   let adminCreated = false;
@@ -1789,6 +1828,7 @@ export function initializeDatabase({ database = db, initialAdminPassword = env.i
     migrateRepSupervisorRadar(database);
     migrateCairoTimezone(database);
     migrateMachineGeofenceAndBreadcrumbs(database);
+    migrateTrackingIdentity(database);
     migrateMachineUpdatedAt(database);
     migrateMachineVerificationAndCorrections(database);
     migrateMachineLocationConfirmationReview(database);
@@ -1816,6 +1856,7 @@ export function initializeDatabase({ database = db, initialAdminPassword = env.i
     migrateMaintenancePhotoRotations(database);
     migrateMaintenancePhysicalPhotoRotations(database);
     migrateDurableOperationsEvents(database);
+    migrateOperationsPublicationIdentity(database);
     migrateMachineMaintenanceNotes(database);
     migrateMachineNotesHistory(database);
     migrateMaintenanceUnmatchedFolderDuplicates(database);

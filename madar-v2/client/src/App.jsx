@@ -1,3 +1,4 @@
+import { operationNotification } from './lib/operation-notifications.js';
 import React, { Suspense, lazy, useCallback, useEffect, useState } from 'react';
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import AppShell from './components/layout/AppShell.jsx';
@@ -88,6 +89,7 @@ function AuthenticatedApplication() {
   const [offlineOnly, setOfflineOnly] = useState(false);
   const [operationsAlert, setOperationsAlert] = useState('');
   const [operationsAlertLink, setOperationsAlertLink] = useState('/accounting');
+  const [operationsNotices,setOperationsNotices] = useState([]);
 
   const fetchAuthStatus = useCallback(async () => {
     setLoading(true);
@@ -169,30 +171,37 @@ function AuthenticatedApplication() {
 
   useEffect(() => {
     if (offlineOnly || user?.role !== 'admin') return undefined;
-    const events = new EventSource('/api/supervisor/events', { withCredentials: true });
+    const storageKey = `madar-supervisor-notices:${user.id}`;
+    let cursor = 0;
+    try { const saved=JSON.parse(localStorage.getItem(storageKey) || '[]'); setOperationsNotices(Array.isArray(saved) ? saved.filter(item=>item && Number.isSafeInteger(item.id) && typeof item.text==='string' && typeof item.href==='string' && item.href.startsWith('/') && !item.href.startsWith('//')).slice(0,100) : []); cursor=Number(localStorage.getItem(`${storageKey}:cursor`) || 0); } catch { setOperationsNotices([]); }
+    const events = new EventSource(`/api/supervisor/events?lastEventId=${Number.isSafeInteger(cursor) && cursor >= 0 ? cursor : 0}`, { withCredentials: true });
     const onOperationsEvent = (message) => {
       try {
         const event = JSON.parse(message.data);
         window.dispatchEvent(new CustomEvent('madar:operations-event', { detail: event }));
-        if (event.type === 'overtime.pending') {
-          const hours = Number(event.overtimeHours);
-          const hoursLabel = Number.isFinite(hours) ? ` (${hours} ساعة)` : '';
-          setOperationsAlert(`أوفر تايم جديد بانتظار الاعتماد${hoursLabel}${event.employeeName ? ` · ${event.employeeName}` : ''}.`);
-          setOperationsAlertLink('/accounting');
-        } else if (event.type === 'rep.machine.correction-submitted') {
-          setOperationsAlert(`بلاغ تصحيح ماكينة ${event.reportedCode || ''} بانتظار المراجعة.`);
-          setOperationsAlertLink('/maintenance?view=machines&review=corrections');
+        if (Number.isSafeInteger(event.id) && event.id > 0) { try {localStorage.setItem(`${storageKey}:cursor`,String(event.id));} catch { /* API reconciliation still works. */ } }
+        const notice=operationNotification(event);
+        if(notice) {
+          setOperationsAlert(notice.text);setOperationsAlertLink(notice.href);
+          setOperationsNotices(current=>{
+            const next=[notice,...current.filter(item=>item.id!==notice.id)].slice(0,100);
+            try {localStorage.setItem(storageKey,JSON.stringify(next));} catch { /* Keep the visible notifications. */ }
+            return next;
+          });
         }
       } catch {
         // Ignore malformed event frames; the regular API refresh remains available.
       }
     };
+    const reconcile=()=>window.dispatchEvent(new CustomEvent('madar:operations-event',{detail:{type:'system.reconcile-required'}}));
+    events.addEventListener('open',reconcile);
     events.addEventListener('operations', onOperationsEvent);
     return () => {
+      events.removeEventListener('open',reconcile);
       events.removeEventListener('operations', onOperationsEvent);
       events.close();
     };
-  }, [offlineOnly, user?.role]);
+  }, [offlineOnly, user?.role, user?.id]);
 
   useEffect(() => {
     try {
@@ -246,10 +255,14 @@ function AuthenticatedApplication() {
       {user?.role === 'admin' && operationsAlert && (
         <aside className="madar-operations-alert" role="status">
           <span>{operationsAlert}</span>
-          <a href={operationsAlertLink}>{operationsAlertLink.includes('review=corrections') ? 'مراجعة بلاغات الماكينات' : 'مراجعة شيت الحضور'}</a>
+          <a href={operationsAlertLink}>عرض التفاصيل</a>
           <button type="button" onClick={() => setOperationsAlert('')} aria-label="إغلاق التنبيه">×</button>
         </aside>
       )}
+      {user?.role === 'admin' && operationsNotices.length > 0 && <details className="madar-operations-alert" aria-label="إشعارات إجراءات المندوبين">
+        <summary>إشعارات إجراءات العمل ({operationsNotices.length})</summary>
+        <ul>{operationsNotices.map(item=><li key={item.id}><a href={item.href}>{item.text}</a>{item.occurredAt && <small> · {new Date(item.occurredAt).toLocaleString('ar-EG')}</small>}</li>)}</ul>
+      </details>}
       {loading ? <LoadingState label="جارٍ التحقق من تسجيل الدخول..." /> : !user ? (
           <SignInPage
             setupRequired={setupRequired}

@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { asyncHandler, HttpError } from '../http.js';
 import { requestActorId } from '../actor.js';
 import { getOfflineMapStatus, readOfflineMapTile } from './offline-tiles.js';
-import { getOperationsEventsAfter, publishOperationsEvent, subscribeOperationsEvents } from '../operations-events.js';
+import { getOperationsReplayCursor, getOperationsEventsAfter, publishOperationsEvent, subscribeOperationsEvents } from '../operations-events.js';
 import { approveRepMachineLocationCorrection, rejectRepMachineLocationCorrection, listLocationConfirmations } from '../rep/service.js';
 import {
   buildApprovedVisitsWorkbook,
@@ -44,7 +44,8 @@ router.get('/map/tiles/:z/:x/:y', (req, res) => {
 
 router.get('/events', (req, res) => {
   const cursor = Number(req.get('Last-Event-ID') ?? req.query.lastEventId ?? 0);
-  const safeCursor = Number.isSafeInteger(cursor) && cursor >= 0 ? cursor : 0;
+  const replay = getOperationsReplayCursor(cursor);
+  const safeCursor = replay.cursor;
   res.status(200).set({
     'Cache-Control': 'private, no-cache, no-transform',
     Connection: 'keep-alive',
@@ -53,12 +54,13 @@ router.get('/events', (req, res) => {
   });
   res.flushHeaders?.();
   res.write('retry: 3000\n\n');
+  if (replay.reconcile) res.write('event: operations\ndata: {"type":"system.reconcile-required","cursorReset":true}\n\n');
   let lastEventId = safeCursor;
   const dispatch = (event) => {
-    const eventId = Number(event.id);
+    const eventId = event.id == null ? NaN : Number(event.id);
     if (Number.isSafeInteger(eventId) && eventId <= lastEventId) return;
     if (Number.isSafeInteger(eventId)) lastEventId = eventId;
-    res.write(`id: ${event.id}\nevent: operations\ndata: ${JSON.stringify(event)}\n\n`);
+    res.write(`${Number.isSafeInteger(eventId) ? `id: ${eventId}\n` : ''}event: operations\ndata: ${JSON.stringify(event)}\n\n`);
     if (event.type === 'system.shutdown') res.end();
   };
   for (const event of getOperationsEventsAfter(safeCursor, { limit: 10_000 })) dispatch(event);

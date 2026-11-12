@@ -38,6 +38,7 @@ async function request(path, options = {}, cookie) {
   const response = await fetch(`${baseUrl}${path}`, {
     ...options,
     headers: {
+      connection: 'close',
       ...(options.headers ?? {}),
       ...(cookie ? { cookie } : {}),
     },

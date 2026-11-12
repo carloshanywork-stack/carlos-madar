@@ -117,11 +117,11 @@ export function getSupervisorRadar(database = defaultDatabase, now = new Date())
 
   const result = reps.map((rep) => {
     const points = database.prepare(`
-      SELECT point.latitude, point.longitude, point.accuracy, point.captured_at
-      FROM rep_location_points point
+      SELECT point.latitude, point.longitude, point.accuracy, point.recorded_at AS captured_at
+      FROM rep_tracking_breadcrumbs point
       JOIN rep_duty_sessions duty ON duty.id = point.duty_session_id
-      WHERE point.rep_user_id = ? AND datetime(point.captured_at) >= datetime(?) AND datetime(point.captured_at) < datetime(?)
-      ORDER BY datetime(point.captured_at), point.id
+      WHERE point.user_id = ? AND datetime(point.recorded_at) >= datetime(?) AND datetime(point.recorded_at) < datetime(?)
+      ORDER BY datetime(point.recorded_at), point.id
     `).all(rep.id, start, end);
     const savedLocation = parseJson(rep.last_location_json);
     const latestPoint = points.at(-1);
@@ -170,14 +170,14 @@ export function getSupervisorRepRoute(repIdInput, dateInput, database = defaultD
 
   const points = database.prepare(`SELECT id, latitude, longitude, accuracy, speed, recorded_at,
       is_stop, stop_duration_minutes, stop_name, stop_arrived_at, stop_departed_at
-    FROM rep_location_breadcrumbs
+    FROM rep_tracking_breadcrumbs
     WHERE user_id = ? AND work_date = ?
       AND datetime(recorded_at) >= datetime(?) AND datetime(recorded_at) < datetime(?)
     ORDER BY datetime(recorded_at), id`).all(repId, day, start, end);
   const stopRows = database.prepare(`SELECT stop_arrived_at AS arrived_at,
       stop_departed_at AS departed_at, MAX(stop_duration_minutes) AS duration_minutes,
       stop_name, AVG(latitude) AS latitude, AVG(longitude) AS longitude
-    FROM rep_location_breadcrumbs
+    FROM rep_tracking_breadcrumbs
     WHERE user_id = ? AND work_date = ? AND is_stop = 1 AND stop_arrived_at IS NOT NULL
     GROUP BY stop_arrived_at, stop_departed_at, stop_name
     ORDER BY datetime(stop_arrived_at)`).all(repId, day);

@@ -62,11 +62,8 @@ public class RepLocationService extends Service implements LocationListener {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         if (intent != null && ACTION_STOP.equals(intent.getAction())) {
-            if (hasUnacknowledgedBreadcrumbs()) {
-                MadarSyncScheduler.ensurePeriodic(getApplicationContext());
-                MadarSyncScheduler.enqueueNow(getApplicationContext(), false);
-                return START_STICKY;
-            }
+            // Stop collecting immediately; WorkManager owns uploading the preserved backlog.
+            MadarSyncScheduler.enqueueNow(getApplicationContext(), false);
             stopTracking();
             return START_NOT_STICKY;
         }
@@ -83,6 +80,13 @@ public class RepLocationService extends Service implements LocationListener {
             return START_NOT_STICKY;
         }
 
+        long currentRep = RepAuthStore.repId(this);
+        long dutyOwner = getPreferences().getLong("duty_rep_id", 0L);
+        if (explicitStart) {
+            dutyOwner = currentRep;
+            getPreferences().edit().putLong("duty_rep_id", dutyOwner).commit();
+        }
+        if (dutyOwner < 1L || dutyOwner != currentRep) { stopTracking(); return START_NOT_STICKY; }
         acquireWakeLock();
         getPreferences().edit()
             .putBoolean("duty_active", true)
@@ -201,7 +205,9 @@ public class RepLocationService extends Service implements LocationListener {
     }
 
     private void appendTrackPoint(Location location) {
-        if (trackStore != null) trackStore.append(location, RepAuthStore.repId(this));
+        long owner = getPreferences().getLong("duty_rep_id", 0L);
+        if (owner < 1L || owner != RepAuthStore.repId(this)) { stopTracking(); return; }
+        if (trackStore != null) trackStore.append(location, owner);
     }
 
     @Override

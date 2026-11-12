@@ -1,3 +1,4 @@
+import { db } from '../../database/connection.js';
 import { Router } from 'express';
 import { readFile } from 'node:fs/promises';
 import { extname } from 'node:path';
@@ -72,6 +73,20 @@ import {
 } from './service.js';
 
 const router = Router();
+// Authorized mutations notify scoped clients after a successful response; clients reconcile through their own APIs.
+router.use((req,res,next)=>{
+  if(['POST','PUT','PATCH','DELETE'].includes(req.method)) res.once('finish',()=>{
+    if(res.statusCode<200||res.statusCode>=300||res.statusCode===202)return;
+    try {
+      const recipients=db.prepare("SELECT id FROM users WHERE role='rep' AND active=1 AND deleted_at IS NULL").all().map(row=>row.id);
+      publishOperationsEvent('maintenance.changed',{recipientUserIds:recipients});
+    } catch(error) {
+      console.error('Maintenance reconciliation notification failed:',error.message);
+    }
+  });
+  next();
+});
+
 const NO_CACHE_HEADERS = {
   'Cache-Control': 'private, no-cache, no-store, must-revalidate, max-age=0',
   Pragma: 'no-cache',

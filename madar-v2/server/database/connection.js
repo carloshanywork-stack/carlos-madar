@@ -1,3 +1,4 @@
+import {securePrivateFile} from '../config/private-files.js';
 import Database from 'better-sqlite3';
 import { mkdirSync } from 'node:fs';
 import { dirname, isAbsolute, resolve } from 'node:path';
@@ -14,6 +15,7 @@ export function createConnection(filePath = databasePath) {
   connection.pragma('journal_mode = WAL');
   connection.pragma('synchronous = NORMAL');
   connection.pragma('busy_timeout = 5000');
+  if(filePath!==':memory:'&&!filePath.startsWith('file:')) for(const path of [filePath,`${filePath}-wal`,`${filePath}-shm`]) securePrivateFile(path);
   return connection;
 }
 

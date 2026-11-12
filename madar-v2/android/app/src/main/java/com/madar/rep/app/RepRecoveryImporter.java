@@ -148,7 +148,7 @@ private static JSONArray importVisitPhotos(Context context, JSONArray photos, St
         File target = new File(directory, filename).getCanonicalFile();
         if (!target.getPath().startsWith(directory.getCanonicalPath() + File.separator)) throw new SecurityException("مسار صورة الاسترداد غير آمن.");
         if (target.exists()) {
-                if (!java.util.Arrays.equals(bytes, java.nio.file.Files.readAllBytes(target.toPath()))) throw new IllegalStateException("Existing recovery evidence has different bytes; original preserved.");
+                if (!java.util.Arrays.equals(bytes, RepEvidenceFile.read(target))) throw new IllegalStateException("Existing recovery evidence has different bytes; original preserved.");
             } else {
                 try (java.io.FileOutputStream output = new java.io.FileOutputStream(target)) { output.write(bytes); output.getFD().sync(); }
             }

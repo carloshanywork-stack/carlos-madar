@@ -12,7 +12,7 @@ import {
   recoverUnmatchedMaintenanceFolderDeletions,
 } from './modules/maintenance/service.js';
 import { recoverRepVisitUploads } from './modules/rep/service.js';
-import { publishOperationsEvent } from './modules/operations-events.js';
+import { startOperationsOutboxScheduler, publishOperationsEvent } from './modules/operations-events.js';
 
 const initialization = initializeDatabase();
 try {
@@ -58,6 +58,7 @@ if (initialization.adminCreated) {
 
 const server = app.listen(env.port, env.host, () => {
   console.log(`MADAR V2 API listening at http://${env.host}:${env.port}`);
+  startOperationsOutboxScheduler();
   startSystemBackupScheduler();
   startDatabaseMaintenanceScheduler();
 });

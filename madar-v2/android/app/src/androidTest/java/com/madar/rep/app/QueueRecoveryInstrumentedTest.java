@@ -23,6 +23,7 @@ public class QueueRecoveryInstrumentedTest {
         context = InstrumentationRegistry.getInstrumentation().getTargetContext();
         context.deleteDatabase("madar_rep_local.db");
         context.deleteDatabase("madar_rep_tracking.db");
+        context.deleteDatabase("madar_photo_archive.db");
         java.io.File uploads = new java.io.File(context.getFilesDir(), "MADAR");
         if (uploads.exists()) try (java.util.stream.Stream<java.nio.file.Path> paths = java.nio.file.Files.walk(uploads.toPath())) {
             paths.sorted(java.util.Comparator.reverseOrder()).forEach(path -> { try {java.nio.file.Files.delete(path);} catch(Exception e) {throw new RuntimeException(e);} });
@@ -110,6 +111,35 @@ public class QueueRecoveryInstrumentedTest {
         try (RepTrackStore tracks=new RepTrackStore(context)) {
             assertEquals(1,tracks.recoveryQueue(41).getJSONArray("pending").length());
             assertEquals(0,tracks.recoveryQueue(42).getJSONArray("pending").length());
+        }
+    }
+    @Test public void atomicImageFailureRetainsPreviousBytes() throws Exception {
+        java.io.File file=new java.io.File(context.getCacheDir(),"atomic-photo-fixture.jpg");
+        RepEvidenceFile.write(file,"original".getBytes(StandardCharsets.UTF_8));
+        android.util.AtomicFile atomic=new android.util.AtomicFile(file);
+        java.io.FileOutputStream pending=atomic.startWrite();pending.write("partial-new".getBytes(StandardCharsets.UTF_8));atomic.failWrite(pending);
+        assertEquals("original",new String(RepEvidenceFile.read(file),StandardCharsets.UTF_8));
+        RepEvidenceFile.write(file,"replacement".getBytes(StandardCharsets.UTF_8));
+        assertEquals("replacement",new String(RepEvidenceFile.read(file),StandardCharsets.UTF_8));file.delete();
+    }
+    @Test public void trackingQueueIdentitySurvivesRestartAndVersionThreeUpgrade() throws Exception {
+        String id;
+        try(RepTrackStore tracks=new RepTrackStore(context)) {id=tracks.queueIdentity();}
+        try(RepTrackStore tracks=new RepTrackStore(context)) {assertEquals(id,tracks.queueIdentity());tracks.getWritableDatabase().execSQL("DROP TABLE queue_identity");tracks.getWritableDatabase().setVersion(3);}
+        try(RepTrackStore tracks=new RepTrackStore(context)) {assertFalse(tracks.queueIdentity().isEmpty());assertEquals(4,tracks.getReadableDatabase().getVersion());}
+    }
+    @Test public void archiveSnapshotSurvivesSourceDeletionAndRemainsOwnerScoped() throws Exception {
+        java.io.File directory=new java.io.File(context.getFilesDir(),"MADAR/uploads/Region/2026/11/Machine/Before");assertTrue(directory.mkdirs());
+        java.io.File source=new java.io.File(directory,"capture_0001.jpg");byte[] bytes="archive-fixture".getBytes(StandardCharsets.UTF_8);
+        RepEvidenceFile.write(source,bytes);
+        RepPhotoArchive.preserveBeforeRemoval(context,41,source);
+        RepPhotoArchive.preserveBeforeRemoval(context,41,source);
+        assertEquals(1,RepPhotoArchive.status(context,41).getInt("pending"));
+        assertTrue(source.delete());
+        assertEquals(1,RepPhotoArchive.status(context,41).getInt("pending"));assertEquals(0,RepPhotoArchive.status(context,42).getInt("pending"));
+        try(RepPhotoArchive archive=new RepPhotoArchive(context);Cursor rows=archive.getReadableDatabase().rawQuery("SELECT snapshot_path,relative_path FROM photos WHERE rep_id=41",null)) {
+            assertTrue(rows.moveToFirst());assertArrayEquals(bytes,RepEvidenceFile.read(new java.io.File(rows.getString(0))));
+            assertEquals("Areas/Region/2026/11/Machine/Before/capture_0001.jpg",rows.getString(1));
         }
     }
 }

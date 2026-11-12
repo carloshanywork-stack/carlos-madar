@@ -36,7 +36,7 @@ export default defineConfig(({ mode }) => {
     envFile: false,
     base: capacitorBuild ? './' : '/',
     define: {
-      __MADAR_BUILD_VERSION__: JSON.stringify(new Date().toISOString()),
+      __MADAR_BUILD_VERSION__: JSON.stringify(process.env.MADAR_BUILD_VERSION || new Date().toISOString()),
       __MADAR_API_BASE_URL__: JSON.stringify(apiBaseUrl),
     },
     build: {
