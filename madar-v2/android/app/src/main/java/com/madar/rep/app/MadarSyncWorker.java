@@ -249,9 +249,8 @@ public final class MadarSyncWorker extends Worker {
     }
 
     /**
-     * Drain machine actions before any dependent visit. Location confirmations stay
-     * pending until supervisor approval; correction reports are removed once the
-     * server confirms the durable request.
+     * Drain machine actions before any dependent visit. First-location confirmations
+     * are approved immediately by the server; corrections are managed separately.
      */
     private Result processMachineActions(String baseUrl, OkHttpClient client,
         RepLocalStore store, long repId) {
@@ -273,12 +272,12 @@ public final class MadarSyncWorker extends Worker {
                         if ((response.code() == 200 || response.code() == 201) && result != null && result.optBoolean("success", false)) {
                             long correctionId = result.optLong("correctionId", result.optLong("id", 0L));
                             String status = result.optString("status", "pending");
-            String localStatus = "approved".equals(status) || "rejected".equals(status)
-                ? status : "pending_approval";
-            store.markMachineActionPendingApproval(action.actionUuid, correctionId, status);
-            if (!"pending_approval".equals(localStatus)) {
-                store.updateMachineActionReview(action.actionUuid, repId, localStatus, correctionId, "");
-            }
+                            String localStatus = "approved".equals(status) ? "approved"
+                                : "rejected".equals(status) ? "rejected" : "pending_approval";
+                            store.markMachineActionPendingApproval(action.actionUuid, correctionId, status);
+                            if (!"pending_approval".equals(localStatus)) {
+                                store.updateMachineActionReview(action.actionUuid, repId, localStatus, correctionId, "");
+                            }
             continue;
         }
         String message = result == null ? ""

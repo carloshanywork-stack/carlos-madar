@@ -193,6 +193,20 @@ test('client proposal states preserve approved coordinates and separate rejectio
   const oldCache = { ...card, latitude: 0, longitude: 0, isLocationLocked: true };
   delete oldCache.approvedLocation;
   assert.equal(applyPendingMachineLocations({ regions: [{ machines: [oldCache] }] }).regions[0].machines[0].latitude, null);
+
+  const lockedByProposal = { ...card, repId: 7, canVisit: false, approvedLocation: null, isLocationLocked: false,
+    locationConfirmation: null, locationConfirmationPending: true, locationReviewState: 'queued' };
+  const approvedAction = { machineId: 1, repId: 7, type: 'confirm_location', actionUuid: 'new', status: 'approved',
+    payload: { location: { latitude: 32, longitude: 33 } } };
+  const approved = applyPendingMachineLocations({ regions: [{ machines: [lockedByProposal] }] }, [approvedAction]).regions[0].machines[0];
+  assert.equal(approved.canVisit, true);
+  assert.equal(approved.isLocationLocked, true);
+  assert.equal(approved.latitude, 32);
+  assert.equal(approved.locationReviewState, 'approved');
+  const heldByAnotherRep = applyPendingMachineLocations({
+    regions: [{ machines: [{ ...lockedByProposal, workOwnerId: 8 }] }],
+  }, [approvedAction]).regions[0].machines[0];
+  assert.equal(heldByAnotherRep.canVisit, false);
 });
 
 test('location approval survives application restart and reconciles a stale route snapshot', async () => {

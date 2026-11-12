@@ -43,11 +43,16 @@ function projectToWorld(location, zoom) {
 }
 
 function TrackMap({ representatives, selectedId, onSelect, selectedRoute }) {
+  const routeMatchesSelection = selectedId !== null && selectedRoute?.representative?.id === selectedId;
   const positions = [
-    ...representatives.flatMap((rep) => rep.trail?.length ? rep.trail : rep.lastLocation ? [rep.lastLocation] : []),
-    ...(selectedRoute?.polyline ?? []),
-    ...(selectedRoute?.stops ?? []),
-    ...(selectedRoute?.visitedMachines ?? []).filter((visit) => Number.isFinite(visit.latitude) && Number.isFinite(visit.longitude)),
+    ...(selectedId === null
+      ? representatives.flatMap((rep) => rep.trail?.length ? rep.trail : rep.lastLocation ? [rep.lastLocation] : [])
+      : routeMatchesSelection
+        ? selectedRoute.polyline ?? []
+        : representatives.filter((rep) => rep.id === selectedId)
+          .flatMap((rep) => rep.trail?.length ? rep.trail : rep.lastLocation ? [rep.lastLocation] : [])),
+    ...(routeMatchesSelection ? selectedRoute.stops ?? [] : []),
+    ...(routeMatchesSelection ? selectedRoute.visitedMachines ?? [] : []).filter((visit) => Number.isFinite(visit.latitude) && Number.isFinite(visit.longitude)),
   ];
   const [mapStatus, setMapStatus] = useState(null);
   useEffect(() => {
@@ -140,7 +145,7 @@ function TrackMap({ representatives, selectedId, onSelect, selectedRoute }) {
         </>}
         <text x="18" y="481" className="radar-map-caption">{mapStatus?.renderable ? `${mapStatus.name} · خريطة محلية بلا اتصال` : 'لا توجد حزمة MBTiles محلية · لا اتصال بمزوّد خرائط خارجي'}</text>
         {!positions.length && <text x="450" y="250" textAnchor="middle" className="radar-map-empty">بانتظار أول إشارة GPS</text>}
-        {selectedRoute?.polyline?.length > 1 && <polyline
+        {routeMatchesSelection && selectedRoute.polyline?.length > 1 && <polyline
           points={selectedRoute.polyline.map((location) => {
             const xy = point(location);
             return `${xy.x},${xy.y}`;
@@ -148,7 +153,7 @@ function TrackMap({ representatives, selectedId, onSelect, selectedRoute }) {
           fill="none" stroke="#1769e0" strokeWidth="5" strokeLinecap="round" strokeLinejoin="round"
           strokeDasharray="1 0" opacity=".9"
         />}
-        {(selectedRoute?.stops ?? []).map((stop, index) => {
+        {(routeMatchesSelection ? selectedRoute.stops ?? [] : []).map((stop, index) => {
           const xy = point(stop);
           return <g key={`${stop.arrivedAt}-${index}`} className="radar-stop-pin">
             <circle cx={xy.x} cy={xy.y} r="11" fill="#fff" stroke="#ce5a31" strokeWidth="4" />
@@ -158,7 +163,7 @@ function TrackMap({ representatives, selectedId, onSelect, selectedRoute }) {
             <text x={xy.x + 35} y={xy.y - 11} textAnchor="middle" className="radar-stop-label">{stop.durationMinutes} د</text>
           </g>;
         })}
-        {(selectedRoute?.visitedMachines ?? []).filter((visit) => Number.isFinite(visit.latitude) && Number.isFinite(visit.longitude)).map((visit, index) => {
+        {(routeMatchesSelection ? selectedRoute.visitedMachines ?? [] : []).filter((visit) => Number.isFinite(visit.latitude) && Number.isFinite(visit.longitude)).map((visit, index) => {
           const xy = point(visit);
           return <g key={`visit-${visit.visitUuid ?? index}`}>
             <circle cx={xy.x} cy={xy.y} r="10" fill="#fff" stroke="#6944a3" strokeWidth="3" />
@@ -166,23 +171,28 @@ function TrackMap({ representatives, selectedId, onSelect, selectedRoute }) {
             <title>{`${visit.machineCode} · ${visit.machineName || ''} · ${formatTime(visit.capturedAt)}`}</title>
           </g>;
         })}
-        {representatives.map((rep) => {
-          const points = rep.trail?.length ? rep.trail : rep.lastLocation ? [rep.lastLocation] : [];
+        {representatives.filter((rep) => selectedId === null || rep.id === selectedId).map((rep) => {
+          const points = routeMatchesSelection && selectedRoute.representative?.id === rep.id
+            ? selectedRoute.polyline ?? []
+            : rep.trail?.length ? rep.trail : rep.lastLocation ? [rep.lastLocation] : [];
           const status = STATUS[rep.status] ?? STATUS.offline;
           const xy = points.map(point);
           const last = xy.at(-1);
           if (!last) return null;
           const line = xy.map((item) => `${item.x},${item.y}`).join(' ');
           return (
-            <g key={rep.id} className="radar-map-rep" onClick={() => onSelect(rep.id)} role="button" tabIndex="0" aria-label={`عرض ${rep.fullName}`}>
+            <g key={rep.id} className="radar-map-rep" onClick={() => onSelect(rep.id)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelect(rep.id); } }} role="button" tabIndex="0" aria-pressed={selectedId === rep.id} aria-label={`عرض مسار ${rep.fullName} · ${status.label}`}>
               {xy.length > 1 && <polyline points={line} fill="none" stroke={status.color} strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" opacity=".73" />}
               {xy.filter((_, index) => index % Math.max(1, Math.ceil(xy.length / 18)) === 0).map((stop, index) => (
                 <circle key={`${rep.id}-trail-${index}`} cx={stop.x} cy={stop.y} r="2.7" fill={status.color} opacity=".48" />
               ))}
               <circle cx={last.x} cy={last.y} r="13" fill={status.color} opacity=".15" />
               <circle cx={last.x} cy={last.y} r="7" fill={status.color} stroke="#fff" strokeWidth="2.5" />
-              <rect x={last.x - 30} y={last.y - 33} width="60" height="19" rx="8" fill="#173148" />
-              <text x={last.x} y={last.y - 20} textAnchor="middle" className="radar-map-name">{rep.fullName.slice(0, 12)}</text>
+              <title>{`${rep.fullName} · ${status.label} · ${formatTime(rep.lastSignal)}`}</title>
+              <rect x={last.x - 46} y={last.y - 53} width="92" height="16" rx="7" fill={status.color} />
+              <text x={last.x} y={last.y - 42} textAnchor="middle" className="radar-map-status">{status.label}</text>
+              <rect x={last.x - 42} y={last.y - 34} width="84" height="17" rx="7" fill="#173148" />
+              <text x={last.x} y={last.y - 22} textAnchor="middle" className="radar-map-name">{rep.fullName.slice(0, 14)}</text>
               {selectedId === rep.id && <circle cx={last.x} cy={last.y} r="17" fill="none" stroke="#183a53" strokeWidth="1.5" strokeDasharray="3 3" />}
             </g>
           );
@@ -207,6 +217,8 @@ export default function SupervisorRadarPage() {
   const [reviewNotes, setReviewNotes] = useState({});
   const [loading, setLoading] = useState(true);
   const [busyVisit, setBusyVisit] = useState(null);
+  const [selectedBulkIds, setSelectedBulkIds] = useState(() => new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
 
@@ -218,7 +230,10 @@ export default function SupervisorRadarPage() {
         api.get('/api/attendance/today').catch(() => null),
       ]);
       setRadar(radarData);
-      setVisits(queueData.visits ?? []);
+      const nextVisits = queueData.visits ?? [];
+      const nextIds = new Set(nextVisits.map((visit) => Number(visit.id)));
+      setSelectedBulkIds((current) => new Set([...current].filter((id) => nextIds.has(id))));
+      setVisits(nextVisits);
       setOverdueAttendance(attendanceData?.overdue ?? []);
       setRouteRevision((revision) => revision + 1);
       setError('');
@@ -250,10 +265,6 @@ export default function SupervisorRadarPage() {
   const focusedRep = representatives.find((rep) => rep.id === selectedRep) ?? null;
 
   useEffect(() => {
-    if (selectedRep === null && representatives.length) setSelectedRep(representatives[0].id);
-  }, [representatives, selectedRep]);
-
-  useEffect(() => {
     if (radar?.businessDate && !manuallySelectedRouteDate.current) setRouteDate(radar.businessDate);
   }, [radar?.businessDate]);
 
@@ -281,6 +292,7 @@ export default function SupervisorRadarPage() {
         note: action === 'reshoot' ? reviewNote.trim() : reviewNote.trim() || undefined,
       });
       setVisits((current) => current.filter((item) => item.id !== visit.id));
+      setSelectedBulkIds((current) => { const next = new Set(current); next.delete(Number(visit.id)); return next; });
       setReviewNotes((current) => { const next = { ...current }; delete next[visit.id]; return next; });
       setSelectedVisit(null);
       setNotice(result.status === 'approved' ? `اعتُمدت زيارة الماكينة ${visit.machineCode}.` : `أُرسل طلب إعادة التصوير للمندوب ${visit.repName}.`);
@@ -290,6 +302,40 @@ export default function SupervisorRadarPage() {
       setError(requestError.message || 'تعذر حفظ قرار المراجعة.');
     } finally {
       setBusyVisit(null);
+    }
+  };
+
+  const approveDisplayedVisits = async () => {
+    const visibleIds = visits.map((visit) => Number(visit.id));
+    const visitIds = visibleIds.filter((id) => selectedBulkIds.has(id));
+    if (!visitIds.length) {
+      setError('حدد زيارة واحدة على الأقل من العناصر الظاهرة في طابور المراجعة.');
+      return;
+    }
+    const confirmed = window.confirm(`اعتماد ${visitIds.length} زيارة محددة من القائمة الظاهرة؟\nسيتم الاعتماد ذرياً؛ إذا تعذر أحد المتطلبات فلن يُعتمد أي عنصر. لن تُؤرشف أوامر الصيانة.`);
+    if (!confirmed) return;
+    setBulkBusy(true);
+    setError('');
+    try {
+      const result = await api.post('/api/supervisor/visits/approve-all', { visitIds });
+      if (!result?.success || !Array.isArray(result.visitIds)
+          || result.visitIds.some((id) => !visitIds.includes(Number(id)))) {
+        throw new Error('استجابة الاعتماد لا تطابق الزيارات التي اخترتها. حدّث القائمة للتحقق من الحالة.');
+      }
+      const approvedCount = Number(result.approvedCount) || 0;
+      const alreadyApprovedCount = Number(result.alreadyApprovedCount) || 0;
+      setNotice(`اكتمل اعتماد ${approvedCount} زيارة جديدة${alreadyApprovedCount ? `؛ ${alreadyApprovedCount} كانت معتمدة سابقاً` : ''}. لم تُؤرشف أوامر الصيانة.`);
+      setSelectedVisit(null);
+      setSelectedBulkIds((current) => new Set([...current].filter((id) => !visitIds.includes(id))));
+      await refresh();
+    } catch (requestError) {
+      const prerequisiteMessage = requestError.status === 409
+        ? `لم يُعتمد أي عنصر؛ راجع متطلبات الزيارات المحددة (مثل وجود طلب إعادة تصوير أو أكثر من زيارة للبطاقة نفسها). ${requestError.message || ''}`
+        : requestError.message || 'تعذر اعتماد الزيارات المحددة؛ لم يتم اعتماد أي زيارة بحسب الاستجابة.';
+      setError(prerequisiteMessage);
+      await refresh();
+    } finally {
+      setBulkBusy(false);
     }
   };
 
@@ -332,11 +378,12 @@ export default function SupervisorRadarPage() {
           </div>
           <div className="radar-route-controls">
             <label>المندوب<select value={selectedRep ?? ''} onChange={(event) => setSelectedRep(event.target.value ? Number(event.target.value) : null)}>
-              <option value="">اختر المندوب</option>
+              <option value="">كل المندوبين · نظرة عامة</option>
               {representatives.map((rep) => <option key={rep.id} value={rep.id}>{rep.fullName}</option>)}
             </select></label>
             <label>التاريخ<input type="date" value={routeDate} onChange={(event) => { manuallySelectedRouteDate.current = true; setRouteDate(event.target.value); }} /></label>
-            <span>{routeLoading ? 'جارٍ تحميل نقاط المسار…' : `${selectedRoute?.polyline?.length ?? 0} نقطة · ${selectedRoute?.stops?.length ?? 0} توقف · ${selectedRoute?.speedSummary?.averageKmh ?? 0} كم/س متوسط`}</span>
+            {selectedRep !== null && <button type="button" className="radar-overview-button" onClick={() => setSelectedRep(null)}>العودة إلى كل المندوبين</button>}
+            <span>{selectedRep === null ? `${representatives.length} مندوب · الحالة وآخر إشارة على الخريطة` : routeLoading ? 'جارٍ تحميل كامل نقاط المسار…' : `${selectedRoute?.polyline?.length ?? 0} نقطة مسجلة · ${selectedRoute?.stops?.length ?? 0} توقف · ${selectedRoute?.visitedMachines?.length ?? 0} زيارة`}</span>
           </div>
           <TrackMap representatives={representatives} selectedId={selectedRep} onSelect={setSelectedRep} selectedRoute={selectedRoute} />
           {selectedRoute && <div className="radar-stops-list" aria-label="توقفات المندوب المحدد">
@@ -389,6 +436,14 @@ export default function SupervisorRadarPage() {
             <span className="queue-count">{visits.length}</span>
           </div>
           {!visits.length ? <div className="supervisor-qa-empty"><span>✓</span><strong>لا توجد زيارات تنتظر المراجعة</strong><small>ستظهر هنا الزيارات بعد مزامنتها من تطبيق المندوب.</small></div> : (
+            <>
+            <div className="qa-bulk-toolbar">
+              <label><input type="checkbox" checked={visits.length > 0 && visits.every((visit) => selectedBulkIds.has(Number(visit.id)))} onChange={(event) => setSelectedBulkIds(event.target.checked ? new Set(visits.map((visit) => Number(visit.id))) : new Set())} /> تحديد كل الزيارات الظاهرة ({visits.length})</label>
+              <button type="button" className="qa-approve-all" disabled={bulkBusy || !visits.some((visit) => selectedBulkIds.has(Number(visit.id)))} onClick={() => void approveDisplayedVisits()}>
+                {bulkBusy ? 'جارٍ اعتماد المحدد…' : `اعتماد كل الزيارات المحددة (${visits.filter((visit) => selectedBulkIds.has(Number(visit.id))).length})`}
+              </button>
+              <small>يرسل المعرفات المحددة الظاهرة فقط. الاعتماد ذري ولا يؤرشف أوامر الصيانة.</small>
+            </div>
             <div className="qa-visit-list">
               {visits.map((visit) => {
                 const beforePhotos = visit.beforePhotos ?? (visit.beforePhotoUrl ? [{ url: visit.beforePhotoUrl }] : []);
@@ -396,7 +451,7 @@ export default function SupervisorRadarPage() {
                 return <article className="qa-visit-card" key={visit.id}>
                 <div className="qa-visit-heading">
                   <div><span className="qa-machine-code" dir="ltr">{visit.machineCode}</span><h3>{visit.machineName}</h3><p>{visit.regionName} · {visit.orderCode}</p></div>
-                  <span className="qa-pending-badge">بانتظار الاعتماد</span>
+                  <div className="qa-visit-selection"><label><input type="checkbox" checked={selectedBulkIds.has(Number(visit.id))} onChange={(event) => setSelectedBulkIds((current) => { const next = new Set(current); if (event.target.checked) next.add(Number(visit.id)); else next.delete(Number(visit.id)); return next; })} /> ضمن الاعتماد الجماعي</label><span className="qa-pending-badge">بانتظار الاعتماد</span></div>
                 </div>
                 <div className="qa-photo-pair">
                   {beforePhotos.map((photo, index) => <button key={`before-${index}`} type="button" onClick={() => setSelectedVisit({ ...visit, zoomPhoto: 'before', zoomPhotoIndex: index })} aria-label={`تكبير صورة قبل الصيانة ${index + 1}`}><img src={photo.url} alt={`قبل الصيانة ${visit.machineCode} ${index + 1}`} /><span>قبل الصيانة · {index + 1} ↗</span></button>)}
@@ -442,6 +497,7 @@ export default function SupervisorRadarPage() {
                 </article>;
               })}
             </div>
+            </>
           )}
         </section>
       </div>

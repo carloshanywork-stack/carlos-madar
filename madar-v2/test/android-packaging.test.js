@@ -52,6 +52,7 @@ test('native rep gate, private SQLite queue, and WorkManager upload contract are
   const manifest = read('android/app/src/main/AndroidManifest.xml');
   const activity = read('android/app/src/main/java/com/madar/rep/app/MainActivity.java');
   const engine = read('android/app/src/main/java/com/madar/rep/app/RepNativeEnginePlugin.java');
+  const cameraSequence = read('android/app/src/main/java/com/madar/rep/app/RepCameraSequenceActivity.java');
   const store = read('android/app/src/main/java/com/madar/rep/app/RepLocalStore.java');
   const worker = read('android/app/src/main/java/com/madar/rep/app/MadarSyncWorker.java');
   const scheduler = read('android/app/src/main/java/com/madar/rep/app/MadarSyncScheduler.java');
@@ -142,7 +143,7 @@ test('native rep gate, private SQLite queue, and WorkManager upload contract are
   assert.match(photoProcessor, /Bitmap oriented = orient\(decoded, orientation\)/);
   assert.match(photoProcessor, /oriented\.getWidth\(\) > oriented\.getHeight\(\)[\s\S]*?portraitMatrix\.setRotate\(90f\)/);
   assert.match(photoProcessor, /drawWatermark\(scaled, watermark, location, phase\)/);
-  const watermarkRenderer = engine.slice(engine.indexOf('private static Bitmap drawWatermark'));
+  const watermarkRenderer = engine.slice(engine.indexOf('private Bitmap drawWatermark'));
   for (const watermarkField of ['machineCode', 'machineName', 'repName', 'capturedAt', 'latitude', 'longitude', 'accuracy']) {
     assert.match(watermarkRenderer, new RegExp(watermarkField));
   }
@@ -150,6 +151,15 @@ test('native rep gate, private SQLite queue, and WorkManager upload contract are
   assert.match(visitSheet, /const remaining = 3 - photos\[phase\]\.length/);
   assert.match(engine, /new File\(new File\(getContext\(\)\.getFilesDir\(\), "visits"\), visitUuid\)/);
   assert.match(nativeBridges, /sourceUri: photo\.path/);
+  assert.match(nativeBridges, /captureVisitPhotos\(\{ maxPhotos, phaseLabel \}\)/);
+  assert.match(engine, /startActivityForResult\(call, intent, "visitPhotosCaptured"\)/);
+  assert.match(cameraSequence, /createCaptureSession/);
+  assert.match(cameraSequence, /capture\(request\.build\(\)/);
+  assert.match(cameraSequence, /0 \/ " \+ maxPhotos/);
+  assert.match(cameraSequence, /stream\.getFD\(\)\.sync\(\)/);
+  assert.match(manifest, /android:name="\.RepCameraSequenceActivity"[\s\S]*?android:exported="false"/);
+  assert.match(watermarkRenderer, /getAssets\(\)\.open\("public\/icon-192\.png"\)/);
+  assert.match(watermarkRenderer, /المحافظة: غير متاحة/);
   assert.match(nativeBridges, /enqueueNativeAttendanceAction/);
   assert.match(repApp, /attendance\/sync/);
   assert.match(repApp, /pendingAttendanceActions/);

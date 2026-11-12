@@ -7,6 +7,7 @@ import {
   projectToWorld,
   unprojectFromWorld,
 } from './map-utils.js';
+import { isFreshGpsFix, orderMachinesByStraightLineDistance } from './location-review.js';
 
 const VIEW_WIDTH = 900;
 const VIEW_HEIGHT = 500;
@@ -36,7 +37,10 @@ export default function OfflineRouteMap({ pack, machines, gps, onMachineSelect, 
   const activeCenter = center;
   const worldCenter = useMemo(() => projectToWorld(activeCenter, zoom), [activeCenter, zoom]);
   const tileCoordinates = useMemo(() => getVisibleTileCoordinates(activeCenter, zoom, VIEW_WIDTH, VIEW_HEIGHT), [activeCenter, zoom]);
-  const locatedMachines = machines.filter((machine) => Number.isFinite(machine.latitude) && Number.isFinite(machine.longitude));
+  const locatedMachines = machines.filter((machine) => machine.isLocationLocked === true
+    && machine.approvedLocation && Number.isFinite(machine.latitude) && Number.isFinite(machine.longitude));
+  const needsLocation = machines.filter((machine) => !locatedMachines.includes(machine));
+  const distanceGroups = isFreshGpsFix(gps) ? orderMachinesByStraightLineDistance(machines, gps) : null;
   const selectedMachine = machines.find((machine) => Number(machine.machineId) === Number(selectedMachineId)) ?? null;
 
   function getMachineStatus(machine) {
@@ -169,6 +173,19 @@ export default function OfflineRouteMap({ pack, machines, gps, onMachineSelect, 
         <small className="rep-map-attribution">{pack.attribution || 'خريطة محلية مخزنة على الهاتف'}</small>
       </div>
       <p className="rep-map-legend"><span><i className="machine-pin done-pin" />تم الفحص</span><span><i className="machine-pin in-progress-pin" />قيد التنفيذ</span><span><i className="machine-pin not-started-pin" />لم تبدأ</span><span><i className="gps-pin" />موقع GPS الحالي</span><small>اسحب الخريطة لتحريكها؛ تحديد الموقع عبر GPS لا يحتاج إلى إنترنت.</small></p>
+      {distanceGroups && distanceGroups.located.length > 0 && <section className="rep-map-nearest-list" aria-label="الماكينات مرتبة حسب المسافة المستقيمة">
+        <strong>الأقرب إلى موقعك · مسافة خط مستقيم فقط</strong>
+        {distanceGroups.located.map((machine) => <button key={`near-${machine.cardId}`} type="button" onClick={() => onMachineSelect({ ...machine, regionName: machine.regionName })} disabled={machine.canVisit === false}>
+          <span><b dir="ltr">{machine.machineCode}</b> · {machine.arabicName || 'ماكينة'}</span><small>{Math.round(machine.straightLineDistanceMeters)}م مستقيمة · {machine.regionName}</small>
+        </button>)}
+      </section>}
+      {needsLocation.length > 0 && <section className="rep-map-needs-location" aria-label="ماكينات تحتاج تثبيت الموقع">
+        <strong>الموقع يحتاج تثبيتاً ({needsLocation.length})</strong>
+        <small>لا يوجد إحداثي معتمد؛ لم تُحسب مسافة لهذه الماكينات.</small>
+        {needsLocation.map((machine) => <button key={`need-${machine.cardId}`} type="button" onClick={() => onMachineSelect({ ...machine, regionName: machine.regionName })} disabled={machine.canVisit === false}>
+          <span><b dir="ltr">{machine.machineCode}</b> · {machine.arabicName || 'ماكينة'}</span><small>{machine.regionName || 'منطقة غير محددة'} · يحتاج GPS أولياً معتمداً</small>
+        </button>)}
+      </section>}
     </section>
   );
 }

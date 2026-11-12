@@ -395,6 +395,37 @@ public final class RepNativeEnginePlugin extends Plugin {
     }
 
     @PluginMethod
+    public void captureVisitPhotos(PluginCall call) {
+        long owner = RepAuthStore.repId(getContext());
+        int maxPhotos = call.getInt("maxPhotos", 3);
+        String phaseLabel = call.getString("phaseLabel", "الصور");
+        if (owner < 1L) { call.reject("يلزم تسجيل الدخول قبل التقاط صور الزيارة."); return; }
+        if (maxPhotos < 1 || maxPhotos > 3) { call.reject("عدد صور المجموعة يجب أن يكون من 1 إلى 3."); return; }
+        Intent intent = new Intent(getContext(), RepCameraSequenceActivity.class);
+        intent.putExtra(RepCameraSequenceActivity.EXTRA_MAX_PHOTOS, maxPhotos);
+        intent.putExtra(RepCameraSequenceActivity.EXTRA_PHASE_LABEL, phaseLabel);
+        startActivityForResult(call, intent, "visitPhotosCaptured");
+    }
+
+    @ActivityCallback
+    private void visitPhotosCaptured(PluginCall call, ActivityResult result) {
+        if (call == null) return;
+        if (result.getResultCode() != android.app.Activity.RESULT_OK || result.getData() == null) {
+            call.reject("لم تُحفظ صور الكاميرا؛ يمكنك المحاولة مرة أخرى.", "VISIT_CAMERA_CANCELLED");
+            return;
+        }
+        try {
+            JSONArray photos = new JSONArray(result.getData().getStringExtra(RepCameraSequenceActivity.EXTRA_PHOTOS));
+            if (photos.length() < 1 || photos.length() > 3) throw new IllegalArgumentException("نتيجة الكاميرا لا تحتوي عدداً صالحاً من الصور.");
+            JSObject response = new JSObject();
+            response.put("photos", photos);
+            call.resolve(response);
+        } catch (Exception error) {
+            call.reject("تعذر قراءة الصور التي التقطتها الكاميرا.", "VISIT_CAMERA_RESULT_INVALID", error);
+        }
+    }
+
+    @PluginMethod
     public void processVisitPhoto(PluginCall call) {
         String visitUuid = call.getString("visitUuid");
         String phase = call.getString("phase");
@@ -425,11 +456,22 @@ public final class RepNativeEnginePlugin extends Plugin {
                 } catch(Exception archiveError) {
                     result.put("archiveWarning","الصورة محفوظة داخل التطبيق؛ تعذر تجهيز نسختها في المجلد المختار.");
                 }
+                deleteTemporaryCameraCapture(sourceUri);
                 call.resolve(result);
             } catch (Exception error) {
                 call.reject("تعذر ضغط الصورة وختمها وحفظها داخل الهاتف.", "VISIT_PHOTO_SAVE_FAILED", error);
             }
         });
+    }
+
+    private void deleteTemporaryCameraCapture(String sourceUri) {
+        try {
+            Uri uri = Uri.parse(sourceUri);
+            if (!"file".equals(uri.getScheme())) return;
+            File root = new File(getContext().getFilesDir(), "visit-camera-captures").getCanonicalFile();
+            File source = new File(uri.getPath()).getCanonicalFile();
+            if (source.getPath().startsWith(root.getPath() + File.separator) && source.isFile()) source.delete();
+        } catch (Exception ignored) { /* Keep the durable processed image; an unremoved temporary can be cleaned later. */ }
     }
 
     @PluginMethod
@@ -939,7 +981,7 @@ private JSONArray exportPhasePhotos(JSONArray entries, String phase, String visi
         return Bitmap.createBitmap(source, 0, 0, source.getWidth(), source.getHeight(), matrix, true);
     }
 
-    private static Bitmap drawWatermark(Bitmap source, JSONObject data, JSONObject location, String phase) throws Exception {
+    private Bitmap drawWatermark(Bitmap source, JSONObject data, JSONObject location, String phase) throws Exception {
         Bitmap output = source.copy(Bitmap.Config.ARGB_8888, true);
         Canvas canvas = new Canvas(output);
         int width = output.getWidth();
@@ -950,9 +992,17 @@ private JSONArray exportPhasePhotos(JSONArray entries, String phase, String visi
         float panelWidth = width;
         float panelHeight = Math.min(height, padding * 2f + lineHeight * 6f);
         float top = Math.max(0f, height - panelHeight);
+        float logoSize = Math.max(30f, Math.min(Math.round(fontSize * 2f), Math.round(panelWidth * 0.14f)));
         Paint background = new Paint(Paint.ANTI_ALIAS_FLAG);
         background.setColor(Color.argb(210, 7, 19, 31));
         canvas.drawRect(new RectF(0f, top, panelWidth, height), background);
+        Bitmap logo;
+        try (InputStream input = getContext().getAssets().open("public/icon-192.png")) {
+            logo = BitmapFactory.decodeStream(input);
+        }
+        if (logo == null) throw new IllegalStateException("تعذر قراءة شعار MADAR المضمّن في التطبيق.");
+        canvas.drawBitmap(logo, null, new RectF(padding, top + padding, padding + logoSize, top + padding + logoSize), new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG));
+        logo.recycle();
         Paint text = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.SUBPIXEL_TEXT_FLAG);
         text.setColor(Color.WHITE);
         text.setTextSize(fontSize);
@@ -980,12 +1030,13 @@ private JSONArray exportPhasePhotos(JSONArray entries, String phase, String visi
             data.optString("machineCode", "") + " | " + dateFormat.format(timestamp) + " " + timeFormat.format(timestamp),
             gps + " | " + (repName.isEmpty() ? "مندوب ميداني" : repName),
             location == null ? "دقة GPS غير متاحة" : "دقة GPS: ±" + Math.round(location.optDouble("accuracy")) + "م",
-            "المنطقة: " + (region.isEmpty() ? "غير محددة" : region) + (area.isEmpty() ? "" : " · " + area),
+            "المحافظة: غير متاحة · المنطقة المسجلة: " + (region.isEmpty() ? "غير متاحة" : region) + (area.isEmpty() ? "" : " · " + area),
             data.optString("machineName", ""),
         };
         float maxWidth = Math.max(40f, panelWidth - padding * 2f);
         for (int index = 0; index < lines.length; index += 1) {
-            CharSequence clipped = TextUtils.ellipsize(lines[index], new android.text.TextPaint(text), maxWidth, TextUtils.TruncateAt.END);
+            float lineWidth = index == 0 ? Math.max(40f, maxWidth - logoSize - padding) : maxWidth;
+            CharSequence clipped = TextUtils.ellipsize(lines[index], new android.text.TextPaint(text), lineWidth, TextUtils.TruncateAt.END);
             float baseline = top + padding + lineHeight * index + lineHeight * 0.75f;
             canvas.drawText(clipped.toString(), panelWidth - padding, baseline, text);
         }

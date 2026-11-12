@@ -4,7 +4,13 @@ import { lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, apiUrl } from '../../lib/api.js';
 import { distanceBetweenGpsPointsMeters, getAdaptiveGpsInterval, GPS_POLLING } from './gps-adaptive.js';
 import { googleMapsNavigationUrl } from './map-utils.js';
-import { applyPendingMachineLocations, locationReviewState, locationReviewLabel } from './location-review.js';
+import {
+  applyPendingMachineLocations,
+  isFreshGpsFix,
+  locationReviewState,
+  locationReviewLabel,
+  orderMachinesByStraightLineDistance,
+} from './location-review.js';
 import {
   addPendingVisit,
   addPendingMachineAction,
@@ -176,7 +182,7 @@ function formatGps(location) {
 }
 
 function machineDistance(machine, location) {
-  if (!Number.isFinite(machine.latitude) || !Number.isFinite(machine.longitude) || !location) return null;
+  if (!machine.isLocationLocked || !Number.isFinite(machine.latitude) || !Number.isFinite(machine.longitude) || !location) return null;
   return distanceBetweenGpsPointsMeters(location, { latitude: machine.latitude, longitude: machine.longitude });
 }
 
@@ -891,7 +897,7 @@ const loadLocalSnapshots = useCallback(async () => {
           setToast(event.status === 'approved' ? 'اعتمد المشرف آخر زيارة ميدانية.' : 'طلب المشرف إعادة تصوير الزيارة.');
           void refreshData();
         } else if (event.type === 'rep.machine.location-reviewed') {
-          setToast(event.status === 'approved' ? 'اعتمد المدير موقع الماكينة.' : 'رُفض الموقع المقترح؛ راجع الملاحظة وأعد الإرسال.');
+          setToast(event.status === 'approved' ? 'أكد الخادم موقع الماكينة.' : 'رُفض الموقع المقترح؛ راجع الملاحظة وأعد الإرسال.');
           void refreshData();
         } else if (event.type === 'attendance.changed') {
           const cancellationIsForUser = Number(event.userId) === userId
@@ -1395,7 +1401,7 @@ let canDrainVisits = true;
     catch (error) { setStorageError(`تعذر إعادة قراءة طوابير المزامنة؛ لم تُعتبر فارغة. ${error.message || ''}`); }
     if (changedServer) void refreshData();
   }
-}, [nativeApp, offlineOnly, refreshData, refreshPending, serverState, userId]);
+}, [nativeApp, networkOnline, offlineOnly, refreshData, refreshPending, serverState, userId]);
 
   useEffect(() => {
     if (!nativeApp) return undefined;
@@ -1456,11 +1462,13 @@ let canDrainVisits = true;
   }, [toast]);
 
   const summary = route?.summary ?? { totalMachines: 0, completed: 0, pending: 0, pendingReview: 0, progress: 0 };
+  const freshGps = isFreshGpsFix(gps);
   const filteredRegions = useMemo(() => {
     const term = normalize(query);
-    return (route?.regions ?? []).map((region) => ({
-      ...region,
-      machines: region.machines.filter((machine) => {
+    const machines = (route?.regions ?? []).flatMap((region) => region.machines.map((machine) => ({
+      ...machine,
+      regionName: region.regionName,
+    }))).filter((machine) => {
         const matchesTerm = !term
           || normalize(machine.machineCode).includes(term)
           || normalize(machine.arabicName).includes(term)
@@ -1470,11 +1478,25 @@ let canDrainVisits = true;
           || (routeFilter === 'remaining' && !visitSubmitted(machine))
           || (routeFilter === 'completed' && visitSubmitted(machine));
         return matchesTerm && matchesFilter;
-      }),
-    })).filter((region) => region.machines.length > 0);
-  }, [query, route, routeFilter]);
+      });
+    const { located, needsLocation } = orderMachinesByStraightLineDistance(machines, freshGps ? gps : null);
+    if (freshGps) return [
+      ...(located.length ? [{ regionName: 'الأقرب أولاً · مسافة خط مستقيم', machines: located }] : []),
+      ...(needsLocation.length ? [{ regionName: 'تحتاج تثبيت الموقع', machines: needsLocation }] : []),
+    ];
+    const byRegion = new Map();
+    for (const machine of located) {
+      const name = machine.regionName || 'منطقة غير محددة';
+      if (!byRegion.has(name)) byRegion.set(name, []);
+      byRegion.get(name).push(machine);
+    }
+    return [
+      ...[...byRegion].map(([regionName, groupedMachines]) => ({ regionName, machines: groupedMachines })),
+      ...(needsLocation.length ? [{ regionName: 'تحتاج تثبيت الموقع', machines: needsLocation }] : []),
+    ];
+  }, [freshGps, gps, query, route, routeFilter]);
 
-  const routeMachines = useMemo(() => (route?.regions ?? []).flatMap((region) => region.machines ?? []), [route]);
+  const routeMachines = useMemo(() => (route?.regions ?? []).flatMap((region) => (region.machines ?? []).map((machine) => ({ ...machine, regionName: region.regionName }))), [route]);
   const routeFilterCounts = {
   all: routeMachines.length,
   remaining: routeMachines.filter((machine) => !visitSubmitted(machine)).length,
@@ -1682,14 +1704,68 @@ try {
     if (!nativeApp) throw error;
     setStorageError(`حُفظ الإجراء في SQLite الأصلية، لكن تعذر حفظ نسخة العرض في IndexedDB: ${error.message}`);
   }
-  await refreshPending();
-  setRoute((current) => {
-    const updated = applyPendingMachineLocations(current, pendingMachineActionsRef.current);
-    void saveSnapshot('route_snapshots', userId, { route: updated, cachedAt: new Date().toISOString() }).catch(() => undefined);
-    return updated;
+      await refreshPending();
+      const online = !offlineOnly && navigator.onLine && networkOnline && serverState === 'online';
+      let result = null;
+      if (online) {
+        try {
+          result = await api.post(
+            `/api/rep/machines/${encodeURIComponent(queuedAction.machineId)}/confirm-location`,
+            payload,
+            { timeoutMs: 12000 },
+          );
+          if (!result?.success || !['approved', 'pending'].includes(result.status)) {
+            throw new Error('لم يؤكد الخادم حفظ الموقع؛ بقي الإجراء محفوظاً على الهاتف.');
+          }
+          const status = locationReviewState(result.status);
+          const reviewNote = result.locationConfirmation?.reviewNote ?? result.reviewNote ?? '';
+          await updatePendingMachineAction(actionUuid, {
+            status, correctionId: result.correctionId, reviewNote, lastError: '',
+          });
+          if (nativeApp) await reconcileNativeMachineActionReview(actionUuid, userId, {
+            status, correctionId: result.correctionId, reviewNote,
+          });
+          const acknowledgedAction = { ...queuedAction, status, correctionId: result.correctionId, reviewNote };
+          setRoute((current) => {
+            const updated = applyPendingMachineLocations(current, [acknowledgedAction]);
+            void saveSnapshot('route_snapshots', userId, { route: updated, cachedAt: new Date().toISOString() }).catch(() => undefined);
+            return updated;
+          });
+          setToast(status === 'approved'
+            ? 'تم اعتماد الموقع الأول فوراً من الخادم؛ يمكنك متابعة الزيارة.'
+            : 'أُرسل تصحيح الموقع للمراجعة الإدارية؛ تبقى الزيارة متوقفة حتى القرار.');
+          void refreshData();
+          await refreshPending();
+          return {
+            latitude: result.machine?.latitude ?? payload.location.latitude,
+            longitude: result.machine?.longitude ?? payload.location.longitude,
+            isLocationLocked: status === 'approved',
+            approvedLocation: status === 'approved' ? payload.location : null,
+            locationConfirmation: result.locationConfirmation ?? { actionUuid, proposedLocation: payload.location, status: result.status },
+            locationReviewState: status,
+            locationConfirmationPending: status === 'pending_approval',
+            canVisit: status === 'approved',
+          };
+        } catch (error) {
+          const permanentClientError = error.status >= 400 && error.status < 500
+            && ![408, 425, 429].includes(error.status);
+          if (permanentClientError) {
+            await updatePendingMachineAction(actionUuid, { status: 'blocked', lastError: error.message });
+            await refreshPending();
+            throw error;
+          }
+          await updatePendingMachineAction(actionUuid, { status: 'queued', lastError: error.message || 'بانتظار اتصال الخادم.' });
+        }
+      }
+      const queuedForOverlay = { ...queuedAction, status: 'queued' };
+      setRoute((current) => {
+        const updated = applyPendingMachineLocations(current, [queuedForOverlay]);
+        void saveSnapshot('route_snapshots', userId, { route: updated, cachedAt: new Date().toISOString() }).catch(() => undefined);
+        return updated;
       });
-      setToast('حُفظ الموقع المقترح؛ تظل الزيارة متوقفة حتى اعتماد المدير.');
-      void drainQueue();
+      setToast('الموقع محفوظ على الهاتف وبانتظار المزامنة؛ لا يلزم اعتماد مدير للموقع الأول بعد إقرار الخادم.');
+      if (online) void drainQueue();
+      await refreshPending();
       return {
         locationConfirmation: { actionUuid, proposedLocation: payload.location, status: 'queued' },
         locationReviewState: 'queued',
@@ -1850,8 +1926,8 @@ try {
         <div className="rep-route-heading">
           <div><span className="rep-eyebrow">أوامر الصيانة المعيّنة لك</span><h2>ماكيناتك <small>{summary.totalMachines} بطاقة</small></h2></div>
           <div className="rep-route-heading-actions">
-            <button type="button" className={`rep-map-toggle ${showOfflineMap ? 'active' : ''}`} onClick={() => setShowOfflineMap((value) => !value)} aria-expanded={showOfflineMap}>
-              ⌖ {showOfflineMap ? 'إخفاء الخريطة' : 'خريطة أوفلاين'}
+              <button type="button" className={`rep-map-toggle ${showOfflineMap ? 'active' : ''}`} onClick={() => setShowOfflineMap((value) => !value)} aria-expanded={showOfflineMap}>
+               ⌖ {showOfflineMap ? 'إخفاء خريطة الماكينات' : 'خريطة الماكينات · متاحة دون إنترنت'}
             </button>
             <label className="rep-search">
               <span aria-hidden="true">⌕</span>
@@ -1901,20 +1977,26 @@ try {
                           onClick={() => setSelectedMachine({ ...machine, regionName: region.regionName })}
                           disabled={machine.canVisit === false}
                         >
-                           <div className="rep-machine-card-top"><span className="rep-machine-code" dir="ltr">{machine.machineCode}</span><span className="rep-machine-status">{machine.workStatus === 'done' ? '✅ تم' : machine.workStatus === 'in_progress' ? '🟠 قيد التنفيذ' : machine.correctionPending ? '⚠️ بلاغ تصحيح قيد المراجعة' : machine.reviewStatus === 'reshoot' ? '🔁 إعادة تصوير' : machine.canVisit === false ? 'مغلقة' : '⏳ متبقية'}</span></div>
+                            <div className="rep-machine-card-top"><span className="rep-machine-code" dir="ltr">{machine.machineCode}</span><span className="rep-machine-status">{machine.reviewStatus === 'pending' ? '🟣 بانتظار مراجعة الصور' : machine.workStatus === 'done' ? '✅ تم' : machine.workStatus === 'in_progress' ? '🟠 قيد التنفيذ' : machine.correctionPending ? '⚠️ بلاغ تصحيح قيد المراجعة' : machine.reviewStatus === 'reshoot' ? '🔁 إعادة تصوير' : machine.canVisit === false ? 'مغلقة' : '⏳ متبقية'}</span></div>
                           <small className="rep-work-order-code">أمر الصيانة · {machine.workOrderCode}</small>
                           {machine.clientName && <strong className="rep-machine-branch">{machine.clientName}</strong>}
                           <span className="rep-machine-name">{machine.arabicName || `ماكينة ${machine.machineCode}`}</span>
                           <span className="rep-machine-address"><i aria-hidden="true">⌖</i>{machine.address || 'عنوان العميل غير مسجل'}</span>
-                           <span className="rep-machine-distance">
-                             <i aria-hidden="true">↔</i>
-                             {machine.locationConfirmationPending
-                                ? 'موقع مقترح · بانتظار الإرسال أو اعتماد المدير'
-                               : !machine.isLocationLocked || machineDistance(machine, gps) === null
-                               ? !machine.isLocationLocked || !Number.isFinite(machine.latitude) || !Number.isFinite(machine.longitude)
-                                 ? 'الموقع الجغرافي غير مثبت'
-                                 : 'سجّل الحضور لتحديث المسافة'
-                               : `المسافة الحالية ${Math.round(machineDistance(machine, gps))}م · GPS ±${Math.round(gps.accuracy)}م`}
+                            <span className={`rep-machine-distance ${freshGps && machine.straightLineDistanceMeters !== undefined ? 'is-straight-line' : ''}`}>
+                              <i aria-hidden="true">↔</i>
+                              {machine.locationConfirmationPending
+                                 ? ['queued', 'syncing'].includes(machine.locationReviewState)
+                                   ? 'موقع أول محفوظ محلياً · بانتظار المزامنة'
+                                   : machine.locationReviewState === 'blocked'
+                                     ? 'إرسال الموقع يحتاج مراجعة · افتح البطاقة'
+                                     : 'تصحيح الموقع بانتظار المراجعة الإدارية'
+                                : !machine.isLocationLocked || machineDistance(machine, gps) === null
+                                ? !machine.isLocationLocked || !Number.isFinite(machine.latitude) || !Number.isFinite(machine.longitude)
+                                  ? 'الموقع يحتاج تثبيتاً · لا توجد مسافة معتمدة'
+                                  : 'لا يوجد تثبيت GPS حديث للمقارنة'
+                                : machine.straightLineDistanceMeters !== undefined
+                                  ? `خط مستقيم ${Math.round(machine.straightLineDistanceMeters)}م · ترتيب تقريبي من الأقرب · GPS ±${Math.round(gps.accuracy)}م`
+                                  : `المسافة الحالية ${Math.round(machineDistance(machine, gps))}م · GPS ±${Math.round(gps.accuracy)}م`}
                           </span>
                            {machine.reviewNote && <small className="rep-review-note">ملاحظة المشرف: {machine.reviewNote}</small>}
                            {machine.locationConfirmation && <small className="rep-review-note">
@@ -1924,7 +2006,7 @@ try {
                            {machine.locationConfirmation?.proposedLocation && <small>
                              الموقع المقترح: <bdi>{machine.locationConfirmation.proposedLocation.latitude}, {machine.locationConfirmation.proposedLocation.longitude}</bdi>
                            </small>}
-                          <span className="rep-machine-open">{machine.isCompleted ? 'تم اعتماد الزيارة' : machine.reviewStatus === 'pending' ? 'بانتظار قرار المشرف' : machine.reviewStatus === 'reshoot' ? 'افتح لإعادة التصوير' : machine.canVisit === false ? 'للعرض فقط' : 'ابدأ الزيارة'} <b aria-hidden="true">←</b></span>
+                           <span className="rep-machine-open">{machine.isCompleted ? 'تم اعتماد الزيارة' : machine.reviewStatus === 'pending' ? 'بانتظار مراجعة الصور · تابع إلى ماكينة أخرى' : machine.reviewStatus === 'reshoot' ? 'افتح لإعادة التصوير' : machine.canVisit === false ? 'للعرض فقط' : 'ابدأ الزيارة'} <b aria-hidden="true">←</b></span>
                         </button>
                         {googleMapsNavigationUrl(machine) && <a className="rep-map-link" href={googleMapsNavigationUrl(machine)} target="_blank" rel="noopener noreferrer">⌖ ملاحة إلى الماكينة في Google Maps</a>}
                       </article>
@@ -1947,8 +2029,8 @@ try {
          <div className="rep-queue-panel-head"><div><span className="rep-eyebrow">التخزين المحلي</span><h2>سجل الإجراءات والمزامنة <small>{pendingQueueCount}</small></h2></div><button className="rep-icon-button" type="button" onClick={() => setShowQueue(false)} aria-label="إخفاء قائمة المزامنة">×</button></div>
          {!pendingQueueCount ? <p className="rep-queue-empty">لا توجد إجراءات معلقة لهذا الحساب.</p> : <ul className="rep-queue-list">
           {pendingMachineActions.map((action) => <li key={action.actionUuid}>
-     {['pending_approval', 'approved', 'rejected'].includes(action.status) && <span>
-       {({ pending_approval: 'بانتظار اعتماد المدير', approved: 'معتمد', rejected: 'مرفوض؛ أعد الإرسال من بطاقة الماكينة' })[action.status]} {action.reviewNote || ''}
+      {['pending_approval', 'approved', 'rejected'].includes(action.status) && <span>
+        {({ pending_approval: action.type === 'confirm_location' ? 'تصحيح موقع بانتظار مراجعة الإدارة' : 'بانتظار المراجعة الإدارية', approved: 'معتمد', rejected: 'مرفوض؛ أعد الإرسال من بطاقة الماكينة' })[action.status]} {action.reviewNote || ''}
      </span>}
     <span className={`rep-queue-state ${action.status === 'syncing' ? 'syncing' : ''} ${action.status === 'blocked' ? 'blocked' : ''}`} aria-hidden="true">{action.status === 'syncing' ? '↻' : action.status === 'blocked' ? '!' : '⏳'}</span>
      <div><strong>{action.type === 'confirm_location' ? `مقترح موقع الماكينة · بطاقة ${action.payload?.cardId || ''}` : `بلاغ ماكينة مختلفة · ${action.payload?.reportedCode || ''}`}</strong><small>حُفظ {formatTime(action.createdAt)}{action.attempts ? ` · محاولات ${action.attempts}` : ''} · {locationReviewLabel(action.status)}</small>{(action.evidence || action.evidenceAvailable) && <small>صورة الإثبات محفوظة محلياً · {action.evidence ? `${Math.ceil(action.evidence.size / 1024)} KB` : 'ملف أصلي'}</small>}{action.lastError && <small className="rep-queue-error">{action.lastError}</small>}</div>

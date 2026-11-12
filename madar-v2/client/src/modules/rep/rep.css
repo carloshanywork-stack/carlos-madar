@@ -201,6 +201,14 @@
 #madar-app .rep-map-loading, #madar-app .rep-map-missing { position: absolute; inset: 12px 12px auto; width: fit-content; max-width: calc(100% - 24px); padding: 7px 9px; border: 1px solid #c7d3d3; border-radius: 8px; color: #314a55; background: rgba(255,255,255,.94); font-size: 9px; font-weight: 800; }
 #madar-app .rep-map-attribution { position: absolute; bottom: 7px; left: 7px; max-width: 85%; padding: 4px 6px; border-radius: 5px; color: #3c4e52; background: rgba(255,255,255,.88); font-size: 8px; }
 #madar-app .rep-map-machine-popup { position: absolute; z-index: 2; right: 10px; bottom: 10px; display: grid; width: min(330px, calc(100% - 20px)); gap: 7px; padding: 14px; border: 1px solid #c9d8d4; border-radius: 13px; color: #18352e; background: rgba(255,255,255,.97); box-shadow: 0 10px 32px #102b2430; }
+#madar-app .rep-map-nearest-list, #madar-app .rep-map-needs-location { display: grid; gap: 7px; margin-top: 10px; padding: 12px; border: 1px solid #c9ddd5; border-radius: 12px; background: #f6faf8; }
+#madar-app .rep-map-nearest-list > strong, #madar-app .rep-map-needs-location > strong { color: #235744; font-size: 11px; font-weight: 950; }
+#madar-app .rep-map-needs-location { border-color: #ead7a8; background: #fffaf0; }
+#madar-app .rep-map-needs-location > strong { color: #80611c; }
+#madar-app .rep-map-nearest-list > small, #madar-app .rep-map-needs-location > small { color: #66766f; font-size: 9px; }
+#madar-app .rep-map-nearest-list > button, #madar-app .rep-map-needs-location > button { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; min-height: 38px; padding: 7px 9px; border: 1px solid #d7e2dd; border-radius: 8px; color: #29483d; background: #fff; cursor: pointer; text-align: start; font-size: 9px; }
+#madar-app .rep-map-nearest-list > button:disabled, #madar-app .rep-map-needs-location > button:disabled { cursor: not-allowed; opacity: .62; }
+#madar-app .rep-map-nearest-list > button small, #madar-app .rep-map-needs-location > button small { flex: 0 0 auto; color: #71847b; font-size: 8px; }
 #madar-app .rep-map-machine-popup > strong { padding-inline-end: 26px; font-size: 13px; }
 #madar-app .rep-map-machine-popup > small { color: #52645e; font-size: 10px; line-height: 1.6; }
 #madar-app .rep-map-machine-popup-close { position: absolute; top: 7px; left: 8px; width: 28px; height: 28px; border: 0; border-radius: 50%; color: #42534e; background: #edf3f0; font-size: 19px; cursor: pointer; }

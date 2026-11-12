@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { compressAndWatermark, locationPayload } from './image-processing.js';
 import {
-  captureNativeCameraPhoto,
+  captureNativeCameraPhotos,
   deleteNativeVisitPhoto,
   isNativeRepApp,
   nativeFilePreviewUrl,
@@ -215,7 +215,18 @@ export default function MachineVisitSheet({ machine, repName = '', reasons, gps,
     for (const [index, file] of selectedFiles.entries()) {
       setProcessingPhase(phase);
       try {
-        const capturedAt = new Date();
+        const capturedAt = file.capturedAt ? new Date(file.capturedAt) : new Date();
+        if (Number.isNaN(capturedAt.valueOf())) throw new Error('وقت التقاط الصورة غير صالح.');
+        const capturedGps = nativeApp && file.capturedAt
+          ? file.location
+          : await captureLocation?.() ?? currentLocation;
+        const geofenceGps = capturedGps ?? currentLocation;
+        if (!geofenceGps) throw new Error('لا توجد إشارة GPS متاحة للتحقق من نطاق الماكينة.');
+        if (Math.max(0,
+          distanceMeters(geofenceGps, { latitude: activeMachine.latitude, longitude: activeMachine.longitude })
+            - Number(geofenceGps.accuracy ?? 0)) > radius) {
+          throw new Error(`صورة ${index + 1}: إشارة GPS خارج نطاق الماكينة؛ لا يمكن إرفاقها بالزيارة.`);
+        }
         if (nativeApp) {
           const usedIndexes = new Set([...photos[phase], ...preparedPhotos].map((photo) => Number(photo.photoIndex)));
           const photoIndex = [0, 1, 2].find((candidate) => !usedIndexes.has(candidate));
@@ -234,7 +245,7 @@ export default function MachineVisitSheet({ machine, repName = '', reasons, gps,
               phase,
               capturedAt: capturedAt.toISOString(),
               visitCapturedAt: draftCapturedAt,
-              location: locationPayload(currentLocation),
+              location: locationPayload(capturedGps),
             },
           });
           if (saved.archiveWarning) setError(saved.archiveWarning);
@@ -254,7 +265,7 @@ export default function MachineVisitSheet({ machine, repName = '', reasons, gps,
             areaName: activeMachine.areaName,
             phase,
             capturedAt,
-            location: locationPayload(currentLocation),
+            location: locationPayload(capturedGps),
           });
           const previewUrl = URL.createObjectURL(blob);
           previewUrls.current.add(previewUrl);
@@ -284,8 +295,11 @@ export default function MachineVisitSheet({ machine, repName = '', reasons, gps,
       return;
     }
     try {
-      const photo = await captureNativeCameraPhoto();
-      await processCaptures(phase, [photo]);
+      const captured = await captureNativeCameraPhotos({
+        maxPhotos: 3 - photos[phase].length,
+        phaseLabel: phase === 'before' ? 'قبل الصيانة' : 'بعد الصيانة',
+      });
+      await processCaptures(phase, captured);
     } catch (captureError) {
       setError(captureError.message || 'تعذر فتح الكاميرا. تحقق من إذن الكاميرا وحاول مجدداً.');
     }
@@ -297,8 +311,8 @@ export default function MachineVisitSheet({ machine, repName = '', reasons, gps,
     autoCameraOpened.current = true;
     void (async () => {
       try {
-        const photo = await captureNativeCameraPhoto();
-        await processCaptures('before', [photo]);
+        const captured = await captureNativeCameraPhotos({ maxPhotos: 3, phaseLabel: 'قبل الصيانة' });
+        await processCaptures('before', captured);
       } catch (captureError) {
         setError(captureError.message || 'تعذر فتح الكاميرا تلقائياً؛ استخدم زر التقاط صورة قبل الصيانة.');
       }
@@ -455,7 +469,7 @@ export default function MachineVisitSheet({ machine, repName = '', reasons, gps,
             disabled={Boolean(processingPhase) || saving || !canCapture || phasePhotos.length >= 3}
           >
             <span className="rep-camera-icon" aria-hidden="true">⌖</span>
-            <span>{processingPhase === phase ? 'جارٍ تجهيز الصورة...' : `${nativeApp ? 'التقط صورة أخرى بالكاميرا' : 'أضف صورة بالكاميرا'} · ${label}`}</span>
+            <span>{processingPhase === phase ? 'جارٍ تجهيز الصور...' : `${nativeApp ? `التقط حتى ${3 - phasePhotos.length} صور متتالية دون إغلاق الكاميرا` : 'أضف صوراً بالكاميرا'} · ${label}`}</span>
           </button>
           {!nativeApp && <button type="button" className="rep-button rep-button-light" onClick={() => inputRef.current?.click()} disabled={Boolean(processingPhase) || saving || !canCapture || phasePhotos.length >= 3}>اختيار الصور المتبقية</button>}
         </div>
@@ -504,7 +518,7 @@ export default function MachineVisitSheet({ machine, repName = '', reasons, gps,
             {!gps
               ? 'جارٍ انتظار إشارة GPS؛ يلزم الموقع لتفعيل التصوير.'
               : !locationLocked || !hasMachinePin
-                 ? 'تأكد من كود الماكينة ثم أرسل موقعك الحالي لاعتماد المدير، أو أرسل بلاغ ماكينة خاطئة.'
+                 ? 'تأكد من كود الماكينة ثم أرسل GPS الحالي؛ يُعتمد الموقع الأول فور مزامنته، أما تصحيح موقع موجود فيحتاج مراجعة الإدارة.'
                 : withinGeofence
                   ? `أنت داخل النطاق · المسافة ${Math.round(effectiveDistance)} متر (المسموح ${radius} متر).`
                   : `أنت خارج النطاق · المسافة الفعالة ${Math.round(effectiveDistance)} متر (المسموح ${radius} متر).`}
@@ -513,12 +527,18 @@ export default function MachineVisitSheet({ machine, repName = '', reasons, gps,
           {!locationLocked || !hasMachinePin ? <section className="rep-machine-verification">
             <div>
               <strong>تحقق من هوية وموقع الماكينة</strong>
-              <small>{locationPending ? 'الموقع المقترح بانتظار الإرسال أو اعتماد المدير؛ التصوير متوقف.' : 'يُرسل موقع GPS للمراجعة؛ لا يُعتمد إلا بقرار المدير.'}</small>
+              <small>{locationPending
+                ? ['queued', 'syncing'].includes(activeMachine.locationReviewState)
+                  ? 'الموقع الأول محفوظ محلياً وبانتظار المزامنة؛ لا ينتظر اعتماد مدير بعد إقرار الخادم.'
+                  : activeMachine.locationReviewState === 'blocked'
+                    ? 'تعذر إرسال الموقع ويحتاج مراجعة من سجل المزامنة؛ التصوير متوقف.'
+                    : 'تصحيح الموقع بانتظار المراجعة الإدارية؛ التصوير متوقف حتى القرار.'
+                : 'يُعتمد الموقع الأول الصحيح فور استلام الخادم؛ وتصحيحات المواقع الموجودة تبقى تحت مراجعة الإدارة.'}</small>
               {activeMachine.locationConfirmation?.reviewNote && <small>{activeMachine.locationConfirmation.reviewNote}</small>}
             </div>
             <button type="button" className="rep-button rep-button-primary" onClick={() => void confirmCurrentLocation()}
               disabled={locationPending || confirmingLocation || !gps || Number(gps.accuracy) > 100 || saving || correctionSaving || correctionOpen}>
-              {confirmingLocation ? 'جارٍ حفظ المقترح…' : 'إرسال موقعي الحالي لاعتماد المدير'}
+              {confirmingLocation ? 'جارٍ حفظ ومزامنة الموقع…' : 'تثبيت الموقع الأول / إرسال التصحيح'}
             </button>
           </section> : <section className="rep-machine-verification verified">
             <div>

@@ -28,6 +28,7 @@
 #madar-app .radar-map-rep { cursor: pointer; outline: none; }
 #madar-app .radar-map-rep:focus-visible > circle:last-of-type { stroke: #152f47; stroke-width: 4; }
 #madar-app .radar-map-name { fill: #fff; font-family: Arial, sans-serif; font-size: 9px; font-weight: 800; }
+#madar-app .radar-map-status { fill: #fff; font-family: Arial, sans-serif; font-size: 8px; font-weight: 900; }
 #madar-app .radar-stop-label { fill: #fff; font-family: Arial, sans-serif; font-size: 8px; font-weight: 900; }
 #madar-app .radar-map-caption { fill: #65766f; font-family: Arial, sans-serif; font-size: 10px; }
 #madar-app .radar-map-empty { fill: #6c7a7a; font-family: Arial, sans-serif; font-size: 18px; font-weight: 700; }
@@ -36,6 +37,7 @@
 #madar-app .radar-route-controls label { display: grid; gap: 4px; color: #506372; font-size: 9px; font-weight: 800; }
 #madar-app .radar-route-controls select, #madar-app .radar-route-controls input { min-width: 150px; height: 34px; padding: 0 9px; border: 1px solid #d2dddf; border-radius: 8px; color: #263f53; background: #fff; font: inherit; font-size: 10px; }
 #madar-app .radar-route-controls > span { margin-inline-start: auto; padding-bottom: 8px; color: #58717d; font-size: 9px; font-weight: 800; }
+#madar-app .radar-overview-button { min-height: 34px; padding: 0 10px; border: 1px solid #9dcaba; border-radius: 8px; color: #17664f; background: #eff8f3; cursor: pointer; font-size: 9px; font-weight: 900; }
 #madar-app .radar-stops-list { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; padding: 0 15px 12px; color: #566972; font-size: 9px; }
 #madar-app .radar-stops-list > strong { flex: 0 0 100%; color: #364f60; font-size: 10px; }
 #madar-app .radar-stops-list > span { display: grid; gap: 3px; padding: 7px 9px; border: 1px solid #edd3c6; border-radius: 8px; color: #803d25; background: #fff7f2; }
@@ -71,12 +73,21 @@
 #madar-app .supervisor-qa-empty > span { display: grid; width: 44px; height: 44px; place-items: center; border-radius: 15px; color: #187356; background: #e8f5ef; font-size: 22px; }
 #madar-app .supervisor-qa-empty strong { color: #243b4f; font-size: 12px; }
 #madar-app .supervisor-qa-empty small { font-size: 9px; }
+#madar-app .qa-bulk-toolbar { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 7px 12px; margin: 10px 11px 0; padding: 12px; border: 1px solid #b5d9cb; border-radius: 11px; background: linear-gradient(135deg, #f0faf5, #f7fbf8); }
+#madar-app .qa-bulk-toolbar label, #madar-app .qa-visit-selection label { display: inline-flex; align-items: center; gap: 6px; color: #36594e; font-size: 9px; font-weight: 850; }
+#madar-app .qa-bulk-toolbar input, #madar-app .qa-visit-selection input { accent-color: #147653; }
+#madar-app .qa-approve-all { min-height: 38px; padding: 0 13px; border: 1px solid #126a50; border-radius: 9px; color: #fff; background: #147653; cursor: pointer; font-size: 10px; font-weight: 900; }
+#madar-app .qa-approve-all:hover:not(:disabled) { background: #0e6043; }
+#madar-app .qa-approve-all:disabled { cursor: not-allowed; opacity: .55; }
+#madar-app .qa-bulk-toolbar > small { grid-column: 1 / -1; color: #627c72; font-size: 8px; }
 #madar-app .qa-visit-list { display: grid; max-height: calc(100vh - 370px); gap: 10px; overflow: auto; padding: 11px; }
 #madar-app .qa-visit-card { padding: 12px; border: 1px solid #e0e5e4; border-radius: 12px; background: #fff; }
 #madar-app .qa-visit-heading { display: flex; align-items: start; justify-content: space-between; gap: 8px; }
 #madar-app .qa-machine-code { display: inline-block; padding: 3px 7px; border-radius: 6px; color: #fff; background: #233d55; font-family: Consolas, monospace; font-size: 10px; font-weight: 900; }
 #madar-app .qa-visit-heading h3 { display: inline; margin: 0 0 0 7px; color: #1f3448; font-size: 11px; }
 #madar-app .qa-visit-heading p { margin: 5px 0 0; color: #718087; font-size: 8px; }
+#madar-app .qa-visit-selection { display: grid; justify-items: end; gap: 6px; }
+#madar-app .qa-visit-selection label { white-space: nowrap; }
 #madar-app .qa-pending-badge { flex: 0 0 auto; padding: 5px 7px; border: 1px solid #efd695; border-radius: 99px; color: #815b13; background: #fff9e9; font-size: 8px; font-weight: 850; }
 #madar-app .qa-photo-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin: 10px 0; }
 #madar-app .qa-photo-pair button { position: relative; height: 150px; overflow: hidden; padding: 0; border: 1px solid #d8e0df; border-radius: 8px; background: #eef1ef; cursor: zoom-in; }
@@ -121,6 +132,10 @@
   #madar-app .radar-route-controls { align-items: stretch; flex-direction: column; }
   #madar-app .radar-route-controls select, #madar-app .radar-route-controls input { width: 100%; }
   #madar-app .radar-route-controls > span { margin: 0; padding: 0; }
+  #madar-app .radar-overview-button { min-height: 38px; }
+  #madar-app .qa-bulk-toolbar { grid-template-columns: 1fr; }
+  #madar-app .qa-bulk-toolbar > small { grid-column: auto; }
+  #madar-app .qa-approve-all { width: 100%; }
   #madar-app .radar-below { grid-template-columns: 1fr; }
   #madar-app .radar-rep-details dl > div { padding: 7px 0; }
   #madar-app .qa-visit-list { grid-template-columns: 1fr; }

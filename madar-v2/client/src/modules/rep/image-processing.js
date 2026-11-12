@@ -44,7 +44,7 @@ export function buildWatermarkLines({ machineCode, machineName, regionName, area
     `التاريخ: ${date} · ${weekday}`,
     `الوقت: ${time}`,
     `GPS: ${locationLabel}`,
-    `المحافظة/المنطقة المسجلة: ${[regionName, areaName].filter((value, index, values) => value && values.indexOf(value) === index).join(' · ') || 'غير محددة'}`,
+    `المحافظة: غير متاحة · المنطقة المسجلة: ${[regionName, areaName].filter((value, index, values) => value && values.indexOf(value) === index).join(' · ') || 'غير متاحة'}`,
     `الماكينة: ${machineCode} · ${machineName || `ماكينة ${machineCode}`}`,
   ];
 }
@@ -55,10 +55,25 @@ export function getWatermarkLayout(width, height) {
   const padding = Math.max(12, Math.round(fontSize * 0.65));
   const panelWidth = Math.min(width, Math.max(Math.round(width * 0.58), 300));
   const panelHeight = Math.min(height, padding * 2 + lineHeight * 6);
+  const logoSize = Math.max(30, Math.min(Math.round(fontSize * 2), Math.round(panelWidth * 0.14)));
   return {
-    fontSize, lineHeight, padding, panelWidth, panelHeight,
+    fontSize, lineHeight, padding, panelWidth, panelHeight, logoSize,
     panelTop: Math.max(0, height - panelHeight),
   };
+}
+
+let watermarkLogoPromise;
+function loadWatermarkLogo() {
+  if (!watermarkLogoPromise) {
+    watermarkLogoPromise = new Promise((resolve, reject) => {
+      const logo = new Image();
+      logo.onload = () => resolve(logo);
+      logo.onerror = () => reject(new Error('تعذر تحميل شعار MADAR المضمّن؛ لم تُحفظ الصورة دون ختم.'));
+      logo.src = '/icon-192.png';
+      if (logo.complete && logo.naturalWidth) resolve(logo);
+    });
+  }
+  return watermarkLogoPromise;
 }
 
 async function decodeImage(file) {
@@ -93,9 +108,11 @@ export async function compressAndWatermark(file, { machineCode, machineName, reg
   context.drawImage(image, 0, 0, width, height);
   image.close?.();
 
-  const { fontSize, lineHeight, padding, panelWidth, panelHeight, panelTop } = getWatermarkLayout(width, height);
+  const { fontSize, lineHeight, padding, panelWidth, panelHeight, panelTop, logoSize } = getWatermarkLayout(width, height);
   context.fillStyle = 'rgba(7, 19, 31, 0.82)';
   context.fillRect(0, panelTop, panelWidth, panelHeight);
+  const logo = await loadWatermarkLogo();
+  context.drawImage(logo, padding, panelTop + padding, logoSize, logoSize);
   context.direction = 'rtl';
   context.textAlign = 'right';
   context.textBaseline = 'middle';
@@ -106,7 +123,8 @@ export async function compressAndWatermark(file, { machineCode, machineName, reg
 
   lines.forEach((line, index) => {
     const y = panelTop + padding + lineHeight * index + lineHeight / 2;
-    context.fillText(fitText(context, line, maxTextWidth), panelWidth - padding, y, maxTextWidth);
+    const lineMaxWidth = index === 0 ? maxTextWidth - logoSize - padding : maxTextWidth;
+    context.fillText(fitText(context, line, lineMaxWidth), panelWidth - padding, y, lineMaxWidth);
   });
 
   return toJpegBlob(canvas, 0.82);

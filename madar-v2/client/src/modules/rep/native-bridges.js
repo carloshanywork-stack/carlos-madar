@@ -53,6 +53,22 @@ export async function captureNativeCameraPhoto() {
   return { sourceUri: photo.path, previewUrl: photo.webPath };
 }
 
+export async function captureNativeCameraPhotos({ maxPhotos = 3, phaseLabel = 'الصور' } = {}) {
+  if (!isNativeRepApp()) throw new Error('التقاط مجموعة الصور متاح داخل تطبيق أندرويد فقط.');
+  const archive = await getNativePhotoArchiveStatus();
+  if (!archive?.configured) await chooseNativePhotoArchiveFolder();
+  const result = await RepEngine.captureVisitPhotos({ maxPhotos, phaseLabel });
+  if (!Array.isArray(result?.photos) || !result.photos.length) throw new Error('لم تُرجع الكاميرا صوراً صالحة.');
+  return result.photos.map((photo) => ({
+    sourceUri: photo.sourceUri,
+    capturedAt: photo.capturedAt,
+    location: photo.location && Number.isFinite(photo.location.latitude)
+      && Number.isFinite(photo.location.longitude) && Number.isFinite(photo.location.accuracy)
+      && typeof photo.location.updatedAt === 'string'
+      ? photo.location : null,
+  })).filter((photo) => typeof photo.sourceUri === 'string' && photo.sourceUri.length > 0);
+}
+
 export async function getNativePermissionState() {
   if (!isNativeRepApp()) return null;
   return RepEngine.getPermissionState();
