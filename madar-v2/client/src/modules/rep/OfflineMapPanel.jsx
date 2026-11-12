@@ -4,6 +4,7 @@ import { deleteOfflineMapPack, listOfflineMapPacks, listOfflineMapTileKeys, save
 import { OFFLINE_MAP_PACKS } from './map-utils.js';
 import { getNativeAuthorizationHeaders } from './native-session.js';
 import OfflineRouteMap from './OfflineRouteMap.jsx';
+import GoogleRouteMap from './GoogleRouteMap.jsx';
 
 function formatSize(bytes) {
   const value = Number(bytes) || 0;
@@ -74,6 +75,8 @@ export default function OfflineMapPanel({ route, gps, online, offlineOnly, onMac
   const [downloading, setDownloading] = useState(false);
   const [progress, setProgress] = useState({ completed: 0, total: 0 });
   const [error, setError] = useState('');
+  const [provider, setProvider] = useState(() => (online && !offlineOnly ? 'google' : 'offline'));
+  const [googleConfig, setGoogleConfig] = useState({ loaded: false, enabled: false, apiKey: null });
   const downloadController = useRef(null);
 
   const selectedDefinition = OFFLINE_MAP_PACKS.find((pack) => pack.id === selectedId) ?? OFFLINE_MAP_PACKS[0];
@@ -109,6 +112,27 @@ export default function OfflineMapPanel({ route, gps, online, offlineOnly, onMac
       .then((result) => { if (active) setCatalog(result.packs ?? []); })
       .catch((caught) => { if (active) setError(caught.message || 'تعذر فحص حزم الخرائط على الخادم.'); })
       .finally(() => { if (active) setCatalogLoading(false); });
+    return () => { active = false; };
+  }, [offlineOnly, online]);
+
+  useEffect(() => {
+    if (!online || offlineOnly) setProvider('offline');
+  }, [offlineOnly, online]);
+
+  useEffect(() => {
+    if (!online || offlineOnly) return undefined;
+    let active = true;
+    fetchWithTimeout('/api/rep/map/google', { timeoutMs: 6000 })
+      .then((result) => {
+        if (active) setGoogleConfig({
+          loaded: true,
+          enabled: Boolean(result?.enabled),
+          apiKey: typeof result?.apiKey === 'string' && result.apiKey ? result.apiKey : null,
+        });
+      })
+      .catch(() => {
+        if (active) setGoogleConfig({ loaded: true, enabled: false, apiKey: null });
+      });
     return () => { active = false; };
   }, [offlineOnly, online]);
 
@@ -192,12 +216,33 @@ export default function OfflineMapPanel({ route, gps, online, offlineOnly, onMac
   }
 
   const downloadAllowed = Boolean(selectedCatalogPack?.available && online && !offlineOnly);
+  const onlineNow = online && !offlineOnly;
   return (
-    <section className="rep-offline-map-panel" aria-label="حزم الخرائط بلا اتصال">
+    <section className="rep-offline-map-panel" aria-label="خريطة ماكينات اليوم">
       <div className="rep-offline-map-panel-head">
-        <div><span className="rep-eyebrow">خرائط محفوظة على الهاتف · لا مزوّد خرائط مضمّن</span><h3>العمل بالخرائط دون اتصال</h3></div>
-        <span className={`rep-map-network ${online && !offlineOnly ? 'online' : ''}`}>{online && !offlineOnly ? 'متصل لتنزيل الحزمة' : 'أوفلاين · استخدم الحزم المحفوظة'}</span>
+        <div><span className="rep-eyebrow">خريطة Google عند الاتصال · حزم MBTiles محفوظة بلا إنترنت</span><h3>خريطة الماكينات والمسار</h3></div>
+        <span className={`rep-map-network ${onlineNow ? 'online' : ''}`}>{onlineNow ? 'متصل · خريطة محدثة' : 'أوفلاين · الخريطة المحلية'}</span>
       </div>
+      <div className="rep-map-provider-tabs" role="tablist" aria-label="مصدر الخريطة">
+        <button type="button" role="tab" aria-selected={provider === 'google'}
+          className={provider === 'google' ? 'active' : ''} disabled={!onlineNow}
+          onClick={() => setProvider('google')}
+          title={onlineNow ? 'خريطة Google المضمّنة داخل التطبيق' : 'خريطة Google تحتاج اتصالاً بالإنترنت'}>
+          <b>Google Maps</b>
+          <small>{googleConfig.enabled ? 'طبقة تفاعلية مضمّنة' : googleConfig.loaded ? 'عرض سريع مضمّن' : 'جارٍ التحقق…'}</small>
+        </button>
+        <button type="button" role="tab" aria-selected={provider === 'offline'}
+          className={provider === 'offline' ? 'active' : ''} onClick={() => setProvider('offline')}>
+          <b>الخريطة المحلية</b><small>تعمل دون إنترنت</small>
+        </button>
+      </div>
+      {provider === 'google' ? (onlineNow ? (
+        !googleConfig.loaded
+          ? <p className="rep-map-pack-summary" role="status">جارٍ التحقق من إعداد خريطة Google على الخادم…</p>
+          : <GoogleRouteMap apiKey={googleConfig.apiKey} machines={routeMachines} gps={gps} onMachineSelect={onMachineSelect} />
+      ) : (
+        <p className="rep-map-warning">خريطة Google تحتاج اتصالاً بالإنترنت؛ تم التحويل إلى الخريطة المحلية. نزّل حزمة المنطقة مسبقاً للعمل بلا اتصال.</p>
+      )) : <>
       <div className="rep-map-pack-row">
         <label>
           <span>اختر حزمة المنطقة</span>
@@ -235,7 +280,8 @@ export default function OfflineMapPanel({ route, gps, online, offlineOnly, onMac
         onMachineSelect={onMachineSelect}
       />}
       {error && <p className="rep-map-error" role="alert">{error}</p>}
-      <p className="rep-map-disclaimer">حزم الخرائط تُحمّل من ملف MBTiles محلي يثبّته مسؤول النظام؛ لا تُرسل إحداثيات المندوب إلى مزوّد خرائط. GPS يعمل بلا إنترنت. استخدم رابط Google Maps للملاحة الخارجية عند الحاجة.</p>
+      </>}
+      <p className="rep-map-disclaimer">خريطة Google تُحمّل فقط عند وجود اتصال، وعند انقطاعه يتحوّل التطبيق إلى حزمة MBTiles المحفوظة على الهاتف. GPS يعمل بلا إنترنت، وإحداثيات المندوب لا تُرسل إلى مزوّد الخرائط في الوضع المحلي.</p>
     </section>
   );
 }

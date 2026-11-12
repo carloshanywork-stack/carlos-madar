@@ -11,6 +11,7 @@ export function operationNotification(event) {
     'rep.machine.correction-submitted': [`بلاغ تصحيح ماكينة ${event.reportedCode || ''} من ${rep}.`, '/maintenance?view=machines&review=corrections'],
     'maintenance.order.assigned': [`تم تحديث تكليف أمر التشغيل ${event.orderCode || ''}.`, '/supervisor'],
     'overtime.pending': [`طلب أوفر تايم جديد ${event.employeeName || ''} بانتظار الاعتماد.`, '/accounting'],
+    'overtime.requested': [`طلب ${rep} فتح جلسة أوفرتايم إضافية بانتظار موافقة المشرف.`, '/accounting'],
   };
   const entry = known[event.type];
   return entry ? { id: event.id, text: entry[0], href: entry[1], occurredAt: event.occurredAt } : null;

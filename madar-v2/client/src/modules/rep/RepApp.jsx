@@ -113,13 +113,24 @@ function formatTime(value) {
   }
 }
 
-function attendanceHours(record, now = Date.now()) {
-  if (!record?.clock_in_time) return 0;
-  const start = Date.parse(record.clock_in_time);
-  const end = record.clock_out_time ? Date.parse(record.clock_out_time) : now;
+function sessionHours(startValue, endValue, now = Date.now()) {
+  if (!startValue) return 0;
+  const start = Date.parse(startValue);
+  const end = endValue ? Date.parse(endValue) : now;
   return Number.isFinite(start) && Number.isFinite(end) && end >= start
-    ? Math.round((end - start) / 36000) / 100
+    ? (end - start) / 3_600_000
     : 0;
+}
+
+function attendanceHours(record, now = Date.now()) {
+  const total = sessionHours(record?.clock_in_time, record?.clock_out_time, now)
+    + sessionHours(record?.overtime_clock_in_time, record?.overtime_clock_out_time, now);
+  return Math.round(total * 100) / 100;
+}
+
+function hasOpenAttendanceSession(record) {
+  return Boolean((record?.clock_in_time && !record.clock_out_time)
+    || (record?.overtime_clock_in_time && !record.overtime_clock_out_time));
 }
 
 const MAX_CLOCK_ACCURACY_METERS = 250;
@@ -145,20 +156,50 @@ function applyPendingAttendance(attendance, actions = []) {
     const occurredAt = item.occurredAt ?? item.payload?.occurredAt;
     const location = item.location ?? item.payload?.location;
     if (!['in', 'out'].includes(action) || !occurredAt) continue;
+    const regularClosed = Boolean(current?.clock_in_time && current?.clock_out_time);
     if (action === 'in') {
+      if (regularClosed) {
+        current = {
+          ...current,
+          overtime_session_status: 'open',
+          overtime_clock_in_time: occurredAt,
+          overtime_clock_in_source: 'app',
+          overtime_clock_in_lat: location?.latitude ?? null,
+          overtime_clock_in_lng: location?.longitude ?? null,
+          overtime_clock_in_accuracy: location?.accuracy ?? null,
+          overtime_clock_in_location_at: location?.updatedAt ?? null,
+          overtime_clock_in_biometric_verified: 1,
+          overtime_clock_out_time: null,
+          overtime_clock_out_source: null,
+          overtime_session_hours: 0,
+        };
+      } else {
+        current = {
+          ...(current ?? {}),
+          work_date: businessDateFor(occurredAt),
+          status: 'present',
+          clock_in_time: occurredAt,
+          clock_in_source: 'app',
+          clock_in_lat: location?.latitude ?? null,
+          clock_in_lng: location?.longitude ?? null,
+          clock_in_accuracy: location?.accuracy ?? null,
+          clock_in_location_at: location?.updatedAt ?? null,
+          clock_in_biometric_verified: 1,
+          clock_out_time: null,
+          clock_out_source: null,
+        };
+      }
+    } else if (current?.overtime_clock_in_time && !current.overtime_clock_out_time) {
       current = {
-        ...(current ?? {}),
-        work_date: businessDateFor(occurredAt),
-        status: 'present',
-        clock_in_time: occurredAt,
-        clock_in_source: 'app',
-        clock_in_lat: location?.latitude ?? null,
-        clock_in_lng: location?.longitude ?? null,
-        clock_in_accuracy: location?.accuracy ?? null,
-        clock_in_location_at: location?.updatedAt ?? null,
-        clock_in_biometric_verified: 1,
-        clock_out_time: null,
-        clock_out_source: null,
+        ...current,
+        overtime_session_status: 'closed',
+        overtime_clock_out_time: occurredAt,
+        overtime_clock_out_source: 'app',
+        overtime_clock_out_lat: location?.latitude ?? null,
+        overtime_clock_out_lng: location?.longitude ?? null,
+        overtime_clock_out_accuracy: location?.accuracy ?? null,
+        overtime_clock_out_location_at: location?.updatedAt ?? null,
+        overtime_clock_out_biometric_verified: 1,
       };
     } else if (current?.clock_in_time && !current.clock_out_time) {
       current = {
@@ -267,6 +308,10 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
   const [attendance, setAttendance] = useState(null);
   const [attendanceLoaded, setAttendanceLoaded] = useState(false);
   const [attendanceSaving, setAttendanceSaving] = useState(false);
+  const [overtimeRequest, setOvertimeRequest] = useState(null);
+  const [overtimeFormOpen, setOvertimeFormOpen] = useState(false);
+  const [overtimeReason, setOvertimeReason] = useState('');
+  const [overtimeBusy, setOvertimeBusy] = useState(false);
   const [clockNow, setClockNow] = useState(() => Date.now());
   const [reasons, setReasons] = useState([]);
   const [pendingVisits, setPendingVisits] = useState([]);
@@ -557,7 +602,8 @@ const loadLocalSnapshots = useCallback(async () => {
       if (savedAttendance?.date === currentBusinessDate() || attendanceActions.length) {
         const cachedAttendance = applyPendingAttendance(savedAttendance.attendance ?? null, attendanceActions);
         setAttendance(cachedAttendance);
-        setOnDuty(Boolean(cachedAttendance?.clock_in_time && !cachedAttendance.clock_out_time));
+        if (savedAttendance?.overtimeRequest && savedAttendance?.date === currentBusinessDate()) setOvertimeRequest(savedAttendance.overtimeRequest);
+        setOnDuty(hasOpenAttendanceSession(cachedAttendance));
         setAttendanceLoaded(true);
       }
       setPendingVisits(visits);
@@ -581,7 +627,7 @@ const loadLocalSnapshots = useCallback(async () => {
         const offlineAttendance = applyPendingAttendance(null, nativeAttendanceActions);
         if (offlineAttendance) {
           setAttendance(offlineAttendance);
-          setOnDuty(Boolean(offlineAttendance.clock_in_time && !offlineAttendance.clock_out_time));
+          setOnDuty(hasOpenAttendanceSession(offlineAttendance));
             setAttendanceLoaded(true);
         }
     if (nativeCache?.route) setRoute(applyPendingMachineLocations(nativeCache.route));
@@ -673,12 +719,14 @@ const loadLocalSnapshots = useCallback(async () => {
         setPendingAttendanceActions(pendingActions);
         const currentAttendance = applyPendingAttendance(result.attendance ?? null, pendingActions);
         setAttendance(currentAttendance);
-        setOnDuty(Boolean(currentAttendance?.clock_in_time && !currentAttendance.clock_out_time));
+        setOvertimeRequest(result.overtimeRequest ?? null);
+        setOnDuty(hasOpenAttendanceSession(currentAttendance));
         setAttendanceLoaded(true);
         try {
           await saveSnapshot('attendance_snapshots', userId, {
             date: result.date,
             attendance: result.attendance ?? null,
+            overtimeRequest: result.overtimeRequest ?? null,
             cachedAt: new Date().toISOString(),
           });
         } catch {
@@ -691,6 +739,46 @@ const loadLocalSnapshots = useCallback(async () => {
       return null;
     }
   }, [nativeApp, offlineOnly, userId]);
+
+  const submitOvertimeRequest = useCallback(async (event) => {
+    event?.preventDefault();
+    if (overtimeBusy) return;
+    if (offlineOnly || !navigator.onLine || serverState !== 'online') {
+      setToast('تحتاج اتصالاً بالخادم لإرسال طلب الأوفرتايم واعتماده من المشرف.');
+      return;
+    }
+    setOvertimeBusy(true);
+    try {
+      const result = await api.post('/api/rep/attendance/overtime-request', {
+        ...(overtimeReason.trim() ? { reason: overtimeReason.trim() } : {}),
+      }, { timeoutMs: 8000 });
+      setOvertimeRequest(result.request ?? null);
+      setOvertimeFormOpen(false);
+      setOvertimeReason('');
+      setToast('تم إرسال طلب الأوفرتايم إلى المشرف.');
+      void refreshAttendance();
+    } catch (error) {
+      setToast(error.message || 'تعذر إرسال طلب الأوفرتايم. حاول مرة أخرى.');
+    } finally {
+      setOvertimeBusy(false);
+    }
+  }, [offlineOnly, overtimeBusy, overtimeReason, refreshAttendance, serverState]);
+
+  const cancelOvertimeRequest = useCallback(async () => {
+    if (overtimeBusy) return;
+    setOvertimeBusy(true);
+    try {
+      const result = await api.post('/api/rep/attendance/overtime-request/cancel', {}, { timeoutMs: 8000 });
+      setOvertimeRequest(result.request ?? null);
+      setOvertimeFormOpen(false);
+      setToast('تم إلغاء طلب الأوفرتايم.');
+      void refreshAttendance();
+    } catch (error) {
+      setToast(error.message || 'تعذر إلغاء طلب الأوفرتايم.');
+    } finally {
+      setOvertimeBusy(false);
+    }
+  }, [overtimeBusy, refreshAttendance]);
 
   const clockAttendance = useCallback(async (action) => {
     if (offlineOnly) {
@@ -740,7 +828,7 @@ const loadLocalSnapshots = useCallback(async () => {
       setPendingAttendanceActions(pendingActions);
       const optimisticAttendance = applyPendingAttendance(attendance, pendingActions);
       setAttendance(optimisticAttendance);
-      setOnDuty(Boolean(optimisticAttendance?.clock_in_time && !optimisticAttendance.clock_out_time));
+      setOnDuty(hasOpenAttendanceSession(optimisticAttendance));
       setAttendanceLoaded(true);
 
       let trackingReady = false;
@@ -779,7 +867,10 @@ const loadLocalSnapshots = useCallback(async () => {
             setPendingAttendanceActions(remainingActions);
             serverAttendance = applyPendingAttendance(serverAttendance, remainingActions);
             setAttendance(serverAttendance);
-            setOnDuty(Boolean(serverAttendance.clock_in_time && !serverAttendance.clock_out_time));
+            setOvertimeRequest((current) => (serverAttendance.overtime_session_id
+              ? { ...(current ?? {}), status: 'used' }
+              : current));
+            setOnDuty(hasOpenAttendanceSession(serverAttendance));
           }
         } catch (error) {
           if (error.status === 401) window.dispatchEvent(new Event('madar-auth-expired'));
@@ -908,6 +999,13 @@ const loadLocalSnapshots = useCallback(async () => {
             void clearSnapshot('attendance_snapshots', userId).catch(() => undefined);
             setToast('⚠️ تم إلغاء تسجيل الحضور لهذا اليوم من قبل الإدارة.');
           } else void refreshAttendance();
+        } else if (event.type === 'overtime.reviewed') {
+          setToast(event.decision === 'approved'
+            ? 'اعتمد المشرف طلب الأوفرتايم؛ يمكنك الآن بدء جلسة الحضور الإضافية.'
+            : event.decision === 'rejected'
+              ? 'تم رفض طلب الأوفرتايم؛ يمكنك إرسال طلب جديد بعد إغلاق الدوام الأساسي.'
+              : 'تم تحديث طلب الأوفرتايم.');
+          void refreshAttendance();
         }
       } catch {
         // Ignore malformed frames; the regular route refresh remains a fallback.
@@ -996,7 +1094,7 @@ const loadLocalSnapshots = useCallback(async () => {
         if (state.active) void syncTracking({ duty: true });
         return;
       }
-      const attendanceIsOpen = Boolean(attendance?.clock_in_time && !attendance.clock_out_time);
+      const attendanceIsOpen = hasOpenAttendanceSession(attendance);
       setOnDuty(attendanceIsOpen);
       if (attendanceIsOpen) {
         if (state.active) void syncTracking({ duty: true });
@@ -1009,7 +1107,9 @@ const loadLocalSnapshots = useCallback(async () => {
       }
     }).catch(() => undefined);
     return () => { active = false; };
-  }, [attendance?.clock_in_time, attendance?.clock_out_time, attendanceLoaded, nativeApp, syncTracking]);
+  }, [attendance?.clock_in_time, attendance?.clock_out_time,
+    attendance?.overtime_clock_in_time, attendance?.overtime_clock_out_time,
+    attendanceLoaded, nativeApp, syncTracking]);
 
   useEffect(() => {
     nativeBackStateRef.current = { selectedMachine, showQueue, tutorialOpen };
@@ -1585,7 +1685,7 @@ const finishTutorial = () => {
 };
 
   const logout = async () => {
-    if (attendance?.clock_in_time && !attendance.clock_out_time) {
+    if (hasOpenAttendanceSession(attendance)) {
       setToast('سجّل الانصراف من بطاقة الحضور أولاً؛ يمكنك الخروج بعد إغلاق الوردية.');
       return;
     }
@@ -1836,9 +1936,30 @@ try {
       : networkOnline
         ? 'السيرفر غير متاح'
         : 'أوفلاين · حفظ محلي';
-  const attendanceIsOpen = Boolean(attendance?.clock_in_time && !attendance.clock_out_time);
-  const attendanceIsClosed = Boolean(attendance?.clock_in_time && attendance.clock_out_time);
+  const regularOpen = Boolean(attendance?.clock_in_time && !attendance.clock_out_time);
+  const regularClosed = Boolean(attendance?.clock_in_time && attendance.clock_out_time);
+  const overtimeOpen = Boolean(attendance?.overtime_clock_in_time && !attendance.overtime_clock_out_time);
+  const overtimeClosed = Boolean(attendance?.overtime_clock_in_time && attendance.overtime_clock_out_time);
+  const attendanceIsOpen = regularOpen || overtimeOpen;
+  const overtimeApproved = overtimeRequest?.status === 'approved';
+  const attendanceIsClosed = regularClosed && !overtimeOpen && !overtimeClosed && !overtimeApproved;
+  const overtimeReady = regularClosed && overtimeApproved && !overtimeClosed;
+  const canRequestOvertime = regularClosed && !overtimeOpen && !overtimeClosed
+    && !overtimeApproved && overtimeRequest?.status !== 'pending';
   const punchAction = attendanceIsOpen ? 'out' : 'in';
+  const overtimeHoursForToday = sessionHours(attendance?.overtime_clock_in_time,
+    attendance?.overtime_clock_out_time, clockNow);
+  const punchLabel = attendanceSaving
+    ? 'جارٍ تسجيل البصمة…'
+    : regularOpen
+      ? 'تسجيل الانصراف ↧'
+      : overtimeOpen
+        ? 'إنهاء جلسة الأوفرتايم ↧'
+        : overtimeReady
+          ? 'بدء جلسة الأوفرتايم ↥'
+          : attendanceIsClosed
+            ? 'تم تسجيل الانصراف اليوم'
+            : 'تسجيل الحضور ↥';
 
   return (
     <main className="rep-app" dir="rtl">
@@ -1876,30 +1997,72 @@ try {
           <span className="rep-eyebrow">الحضور والانصراف · {new Intl.DateTimeFormat('ar-EG', { dateStyle: 'full', timeZone: 'Africa/Cairo' }).format(new Date())}</span>
           <strong>{attendance?.clock_in_time ? `${attendanceHours(attendance, clockNow).toFixed(2)} ساعة` : 'لم يسجل الحضور بعد'}</strong>
           <small>{attendance?.clock_in_time
-            ? `حضور ${formatTime(attendance.clock_in_time)}${attendance.clock_out_time ? ` · انصراف ${formatTime(attendance.clock_out_time)}` : ' · الدوام مستمر'}`
+            ? `حضور ${formatTime(attendance.clock_in_time)}${attendance.clock_out_time ? ` · انصراف ${formatTime(attendance.clock_out_time)}` : ' · الدوام مستمر'}${attendance.overtime_clock_in_time ? ` · أوفرتايم ${formatTime(attendance.overtime_clock_in_time)}${attendance.overtime_clock_out_time ? ` إلى ${formatTime(attendance.overtime_clock_out_time)}` : ' · الجلسة الإضافية مستمرة'}` : ''}`
             : 'يُحفظ وقت الجهاز وموقع GPS بأمان؛ وتتم المزامنة تلقائياً عند الاتصال.'}</small>
         </div>
         <div className="rep-attendance-actions">
           <button
-            className={`rep-attendance-punch ${attendanceIsOpen ? 'clock-out' : 'clock-in'}`}
+            className={`rep-attendance-punch ${attendanceIsOpen ? 'clock-out' : 'clock-in'} ${overtimeReady ? 'overtime' : ''}`}
             type="button"
             disabled={attendanceSaving || offlineOnly || !nativeApp || attendanceIsClosed}
             onClick={() => void clockAttendance(punchAction)}
-            aria-label={attendanceIsOpen ? 'تسجيل الانصراف وإيقاف تتبع الوردية' : attendanceIsClosed ? 'تم تسجيل الانصراف لهذا اليوم' : 'تسجيل الحضور وبدء تتبع الوردية'}
+            aria-label={regularOpen
+              ? 'تسجيل الانصراف وإيقاف تتبع الوردية'
+              : overtimeOpen
+                ? 'إنهاء جلسة الأوفرتايم'
+                : overtimeReady
+                  ? 'بدء جلسة الأوفرتايم المعتمدة'
+                  : attendanceIsClosed
+                    ? 'تم تسجيل الانصراف لهذا اليوم'
+                    : 'تسجيل الحضور وبدء تتبع الوردية'}
           >
-            {attendanceSaving
-              ? 'جارٍ تسجيل البصمة…'
-              : attendanceIsOpen
-                ? 'تسجيل الانصراف ↧'
-                : attendanceIsClosed
-                  ? 'تم تسجيل الانصراف اليوم'
-                  : 'تسجيل الحضور ↥'}
+            {punchLabel}
           </button>
           <div className={`rep-attendance-gps ${gps ? 'has-fix' : ''}`} role="status">
             <i aria-hidden="true" />
             <span><b>GPS</b> · {gps ? formatGps(gps) : gpsError || 'سيُطلب الموقع عند تسجيل البصمة'}{pendingAttendanceActions.length ? ` · ${pendingAttendanceActions.length} تسجيل حضور بانتظار المزامنة` : ''}</span>
           </div>
         </div>
+        {(overtimeRequest || regularClosed) && (
+          <div className="rep-attendance-overtime" aria-live="polite">
+            {overtimeRequest?.status === 'pending' && (
+              <div className="rep-overtime-state pending">
+                <span><b>طلب أوفرتايم قيد الاعتماد</b><small>أُرسل {formatTime(overtimeRequest.created_at)} وينتظر موافقة المشرف؛ لن يبدأ التسجيل الإضافي قبل الاعتماد.</small></span>
+                <button type="button" disabled={overtimeBusy} onClick={() => void cancelOvertimeRequest()}>{overtimeBusy ? 'جارٍ الإلغاء…' : 'إلغاء الطلب'}</button>
+              </div>
+            )}
+            {overtimeApproved && !overtimeClosed && (
+              <div className="rep-overtime-state approved">
+                <span><b>تم اعتماد الأوفرتايم</b><small>اضغط «بدء جلسة الأوفرتايم» لتسجيل حضور وانصراف إضافي مرة واحدة لهذا اليوم.</small></span>
+              </div>
+            )}
+            {overtimeClosed && (
+              <div className="rep-overtime-state done">
+                <span><b>جلسة أوفرتايم مكتملة · {overtimeHoursForToday.toFixed(2)} ساعة</b><small>من {formatTime(attendance.overtime_clock_in_time)} إلى {formatTime(attendance.overtime_clock_out_time)} · تُراجع الساعات إدارياً مع مسير الرواتب.</small></span>
+              </div>
+            )}
+            {overtimeRequest?.status === 'rejected' && (
+              <div className="rep-overtime-state rejected">
+                <span><b>تم رفض طلب الأوفرتايم</b><small>{overtimeRequest.supervisor_note || 'لم يُسجّل المشرف سبباً للرفض.'} يمكنك إرسال طلب جديد.</small></span>
+              </div>
+            )}
+            {canRequestOvertime && (overtimeFormOpen ? (
+              <form className="rep-overtime-form" onSubmit={(event) => void submitOvertimeRequest(event)}>
+                <label>سبب الأوفرتايم (اختياري)
+                  <textarea value={overtimeReason} onChange={(event) => setOvertimeReason(event.target.value)} maxLength={500} rows={2} placeholder="مثال: استكمال زيارة ماكينة متأخرة" />
+                </label>
+                <div className="rep-overtime-form-actions">
+                  <button type="submit" disabled={overtimeBusy}>{overtimeBusy ? 'جارٍ الإرسال…' : 'إرسال الطلب للمشرف'}</button>
+                  <button type="button" disabled={overtimeBusy} onClick={() => { setOvertimeFormOpen(false); setOvertimeReason(''); }}>إلغاء</button>
+                </div>
+              </form>
+            ) : (
+              <button type="button" className="rep-overtime-open" onClick={() => setOvertimeFormOpen(true)}>
+                طلب أوفرتايم إضافي · بعد إغلاق الدوام الأساسي
+              </button>
+            ))}
+          </div>
+        )}
       </section>
 
       <section className="rep-welcome-row">

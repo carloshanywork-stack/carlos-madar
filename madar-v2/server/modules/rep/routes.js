@@ -12,6 +12,8 @@ import {
   clockOutForRep,
   getTodayAttendanceForRep,
   recordRepMockLocationAttempt,
+  requestOvertimeForRep,
+  cancelOvertimeRequestForRep,
   syncRepAttendanceAction,
 } from '../employees/attendance.js';
 import {
@@ -128,6 +130,32 @@ router.get('/events', (req, res) => {
 router.get('/attendance/today', (req, res) => {
   res.set({ 'Cache-Control': 'private, no-store', Pragma: 'no-cache' });
   res.json({ success: true, ...getTodayAttendanceForRep(req.user.id) });
+});
+
+router.post('/attendance/overtime-request', (req, res) => {
+  const request = requestOvertimeForRep(req.user.id, req.body);
+  publishOperationsEvent('overtime.requested', {
+    requestId: request.id,
+    employeeId: request.employee_id,
+    workDate: request.work_date,
+    reason: request.reason,
+    userId: req.user.id,
+    recipientUserIds: [req.user.id],
+  });
+  res.status(201).json({ success: true, request });
+});
+
+router.post('/attendance/overtime-request/cancel', (req, res) => {
+  const request = cancelOvertimeRequestForRep(req.user.id);
+  publishOperationsEvent('overtime.reviewed', {
+    requestId: request.id,
+    employeeId: request.employee_id,
+    workDate: request.work_date,
+    decision: 'cancelled',
+    userId: req.user.id,
+    recipientUserIds: [req.user.id],
+  });
+  res.json({ success: true, request });
 });
 
 router.post('/attendance/clock-in', (req, res) => {
@@ -284,6 +312,15 @@ router.get('/fault-reasons', (_req, res) => {
 router.get('/map/packs', (_req, res) => {
   res.set({ 'Cache-Control': 'private, no-store', Pragma: 'no-cache' });
   res.json({ success: true, packs: getOfflineMapPackCatalog() });
+});
+
+router.get('/map/google', (_req, res) => {
+  res.set({ 'Cache-Control': 'private, max-age=300' });
+  res.json({
+    success: true,
+    enabled: Boolean(env.googleMapsApiKey),
+    apiKey: env.googleMapsApiKey || null,
+  });
 });
 
 router.get('/map/packs/:packId/manifest', (req, res, next) => {

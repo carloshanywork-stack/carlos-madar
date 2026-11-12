@@ -11,8 +11,10 @@ import {
   getAttendanceBusinessDate,
   getAttendanceBusinessTimeZone,
   getOverdueAttendance,
+  listOvertimeRequests,
   listPendingOvertime,
   reviewOvertime,
+  reviewOvertimeRequest,
 } from './attendance.js';
 
 const router = Router();
@@ -28,6 +30,49 @@ function requireAdmin(req, res, next) {
 router.get('/pending-overtime', requireFinanceOrAdmin, (_req, res) => {
   res.set({ 'Cache-Control': 'private, no-store', Pragma: 'no-cache' });
   res.json({ records: listPendingOvertime() });
+});
+
+router.get('/overtime-requests', requireFinanceOrAdmin, (req, res) => {
+  res.set({ 'Cache-Control': 'private, no-store', Pragma: 'no-cache' });
+  res.json({ success: true, requests: listOvertimeRequests(req.query.status ?? 'pending') });
+});
+
+router.post('/overtime-requests/:id/approve', requireFinanceOrAdmin, (req, res) => {
+  const body = requireObject(req.body ?? {});
+  allowOnlyKeys(body, ['note']);
+  const request = reviewOvertimeRequest(req.params.id, 'approved', requestActorId(req), undefined, {
+    note: body.note,
+  });
+  publishOperationsEvent('overtime.reviewed', {
+    requestId: request.id,
+    employeeId: request.employee_id,
+    employeeName: request.employee_name,
+    workDate: request.work_date,
+    decision: 'approved',
+    userId: request.requested_by,
+    recipientUserIds: [Number(request.requested_by)],
+  });
+  res.set({ 'Cache-Control': 'private, no-store' });
+  res.json({ success: true, request });
+});
+
+router.post('/overtime-requests/:id/reject', requireFinanceOrAdmin, (req, res) => {
+  const body = requireObject(req.body ?? {});
+  allowOnlyKeys(body, ['note']);
+  const request = reviewOvertimeRequest(req.params.id, 'rejected', requestActorId(req), undefined, {
+    note: body.note,
+  });
+  publishOperationsEvent('overtime.reviewed', {
+    requestId: request.id,
+    employeeId: request.employee_id,
+    employeeName: request.employee_name,
+    workDate: request.work_date,
+    decision: 'rejected',
+    userId: request.requested_by,
+    recipientUserIds: [Number(request.requested_by)],
+  });
+  res.set({ 'Cache-Control': 'private, no-store' });
+  res.json({ success: true, request });
 });
 
 router.get('/today', requireAdmin, (_req, res) => {

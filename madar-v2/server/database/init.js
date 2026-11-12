@@ -53,6 +53,7 @@ const adminClockOutNoteMigration = '20261104-attendance-admin-clockout-note';
 const attendanceClockLocationMigration = '20261105-attendance-clock-gps';
 const attendanceBiometricMigration = '20261105-attendance-biometric-confirmation';
 const repAttendanceSyncMigration = '20261110-rep-offline-attendance-sync';
+const attendanceOvertimeRequestsMigration = '20261112-attendance-overtime-requests';
 const attendanceCancellationMigration = '20261111-attendance-cancellation-status';
 const machineUpdatedAtMigration = '20261111-machine-updated-at';
 const machineVerificationCorrectionsMigration = '20261104-machine-verification-corrections';
@@ -1157,6 +1158,73 @@ export function migrateRepAttendanceSync(database) {
   migrate.immediate();
 }
 
+export function migrateAttendanceOvertimeRequests(database) {
+  const migrate = database.transaction(() => {
+    const applied = database.prepare('SELECT 1 FROM schema_migrations WHERE version = ?')
+      .get(attendanceOvertimeRequestsMigration);
+    if (applied) return;
+
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS attendance_overtime_requests (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        employee_id INTEGER NOT NULL REFERENCES employees(id),
+        work_date TEXT NOT NULL,
+        requested_by INTEGER NOT NULL REFERENCES users(id),
+        reason TEXT,
+        status TEXT NOT NULL DEFAULT 'pending'
+          CHECK (status IN ('pending', 'approved', 'rejected', 'cancelled', 'used')),
+        supervisor_id INTEGER REFERENCES users(id),
+        supervisor_note TEXT,
+        decided_at TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_overtime_requests_open
+        ON attendance_overtime_requests(employee_id, work_date)
+        WHERE status IN ('pending', 'approved');
+      CREATE INDEX IF NOT EXISTS idx_overtime_requests_status_date
+        ON attendance_overtime_requests(status, work_date, employee_id);
+
+      CREATE TABLE IF NOT EXISTS attendance_overtime_sessions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        request_id INTEGER NOT NULL UNIQUE REFERENCES attendance_overtime_requests(id),
+        employee_id INTEGER NOT NULL REFERENCES employees(id),
+        work_date TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'closed', 'cancelled')),
+        clock_in_time TEXT NOT NULL,
+        clock_in_source TEXT NOT NULL CHECK (clock_in_source IN ('app', 'admin')),
+        clock_in_lat REAL,
+        clock_in_lng REAL,
+        clock_in_accuracy REAL,
+        clock_in_location_at TEXT,
+        clock_in_biometric_verified INTEGER NOT NULL DEFAULT 0
+          CHECK (clock_in_biometric_verified IN (0, 1)),
+        clock_out_time TEXT,
+        clock_out_source TEXT CHECK (clock_out_source IN ('app', 'admin')),
+        clock_out_lat REAL,
+        clock_out_lng REAL,
+        clock_out_accuracy REAL,
+        clock_out_location_at TEXT,
+        clock_out_biometric_verified INTEGER NOT NULL DEFAULT 0
+          CHECK (clock_out_biometric_verified IN (0, 1)),
+        clock_out_admin_note TEXT,
+        total_hours REAL NOT NULL DEFAULT 0 CHECK (total_hours >= 0),
+        overtime_hours REAL NOT NULL DEFAULT 0 CHECK (overtime_hours >= 0),
+        normal_overtime_hours REAL NOT NULL DEFAULT 0 CHECK (normal_overtime_hours >= 0),
+        holiday_overtime_hours REAL NOT NULL DEFAULT 0 CHECK (holiday_overtime_hours >= 0),
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (employee_id, work_date)
+      );
+      CREATE INDEX IF NOT EXISTS idx_overtime_sessions_employee_status
+        ON attendance_overtime_sessions(employee_id, status, work_date);
+    `);
+    database.prepare('INSERT INTO schema_migrations (version) VALUES (?)')
+      .run(attendanceOvertimeRequestsMigration);
+  });
+  migrate.immediate();
+}
+
 export function migrateAttendanceCancellation(database) {
   if (database.prepare('SELECT 1 FROM schema_migrations WHERE version = ?').get(attendanceCancellationMigration)) return;
   const original = database.prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'employee_daily_attendance'`).get()?.sql;
@@ -1862,6 +1930,7 @@ export function initializeDatabase({ database = db, initialAdminPassword = env.i
     migrateAttendanceClockLocations(database);
     migrateAttendanceBiometricConfirmation(database);
     migrateRepAttendanceSync(database);
+    migrateAttendanceOvertimeRequests(database);
     migrateClientProfileCrud(database);
     migrateUserEmployeeLinks(database);
     migrateUserEmployeeProfileSync(database);

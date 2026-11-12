@@ -171,9 +171,21 @@ export function cancelDailyAttendance(employeeIdValue, workDateValue, actorId = 
       WHERE employee_id = ? AND work_date = ?`).get(employeeId, workDate);
     if (!current) throw new HttpError(404, 'Attendance record was not found.');
     if (current.status === 'cancelled') return current;
+    const overtimeRequest = latestOvertimeRequest(employeeId, workDate, database);
+    if (overtimeRequest && ['pending', 'approved', 'used'].includes(overtimeRequest.status)) {
+      database.prepare(`UPDATE attendance_overtime_requests
+        SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(overtimeRequest.id);
+    }
+    const overtimeSession = overtimeSessionForDate(employeeId, workDate, database);
+    if (overtimeSession) {
+      database.prepare(`UPDATE attendance_overtime_sessions
+        SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(overtimeSession.id);
+    }
     database.prepare(`UPDATE employee_daily_attendance SET status = 'cancelled',
       clock_in_time = NULL, clock_out_time = NULL, total_hours = 0, regular_hours = 0,
-      overtime_hours = 0, notes = CASE WHEN COALESCE(notes, '') = ''
+      overtime_hours = 0, normal_overtime_hours = 0, holiday_overtime_hours = 0,
+      overtime_status = 'none', overtime_approved_by = NULL,
+      notes = CASE WHEN COALESCE(notes, '') = ''
         THEN 'تم إلغاء الحضور بواسطة الإدارة'
         ELSE notes || ' | تم إلغاء الحضور بواسطة الإدارة' END
       WHERE employee_id = ? AND work_date = ?`)
@@ -255,17 +267,147 @@ function normalizeLocation(input) {
 function getAttendanceRecord(employeeId, date, database) {
   return database.prepare(`SELECT attendance.*, employee.name,
       COALESCE(employee.department_label, employee.department) AS department,
-      user.role AS user_role
+      user.role AS user_role,
+      overtime_session.id AS overtime_session_id,
+      overtime_session.status AS overtime_session_status,
+      overtime_session.clock_in_time AS overtime_clock_in_time,
+      overtime_session.clock_out_time AS overtime_clock_out_time,
+      overtime_session.clock_in_source AS overtime_clock_in_source,
+      overtime_session.clock_out_source AS overtime_clock_out_source,
+      overtime_session.clock_in_lat AS overtime_clock_in_lat,
+      overtime_session.clock_in_lng AS overtime_clock_in_lng,
+      overtime_session.clock_in_accuracy AS overtime_clock_in_accuracy,
+      overtime_session.clock_out_lat AS overtime_clock_out_lat,
+      overtime_session.clock_out_lng AS overtime_clock_out_lng,
+      overtime_session.clock_out_accuracy AS overtime_clock_out_accuracy,
+      overtime_session.clock_out_admin_note AS overtime_clock_out_admin_note,
+      overtime_session.total_hours AS overtime_total_hours,
+      overtime_session.overtime_hours AS overtime_session_hours,
+      overtime_session.normal_overtime_hours AS overtime_normal_hours,
+      overtime_session.holiday_overtime_hours AS overtime_holiday_hours,
+      overtime_session.clock_in_biometric_verified AS overtime_clock_in_biometric_verified,
+      overtime_session.clock_out_biometric_verified AS overtime_clock_out_biometric_verified,
+      overtime_request.id AS overtime_request_id,
+      overtime_request.status AS overtime_request_status,
+      overtime_request.reason AS overtime_request_reason,
+      overtime_request.created_at AS overtime_requested_at
     FROM employee_daily_attendance attendance
     JOIN employees employee ON employee.id = attendance.employee_id
     LEFT JOIN users user ON user.id = employee.user_id
+    LEFT JOIN attendance_overtime_sessions overtime_session
+      ON overtime_session.employee_id = attendance.employee_id
+      AND overtime_session.work_date = attendance.work_date
+      AND overtime_session.status != 'cancelled'
+    LEFT JOIN attendance_overtime_requests overtime_request
+      ON overtime_request.id = (
+        SELECT request.id FROM attendance_overtime_requests request
+        WHERE request.employee_id = attendance.employee_id
+          AND request.work_date = attendance.work_date
+        ORDER BY request.id DESC LIMIT 1
+      )
     WHERE attendance.employee_id = ? AND attendance.work_date = ?`).get(employeeId, date);
+}
+
+function latestOvertimeRequest(employeeId, date, database) {
+  return database.prepare(`SELECT * FROM attendance_overtime_requests
+    WHERE employee_id = ? AND work_date = ? ORDER BY id DESC LIMIT 1`).get(employeeId, date);
+}
+
+function overtimeSessionForDate(employeeId, date, database) {
+  return database.prepare(`SELECT * FROM attendance_overtime_sessions
+    WHERE employee_id = ? AND work_date = ? AND status != 'cancelled'
+    ORDER BY id DESC LIMIT 1`).get(employeeId, date);
+}
+
+function openOvertimeSession(employeeId, database) {
+  return database.prepare(`SELECT session.*, request.status AS request_status
+    FROM attendance_overtime_sessions session
+    JOIN attendance_overtime_requests request ON request.id = session.request_id
+    WHERE session.employee_id = ? AND session.status = 'open'
+    ORDER BY session.id DESC LIMIT 1`).get(employeeId);
+}
+
+/** Every approved second-session hour is overtime; Friday hours use the holiday rate. */
+function calculateOvertimeSessionHours(clockInTime, clockOutTime, timeZone = DEFAULT_TIME_ZONE) {
+  const start = Date.parse(clockInTime);
+  const end = Date.parse(clockOutTime);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+    throw new HttpError(400, 'Clock-out must be later than clock-in.');
+  }
+  if (end - start > 366 * 24 * hourMs) {
+    throw new HttpError(409, 'This overtime session spans more than one year and requires administrative correction.');
+  }
+
+  const firstDay = localParts(start, timeZone);
+  const finalDay = localParts(Math.max(start, end - 1), timeZone);
+  let day = { year: firstDay.year, month: firstDay.month, day: firstDay.day };
+  const lastKey = dateKey(finalDay);
+  let normalMilliseconds = 0;
+  let holidayMilliseconds = 0;
+
+  for (let count = 0; count < 366; count += 1) {
+    const nextDay = nextCalendarDate(day);
+    const dayStart = zonedLocalEpoch(day, 0, timeZone);
+    const dayEnd = zonedLocalEpoch(nextDay, 0, timeZone);
+    const overlap = Math.max(0, Math.min(end, dayEnd) - Math.max(start, dayStart));
+    const weekday = new Date(Date.UTC(day.year, day.month - 1, day.day)).getUTCDay();
+    if (weekday === 5) holidayMilliseconds += overlap;
+    else normalMilliseconds += overlap;
+    if (dateKey(day) === lastKey) break;
+    day = nextDay;
+  }
+
+  const normalOvertimeHours = roundHours(normalMilliseconds);
+  const holidayOvertimeHours = roundHours(holidayMilliseconds);
+  return {
+    totalHours: roundHours(end - start),
+    regularHours: 0,
+    overtimeHours: roundHours(normalMilliseconds + holidayMilliseconds),
+    normalOvertimeHours,
+    holidayOvertimeHours,
+  };
 }
 
 function openAttendance(employeeId, database) {
   return database.prepare(`SELECT * FROM employee_daily_attendance
     WHERE employee_id = ? AND clock_in_time IS NOT NULL AND clock_out_time IS NULL
     ORDER BY work_date DESC, id DESC LIMIT 1`).get(employeeId);
+}
+
+function clockInOvertime(employeeId, attendance, request, source, location, actorId, database,
+  { now, biometricVerified = false, offlineSync = false, actionUuid = null } = {}) {
+  const clockInTime = now.toISOString();
+  const run = database.transaction(() => {
+    const claimed = database.prepare(`UPDATE attendance_overtime_requests
+      SET status = 'used', updated_at = CURRENT_TIMESTAMP
+      WHERE id = ? AND status = 'approved'`).run(request.id);
+    if (!claimed.changes) throw new HttpError(409, 'This overtime request is no longer approved.');
+    database.prepare(`INSERT INTO attendance_overtime_sessions
+        (request_id, employee_id, work_date, status, clock_in_time, clock_in_source,
+         clock_in_lat, clock_in_lng, clock_in_accuracy, clock_in_location_at, clock_in_biometric_verified)
+      VALUES (?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?)`)
+      .run(request.id, employeeId, attendance.work_date, clockInTime, source,
+        location?.latitude ?? null, location?.longitude ?? null, location?.accuracy ?? null,
+        location?.updatedAt ?? null, biometricVerified ? 1 : 0);
+    const current = getAttendanceRecord(employeeId, attendance.work_date, database);
+    recordAudit({ database, actorId, action: 'overtime_clock_in', entityType: 'employee_attendance',
+      entityId: attendance.id,
+      oldValues: { overtime_request_status: request.status, overtime_clock_in_time: null },
+      newValues: {
+        overtime_request_id: request.id,
+        overtime_clock_in_time: clockInTime,
+        overtime_clock_in_source: source,
+        overtime_clock_in_lat: location?.latitude ?? null,
+        overtime_clock_in_lng: location?.longitude ?? null,
+        overtime_clock_in_accuracy: location?.accuracy ?? null,
+        overtime_clock_in_location_at: location?.updatedAt ?? null,
+        overtime_clock_in_biometric_verified: Boolean(biometricVerified),
+        offline_sync: Boolean(offlineSync),
+        ...(actionUuid ? { client_action_uuid: actionUuid } : {}),
+      } });
+    return current;
+  });
+  return run.immediate();
 }
 
 function clockIn(employeeIdValue, source, location, actorId, database = db,
@@ -280,9 +422,24 @@ function clockIn(employeeIdValue, source, location, actorId, database = db,
   const clockInTime = now.toISOString();
   assertAttendanceMonthOpen(date, database);
   if (openAttendance(employeeId, database)) throw new HttpError(409, 'This employee already has an open attendance record.');
+  if (openOvertimeSession(employeeId, database)) throw new HttpError(409, 'This employee already has an open overtime attendance session.');
 
   const previous = getAttendanceRecord(employeeId, date, database);
-  if (previous?.clock_in_time) throw new HttpError(409, 'Attendance has already been clocked in for today.');
+  if (previous?.clock_in_time) {
+    const overtimeRequest = latestOvertimeRequest(employeeId, date, database);
+    const overtimeSession = overtimeSessionForDate(employeeId, date, database);
+    if (overtimeRequest?.status !== 'approved' || overtimeSession) {
+      if (overtimeSession) {
+        throw new HttpError(409, 'Attendance has already been clocked in for today and the additional overtime session has already been used.');
+      }
+      throw new HttpError(409, overtimeRequest?.status === 'rejected'
+        ? 'The overtime request for today was rejected. Request overtime again before a second clock-in.'
+        : 'Attendance has already been clocked in for today. Request and receive overtime approval before a second clock-in.');
+    }
+    return clockInOvertime(employee.id, previous, overtimeRequest, source, location, actorId, database, {
+      now, biometricVerified, offlineSync, actionUuid,
+    });
+  }
   const local = localParts(now.valueOf(), timeZone);
   const weekday = new Date(Date.UTC(
     local.year,
@@ -338,10 +495,83 @@ function clockIn(employeeIdValue, source, location, actorId, database = db,
   return run.immediate();
 }
 
+function clockOutOvertime(employeeId, session, source, location, actorId, database,
+  { now = new Date(), adminNote = null, customTime = false, biometricVerified = false, offlineSync = false, actionUuid = null } = {}) {
+  assertAttendanceMonthOpen(session.work_date, database);
+  const clockOutTime = now.toISOString();
+  if (source === 'app' && now.valueOf() > Date.now() + 5 * 60 * 1000) {
+    throw new HttpError(400, 'Clock-out time cannot be more than five minutes in the future.');
+  }
+  const timeZone = getTimeZone(database);
+  if (customTime && localDate(now, timeZone).slice(0, 7) !== session.work_date.slice(0, 7)) {
+    throw new HttpError(409, 'Clock-out must remain in the same payroll month as the open overtime session.');
+  }
+  if (source === 'admin' && now.valueOf() > Date.now()) {
+    throw new HttpError(400, 'Administrative clock-out time cannot be in the future.');
+  }
+  const daily = database.prepare(`SELECT id FROM employee_daily_attendance
+    WHERE employee_id = ? AND work_date = ?`).get(employeeId, session.work_date);
+  if (!daily) throw new HttpError(409, 'The original attendance record for this overtime session is missing.');
+  const hours = calculateOvertimeSessionHours(session.clock_in_time, clockOutTime, timeZone);
+  const run = database.transaction(() => {
+    const result = database.prepare(`UPDATE attendance_overtime_sessions
+      SET clock_out_time = ?, clock_out_source = ?, clock_out_lat = ?, clock_out_lng = ?,
+        clock_out_accuracy = ?, clock_out_location_at = ?, clock_out_biometric_verified = ?,
+        clock_out_admin_note = ?, total_hours = ?, overtime_hours = ?,
+        normal_overtime_hours = ?, holiday_overtime_hours = ?, status = 'closed',
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = ? AND status = 'open' AND clock_out_time IS NULL`)
+      .run(clockOutTime, source, location?.latitude ?? null, location?.longitude ?? null,
+        location?.accuracy ?? null, location?.updatedAt ?? null, biometricVerified ? 1 : 0,
+        source === 'admin' ? adminNote : null, hours.totalHours, hours.overtimeHours,
+        hours.normalOvertimeHours, hours.holidayOvertimeHours, session.id);
+    if (!result.changes) throw new HttpError(409, 'This overtime session has already been clocked out.');
+    database.prepare(`UPDATE employee_daily_attendance SET
+        total_hours = ROUND(COALESCE(total_hours, 0) + ?, 2),
+        overtime_hours = ROUND(COALESCE(overtime_hours, 0) + ?, 2),
+        normal_overtime_hours = ROUND(COALESCE(normal_overtime_hours, 0) + ?, 2),
+        holiday_overtime_hours = ROUND(COALESCE(holiday_overtime_hours, 0) + ?, 2),
+        overtime_status = CASE WHEN ROUND(COALESCE(overtime_hours, 0) + ?, 2) > 0 THEN 'pending' ELSE 'none' END,
+        overtime_approved_by = NULL
+      WHERE id = ?`)
+      .run(hours.totalHours, hours.overtimeHours, hours.normalOvertimeHours,
+        hours.holidayOvertimeHours, hours.overtimeHours, daily.id);
+    const updated = getAttendanceRecord(employeeId, session.work_date, database);
+    updated.last_clock_out_kind = 'overtime';
+    updated.last_clock_out_time = clockOutTime;
+    recordAudit({ database, actorId, action: source === 'admin' ? 'admin_overtime_clock_out' : 'overtime_clock_out',
+      entityType: 'employee_attendance', entityId: daily.id,
+      oldValues: { overtime_clock_out_time: null, overtime_status: 'open' },
+      newValues: {
+        overtime_session_id: session.id,
+        overtime_clock_out_time: clockOutTime,
+        overtime_clock_out_source: source,
+        overtime_clock_out_lat: location?.latitude ?? null,
+        overtime_clock_out_lng: location?.longitude ?? null,
+        overtime_clock_out_accuracy: location?.accuracy ?? null,
+        overtime_clock_out_location_at: location?.updatedAt ?? null,
+        overtime_clock_out_biometric_verified: Boolean(biometricVerified),
+        overtime_clock_out_admin_note: source === 'admin' ? adminNote : null,
+        overtime_status: 'pending',
+        offline_sync: Boolean(offlineSync),
+        ...(actionUuid ? { client_action_uuid: actionUuid } : {}),
+        ...hours,
+      } });
+    return updated;
+  });
+  return run.immediate();
+}
+
 function clockOut(employeeIdValue, source, location, actorId, database = db,
   { now = new Date(), adminNote = null, customTime = false, biometricVerified = false, offlineSync = false, actionUuid = null } = {}) {
   const employeeId = positiveId(employeeIdValue, 'employeeId');
   const employee = activeEmployee(employeeId, database);
+  const overtime = openOvertimeSession(employee.id, database);
+  if (overtime) {
+    return clockOutOvertime(employee.id, overtime, source, location, actorId, database, {
+      now, adminNote, customTime, biometricVerified, offlineSync, actionUuid,
+    });
+  }
   const current = openAttendance(employee.id, database);
   if (!current) throw new HttpError(409, 'There is no open attendance record for this employee.');
   assertAttendanceMonthOpen(current.work_date, database);
@@ -424,7 +654,9 @@ export function clockInForRep(userId, input, database = db, options = {}) {
   const employee = employeeForRep(positiveId(userId, 'userId'), database);
   return database.transaction(() => {
     const attendance = clockIn(employee.id, 'app', location, userId, database, { ...options, biometricVerified: true });
-    recordAttendanceDuty(database, userId, 'in', attendance.clock_in_time, location);
+    recordAttendanceDuty(database, userId, 'in',
+      attendance.overtime_session_status === 'open' ? attendance.overtime_clock_in_time : attendance.clock_in_time,
+      location);
     return attendance;
   })();
 }
@@ -439,7 +671,7 @@ export function clockOutForRep(userId, input, database = db, options = {}) {
   const employee = employeeForRep(positiveId(userId, 'userId'), database);
   return database.transaction(() => {
     const attendance = clockOut(employee.id, 'app', location, userId, database, { ...options, biometricVerified: true });
-    recordAttendanceDuty(database, userId, 'out', attendance.clock_out_time, location);
+    recordAttendanceDuty(database, userId, 'out', attendance.last_clock_out_time ?? attendance.clock_out_time, location);
     return attendance;
   })();
 }
@@ -547,7 +779,138 @@ export function recordRepMockLocationAttempt(userIdValue, input, database = db) 
 export function getTodayAttendanceForRep(userId, database = db, now = new Date()) {
   const employee = employeeForRep(positiveId(userId, 'userId'), database);
   const date = localDate(now, getTimeZone(database));
-  return { date, attendance: getAttendanceRecord(employee.id, date, database) ?? null };
+  return {
+    date,
+    attendance: getAttendanceRecord(employee.id, date, database) ?? null,
+    overtimeRequest: latestOvertimeRequest(employee.id, date, database) ?? null,
+  };
+}
+
+export function requestOvertimeForRep(userIdValue, input = {}, database = db, { now = new Date() } = {}) {
+  const userId = positiveId(userIdValue, 'userId');
+  const body = requireObject(input ?? {});
+  allowOnlyKeys(body, ['reason']);
+  const reason = body.reason === undefined || body.reason === null || String(body.reason).trim() === ''
+    ? null
+    : requireText(body.reason, 'reason', { maxLength: 500 });
+  const employee = employeeForRep(userId, database);
+  const date = localDate(now, getTimeZone(database));
+  assertAttendanceMonthOpen(date, database);
+  const attendance = getAttendanceRecord(employee.id, date, database);
+  if (!attendance?.clock_in_time || !attendance.clock_out_time || attendance.status === 'cancelled') {
+    throw new HttpError(409, 'Clock out from the regular attendance session before requesting overtime.');
+  }
+  const existing = latestOvertimeRequest(employee.id, date, database);
+  if (existing?.status === 'pending') {
+    throw new HttpError(409, 'An overtime request for today is already waiting for supervisor approval.');
+  }
+  if (existing?.status === 'approved') {
+    throw new HttpError(409, 'An overtime request for today is already approved and ready for the second clock-in.');
+  }
+  if (existing && ['used'].includes(existing.status)) {
+    throw new HttpError(409, 'The overtime session for today has already been used.');
+  }
+  if (overtimeSessionForDate(employee.id, date, database)) {
+    throw new HttpError(409, 'An overtime session has already been recorded for today.');
+  }
+
+  return database.transaction(() => {
+    const result = database.prepare(`INSERT INTO attendance_overtime_requests
+        (employee_id, work_date, requested_by, reason, status)
+      VALUES (?, ?, ?, ?, 'pending')`).run(employee.id, date, userId, reason);
+    const request = database.prepare('SELECT * FROM attendance_overtime_requests WHERE id = ?')
+      .get(result.lastInsertRowid);
+    recordAudit({ database, actorId: userId, action: 'overtime_requested',
+      entityType: 'employee_attendance', entityId: attendance.id,
+      oldValues: { overtime_request_status: existing?.status ?? null },
+      newValues: { overtime_request_id: request.id, work_date: date, reason, status: 'pending' } });
+    return request;
+  }).immediate();
+}
+
+export function cancelOvertimeRequestForRep(userIdValue, database = db, { now = new Date() } = {}) {
+  const userId = positiveId(userIdValue, 'userId');
+  const employee = employeeForRep(userId, database);
+  const date = localDate(now, getTimeZone(database));
+  const current = latestOvertimeRequest(employee.id, date, database);
+  if (!current) throw new HttpError(404, 'No overtime request was found for today.');
+  if (current.status !== 'pending') {
+    throw new HttpError(409, 'Only an overtime request still waiting for supervisor approval can be cancelled.');
+  }
+  const attendance = getAttendanceRecord(employee.id, date, database);
+  return database.transaction(() => {
+    const update = database.prepare(`UPDATE attendance_overtime_requests
+      SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP
+      WHERE id = ? AND status = 'pending'`).run(current.id);
+    if (!update.changes) throw new HttpError(409, 'This overtime request has already been reviewed.');
+    recordAudit({ database, actorId: userId, action: 'overtime_request_cancelled',
+      entityType: 'employee_attendance', entityId: attendance?.id ?? employee.id,
+      oldValues: { overtime_request_id: current.id, status: 'pending' },
+      newValues: { overtime_request_id: current.id, status: 'cancelled' } });
+    return database.prepare('SELECT * FROM attendance_overtime_requests WHERE id = ?').get(current.id);
+  }).immediate();
+}
+
+export function listOvertimeRequests(status = 'pending', database = db) {
+  const allowed = ['pending', 'approved', 'rejected', 'cancelled', 'used', 'all'];
+  if (!allowed.includes(status)) throw new HttpError(400, 'Unsupported overtime request status filter.');
+  return database.prepare(`SELECT request.id, request.employee_id, employee.name AS employee_name,
+      COALESCE(employee.department_label, employee.department) AS department,
+      request.work_date, request.reason, request.status, request.requested_by,
+      requester.full_name AS requested_by_name, request.supervisor_id,
+      supervisor.full_name AS supervisor_name, request.supervisor_note,
+      request.decided_at, request.created_at, request.updated_at,
+      attendance.id AS attendance_id, attendance.clock_in_time, attendance.clock_out_time,
+      attendance.total_hours, attendance.regular_hours, attendance.overtime_hours,
+      session.id AS overtime_session_id, session.clock_in_time AS overtime_clock_in_time,
+      session.clock_out_time AS overtime_clock_out_time
+    FROM attendance_overtime_requests request
+    JOIN employees employee ON employee.id = request.employee_id
+    LEFT JOIN employee_daily_attendance attendance
+      ON attendance.employee_id = request.employee_id AND attendance.work_date = request.work_date
+    LEFT JOIN users requester ON requester.id = request.requested_by
+    LEFT JOIN users supervisor ON supervisor.id = request.supervisor_id
+    LEFT JOIN attendance_overtime_sessions session
+      ON session.request_id = request.id AND session.status != 'cancelled'
+    WHERE (? = 'all' OR request.status = ?)
+    ORDER BY request.work_date DESC, request.created_at, request.id`).all(status, status);
+}
+
+export function reviewOvertimeRequest(requestIdValue, decision, actorId, database = db, { note = null } = {}) {
+  const requestId = positiveId(requestIdValue, 'requestId');
+  if (!['approved', 'rejected'].includes(decision)) throw new HttpError(400, 'Unsupported overtime request decision.');
+  const supervisorNote = note === undefined || note === null || String(note).trim() === ''
+    ? null
+    : requireText(note, 'note', { maxLength: 500 });
+  const current = database.prepare(`SELECT request.*, employee.name AS employee_name
+    FROM attendance_overtime_requests request
+    JOIN employees employee ON employee.id = request.employee_id
+    WHERE request.id = ?`).get(requestId);
+  if (!current) throw new HttpError(404, 'Overtime request was not found.');
+  if (current.status !== 'pending') throw new HttpError(409, 'Only a pending overtime request can be approved or rejected.');
+  assertAttendanceMonthOpen(current.work_date, database);
+  const attendance = database.prepare(`SELECT id FROM employee_daily_attendance
+    WHERE employee_id = ? AND work_date = ?`).get(current.employee_id, current.work_date);
+
+  return database.transaction(() => {
+    const update = database.prepare(`UPDATE attendance_overtime_requests
+      SET status = ?, supervisor_id = ?, supervisor_note = ?, decided_at = CURRENT_TIMESTAMP,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = ? AND status = 'pending'`)
+      .run(decision, actorId ?? null, supervisorNote, requestId);
+    if (!update.changes) throw new HttpError(409, 'This overtime request has already been reviewed.');
+    recordAudit({ database, actorId, action: `overtime_request_${decision}`,
+      entityType: 'employee_attendance', entityId: attendance?.id ?? current.employee_id,
+      oldValues: { overtime_request_id: requestId, status: 'pending' },
+      newValues: { overtime_request_id: requestId, status: decision, supervisor_note: supervisorNote } });
+    return database.prepare(`SELECT request.*, employee.name AS employee_name,
+        COALESCE(employee.department_label, employee.department) AS department,
+        supervisor.full_name AS supervisor_name
+      FROM attendance_overtime_requests request
+      JOIN employees employee ON employee.id = request.employee_id
+      LEFT JOIN users supervisor ON supervisor.id = request.supervisor_id
+      WHERE request.id = ?`).get(requestId);
+  }).immediate();
 }
 
 export function listPendingOvertime(database = db) {

@@ -17,7 +17,10 @@ const [{ app }, { db }, {
   migrateStaffPayrollRules,
   migrateUserEmployeeLinks,
   migrateUserEmployeeProfileSync,
-}, { calculateShiftHours, getAttendanceBusinessDate, getOverdueAttendance }] = await Promise.all([
+}, { calculateShiftHours, getAttendanceBusinessDate, getOverdueAttendance,
+  clockInForEmployee, clockOutForEmployee, clockInForRep, clockOutForRep,
+  requestOvertimeForRep, cancelOvertimeRequestForRep, reviewOvertimeRequest,
+  listOvertimeRequests, getTodayAttendanceForRep }] = await Promise.all([
   import('../server/app.js'),
   import('../server/database/connection.js'),
   import('../server/database/init.js'),
@@ -463,6 +466,140 @@ test('rep and admin clock actions persist source/GPS, guard duplicate punches, a
   assert.equal(rejected.response.status, 200, JSON.stringify(rejected.body));
   assert.equal(rejected.body.attendance.overtime_status, 'rejected');
   assert.equal(rejected.body.attendance.overtime_approved_by, null);
+});
+
+test('overtime requests are approved once and open exactly one extra attendance session', () => {
+  const adminId = db.prepare("SELECT id FROM users WHERE username = 'root'").get().id;
+  const userId = Number(db.prepare(`INSERT INTO users (username, password_hash, full_name, role)
+    VALUES ('overtime-rep', 'test-hash', 'Overtime Representative', 'rep')`).run().lastInsertRowid);
+  const employeeId = Number(db.prepare(`INSERT INTO employees (name, department, user_id, can_login)
+    VALUES ('Overtime Representative', 'Maintenance', ?, 1)`).run(userId).lastInsertRowid);
+
+  const now = new Date('2026-11-05T14:00:00.000Z');
+  const at = (hours) => new Date(now.getTime() + hours * 3_600_000);
+  const workDate = getAttendanceBusinessDate(db, now);
+  const location = { latitude: 30.05, longitude: 31.24, accuracy: 8, updatedAt: at(-4).toISOString() };
+
+  clockInForEmployee(employeeId, adminId, db, { now: at(-4) });
+  assert.throws(() => requestOvertimeForRep(userId, {}, db, { now: at(-3) }),
+    /Clock out from the regular attendance session/);
+  clockOutForEmployee(employeeId, adminId, db, { now: at(-2) });
+
+  const firstRequest = requestOvertimeForRep(userId, { reason: 'استكمال زيارة متأخرة' }, db, { now });
+  assert.equal(firstRequest.status, 'pending');
+  assert.equal(firstRequest.work_date, workDate);
+  assert.equal(firstRequest.reason, 'استكمال زيارة متأخرة');
+  assert.throws(() => requestOvertimeForRep(userId, {}, db, { now }), /already waiting for supervisor approval/);
+  assert.throws(() => clockInForRep(userId, { location, biometricVerified: true }, db, { now }),
+    /Request and receive overtime approval/);
+
+  const cancelled = cancelOvertimeRequestForRep(userId, db, { now });
+  assert.equal(cancelled.status, 'cancelled');
+  assert.throws(() => cancelOvertimeRequestForRep(userId, db, { now }), /still waiting for supervisor approval/);
+
+  const secondRequest = requestOvertimeForRep(userId, {}, db, { now });
+  assert.equal(secondRequest.status, 'pending');
+  assert.ok(listOvertimeRequests('pending', db).some((request) => request.id === secondRequest.id));
+  assert.throws(() => listOvertimeRequests('bogus', db), /Unsupported overtime request status filter/);
+
+  const approved = reviewOvertimeRequest(secondRequest.id, 'approved', adminId, db, { note: 'معتمد من المشرف' });
+  assert.equal(approved.status, 'approved');
+  assert.equal(approved.supervisor_id, adminId);
+  assert.equal(approved.supervisor_note, 'معتمد من المشرف');
+  assert.ok(listOvertimeRequests('approved', db).some((request) => request.id === secondRequest.id));
+  assert.throws(() => reviewOvertimeRequest(secondRequest.id, 'rejected', adminId, db),
+    /Only a pending overtime request/);
+
+  const overtimeIn = clockInForRep(userId, { location, biometricVerified: true }, db, { now });
+  assert.equal(overtimeIn.overtime_session_status, 'open');
+  assert.equal(overtimeIn.overtime_clock_in_time, now.toISOString());
+  assert.equal(overtimeIn.clock_in_time, at(-4).toISOString(), 'the regular session is preserved');
+  assert.equal(overtimeIn.overtime_request_status, 'used');
+  assert.equal(db.prepare('SELECT status FROM attendance_overtime_requests WHERE id = ?').get(secondRequest.id).status, 'used');
+  assert.throws(() => clockInForRep(userId, { location, biometricVerified: true }, db, { now }),
+    /open overtime attendance session/);
+
+  const overtimeOut = clockOutForRep(userId, { location, biometricVerified: true }, db, { now: at(1) });
+  assert.equal(overtimeOut.overtime_session_status, 'closed');
+  assert.equal(overtimeOut.last_clock_out_kind, 'overtime');
+  assert.equal(overtimeOut.overtime_session_hours, 1);
+  assert.equal(overtimeOut.overtime_hours, 1);
+  assert.equal(overtimeOut.overtime_status, 'pending');
+  assert.equal(overtimeOut.clock_out_time, at(-2).toISOString(), 'the regular clock-out is untouched');
+  assert.throws(() => clockOutForRep(userId, { location, biometricVerified: true }, db, { now }),
+    /already been clocked out|open attendance record/);
+  assert.throws(() => clockInForRep(userId, { location, biometricVerified: true }, db, { now }),
+    /additional overtime session has already been used/);
+
+  const todayForRep = getTodayAttendanceForRep(userId, db, now);
+  assert.equal(todayForRep.attendance.overtime_session_status, 'closed');
+  assert.equal(todayForRep.overtimeRequest.status, 'used');
+
+  const auditActions = db.prepare(`SELECT action FROM audit_log
+    WHERE entity_type = 'employee_attendance' AND entity_id IN (?, ?)
+    ORDER BY id`).all(String(todayForRep.attendance.id), String(employeeId)).map((row) => row.action);
+  for (const action of ['overtime_requested', 'overtime_request_cancelled', 'overtime_request_approved',
+    'overtime_clock_in', 'overtime_clock_out']) {
+    assert.ok(auditActions.includes(action), `missing overtime audit action ${action}`);
+  }
+});
+
+test('overtime approval endpoints let a representative use one extra session and expose map config', async () => {
+  const adminLogin = await request('/api/auth/login', jsonOptions('POST', { username: 'root', password: '1234' }));
+  assert.equal(adminLogin.response.status, 200);
+  const adminCookie = adminLogin.cookie;
+  const repLogin = await request('/api/rep/login', jsonOptions('POST', { username: 'attendance-rep', password: 'rep4' }));
+  assert.equal(repLogin.response.status, 200, JSON.stringify(repLogin.body));
+  const repCookie = repLogin.cookie;
+  const rep = db.prepare("SELECT id, user_id FROM employees WHERE name = 'Attendance Rep'").get();
+  const today = getAttendanceBusinessDate(db);
+  db.prepare('DELETE FROM employee_daily_attendance WHERE employee_id = ? AND work_date = ?').run(rep.id, today);
+  db.prepare('DELETE FROM attendance_overtime_requests WHERE employee_id = ?').run(rep.id);
+
+  const location = { latitude: 30.0444, longitude: 31.2357, accuracy: 10, updatedAt: new Date().toISOString() };
+  const clockIn = await request('/api/rep/attendance/clock-in', jsonOptions('POST', { location, biometricVerified: true }), repCookie);
+  assert.equal(clockIn.response.status, 201, JSON.stringify(clockIn.body));
+  const clockOut = await request('/api/rep/attendance/clock-out', jsonOptions('POST', { location, biometricVerified: true }), repCookie);
+  assert.equal(clockOut.response.status, 200, JSON.stringify(clockOut.body));
+
+  const requested = await request('/api/rep/attendance/overtime-request', jsonOptions('POST', { reason: 'طلب من المندوب' }), repCookie);
+  assert.equal(requested.response.status, 201, JSON.stringify(requested.body));
+  assert.equal(requested.body.request.status, 'pending');
+  const todayState = await request('/api/rep/attendance/today', {}, repCookie);
+  assert.equal(todayState.body.overtimeRequest.status, 'pending');
+  const requestedEvent = db.prepare(`SELECT payload_json FROM operations_events
+    WHERE event_type = 'overtime.requested' ORDER BY event_id DESC LIMIT 1`).get();
+  assert.equal(JSON.parse(requestedEvent.payload_json).requestId, requested.body.request.id);
+
+  const repReviewForbidden = await request(`/api/attendance/overtime-requests/${requested.body.request.id}/approve`,
+    jsonOptions('POST', {}), repCookie);
+  assert.equal(repReviewForbidden.response.status, 403);
+  const repListForbidden = await request('/api/attendance/overtime-requests?status=pending', {}, repCookie);
+  assert.equal(repListForbidden.response.status, 403);
+  const pendingRequests = await request('/api/attendance/overtime-requests?status=pending', {}, adminCookie);
+  assert.equal(pendingRequests.response.status, 200, JSON.stringify(pendingRequests.body));
+  assert.ok(pendingRequests.body.requests.some((item) => item.id === requested.body.request.id));
+
+  const approved = await request(`/api/attendance/overtime-requests/${requested.body.request.id}/approve`,
+    jsonOptions('POST', { note: 'موافقة المشرف' }), adminCookie);
+  assert.equal(approved.response.status, 200, JSON.stringify(approved.body));
+  assert.equal(approved.body.request.status, 'approved');
+  assert.equal(approved.body.request.supervisor_note, 'موافقة المشرف');
+
+  const overtimeIn = await request('/api/rep/attendance/clock-in', jsonOptions('POST', { location, biometricVerified: true }), repCookie);
+  assert.equal(overtimeIn.response.status, 201, JSON.stringify(overtimeIn.body));
+  assert.equal(overtimeIn.body.attendance.overtime_session_status, 'open');
+  const overtimeOut = await request('/api/rep/attendance/clock-out', jsonOptions('POST', { location, biometricVerified: true }), repCookie);
+  assert.equal(overtimeOut.response.status, 200, JSON.stringify(overtimeOut.body));
+  assert.equal(overtimeOut.body.attendance.overtime_session_status, 'closed');
+  const thirdClockIn = await request('/api/rep/attendance/clock-in', jsonOptions('POST', { location, biometricVerified: true }), repCookie);
+  assert.equal(thirdClockIn.response.status, 409);
+
+  const mapConfig = await request('/api/rep/map/google', {}, repCookie);
+  assert.equal(mapConfig.response.status, 200, JSON.stringify(mapConfig.body));
+  assert.equal(mapConfig.body.success, true);
+  assert.equal(typeof mapConfig.body.enabled, 'boolean');
+  if (!mapConfig.body.enabled) assert.equal(mapConfig.body.apiKey, null);
 });
 
 test('user-to-employee migration backfills unlinked active and inactive accounts idempotently', () => {

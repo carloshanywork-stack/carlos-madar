@@ -54,6 +54,7 @@ export default function AccountingPage({ isAdmin = false }) {
   const { data: employees, reload: reloadEmployees } = useApi('/api/employees?all=1');
   const { data: attendance, loading: attendanceLoading, error: attendanceError, reload: reloadAttendance } = useApi(`/api/employees/attendance?date=${date}`, { enabled: tab === 'attendance' && attendanceView === 'daily' });
   const { data: pendingOvertime, error: overtimeError, reload: reloadPendingOvertime } = useApi('/api/attendance/pending-overtime', { enabled: tab === 'attendance' && isAdmin });
+  const { data: overtimeRequests, error: overtimeRequestError, reload: reloadOvertimeRequests } = useApi('/api/attendance/overtime-requests?status=pending', { enabled: tab === 'attendance' && isAdmin });
   const { data: attendanceToday, reload: reloadAttendanceToday } = useApi('/api/attendance/today', { enabled: tab === 'attendance' && isAdmin });
   const { data: payroll, loading: payrollLoading, error: payrollError, reload: reloadPayroll } = useApi(`/api/employees/payroll?month=${month}`, { enabled: tab === 'payroll' });
   const { data: treasury, loading: treasuryLoading, error: treasuryError } = useApi('/api/finance/treasury', { enabled: tab === 'treasury' });
@@ -72,6 +73,7 @@ export default function AccountingPage({ isAdmin = false }) {
   const [clockOutLocal, setClockOutLocal] = useState('');
   const [clockOutAdminNote, setClockOutAdminNote] = useState('');
   const [reviewingOvertimeId, setReviewingOvertimeId] = useState(null);
+  const [reviewingOvertimeRequestId, setReviewingOvertimeRequestId] = useState(null);
   const { notice, showToast, clearToast } = useToast();
   const activeEmployees = (employees ?? []).filter((employee) => employee.active && !employee.deleted_at);
   const businessTimeZone = attendanceToday?.timeZone || 'Africa/Cairo';
@@ -93,16 +95,17 @@ export default function AccountingPage({ isAdmin = false }) {
     if (!isAdmin || !['attendance', 'payroll'].includes(tab)) return undefined;
     const onOperationsEvent = (message) => {
       const event = message.detail;
-      if (!['attendance.changed', 'overtime.reviewed', 'overtime.pending'].includes(event?.type)) return;
-      void Promise.all([reloadAttendance(), reloadPendingOvertime(), reloadPayroll(), reloadAttendanceToday()]);
+      if (!['attendance.changed', 'overtime.reviewed', 'overtime.pending', 'overtime.requested'].includes(event?.type)) return;
+      void Promise.all([reloadAttendance(), reloadPendingOvertime(), reloadOvertimeRequests(), reloadPayroll(), reloadAttendanceToday()]);
       window.dispatchEvent(new CustomEvent('madar:attendance-updated', { detail: event }));
-      if (event.type === 'overtime.pending') showToast('يوجد أوفر تايم جديد بانتظار الاعتماد.');
+      if (event.type === 'overtime.requested') showToast('وصل طلب أوفرتايم جديد من مندوب بانتظار اعتماد المشرف.');
+      else if (event.type === 'overtime.pending') showToast('يوجد أوفر تايم جديد بانتظار الاعتماد.');
     };
     window.addEventListener('madar:operations-event', onOperationsEvent);
     return () => {
       window.removeEventListener('madar:operations-event', onOperationsEvent);
     };
-  }, [isAdmin, tab, reloadAttendance, reloadPendingOvertime, reloadPayroll, reloadAttendanceToday, showToast]);
+  }, [isAdmin, tab, reloadAttendance, reloadPendingOvertime, reloadOvertimeRequests, reloadPayroll, reloadAttendanceToday, showToast]);
 
   useEffect(() => {
     if (tab !== 'attendance' || !isAdmin) return undefined;
@@ -226,6 +229,19 @@ export default function AccountingPage({ isAdmin = false }) {
     finally { setReviewingOvertimeId(null); }
   }
 
+  async function reviewOvertimeRequest(request, decision) {
+    setReviewingOvertimeRequestId(request.id);
+    setErrorMessageText('');
+    try {
+      await api.post(`/api/attendance/overtime-requests/${request.id}/${decision === 'approved' ? 'approve' : 'reject'}`, {}, { timeoutMs: 4000 });
+      await Promise.all([reloadOvertimeRequests(), reloadAttendanceToday()]);
+      showToast(decision === 'approved'
+        ? `تم اعتماد طلب الأوفرتايم لـ ${request.employee_name}؛ يمكنه الآن تسجيل حضور إضافي.`
+        : `تم رفض طلب الأوفرتايم لـ ${request.employee_name}.`);
+    } catch (caught) { setErrorMessageText(errorMessage(caught)); }
+    finally { setReviewingOvertimeRequestId(null); }
+  }
+
   function changeAttendance(employeeId, key, value) {
     setAttendanceRows((rows) => rows.map((row) => row.employeeId === employeeId ? { ...row, [key]: value } : row));
   }
@@ -286,6 +302,23 @@ export default function AccountingPage({ isAdmin = false }) {
 
       {tab === 'attendance' && <>
         {overtimeError && <div className="madar-section"><Alert tone="error">{overtimeError}</Alert></div>}
+        {overtimeRequestError && <div className="madar-section"><Alert tone="error">{overtimeRequestError}</Alert></div>}
+        {overtimeRequests?.requests?.length > 0 && <section className="madar-panel madar-section" aria-label="طلبات فتح أوفرتايم">
+          <div className="madar-panel-header"><div><h2>طلبات فتح أوفرتايم · اعتماد المشرف</h2><p>بعد الموافقة يستطيع المندوب تسجيل حضور وانصراف إضافي مرة واحدة لنفس اليوم من تطبيق MADAR.</p></div><Badge tone="warning">{overtimeRequests.requests.length}</Badge></div>
+          <div className="madar-table-wrap"><table className="madar-table"><thead><tr><th>المندوب</th><th>التاريخ</th><th>الدوام الأساسي</th><th>السبب</th><th>وقت الطلب</th><th>إجراء</th></tr></thead><tbody>
+            {overtimeRequests.requests.map((request) => <tr key={request.id}>
+              <td><strong>{request.employee_name}</strong><br /><small className="madar-small madar-muted">{request.department}</small></td>
+              <td>{request.work_date}</td>
+              <td>{formatClock(request.clock_in_time, businessTimeZone)}<br /><small className="madar-small madar-muted">إلى {formatClock(request.clock_out_time, businessTimeZone)} · {request.total_hours ?? 0} س</small></td>
+              <td>{request.reason || 'بدون سبب مسجل'}</td>
+              <td>{formatClock(request.created_at, businessTimeZone)}</td>
+              <td>{isAdmin ? <div className="madar-inline-wrap">
+                <Button size="small" disabled={reviewingOvertimeRequestId === request.id} onClick={() => void reviewOvertimeRequest(request, 'approved')}>موافقة وفتح التسجيل</Button>
+                <Button size="small" variant="danger" disabled={reviewingOvertimeRequestId === request.id} onClick={() => void reviewOvertimeRequest(request, 'rejected')}>رفض</Button>
+              </div> : <Badge tone="warning">بانتظار الإدارة</Badge>}</td>
+            </tr>)}
+          </tbody></table></div>
+        </section>}
         {attendanceToday?.overdue?.length > 0 && <section className="madar-panel madar-section" aria-label="تنبيهات عدم تسجيل الانصراف">
           <div className="madar-panel-header"><div><h2>تنبيه: لم يُسجّل الانصراف</h2><p>تجاوز موعد الانصراف الرسمي الساعة 6:00 مساءً · {businessTimeZone}.</p></div><Badge tone="warning">{attendanceToday.overdue.length}</Badge></div>
           <div className="madar-panel-body"><div className="madar-inline-wrap">{attendanceToday.overdue.map((record) => <div key={record.id} className="madar-inline-wrap">

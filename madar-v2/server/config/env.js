@@ -80,6 +80,8 @@ export const env = Object.freeze({
   storageRoot: process.env.MADAR_V2_STORAGE_ROOT?.trim() || undefined,
   backupRoot: process.env.MADAR_V2_BACKUP_ROOT?.trim() || undefined,
   offlineMapPath: process.env.MADAR_V2_OFFLINE_MAP_PATH?.trim() || undefined,
+  googleMapsApiKey: process.env.GOOGLE_MAPS_API_KEY?.trim()
+    || process.env.VITE_GOOGLE_MAPS_API_KEY?.trim() || '',
   repApkPath: process.env.MADAR_REP_APK_PATH?.trim() || undefined,
   initialAdminPassword: process.env.MADAR_INITIAL_ADMIN_PASSWORD ?? '',
   jwtSecret,
