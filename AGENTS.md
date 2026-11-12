@@ -1,5 +1,9 @@
 # Agent instructions
 
+## Git workflow
+- The repository owner wants `main` to be the only branch. Work directly on `main`; do not create feature branches or Git worktrees unless the owner explicitly requests one.
+- Preserve existing edits. Before committing or pushing, inspect the working tree, verify the relevant changes, and run appropriate safe tests. Push completed, verified changes to `origin/main` so the existing deployment process can pick them up. Do not assume a successful push proves the running service or APK has updated; verify their actual state separately.
+
 ## Repository map and commands
 - `system/` is the npm package: Express API in `src/server.js`, React/Vite UI in `src/App.jsx`, SQLite schema/migrations in `src/db.js`, and pure stock arithmetic in `src/inventory.js`.
 - `src/main.jsx` wraps the SPA in `BrowserRouter`; route paths and page mapping live in `src/App.jsx`. Normal API calls use its `fetch` helper; folder-upload progress uses XHR because Fetch does not expose upload progress.
