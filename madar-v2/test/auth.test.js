@@ -304,3 +304,11 @@ test('GET and HEAD requests to web SPA routes return HTTP 200 index.html', async
   assert.match(html, /<title>مدار مناديب<\/title>/);
 });
 
+test('hidden file paths do not fall through to the SPA shell', async () => {
+  for (const path of ['/.env', '/.env.local', '/nested/.secrets']) {
+    const response = await fetch(`${baseUrl}${path}`);
+    assert.equal(response.status, 404, path);
+    assert.match(response.headers.get('content-type') || '', /text\/plain/);
+    assert.equal(await response.text(), 'Not found');
+  }
+});

@@ -167,6 +167,11 @@ if (existsSync(join(clientDistPath, 'index.html'))) {
       next();
       return;
     }
+    const hasHiddenPathSegment = req.path.split('/').some((segment) => segment.startsWith('.') && segment !== '.well-known');
+    if (hasHiddenPathSegment) {
+      res.status(404).type('text/plain').send('Not found');
+      return;
+    }
     res.sendFile(join(clientDistPath, 'index.html'), (error) => {
       if (error && !res.headersSent) next(error);
     });
