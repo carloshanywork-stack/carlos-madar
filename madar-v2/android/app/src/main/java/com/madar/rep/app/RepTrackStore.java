@@ -107,8 +107,8 @@ public final class RepTrackStore extends SQLiteOpenHelper {
         database.execSQL("DROP TABLE breadcrumbs_legacy");
     }
 
-    /** Append a point only for an authenticated representative; unattributed points are never guessed. */
-    public long append(Location location, long repId) {
+/** Append a point only for an authenticated representative; unattributed points are never guessed. */
+public long append(Location location, long repId) {
         if (repId < 1L) return -1L;
         ContentValues values = new ContentValues();
         values.put("rep_id", repId);
@@ -121,7 +121,7 @@ public final class RepTrackStore extends SQLiteOpenHelper {
     }
 
     public JSONArray pendingTrail(long repId) throws JSONException {
-        JSONArray points = new JSONArray();
+    JSONArray points = new JSONArray();
         if (repId < 1L) return points;
         try (Cursor cursor = getReadableDatabase().rawQuery(
             "SELECT _id, timestamp, latitude, longitude, accuracy, speed FROM " + TABLE
@@ -158,14 +158,115 @@ public final class RepTrackStore extends SQLiteOpenHelper {
         try (Cursor cursor = getReadableDatabase().rawQuery(
             "SELECT COUNT(*) FROM " + TABLE + " WHERE rep_id < 1", null
         )) {
-            return cursor.moveToFirst() ? cursor.getInt(0) : 0;
+        return cursor.moveToFirst() ? cursor.getInt(0) : 0;
+    }
+}
+
+/** Pending and rejected, attributable points for an explicit local recovery export. */
+public JSONObject recoveryQueue(long repId) throws JSONException {
+    JSONObject result = new JSONObject();
+    JSONArray pending = new JSONArray();
+        try (Cursor cursor = getReadableDatabase().rawQuery("SELECT _id, timestamp, latitude, longitude, accuracy, speed FROM " + TABLE + " WHERE rep_id = ? ORDER BY _id", new String[] {String.valueOf(repId)})) {
+            while (cursor.moveToNext()) pending.put(new JSONObject().put("trackId", cursor.getLong(0)).put("repId", repId).put("timestamp", cursor.getLong(1)).put("latitude", cursor.getDouble(2)).put("longitude", cursor.getDouble(3)).put("accuracy", cursor.getDouble(4)).put("speed", cursor.getDouble(5)).put("status", "pending"));
+        }
+    JSONArray rejected = new JSONArray();
+    try (Cursor cursor = getReadableDatabase().rawQuery(
+        "SELECT source_track_id, rep_id, timestamp, latitude, longitude, accuracy, speed, reason, rejected_at "
+            + "FROM " + REJECTED_TABLE + " WHERE rep_id = ? ORDER BY rejected_at, _id",
+        new String[] { String.valueOf(repId) })) {
+        while (cursor.moveToNext()) {
+            JSONObject point = new JSONObject();
+            point.put("trackId", cursor.getLong(0));
+            point.put("repId", cursor.getLong(1));
+            point.put("timestamp", cursor.getLong(2));
+            point.put("latitude", cursor.getDouble(3));
+            point.put("longitude", cursor.getDouble(4));
+            point.put("accuracy", cursor.getDouble(5));
+            point.put("speed", cursor.getDouble(6));
+            point.put("reason", cursor.getString(7));
+            point.put("rejectedAt", cursor.getString(8));
+            point.put("status", "rejected");
+            rejected.put(point);
         }
     }
+    result.put("pending", pending);
+    result.put("rejected", rejected);
+    return result;
+}
 
-    public int acknowledgeThrough(long trackId, long repId) {
-        if (trackId < 1 || repId < 1L) return 0;
-        return getWritableDatabase().delete(TABLE, "_id <= ? AND rep_id = ?",
-            new String[] { String.valueOf(trackId), String.valueOf(repId) });
+public long importPendingPoint(JSONObject point, long repId) {
+    long timestamp = point.optLong("timestamp", 0L);
+    double latitude = point.optDouble("latitude", Double.NaN);
+    double longitude = point.optDouble("longitude", Double.NaN);
+    double accuracy = point.optDouble("accuracy", Double.NaN);
+    double speed = point.optDouble("speed", 0.0);
+    if (repId < 1L || timestamp < 1L || !isFinite(latitude) || latitude < -90 || latitude > 90
+        || !isFinite(longitude) || longitude < -180 || longitude > 180
+        || !isFinite(accuracy) || accuracy < 0 || accuracy > 100000 || !isFinite(speed)) return -1L;
+    SQLiteDatabase database = getWritableDatabase();
+    long trackId = point.optLong("trackId", 0L);
+    if (trackId < 1L) return -1L;
+    try (Cursor existing = database.rawQuery("SELECT rep_id, timestamp, latitude, longitude, accuracy, speed FROM " + TABLE + " WHERE _id = ?",
+        new String[] { String.valueOf(trackId) })) {
+        if (existing.moveToFirst()) {
+            boolean same = existing.getLong(0) == repId && existing.getLong(1) == timestamp
+                && Double.compare(existing.getDouble(2), latitude) == 0 && Double.compare(existing.getDouble(3), longitude) == 0
+                && Double.compare(existing.getDouble(4), accuracy) == 0 && Double.compare(existing.getDouble(5), speed) == 0;
+            return same ? 0L : -1L;
+        }
+    }
+    ContentValues values = new ContentValues();
+    values.put("_id", trackId);
+    values.put("rep_id", repId);
+    values.put("timestamp", timestamp);
+    values.put("latitude", latitude);
+    values.put("longitude", longitude);
+    values.put("accuracy", accuracy);
+    values.put("speed", speed);
+    long inserted = database.insert(TABLE, null, values);
+    if (inserted > 0L) return inserted;
+    try (Cursor existing = database.rawQuery("SELECT 1 FROM " + TABLE + " WHERE rep_id = ? AND timestamp = ? AND latitude = ? AND longitude = ? AND accuracy = ? AND speed = ? LIMIT 1",
+        new String[] { String.valueOf(repId), String.valueOf(timestamp), String.valueOf(latitude), String.valueOf(longitude), String.valueOf(accuracy), String.valueOf(speed) })) {
+        return existing.moveToFirst() ? 0L : -1L;
+    }
+}
+
+public boolean importRejectedPoint(JSONObject point, long repId) {
+    long sourceTrackId = point.optLong("trackId", 0L);
+    long timestamp = point.optLong("timestamp", 0L);
+    double latitude = point.optDouble("latitude", Double.NaN);
+    double longitude = point.optDouble("longitude", Double.NaN);
+    double accuracy = point.optDouble("accuracy", Double.NaN);
+    double speed = point.optDouble("speed", 0.0);
+    if (repId < 1L || sourceTrackId < 1L || timestamp < 1L || !isFinite(latitude) || latitude < -90 || latitude > 90
+        || !isFinite(longitude) || longitude < -180 || longitude > 180
+        || !isFinite(accuracy) || accuracy < 0 || accuracy > 100000 || !isFinite(speed)) return false;
+    SQLiteDatabase database = getWritableDatabase();
+    try (Cursor cursor = database.rawQuery("SELECT 1 FROM " + REJECTED_TABLE
+        + " WHERE rep_id = ? AND source_track_id = ? AND timestamp = ? AND latitude = ? AND longitude = ? "
+        + "AND accuracy = ? AND speed = ? AND reason = ? LIMIT 1",
+        new String[] { String.valueOf(repId), String.valueOf(sourceTrackId), String.valueOf(timestamp),
+            String.valueOf(latitude), String.valueOf(longitude), String.valueOf(accuracy), String.valueOf(speed),
+            point.optString("reason", "") })) {
+        if (cursor.moveToFirst()) return true;
+    }
+    ContentValues values = new ContentValues();
+    values.put("source_track_id", sourceTrackId);
+    values.put("rep_id", repId);
+    values.put("timestamp", timestamp);
+    values.put("latitude", latitude);
+    values.put("longitude", longitude);
+    values.put("accuracy", accuracy);
+    values.put("speed", speed);
+    values.put("reason", point.optString("reason", ""));
+    values.put("rejected_at", point.optString("rejectedAt", ""));
+    return database.insertOrThrow(REJECTED_TABLE, null, values) > 0L;
+}
+
+public int acknowledgeThrough(long trackId, long repId) {
+    if (trackId < 1 || repId < 1L) return 0;
+    return getWritableDatabase().delete(TABLE, "_id <= ? AND rep_id = ?",
+        new String[] { String.valueOf(trackId), String.valueOf(repId) });
     }
 
     public int acknowledgePoint(long trackId, long repId) {

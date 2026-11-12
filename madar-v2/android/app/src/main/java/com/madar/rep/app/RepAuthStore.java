@@ -53,6 +53,11 @@ final class RepAuthStore {
         catch (Exception error) { return 0L; }
     }
 
+    static String username(Context context) {
+        try { return preferences(context).getString("rep_username", ""); }
+        catch (Exception error) { return ""; }
+    }
+
     static void clear(Context context) throws Exception {
         preferences(context).edit().clear().commit();
     }

@@ -24,6 +24,8 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 import com.getcapacitor.annotation.Permission;
 import com.getcapacitor.annotation.PermissionCallback;
 
+import org.json.JSONObject;
+
 import java.util.concurrent.atomic.AtomicBoolean;
 
 @CapacitorPlugin(
@@ -239,21 +241,38 @@ public class RepLocationPlugin extends Plugin {
         } else {
             result.put("lastLocation", (Object) null);
         }
-        try {
-            try (RepTrackStore trackStore = new RepTrackStore(getContext())) {
-                result.put("trail", new JSArray(trackStore.pendingTrail(RepAuthStore.repId(getContext())).toString()));
-            }
-        } catch (Exception ignored) {
-            result.put("trail", new JSArray());
+    try {
+        try (RepTrackStore trackStore = new RepTrackStore(getContext())) {
+            result.put("trail", new JSArray(trackStore.pendingTrail(RepAuthStore.repId(getContext())).toString()));
         }
-        call.resolve(result);
+    } catch (Exception error) {
+        call.reject("تعذر قراءة نقاط GPS المحلية؛ لم تُعتبر القائمة فارغة.", "TRACK_QUEUE_READ_FAILED", error);
+        return;
     }
+    call.resolve(result);
+}
 
-    @PluginMethod
-    public void acknowledgeDutyTracking(PluginCall call) {
-        Integer throughId = call.getInt("throughId");
-        if (throughId == null || throughId < 1) {
-            call.reject("A valid local GPS tracking cursor is required.", "INVALID_TRACK_CURSOR");
+@PluginMethod
+public void getRecoveryQueue(PluginCall call) {
+    long requestedRepId = call.getData().optLong("repId", 0L);
+    long authenticatedRepId = RepAuthStore.repId(getContext());
+    if (requestedRepId < 1L || authenticatedRepId != requestedRepId) {
+        call.reject("يلزم حساب المندوب نفسه لقراءة نقاط GPS المحلية.", "TRACK_QUEUE_OWNER_MISMATCH");
+        return;
+    }
+    try (RepTrackStore trackStore = new RepTrackStore(getContext())) {
+        JSONObject queues = trackStore.recoveryQueue(requestedRepId);
+        call.resolve(new JSObject(queues.toString()));
+    } catch (Exception error) {
+        call.reject("تعذر قراءة طوابير GPS المحلية؛ لم تُعتبر فارغة.", "TRACK_RECOVERY_READ_FAILED", error);
+    }
+}
+
+@PluginMethod
+public void acknowledgeDutyTracking(PluginCall call) {
+    Integer throughId = call.getInt("throughId");
+    if (throughId == null || throughId < 1) {
+        call.reject("A valid local GPS tracking cursor is required.", "INVALID_TRACK_CURSOR");
             return;
         }
         try (RepTrackStore trackStore = new RepTrackStore(getContext())) {
