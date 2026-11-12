@@ -292,3 +292,15 @@ test('both login endpoints share a five-failure-per-IP limiter with the requeste
   assert.equal(blocked.response.status, 429);
   assert.equal(blocked.body.error, 'تم تجاوز الحد المسموح من محاولات الدخول. يرجى الانتظار لمدة دقيقة.');
 });
+
+test('GET and HEAD requests to web SPA routes return HTTP 200 index.html', async () => {
+  const headResponse = await fetch(`${baseUrl}/`, { method: 'HEAD' });
+  assert.equal(headResponse.status, 200);
+  assert.match(headResponse.headers.get('content-type') || '', /text\/html/);
+
+  const getResponse = await fetch(`${baseUrl}/`);
+  assert.equal(getResponse.status, 200);
+  const html = await getResponse.text();
+  assert.match(html, /<title>مدار مناديب<\/title>/);
+});
+
