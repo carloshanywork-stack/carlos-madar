@@ -29,6 +29,12 @@ Android rejects an in-place update between those unrelated signing identities. D
 
 Safe transition requires a same-signer transition build, successful external recovery export with zero omissions and verified photos, then a deliberate reinstall of the approved release and same-account import/reconciliation. Prove that sequence on a disposable device before field use. The release candidate can be prepared independently. A same-signer debug transition build remains a development artifact and is not the final security release.
 
+Final artifacts (12 November 2026):
+
+- Official release: `android/app/build/outputs/apk/release/app-release.apk`, SHA256 `78dc512a01b8f20bee2a7c60c8961b4685a2cc4fbcc69c84cf321ce43c6dd030`, package `com.madar.rep.app`, version `2.0.1` (code 3), non-debuggable, approved release signer above. Provenance records revision `2292c99156c8d3c14ee4f8df75696dd2393846d3`, clean source tree, HTTPS server URL, and matching artifact hash.
+- Debug-signed transition: `android/app/build/outputs/apk/debug/app-debug.apk`, SHA256 `bd7180e3e6340d39cdf06ec15a3ffa309f1a6787a2b4cff21ed7ec1d1d9a4a2c`, same package/version, debuggable, and verified against the existing distributed Debug certificate. This is not the production security release, and physical-device transition/recovery acceptance was waived, not passed.
+- The authenticated download's default selected path is `madar-rep.apk`. After signer compatibility was verified, it was atomically replaced with the transition build. The former APK (SHA256 `de5db6f610da4858ff498bd874518d72ea84eeefb1364ec69250e815c06fea55`) is preserved at `/mnt/madar-storage/Backups/MADAR-V2-apk-transition/madar-rep-before-transition-20261112T125524Z-de5db6f610da4858ff498bd874518d72ea84eeefb1364ec69250e815c06fea55.apk`. No phone was updated.
+
 ## Validation and deployment evidence
 
 Tests use isolated temporary databases and storage. No test writes to production customer storage.
@@ -37,7 +43,7 @@ Tests use isolated temporary databases and storage. No test writes to production
 - Focused Android packaging tests: 5 passed, 0 failed (`final-packaging.tap`).
 - JVM Android unit tests: 1 passed, 0 failed (`android-tests-build.log`).
 - Android instrumentation on isolated, unlocked API-36 emulator: 10 passed, 0 failed (`android-instrumentation.log`, exit 0). An earlier attempt on the pre-existing credential-locked emulator failed for that environment reason; it is retained separately in `android-instrumentation-before-unlock.log` and is not counted as a pass.
-- Release and debug APK builds completed (`android-release-build.log`, `android-final-test-build.log`). A fresh official release build and its final signing/provenance checks are still required after the implementation commit.
+- Final official release and debug transition builds both completed from a clean source tree (`final-official-release-build.log`, `final-transition-debug-build.log`). APK signatures, package/version/debuggable state, hashes, release HTTPS host, bundled standalone assets, and provenance were verified. The debug transition signer matches the pre-existing distributed APK; the approved release signer intentionally does not.
 - Isolated online copy of the live database: integrity `ok`, zero FK violations, 55 existing tables checked, no existing-table row-count changes. It already contained the feature migrations; this verifies repeat/idempotent migration behavior, not a first upgrade from a pre-migration production schema (`live-schema-migration-dry-run.json`).
 - The integrity- and FK-checked snapshot at `Backups/pre-integration-fixes-1794485354549.sqlite` is database-only and already contains the new migration records. It is not an off-device DB+storage backup or restore drill (`pre-deployment-backup.json`).
 
