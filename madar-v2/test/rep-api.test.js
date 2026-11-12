@@ -686,6 +686,9 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   assert.equal(faultReasons.body.success, true);
   assert.ok(faultReasons.body.reasons.some((reason) => reason.name === 'إصلاح إضاءة الليد والإنارة'));
   assert.ok(faultReasons.body.reasons.every((reason) => !('active' in reason)));
+  const structuredReasonId = Number(faultReasons.body.reasons[0].id);
+  db.prepare(`UPDATE maintenance_reasons SET category = 'electrical_lighting', action_meaning = 'executed_work',
+    is_countable = 1, unit = 'piece' WHERE id = ?`).run(structuredReasonId);
 
   const beforeBuffer = await sharp({ create: { width: 80, height: 60, channels: 3, background: '#b7c4ce' } }).jpeg().toBuffer();
   const afterBuffer = await sharp({ create: { width: 70, height: 60, channels: 3, background: '#87b99d' } }).jpeg().toBuffer();
@@ -697,7 +700,8 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
     machineCode: '1434',
     regionName: 'التجمع',
     machineCondition: 'faulty',
-    reasonIds: [faultReasons.body.reasons[0].id],
+    reasonIds: [structuredReasonId],
+    maintenanceLines: [{ reasonId: structuredReasonId, quantity: 3 }],
     notes: 'تم تنظيف الواجهة وفحص الإضاءة',
     capturedAt: new Date(currentTime).toISOString(),
     beforeCapturedAt: [
@@ -719,6 +723,11 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
     for (let index = 0; index < afterCount; index += 1) form.append('afterPhoto', new Blob([afterBuffer], { type: 'image/jpeg' }), `after_${index}.jpg`);
     return form;
   };
+  const legacyCountableVisit = await request('/api/rep/sync-visit', {
+    method: 'POST', body: buildVisitForm({ ...visitPayload, visitUuid: randomUUID(), maintenanceLines: undefined }),
+  }, login.cookie);
+  assert.equal(legacyCountableVisit.response.status, 426);
+  assert.equal(legacyCountableVisit.body.code, 'MAINTENANCE_STRUCTURED_LINES_REQUIRED');
   const tooFewPhotos = await request('/api/rep/sync-visit', {
     method: 'POST', body: buildVisitForm({ ...visitPayload, visitUuid: randomUUID() }, 2, 3),
   }, login.cookie);
@@ -775,6 +784,9 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   assert.equal(visitSync.body.success, true);
   assert.equal(visitSync.body.status, 'pending_review');
   assert.equal(visitSync.body.visitUuid, visitUuid);
+  assert.equal(visitSync.body.maintenanceLines[0].quantity, 3);
+  assert.equal(db.prepare(`SELECT quantity FROM rep_visit_lines WHERE visit_id =
+    (SELECT id FROM rep_visits WHERE visit_uuid = ?)` ).get(visitUuid).quantity, 3);
   const savedCard = db.prepare('SELECT before_photos_json, after_photos_json, reason_ids_json, notes, status FROM maintenance_cards WHERE id = ?')
     .get(missingAfterCardId);
   assert.equal(savedCard.status, 'pending', 'uploaded evidence must not mutate the maintenance card before supervisor approval');

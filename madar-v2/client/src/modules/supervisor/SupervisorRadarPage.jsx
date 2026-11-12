@@ -411,6 +411,28 @@ export default function SupervisorRadarPage() {
                   <span>الرفع <b>{formatTime(visit.capturedAt)}</b></span>
                 </div>
                 <div className="qa-reasons"><strong>أسباب الصيانة</strong><span>{visit.reasonNames.length ? visit.reasonNames.join('، ') : 'لم يُحدد سبب'}</span></div>
+                {visit.maintenanceLines?.length > 0 && (
+                  <div className="qa-reasons qa-quantities" style={{ marginTop: '4px' }}>
+                    <strong>القطع المستبدلة والكميات</strong>
+                    <span style={{ display: 'inline-flex', gap: '6px', flexWrap: 'wrap' }}>
+                      {visit.maintenanceLines.map((line) => (
+                        <span
+                          key={line.reasonId}
+                          style={{
+                            background: '#e0f2fe',
+                            color: '#0369a1',
+                            padding: '2px 8px',
+                            borderRadius: '6px',
+                            fontSize: '12px',
+                            fontWeight: 600,
+                          }}
+                        >
+                          {line.label} (العدد: {line.quantity} {line.unit === 'piece' ? 'قطعة' : line.unit === 'set' ? 'طقم' : (line.unit || 'قطعة')})
+                        </span>
+                      ))}
+                    </span>
+                  </div>
+                )}
                 {visit.notes && <p className="qa-rep-note"><strong>ملاحظة المندوب:</strong> {visit.notes}</p>}
                 <label className="qa-review-note"><span>ملاحظة المراجعة <small>مطلوبة عند طلب إعادة التصوير</small></span><textarea value={reviewNotes[visit.id] ?? ''} onChange={(event) => setReviewNotes((current) => ({ ...current, [visit.id]: event.target.value }))} placeholder="مثال: أعد تصوير اللوحة من زاوية أوضح مع إضاءة كافية" maxLength={1000} rows={2} /></label>
                 <div className="qa-actions">

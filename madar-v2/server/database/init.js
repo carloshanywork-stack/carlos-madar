@@ -19,6 +19,7 @@ const authenticationSessionsMigration = '20261030-authentication-sessions';
 const clientMachineDeploymentMigration = '20261030-client-machine-deployments';
 const warehouseLifecycleMigration = '20261030-warehouse-lifecycle';
 const financeLifecycleMigration = '20261030-finance-lifecycle';
+const financeSettlementIdempotencyMigration = '20261112-finance-settlement-idempotency';
 const v2FeatureParityMigration = '20261031-v2-feature-parity-hr-maintenance';
 const maintenanceTripFolderMigration = '20261031-maintenance-trip-folder-engine';
 const maintenanceOrderDeletionMigration = '20261031-maintenance-order-soft-delete-recovery';
@@ -33,6 +34,7 @@ const durableOperationsEventsMigration = '20261110-durable-operations-events';
 const wholeUnitMainWarehouseMigration = '20261110-main-warehouse-whole-units';
 const machineMaintenanceNotesMigration = '20261109-machine-maintenance-notes';
 const machineNotesHistoryMigration = '20261110-machine-notes-history';
+const structuredMaintenanceLinesMigration = '20261112-structured-maintenance-lines';
 const repUserProfileMigration = '20261102-rep-user-profile';
 const repVisitIngestionMigration = '20261102-rep-offline-visit-ingestion';
 const repSupervisorRadarMigration = '20261102-rep-supervisor-radar-qa';
@@ -442,6 +444,149 @@ export function migrateMaintenanceCardMultiReasons(database) {
 
   database.prepare('INSERT INTO schema_migrations (version) VALUES (?)')
     .run(maintenanceCardMultiReasonMigration);
+}
+
+/** Additive, repeatable catalog and occurrence-line migration. Historical quantities
+ * are explicitly labeled as defaults; only unambiguous executed-work catalog items
+ * are countable in this initial catalog configuration. */
+export function migrateStructuredMaintenanceLines(database) {
+  const applied = database.prepare('SELECT 1 FROM schema_migrations WHERE version = ?')
+    .get(structuredMaintenanceLinesMigration);
+  if (applied) return;
+
+  const columns = new Set(database.pragma('table_info(maintenance_reasons)').map((column) => column.name));
+  if (!columns.has('category')) database.exec("ALTER TABLE maintenance_reasons ADD COLUMN category TEXT NOT NULL DEFAULT 'general_observation'");
+  if (!columns.has('action_meaning')) database.exec("ALTER TABLE maintenance_reasons ADD COLUMN action_meaning TEXT NOT NULL DEFAULT 'observation'");
+  if (!columns.has('is_countable')) database.exec('ALTER TABLE maintenance_reasons ADD COLUMN is_countable INTEGER NOT NULL DEFAULT 0 CHECK (is_countable IN (0, 1))');
+  if (!columns.has('unit')) database.exec('ALTER TABLE maintenance_reasons ADD COLUMN unit TEXT');
+
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS maintenance_reason_versions (
+      id INTEGER PRIMARY KEY,
+      reason_id INTEGER NOT NULL REFERENCES maintenance_reasons(id),
+      name TEXT NOT NULL,
+      category TEXT NOT NULL,
+      action_meaning TEXT NOT NULL,
+      is_countable INTEGER NOT NULL CHECK (is_countable IN (0, 1)),
+      unit TEXT,
+      changed_by INTEGER REFERENCES users(id),
+      changed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_maintenance_reason_versions_reason
+      ON maintenance_reason_versions(reason_id, id);
+    CREATE TABLE IF NOT EXISTS maintenance_card_lines (
+      id INTEGER PRIMARY KEY,
+      card_id INTEGER NOT NULL REFERENCES maintenance_cards(id) ON DELETE CASCADE,
+      reason_id INTEGER NOT NULL REFERENCES maintenance_reasons(id),
+      reason_label_snapshot TEXT NOT NULL,
+      category_snapshot TEXT NOT NULL,
+      action_meaning_snapshot TEXT NOT NULL,
+      quantity INTEGER NOT NULL CHECK (quantity > 0),
+      unit_snapshot TEXT NOT NULL,
+      quantity_provenance TEXT NOT NULL CHECK (quantity_provenance IN ('user_entered', 'legacy_default', 'admin_correction')),
+      created_by INTEGER REFERENCES users(id),
+      updated_by INTEGER REFERENCES users(id),
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE (card_id, reason_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_maintenance_card_lines_reason ON maintenance_card_lines(reason_id, card_id);
+    CREATE TABLE IF NOT EXISTS rep_visit_lines (
+      id INTEGER PRIMARY KEY,
+      visit_id INTEGER NOT NULL REFERENCES rep_visits(id) ON DELETE CASCADE,
+      reason_id INTEGER NOT NULL REFERENCES maintenance_reasons(id),
+      reason_label_snapshot TEXT NOT NULL,
+      category_snapshot TEXT NOT NULL,
+      action_meaning_snapshot TEXT NOT NULL,
+      quantity INTEGER NOT NULL CHECK (quantity > 0),
+      unit_snapshot TEXT NOT NULL,
+      quantity_provenance TEXT NOT NULL CHECK (quantity_provenance IN ('user_entered', 'legacy_default', 'admin_correction')),
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE (visit_id, reason_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_rep_visit_lines_reason ON rep_visit_lines(reason_id, visit_id);
+  `);
+
+  // Conservative, explicit mappings based on the current Arabic labels. Ambiguous
+  // maintenance/condition entries remain non-countable until an administrator configures them.
+  const configure = database.prepare(`UPDATE maintenance_reasons SET category = ?, action_meaning = ?, is_countable = ?, unit = ? WHERE id = ?`);
+  const mappings = [
+    ['electrical_lighting', 'executed_work', 1, 'piece', 1],  // changed transformer
+    ['spotlights_transformers', 'executed_work', 1, 'piece', 4], // changed spotlight
+    ['decoration_structural', 'executed_work', 1, 'piece', 7], // changed decoration column
+    ['electrical_lighting', 'executed_work', 1, 'piece', 9],  // changed LED unit
+    ['electrical_lighting', 'executed_work', 1, 'piece', 21], // replaced damaged wire; piece, not meters
+    ['kits_accessories', 'executed_work', 1, 'set', 23],
+    ['kits_accessories', 'executed_work', 1, 'set', 24],
+    ['kits_accessories', 'executed_work', 1, 'piece', 40],  // changed ground globe
+    ['electrical_lighting', 'blocker', 0, null, 2],
+    ['decoration_structural', 'required_work', 0, null, 3],
+    ['decoration_structural', 'assessment', 0, null, 5],
+    ['decoration_structural', 'assessment', 0, null, 6],
+    ['awnings_supports', 'observation', 0, null, 10],
+    ['awnings_supports', 'required_work', 0, null, 11],
+    ['awnings_supports', 'required_work', 0, null, 12],
+    ['decoration_structural', 'observation', 0, null, 13],
+    ['awnings_supports', 'executed_work', 0, null, 14],
+    ['awnings_supports', 'executed_work', 0, null, 15],
+    ['awnings_supports', 'executed_work', 0, null, 16],
+    ['electrical_lighting', 'blocker', 0, null, 17],
+    ['electrical_lighting', 'executed_work', 0, null, 18],
+    ['decoration_structural', 'executed_work', 0, null, 19],
+    ['electrical_lighting', 'executed_work', 0, null, 20],
+    ['decoration_structural', 'required_work', 0, null, 22],
+    ['permits_access', 'blocker', 0, null, 25],
+    ['permits_access', 'blocker', 0, null, 26],
+    ['decoration_structural', 'required_work', 0, null, 27],
+    ['permits_access', 'blocker', 0, null, 28],
+    ['general_observation', 'required_work', 0, null, 29],
+    ['decoration_structural', 'required_work', 0, null, 30],
+    ['decoration_structural', 'observation', 0, null, 31],
+    ['electrical_lighting', 'executed_work', 0, null, 32],
+    ['spotlights_transformers', 'observation', 0, null, 33],
+    ['general_observation', 'blocker', 0, null, 34],
+    ['awnings_supports', 'observation', 0, null, 35],
+    ['awnings_supports', 'required_work', 0, null, 36],
+    ['spotlights_transformers', 'observation', 0, null, 37],
+    ['electrical_lighting', 'assessment', 0, null, 38],
+    ['general_observation', 'observation', 0, null, 39],
+  ];
+  for (const mapping of mappings) configure.run(...mapping);
+
+  database.exec(`
+    INSERT INTO maintenance_card_lines (
+      card_id, reason_id, reason_label_snapshot, category_snapshot, action_meaning_snapshot,
+      quantity, unit_snapshot, quantity_provenance
+    )
+    SELECT card.id, reason.id, reason.name, reason.category, reason.action_meaning,
+      1, reason.unit, 'legacy_default'
+    FROM maintenance_cards card
+    JOIN maintenance_reasons reason ON reason.is_countable = 1 AND reason.unit IS NOT NULL
+    WHERE card.deleted_at IS NULL
+      AND (
+        EXISTS (SELECT 1 FROM json_each(card.reason_ids_json) selected WHERE CAST(selected.value AS INTEGER) = reason.id)
+        OR (COALESCE(card.reason_ids_json, '[]') = '[]' AND card.reason_id = reason.id)
+      )
+      AND NOT EXISTS (SELECT 1 FROM maintenance_card_lines line WHERE line.card_id = card.id AND line.reason_id = reason.id)
+  `);
+
+  database.exec(`
+    INSERT INTO rep_visit_lines (
+      visit_id, reason_id, reason_label_snapshot, category_snapshot, action_meaning_snapshot,
+      quantity, unit_snapshot, quantity_provenance
+    )
+    SELECT visit.id, reason.id, reason.name, reason.category, reason.action_meaning,
+      1, reason.unit, 'legacy_default'
+    FROM rep_visits visit
+    JOIN maintenance_reasons reason ON reason.is_countable = 1 AND reason.unit IS NOT NULL
+    WHERE visit.status = 'completed'
+      AND (
+        EXISTS (SELECT 1 FROM json_each(visit.reason_ids_json) selected WHERE CAST(selected.value AS INTEGER) = reason.id)
+      )
+      AND NOT EXISTS (SELECT 1 FROM rep_visit_lines line WHERE line.visit_id = visit.id AND line.reason_id = reason.id)
+  `);
+  database.prepare('INSERT INTO schema_migrations (version) VALUES (?)').run(structuredMaintenanceLinesMigration);
 }
 
 export function migrateMaintenancePhotoRotations(database) {
@@ -1598,6 +1743,26 @@ export function migrateFinanceLifecycle(database) {
     .run(financeLifecycleMigration);
 }
 
+function migrateFinanceSettlementIdempotency(database) {
+  if (database.prepare('SELECT 1 FROM schema_migrations WHERE version = ?')
+    .get(financeSettlementIdempotencyMigration)) return;
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS finance_settlement_operations (
+      operation_id TEXT PRIMARY KEY,
+      actor_id INTEGER NOT NULL REFERENCES users(id),
+      operation_type TEXT NOT NULL CHECK (operation_type IN ('purchase_payment', 'sales_receipt')),
+      invoice_id INTEGER NOT NULL REFERENCES invoices(id),
+      payload_sha256 TEXT NOT NULL CHECK (length(payload_sha256) = 64),
+      response_json TEXT NOT NULL CHECK (json_valid(response_json)),
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_finance_settlement_operations_invoice
+      ON finance_settlement_operations(invoice_id, created_at);
+  `);
+  database.prepare('INSERT INTO schema_migrations (version) VALUES (?)')
+    .run(financeSettlementIdempotencyMigration);
+}
+
 export function initializeDatabase({ database = db, initialAdminPassword = env.initialAdminPassword } = {}) {
   const schema = readFileSync(schemaPath, 'utf8');
   let adminCreated = false;
@@ -1618,6 +1783,7 @@ export function initializeDatabase({ database = db, initialAdminPassword = env.i
     migrateWarehouseLifecycle(database);
     migrateWholeUnitMainWarehouse(database);
     migrateFinanceLifecycle(database);
+    migrateFinanceSettlementIdempotency(database);
     migrateV2FeatureParity(database);
     migrateRepVisitIngestion(database);
     migrateRepSupervisorRadar(database);
@@ -1646,6 +1812,7 @@ export function initializeDatabase({ database = db, initialAdminPassword = env.i
     migrateMaintenanceMachineDecommission(database);
     migrateMaintenanceUnmatchedFolderDeletion(database);
     migrateMaintenanceCardMultiReasons(database);
+    migrateStructuredMaintenanceLines(database);
     migrateMaintenancePhotoRotations(database);
     migrateMaintenancePhysicalPhotoRotations(database);
     migrateDurableOperationsEvents(database);

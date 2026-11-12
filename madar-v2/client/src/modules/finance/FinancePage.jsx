@@ -22,6 +22,15 @@ const tabs = [
   { value: 'purchase', label: 'فواتير المشتريات' },
 ];
 
+function settlementOperationKey(userId, invoiceId, operationType) {
+  return `madar.finance.settlement.pending.v1:${userId}:${operationType}:${invoiceId}`;
+}
+
+function createSettlementOperationId() {
+  if (!globalThis.crypto?.randomUUID) throw new Error('This browser cannot create a secure payment retry identifier.');
+  return globalThis.crypto.randomUUID();
+}
+
 export default function FinancePage() {
   const [tab, setTab] = useState('treasury');
   const { data: treasury, loading: treasuryLoading, error: treasuryError, reload: reloadTreasury } = useApi('/api/finance/treasury');
@@ -29,6 +38,7 @@ export default function FinancePage() {
   const { data: purchaseInvoices, loading: purchaseLoading, error: purchaseError, reload: reloadPurchases } = useApi('/api/finance/invoices?kind=purchase');
   const { data: materials } = useApi('/api/warehouse/materials');
   const { data: employees } = useApi('/api/employees');
+  const { data: authStatus } = useApi('/api/auth/status');
   const [modal, setModal] = useState('');
   const [selectedInvoice, setSelectedInvoice] = useState(null);
   const [purchaseLines, setPurchaseLines] = useState([{ materialId: '', quantity: '1', unitCost: '0.00' }]);
@@ -102,14 +112,40 @@ export default function FinancePage() {
     setFormError('');
     const form = new FormData(event.currentTarget);
     const isPurchase = selectedInvoice.kind === 'purchase';
+    const operationType = isPurchase ? 'purchase_payment' : 'sales_receipt';
+    let operationKey;
     try {
       const amountCents = egpToCents(form.get('amount'), { allowZero: false });
-      const result = await api.post(`/api/finance/invoices/${selectedInvoice.id}/${isPurchase ? 'payment' : 'receipt'}`, { amountCents, notes: form.get('notes') || undefined });
+      const notes = String(form.get('notes') || '').trim();
+      operationKey = settlementOperationKey(authStatus?.user?.id, selectedInvoice.id, operationType);
+      if (!authStatus?.user?.id) throw new Error('تعذر التحقق من الحساب الحالي؛ حدّث الصفحة قبل تسجيل السند.');
+      let pending;
+      try { pending = JSON.parse(window.localStorage.getItem(operationKey) || 'null'); }
+      catch { throw new Error('تعذر قراءة معرّف إعادة المحاولة المحفوظ؛ لا تعِد تسجيل الحركة قبل تحديث الصفحة.'); }
+      if (pending && (pending.amountCents !== amountCents || pending.notes !== notes)) {
+        throw new Error(`هناك محاولة سند غير محسومة لهذا الحساب والفاتورة. أعد المحاولة بنفس المبلغ (${formatMoney(pending.amountCents)}) والملاحظات، أو راجع السندات قبل بدء حركة جديدة.`);
+      }
+      if (!pending) {
+        pending = { operationId: createSettlementOperationId(), amountCents, notes };
+        window.localStorage.setItem(operationKey, JSON.stringify(pending));
+      }
+      const result = await api.post(`/api/finance/invoices/${selectedInvoice.id}/${isPurchase ? 'payment' : 'receipt'}`, {
+        amountCents,
+        notes: notes || undefined,
+        operationId: pending.operationId,
+      });
+      window.localStorage.removeItem(operationKey);
       setModal('');
       setSelectedInvoice(null);
       await Promise.all([reloadSales(), reloadPurchases(), reloadTreasury()]);
       showToast(`${isPurchase ? 'تم تسجيل سند الصرف' : 'تم تسجيل سند القبض'}. الرصيد المتبقي ${formatMoney(result.invoice.remaining_cents)}.`);
-    } catch (caught) { setFormError(errorMessage(caught)); }
+    } catch (caught) {
+      if (caught?.status >= 400 && caught.status < 500
+          && caught?.payload?.code !== 'FINANCE_OPERATION_ID_CONFLICT' && operationKey) {
+        try { window.localStorage.removeItem(operationKey); } catch { /* Keep the server error visible. */ }
+      }
+      setFormError(errorMessage(caught));
+    }
     finally { setSaving(false); }
   }
 

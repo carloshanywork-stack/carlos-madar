@@ -301,7 +301,7 @@ export function getRepTodayRoute(rep, database = db) {
 function normalizeVisitInput(input) {
   const body = requireObject(input, 'visit');
   allowOnlyKeys(body, [
-    'visitUuid', 'cardId', 'machineCode', 'regionName', 'machineCondition', 'reasonIds', 'notes',
+    'visitUuid', 'cardId', 'machineCode', 'regionName', 'machineCondition', 'reasonIds', 'maintenanceLines', 'notes',
     'capturedAt', 'beforeCapturedAt', 'afterCapturedAt', 'location',
   ]);
   const visitUuid = requireText(body.visitUuid, 'visitUuid', { maxLength: 36 });
@@ -318,10 +318,31 @@ function normalizeVisitInput(input) {
   if (!['working', 'faulty', 'preventive_maintenance'].includes(machineCondition)) {
     throw new HttpError(400, 'machineCondition must be working, faulty, or preventive_maintenance.');
   }
-  if (!Array.isArray(body.reasonIds) || body.reasonIds.length > 50) {
-    throw new HttpError(400, 'reasonIds must be an array containing at most 50 reason IDs.');
+  let explicitReasonIds = [];
+  if (body.reasonIds !== undefined && body.reasonIds !== null) {
+    if (!Array.isArray(body.reasonIds) || body.reasonIds.length > 50) {
+      throw new HttpError(400, 'reasonIds must be an array containing at most 50 reason IDs.');
+    }
+    explicitReasonIds = body.reasonIds.map((id, index) => positiveId(id, `reasonIds[${index}]`));
   }
-  const reasonIds = [...new Set(body.reasonIds.map((id, index) => positiveId(id, `reasonIds[${index}]`)))];
+  let maintenanceLines = [];
+  if (body.maintenanceLines !== undefined) {
+    if (!Array.isArray(body.maintenanceLines)) throw new HttpError(400, 'maintenanceLines must be an array.');
+    const seenLineReasons = new Set();
+    maintenanceLines = body.maintenanceLines.map((rawLine, index) => {
+      const line = requireObject(rawLine, `maintenanceLines[${index}]`);
+      allowOnlyKeys(line, ['reasonId', 'quantity']);
+      const reasonId = positiveId(line.reasonId, `maintenanceLines[${index}].reasonId`);
+      if (seenLineReasons.has(reasonId)) throw new HttpError(400, `Duplicate maintenance line for reason ${reasonId}.`);
+      seenLineReasons.add(reasonId);
+      if (!Number.isSafeInteger(line.quantity) || line.quantity <= 0) {
+        throw new HttpError(400, `maintenanceLines[${index}].quantity must be a positive whole number.`);
+      }
+      return { reasonId, quantity: line.quantity };
+    });
+    maintenanceLines.sort((left, right) => left.reasonId - right.reasonId);
+  }
+  const reasonIds = [...new Set([...explicitReasonIds, ...maintenanceLines.map((line) => line.reasonId)])];
   const notes = optionalText(body.notes, 'notes', { maxLength: 10000 });
   const capturedAt = requireText(body.capturedAt, 'capturedAt', { maxLength: 64 });
   const capturedDate = new Date(capturedAt);
@@ -338,6 +359,7 @@ function normalizeVisitInput(input) {
     regionName,
     machineCondition,
     reasonIds,
+    maintenanceLines,
     notes,
     capturedAt: capturedDate.toISOString(),
     beforeCapturedAt: parseCapturedTimestamps(body.beforeCapturedAt, capturedDate, 'beforeCapturedAt'),
@@ -413,6 +435,13 @@ function visitResult(row, database = db, { idempotent = false, processing = fals
     SELECT phase, COUNT(*) AS count FROM rep_visit_photos WHERE visit_id = ? GROUP BY phase
   `).all(row.id);
   const counts = Object.fromEntries(photoCounts.map((item) => [item.phase, Number(item.count)]));
+  const maintenanceLines = database.prepare(`SELECT reason_id AS reasonId,
+      reason_label_snapshot AS label, category_snapshot AS category,
+      action_meaning_snapshot AS actionMeaning, quantity, unit_snapshot AS unit,
+      quantity_provenance AS quantityProvenance
+    FROM rep_visit_lines WHERE visit_id = ? ORDER BY id`).all(row.id).map((line) => ({
+    ...line, reasonId: Number(line.reasonId), quantity: Number(line.quantity),
+  }));
   return {
     success: true,
     status: reviewStatus === 'approved' ? 'approved' : reviewStatus === 'reshoot' ? 'reshoot_requested' : 'pending_review',
@@ -420,6 +449,7 @@ function visitResult(row, database = db, { idempotent = false, processing = fals
     machineCode: row.machine_code,
     beforePhotoCount: counts.before ?? 0,
     afterPhotoCount: counts.after ?? 0,
+    maintenanceLines,
     idempotent,
   };
 }
@@ -493,6 +523,22 @@ function findRepVisitCard(rep, visit, database) {
     const activeIds = new Set(rows.filter((row) => row.active).map((row) => Number(row.id)));
     if (visit.reasonIds.some((id) => !activeIds.has(id))) {
       throw new HttpError(409, 'One or more selected maintenance reasons are no longer active. Refresh the reasons and try again.');
+    }
+  }
+  const configuredReasons = visit.reasonIds.length
+    ? database.prepare(`SELECT id, name, category, action_meaning, is_countable, unit
+      FROM maintenance_reasons WHERE id IN (${visit.reasonIds.map(() => '?').join(',')})`).all(...visit.reasonIds)
+    : [];
+  const countableIds = new Set(configuredReasons.filter((reason) => reason.is_countable).map((reason) => Number(reason.id)));
+  const submittedIds = new Set(visit.maintenanceLines.map((line) => line.reasonId));
+  for (const line of visit.maintenanceLines) {
+    if (!countableIds.has(line.reasonId)) throw new HttpError(400, `Reason ${line.reasonId} is not a selected countable maintenance item.`);
+  }
+  for (const reasonId of countableIds) {
+    if (!submittedIds.has(reasonId)) {
+      throw new HttpError(visit.maintenanceLines.length ? 400 : 426,
+        `This maintenance reason requires an explicitly entered quantity. Update the application and provide a quantity for reason ${reasonId}.`,
+        { apiCode: visit.maintenanceLines.length ? 'MAINTENANCE_QUANTITY_REQUIRED' : 'MAINTENANCE_STRUCTURED_LINES_REQUIRED' });
     }
   }
   validateMachineGeofence(card, visit.location);
@@ -922,6 +968,7 @@ function createVisitReservation(rep, visit, payloadHash, card, stagingPath, fina
       requireVisitOwner(existing, rep.id, payloadHash);
       if (existing.status === 'completed') return { row: existing, kind: 'completed' };
       if (existing.status === 'receiving') return { row: existing, kind: 'processing' };
+      persistRepVisitLines(visit, existing.id, database);
       database.prepare(`
         UPDATE rep_visits SET status = 'receiving', failure_message = NULL,
           staging_path = ?, final_path = ?, before_path = NULL, after_path = NULL,
@@ -944,8 +991,18 @@ function createVisitReservation(rep, visit, payloadHash, card, stagingPath, fina
       visit.location ? JSON.stringify(visit.location) : null,
       stagingPath, finalPath,
     );
+    persistRepVisitLines(visit, Number(result.lastInsertRowid), database);
     return { row: findVisit(visit.visitUuid, database), kind: 'reserved', id: Number(result.lastInsertRowid) };
   }).immediate();
+}
+
+function persistRepVisitLines(visit, visitId, database) {
+  const insert = database.prepare(`INSERT OR IGNORE INTO rep_visit_lines
+    (visit_id, reason_id, reason_label_snapshot, category_snapshot, action_meaning_snapshot,
+     quantity, unit_snapshot, quantity_provenance)
+    SELECT ?, id, name, category, action_meaning, ?, unit, 'user_entered'
+    FROM maintenance_reasons WHERE id = ? AND is_countable = 1`);
+  for (const line of visit.maintenanceLines) insert.run(visitId, line.quantity, line.reasonId);
 }
 
 function recordReceivedVisit(rep, visit, visitId, photoRows, database) {
@@ -1411,7 +1468,8 @@ export async function recoverRepVisitUploads(database = db) {
 
 export function getRepFaultReasons(database = db) {
   const reasons = database.prepare(`
-    SELECT id, name
+    SELECT id, name, category, action_meaning AS actionMeaning,
+      is_countable AS countable, unit
     FROM maintenance_reasons
     WHERE active = 1
     ORDER BY name COLLATE NOCASE, id

@@ -260,6 +260,26 @@ export function getPendingVisitReviews(database = defaultDatabase) {
     FROM rep_visit_photos WHERE visit_id IN (${visits.map(() => '?').join(',') || 'NULL'})
     ORDER BY visit_id, phase, ordinal, id
   `).all(...visits.map((visit) => visit.id));
+  const lineRows = database.prepare(`
+    SELECT visit_id, reason_id, reason_label_snapshot, category_snapshot,
+      action_meaning_snapshot, quantity, unit_snapshot, quantity_provenance
+    FROM rep_visit_lines WHERE visit_id IN (${visits.map(() => '?').join(',') || 'NULL'})
+    ORDER BY visit_id, id
+  `).all(...visits.map((visit) => visit.id));
+  const linesByVisit = new Map();
+  for (const line of lineRows) {
+    const vid = Number(line.visit_id);
+    if (!linesByVisit.has(vid)) linesByVisit.set(vid, []);
+    linesByVisit.get(vid).push({
+      reasonId: Number(line.reason_id),
+      label: line.reason_label_snapshot,
+      category: line.category_snapshot,
+      actionMeaning: line.action_meaning_snapshot,
+      quantity: Number(line.quantity),
+      unit: line.unit_snapshot,
+      quantityProvenance: line.quantity_provenance,
+    });
+  }
   const photosByVisit = new Map();
   for (const photo of photoRows) {
     if (!photosByVisit.has(Number(photo.visit_id))) photosByVisit.set(Number(photo.visit_id), { before: [], after: [] });
@@ -278,6 +298,8 @@ export function getPendingVisitReviews(database = defaultDatabase) {
       orderCode: visit.order_code, machineCode: visit.machine_code, machineName: visit.machine_name ?? `ماكينة ${visit.machine_code}`,
       regionName: visit.region_name, address: visit.address ?? '', machineCondition: visit.machine_condition ?? 'working',
       reasonIds: parseJson(visit.reason_ids_json, []), reasonNames: parseJson(visit.reason_ids_json, []).map((id) => namesById.get(Number(id))).filter(Boolean),
+      maintenanceLines: linesByVisit.get(Number(visit.id)) ?? [],
+      maintenance_lines: linesByVisit.get(Number(visit.id)) ?? [],
       notes: visit.notes ?? '', capturedAt: visit.captured_at,
       beforeCapturedAt: visit.before_captured_at, afterCapturedAt: visit.after_captured_at,
       siteDurationSeconds: Number.isFinite(beforeMs) && Number.isFinite(afterMs) && afterMs >= beforeMs
@@ -324,7 +346,7 @@ export async function getSupervisorVisitPhoto(visitIdInput, phase, ordinalInput 
 export function reviewRepVisit(visitIdInput, input, actorId, database = defaultDatabase) {
   const visitId = positiveId(Number(visitIdInput), 'visitId');
   const body = requireObject(input);
-  allowOnlyKeys(body, ['action', 'note']);
+  allowOnlyKeys(body, ['action', 'note', 'maintenanceLines']);
   if (!['approve', 'reshoot'].includes(body.action)) throw new HttpError(400, 'action must be approve or reshoot.');
   const note = optionalText(body.note, 'note', { maxLength: 1000 });
   if (body.action === 'reshoot' && !note) throw new HttpError(400, 'A short note is required when requesting new photos.');
@@ -369,6 +391,26 @@ export function reviewRepVisit(visitIdInput, input, actorId, database = defaultD
       ...(visit.card_reason_id ? [Number(visit.card_reason_id)] : []),
       ...incomingReasons.filter((id) => Number.isSafeInteger(Number(id)) && Number(id) > 0).map(Number),
     ])];
+
+    let supervisorLines = null;
+    if (body.maintenanceLines !== undefined) {
+      if (!Array.isArray(body.maintenanceLines)) throw new HttpError(400, 'maintenanceLines must be an array.');
+      supervisorLines = new Map();
+      for (const [index, rawLine] of body.maintenanceLines.entries()) {
+        const line = requireObject(rawLine, `maintenanceLines[${index}]`);
+        allowOnlyKeys(line, ['reasonId', 'quantity', 'justification']);
+        const lineReasonId = positiveId(line.reasonId, `maintenanceLines[${index}].reasonId`);
+        if (supervisorLines.has(lineReasonId)) throw new HttpError(400, `Duplicate maintenance line for reason ${lineReasonId}.`);
+        if (!Number.isSafeInteger(line.quantity) || line.quantity <= 0) {
+          throw new HttpError(400, `maintenanceLines[${index}].quantity must be a positive whole number.`);
+        }
+        supervisorLines.set(lineReasonId, {
+          quantity: line.quantity,
+          justification: line.justification === undefined ? null : requireText(line.justification, `maintenanceLines[${index}].justification`, { maxLength: 1000 }),
+        });
+      }
+    }
+
     const receivedPhotos = database.prepare(`
       SELECT phase, stored_path FROM rep_visit_photos WHERE visit_id = ? ORDER BY phase, ordinal, id
     `).all(visitId);
@@ -390,6 +432,80 @@ export function reviewRepVisit(visitIdInput, input, actorId, database = defaultD
     `).run(JSON.stringify(nextBefore), JSON.stringify(nextAfter), JSON.stringify(reasonIds), reasonIds[0] ?? null,
       notes, visit.card_id, visit.order_id);
     if (changed.changes !== 1) throw new HttpError(409, 'The maintenance card changed before approval.');
+
+    const visitLines = database.prepare('SELECT * FROM rep_visit_lines WHERE visit_id = ?').all(visitId);
+    const visitLinesByReason = new Map(visitLines.map((l) => [Number(l.reason_id), l]));
+    const existingCardLines = database.prepare('SELECT * FROM maintenance_card_lines WHERE card_id = ?').all(visit.card_id);
+    const existingCardLinesByReason = new Map(existingCardLines.map((l) => [Number(l.reason_id), l]));
+    const countableReasons = reasonIds.length
+      ? database.prepare(`SELECT id, name, category, action_meaning, is_countable, unit
+        FROM maintenance_reasons WHERE id IN (${reasonIds.map(() => '?').join(',')})`).all(...reasonIds)
+        .filter((r) => r.is_countable)
+      : [];
+    if (supervisorLines) {
+      for (const lineReasonId of supervisorLines.keys()) {
+        if (!countableReasons.some((r) => Number(r.id) === lineReasonId)) {
+          throw new HttpError(400, `Reason ${lineReasonId} is not a selected countable maintenance item.`);
+        }
+      }
+    }
+    for (const reason of countableReasons) {
+      const rid = Number(reason.id);
+      const repLine = visitLinesByReason.get(rid);
+      const supervisorLine = supervisorLines?.get(rid);
+      const existingCardLine = existingCardLinesByReason.get(rid);
+
+      // Pre-existing card line untouched by this visit or supervisor must not be overwritten
+      if (!repLine && !supervisorLine && existingCardLine) {
+        continue;
+      }
+
+      const baseline = repLine ?? existingCardLine;
+      const quantity = supervisorLine?.quantity ?? baseline?.quantity ?? 1;
+      const isCorrected = baseline && supervisorLine && Number(baseline.quantity) !== Number(supervisorLine.quantity);
+      if (isCorrected) {
+        if (!supervisorLine.justification) {
+          throw new HttpError(400, `A correction justification is required for maintenance reason ${rid}.`, { apiCode: 'MAINTENANCE_QUANTITY_JUSTIFICATION_REQUIRED' });
+        }
+        recordAudit({
+          database,
+          actorId,
+          action: 'correct_quantity',
+          entityType: 'maintenance_card_line',
+          entityId: baseline.id,
+          oldValues: { quantity: baseline.quantity, provenance: baseline.quantity_provenance },
+          newValues: { quantity, provenance: 'admin_correction', cardId: visit.card_id, reasonId: rid, justification: supervisorLine.justification },
+        });
+      }
+
+      const provenance = isCorrected
+        ? 'admin_correction'
+        : (repLine ? (repLine.quantity_provenance ?? 'user_entered') : (supervisorLine ? 'admin_correction' : (existingCardLine?.quantity_provenance ?? 'legacy_default')));
+
+      database.prepare(`
+        INSERT INTO maintenance_card_lines
+          (card_id, reason_id, reason_label_snapshot, category_snapshot, action_meaning_snapshot,
+           quantity, unit_snapshot, quantity_provenance, created_by, updated_by)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(card_id, reason_id) DO UPDATE SET
+          quantity = excluded.quantity,
+          quantity_provenance = excluded.quantity_provenance,
+          updated_by = excluded.updated_by,
+          updated_at = CURRENT_TIMESTAMP
+      `).run(
+        visit.card_id,
+        rid,
+        reason.name,
+        reason.category,
+        reason.action_meaning,
+        quantity,
+        reason.unit,
+        provenance,
+        visit.rep_user_id,
+        actorId,
+      );
+    }
+
     database.prepare(`
       UPDATE rep_visit_reviews SET status = 'approved', review_note = ?, reviewed_by = ?,
         reviewed_at = CURRENT_TIMESTAMP WHERE visit_id = ? AND status = 'pending'
@@ -423,18 +539,30 @@ export function buildApprovedVisitsWorkbook(dayInput, database = defaultDatabase
     || arabicOrder.compare(left.machine_code, right.machine_code));
   const reasons = database.prepare('SELECT id, name FROM maintenance_reasons').all();
   const reasonsById = new Map(reasons.map((reason) => [Number(reason.id), reason.name]));
+  const visitLines = visits.length ? database.prepare(`
+    SELECT visit_id, reason_label_snapshot, quantity, unit_snapshot
+    FROM rep_visit_lines WHERE visit_id IN (${visits.map(() => '?').join(',')})
+  `).all(...visits.map((v) => v.id)) : [];
+  const linesByVisit = new Map();
+  for (const line of visitLines) {
+    const vid = Number(line.visit_id);
+    if (!linesByVisit.has(vid)) linesByVisit.set(vid, []);
+    linesByVisit.get(vid).push(line);
+  }
   const rows = [
     [`زيارات الصيانة المعتمدة — ${range.day}`],
     ['هذا التقرير يشمل الزيارات التي اعتمدها المشرف فقط. مدة الموقع والمسافة تقديرية حسب أوقات GPS المسجلة.'],
-    ['المنطقة', 'كود الماكينة', 'اسم الماكينة', 'أمر الصيانة', 'المندوب', 'وقت الزيارة', 'مدة الموقع (دقيقة)', 'أسباب الصيانة', 'ملاحظة'],
+    ['المنطقة', 'كود الماكينة', 'اسم الماكينة', 'أمر الصيانة', 'المندوب', 'وقت الزيارة', 'مدة الموقع (دقيقة)', 'أسباب الصيانة', 'القطع والكميات', 'ملاحظة'],
   ];
   for (const visit of visits) {
     const before = visit.before_captured_at ? new Date(visit.before_captured_at).valueOf() : NaN;
     const after = visit.after_captured_at ? new Date(visit.after_captured_at).valueOf() : NaN;
     const duration = Number.isFinite(before) && Number.isFinite(after) && after >= before ? Math.round((after - before) / 60000) : '';
     const visitReasons = parseJson(visit.reason_ids_json, []).map((id) => reasonsById.get(Number(id))).filter(Boolean).join('، ');
+    const lines = linesByVisit.get(Number(visit.id)) || [];
+    const itemsText = lines.map((l) => `${l.reason_label_snapshot} (العدد: ${l.quantity})`).join('، ') || '—';
     rows.push([visit.region_name, visit.machine_code, visit.machine_name ?? `ماكينة ${visit.machine_code}`,
-      visit.order_code, visit.rep_name, visit.captured_at, duration, visitReasons, visit.notes ?? '']);
+      visit.order_code, visit.rep_name, visit.captured_at, duration, visitReasons, itemsText, visit.notes ?? '']);
   }
   rows.splice(2, 0, ['الإجمالي', visits.length]);
   const worksheet = XLSX.utils.aoa_to_sheet(rows);
@@ -445,7 +573,7 @@ export function buildApprovedVisitsWorkbook(dayInput, database = defaultDatabase
   ];
   worksheet['!cols'] = [
     { wch: 20 }, { wch: 16 }, { wch: 30 }, { wch: 20 }, { wch: 24 },
-    { wch: 24 }, { wch: 18 }, { wch: 36 }, { wch: 42 },
+    { wch: 24 }, { wch: 18 }, { wch: 36 }, { wch: 36 }, { wch: 42 },
   ];
   worksheet['!rows'] = [{ hpt: 30 }, { hpt: 28 }, { hpt: 24 }, { hpt: 34 }];
   worksheet['!pageSetup'] = { paperSize: '9', orientation: 'landscape', fitToWidth: 1, fitToHeight: 0 };

@@ -102,12 +102,14 @@ export function getMaintenanceAnalysisRecords(input = {}, database = defaultDb) 
   const parameters = [];
   addFilters(conditions, parameters, filters, SERVICE_DATE);
 
-  return database.prepare(`
+  const records = database.prepare(`
     SELECT machine.area AS area,
       machine.code AS machine_code,
       machine.name_ar AS machine_name,
       order_record.order_code,
       reason.name AS reason_name,
+      card.id AS card_id,
+      card.reason_ids_json,
       COALESCE(card.notes, '') AS notes,
       ${SERVICE_DATE} AS service_date,
       COALESCE((
@@ -129,6 +131,45 @@ export function getMaintenanceAnalysisRecords(input = {}, database = defaultDb) 
     ORDER BY machine.area COLLATE NOCASE, machine.code COLLATE NOCASE,
       ${SERVICE_DATE} DESC, order_record.id DESC, card.id
   `).all(...parameters);
+
+  const cardIds = records.map((r) => r.card_id);
+  const linesByCard = new Map();
+  if (cardIds.length > 0) {
+    const lines = database.prepare(`
+      SELECT card_id, reason_id, reason_label_snapshot, category_snapshot,
+        action_meaning_snapshot, quantity, unit_snapshot, quantity_provenance
+      FROM maintenance_card_lines
+      WHERE card_id IN (${cardIds.map(() => '?').join(',')})
+      ORDER BY card_id, id
+    `).all(...cardIds);
+    for (const line of lines) {
+      const cid = Number(line.card_id);
+      if (!linesByCard.has(cid)) linesByCard.set(cid, []);
+      linesByCard.get(cid).push({
+        reasonId: Number(line.reason_id),
+        label: line.reason_label_snapshot,
+        category: line.category_snapshot,
+        actionMeaning: line.action_meaning_snapshot,
+        quantity: Number(line.quantity),
+        unit: line.unit_snapshot,
+        quantityProvenance: line.quantity_provenance,
+      });
+    }
+  }
+
+  return records.map((record) => {
+    const lines = linesByCard.get(Number(record.card_id)) || [];
+    const totalQuantity = lines.reduce((sum, l) => sum + (Number(l.quantity) || 0), 0);
+    const itemsSummary = lines
+      .map((l) => `${l.label} (${l.quantity} ${l.unit === 'piece' ? 'قطعة' : l.unit === 'set' ? 'طقم' : (l.unit || '')})`.trim())
+      .join('، ');
+    return {
+      ...record,
+      maintenance_lines: lines,
+      total_quantity: totalQuantity,
+      items_summary: itemsSummary,
+    };
+  });
 }
 
 export function buildMaintenanceAnalysisWorkbook(input = {}, database = defaultDb) {
@@ -146,12 +187,45 @@ export function buildMaintenanceAnalysisWorkbook(input = {}, database = defaultD
     record.technicians,
     ({ in_progress: 'قيد التنفيذ', review: 'بانتظار المراجعة', archived: 'مؤرشف' })[record.status] ?? record.status,
   ]);
-  const worksheet = XLSX.utils.aoa_to_sheet([EXPORT_HEADERS, ...rows]);
+  const headers = [
+    'المنطقة / Area',
+    'كود الماكينة',
+    'اسم الماكينة',
+    'رقم أمر الخدمة',
+    'سبب العطل',
+    'الملاحظات الفنية',
+    'تاريخ الخدمة',
+    'الفنيون المكلفون',
+    'الحالة',
+  ];
+  const worksheet = XLSX.utils.aoa_to_sheet([headers, ...rows]);
   worksheet['!cols'] = [
     { wch: 24 }, { wch: 20 }, { wch: 32 }, { wch: 22 }, { wch: 32 },
     { wch: 42 }, { wch: 22 }, { wch: 30 }, { wch: 20 },
   ];
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, worksheet, 'تحليل الصيانة');
+
+  const totalsByItem = new Map();
+  for (const record of records) {
+    for (const line of record.maintenance_lines || []) {
+      const key = `${line.label}\0${line.unit}`;
+      const current = totalsByItem.get(key) || { label: line.label, unit: line.unit, total: 0 };
+      current.total += line.quantity;
+      totalsByItem.set(key, current);
+    }
+  }
+  const summaryRows = [
+    ['بند الصيانة / القطعة', 'الوحدة', 'إجمالي الكمية المستبدلة'],
+    ...[...totalsByItem.values()].map((item) => [
+      item.label,
+      item.unit === 'piece' ? 'قطعة' : item.unit === 'set' ? 'طقم' : (item.unit || '—'),
+      item.total,
+    ]),
+  ];
+  const summarySheet = XLSX.utils.aoa_to_sheet(summaryRows);
+  summarySheet['!cols'] = [{ wch: 36 }, { wch: 16 }, { wch: 24 }];
+  XLSX.utils.book_append_sheet(workbook, summarySheet, 'ملخص القطع المستبدلة');
+
   return XLSX.write(workbook, { bookType: 'xlsx', type: 'buffer' });
 }

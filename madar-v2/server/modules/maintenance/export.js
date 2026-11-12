@@ -547,25 +547,44 @@ async function addMaintenanceCardSlide(pptx, order, card, clientLogo, fixedLogo,
     fit: 'shrink',
     rtlMode: true,
   });
-  const rawReasons = Array.isArray(card.reason_names) && card.reason_names.length
-    ? card.reason_names
-    : (card.reason_name ? card.reason_name.split(' • ') : []);
-  const reasons = rawReasons
-    .map((reason) => String(reason ?? '').trim())
-    .filter((reason) => reason && reason !== 'غير محدد');
+  const reasonEntries = (Array.isArray(card.reason_ids) && Array.isArray(card.reason_names) && card.reason_ids.length === card.reason_names.length)
+    ? card.reason_ids.map((id, index) => ({ id: Number(id), name: String(card.reason_names[index] ?? '').trim() }))
+    : (Array.isArray(card.reason_names) && card.reason_names.length
+      ? card.reason_names.map((name, index) => ({ id: Array.isArray(card.reason_ids) ? Number(card.reason_ids[index]) : null, name: String(name ?? '').trim() }))
+      : (card.reason_name ? card.reason_name.split(/ • |، /).map((name) => ({ id: null, name: String(name ?? '').trim() })) : []));
+  const reasons = reasonEntries.filter((entry) => entry.name && entry.name !== 'غير محدد');
+  const linesByReasonId = new Map(
+    (card.maintenance_lines ?? []).map((line) => [Number(line.reasonId), line])
+  );
+  const linesByLabel = new Map(
+    (card.maintenance_lines ?? []).map((line) => [String(line.label).trim(), line])
+  );
   if (reasons.length) {
     const fontSize = reasons.length === 1 ? 15.5 : (reasons.length === 2 ? 12.5 : 11);
-    const reasonRuns = reasons.map((reasonText, index) => ({
-      text: `${index + 1}. ${reasonText}`,
-      options: {
-        rtlMode: true,
-        fontSize,
-        bold: true,
-        color: primary,
-        lang: 'ar-EG',
-        breakLine: index < reasons.length - 1,
-      },
-    }));
+    const reasonRuns = reasons.map((entry, index) => {
+      const reasonText = entry.name;
+      const line = (entry.id !== null && linesByReasonId.get(entry.id))
+        || linesByLabel.get(reasonText);
+      let formattedText = reasonText;
+      if (line && line.quantity > 0) {
+        if (line.quantityProvenance === 'legacy_default') {
+          formattedText = reasonText;
+        } else {
+          formattedText = `${reasonText} (العدد: ${line.quantity})`;
+        }
+      }
+      return {
+        text: `${index + 1}. ${formattedText}`,
+        options: {
+          rtlMode: true,
+          fontSize,
+          bold: true,
+          color: primary,
+          lang: 'ar-EG',
+          breakLine: index < reasons.length - 1,
+        },
+      };
+    });
     slide.addText(reasonRuns, {
       x: 1.8,
       y: 0.16,
@@ -994,7 +1013,11 @@ export async function buildMaintenanceDocx(orderId, database) {
       new TableRow({ tableHeader: true, children: [cell('الكود', true), cell('الآلة', true), cell('المنطقة', true), cell('الحالة / السبب', true)] }),
       ...cards.map((card) => {
         const isCompleted = card.status === 'completed';
-        const statusLabel = isCompleted ? `مكتمل (${card.reason_name || 'فحص دوري'})` : 'لم يتم الفحص (ناقص)';
+        const activeLines = (card.maintenance_lines || []).filter((l) => l.quantity > 0 && l.quantityProvenance !== 'legacy_default');
+        const partsSummary = activeLines.map((l) => `${l.label} (العدد: ${l.quantity})`).join('، ');
+        const statusLabel = isCompleted
+          ? `مكتمل (${card.reason_name || 'فحص دوري'}${partsSummary ? ` [${partsSummary}]` : ''})`
+          : 'لم يتم الفحص (ناقص)';
         return new TableRow({
           children: [
             cell(card.machine_code),
@@ -1012,7 +1035,9 @@ export async function buildMaintenanceDocx(orderId, database) {
   }
   for (const card of completedCards) {
     content.push(rtlParagraph(`${card.machine_code} · ${card.machine_name_ar}`, { heading: HeadingLevel.HEADING_2, pageBreakBefore: true }));
-    content.push(rtlParagraph(`المنطقة: ${card.machine_area || '—'}    ·    سبب العطل: ${card.reason_name || 'غير محدد'}`));
+    const activeLines = (card.maintenance_lines || []).filter((l) => l.quantity > 0 && l.quantityProvenance !== 'legacy_default');
+    const partsSummary = activeLines.map((l) => `${l.label} (العدد: ${l.quantity})`).join('، ');
+    content.push(rtlParagraph(`المنطقة: ${card.machine_area || '—'}    ·    سبب العطل: ${card.reason_name || 'غير محدد'}${partsSummary ? `    ·    القطع المستبدلة: ${partsSummary}` : ''}`));
     content.push(rtlParagraph(`الفنيون: ${order.technicians.map((technician) => technician.name).join('، ') || 'غير معيّنين'}    ·    تاريخ الزيارة: ${String(order.created_at ?? '').slice(0, 10) || '—'}`));
     for (const [label, paths] of [['قبل الصيانة', card.before_photos], ['بعد الصيانة', card.after_photos]]) {
       content.push(rtlParagraph(label, { heading: HeadingLevel.HEADING_3 }));

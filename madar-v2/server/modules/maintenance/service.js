@@ -1435,23 +1435,48 @@ export function previewMachineImport(file) {
   return { totalRows: rows.length, preview, previewValidRows: validRows };
 }
 
+const MAINTENANCE_CATEGORIES = new Set([
+  'electrical_lighting', 'spotlights_transformers', 'decoration_structural',
+  'awnings_supports', 'kits_accessories', 'permits_access', 'general_observation',
+]);
+const MAINTENANCE_MEANINGS = new Set(['executed_work', 'required_work', 'assessment', 'blocker', 'observation']);
+const MAINTENANCE_UNITS = new Set(['piece', 'set']);
+
+function normalizeReasonConfiguration(input, current = null) {
+  const category = input.category === undefined ? (current?.category ?? 'general_observation') : input.category;
+  const actionMeaning = input.actionMeaning === undefined ? (current?.action_meaning ?? 'observation') : input.actionMeaning;
+  const countable = input.countable === undefined ? Boolean(current?.is_countable ?? false) : input.countable;
+  const unit = input.unit === undefined ? (current?.unit ?? null) : input.unit;
+  if (!MAINTENANCE_CATEGORIES.has(category)) throw new HttpError(400, 'category is not supported.');
+  if (!MAINTENANCE_MEANINGS.has(actionMeaning)) throw new HttpError(400, 'actionMeaning is not supported.');
+  if (typeof countable !== 'boolean') throw new HttpError(400, 'countable must be a boolean.');
+  if (countable && !MAINTENANCE_UNITS.has(unit)) throw new HttpError(400, 'A countable reason requires unit piece or set.');
+  if (!countable && unit !== null && unit !== '') throw new HttpError(400, 'A non-countable reason cannot have a unit.');
+  return { category, actionMeaning, countable: Number(countable), unit: countable ? unit : null };
+}
+
 export function listMaintenanceReasons({ includeInactive = false } = {}, database = db) {
   const condition = includeInactive ? '' : 'WHERE active = 1';
   return database.prepare(`
-    SELECT id, name, active, created_at FROM maintenance_reasons ${condition}
+    SELECT id, name, active, category, action_meaning AS actionMeaning,
+      is_countable AS countable, unit, created_at FROM maintenance_reasons ${condition}
     ORDER BY active DESC, name COLLATE NOCASE, id
   `).all();
 }
 
 export function createMaintenanceReason(input, actorId = null, database = db) {
   const body = requireObject(input);
-  allowOnlyKeys(body, ['name']);
+  allowOnlyKeys(body, ['name', 'category', 'actionMeaning', 'countable', 'unit']);
   const name = requireText(body.name, 'name', { maxLength: 200 });
+  const config = normalizeReasonConfiguration(body);
   try {
-    const result = database.prepare('INSERT INTO maintenance_reasons (name) VALUES (?)').run(name);
+    const result = database.prepare(`INSERT INTO maintenance_reasons
+      (name, category, action_meaning, is_countable, unit) VALUES (?, ?, ?, ?, ?)`)
+      .run(name, config.category, config.actionMeaning, config.countable, config.unit);
     const id = Number(result.lastInsertRowid);
-    recordAudit({ database, actorId, action: 'create', entityType: 'maintenance_reason', entityId: id, newValues: { name } });
-    return database.prepare('SELECT id, name, active, created_at FROM maintenance_reasons WHERE id = ?').get(id);
+    recordAudit({ database, actorId, action: 'create', entityType: 'maintenance_reason', entityId: id, newValues: { name, ...config } });
+    return database.prepare(`SELECT id, name, active, category, action_meaning AS actionMeaning,
+      is_countable AS countable, unit, created_at FROM maintenance_reasons WHERE id = ?`).get(id);
   } catch (error) {
     if (error.code === 'SQLITE_CONSTRAINT_UNIQUE') throw new HttpError(409, 'That maintenance reason already exists.');
     throw error;
@@ -1461,9 +1486,10 @@ export function createMaintenanceReason(input, actorId = null, database = db) {
 export function updateMaintenanceReason(reasonId, input, actorId = null, database = db) {
   const id = positiveId(reasonId, 'reasonId');
   const body = requireObject(input);
-  allowOnlyKeys(body, ['name', 'active']);
+  allowOnlyKeys(body, ['name', 'active', 'category', 'actionMeaning', 'countable', 'unit']);
   if (!Object.keys(body).length) throw new HttpError(400, 'At least one maintenance reason field must be provided.');
-  const current = database.prepare('SELECT id, name, active, created_at FROM maintenance_reasons WHERE id = ?').get(id);
+  const current = database.prepare(`SELECT id, name, active, category, action_meaning, is_countable, unit, created_at
+    FROM maintenance_reasons WHERE id = ?`).get(id);
   if (!current) throw new HttpError(404, 'Maintenance reason was not found.');
 
   const name = body.name === undefined ? current.name : requireText(body.name, 'name', { maxLength: 200 });
@@ -1472,25 +1498,39 @@ export function updateMaintenanceReason(reasonId, input, actorId = null, databas
     if (![true, false, 0, 1].includes(body.active)) throw new HttpError(400, 'active must be a boolean or 0/1.');
     active = Number(body.active);
   }
+  const config = normalizeReasonConfiguration(body, current);
 
   try {
     database.transaction(() => {
-      database.prepare('UPDATE maintenance_reasons SET name = ?, active = ? WHERE id = ?').run(name, active, id);
+      const changedInterpretation = name !== current.name || config.category !== current.category
+        || config.actionMeaning !== current.action_meaning || config.countable !== current.is_countable
+        || config.unit !== current.unit;
+      if (changedInterpretation) {
+        database.prepare(`INSERT INTO maintenance_reason_versions
+          (reason_id, name, category, action_meaning, is_countable, unit, changed_by)
+          VALUES (?, ?, ?, ?, ?, ?, ?)`)
+          .run(id, current.name, current.category, current.action_meaning, current.is_countable, current.unit, actorId);
+      }
+      database.prepare(`UPDATE maintenance_reasons SET name = ?, active = ?, category = ?,
+        action_meaning = ?, is_countable = ?, unit = ? WHERE id = ?`)
+        .run(name, active, config.category, config.actionMeaning, config.countable, config.unit, id);
       recordAudit({
         database,
         actorId,
         action: 'update',
         entityType: 'maintenance_reason',
         entityId: id,
-        oldValues: { name: current.name, active: current.active },
-        newValues: { name, active },
+        oldValues: { name: current.name, active: current.active, category: current.category,
+          actionMeaning: current.action_meaning, countable: current.is_countable, unit: current.unit },
+        newValues: { name, active, ...config },
       });
     }).immediate();
   } catch (error) {
     if (error.code === 'SQLITE_CONSTRAINT_UNIQUE') throw new HttpError(409, 'That maintenance reason already exists.');
     throw error;
   }
-  return database.prepare('SELECT id, name, active, created_at FROM maintenance_reasons WHERE id = ?').get(id);
+  return database.prepare(`SELECT id, name, active, category, action_meaning AS actionMeaning,
+    is_countable AS countable, unit, created_at FROM maintenance_reasons WHERE id = ?`).get(id);
 }
 
 export function deactivateMaintenanceReason(reasonId, actorId = null, database = db) {
@@ -3067,6 +3107,19 @@ export function getMaintenanceOrder(orderId, database = db) {
     WHERE assigned.order_id = ?
     ORDER BY user.full_name COLLATE NOCASE, user.id
   `).all(order.id);
+  const structuredLinesByCard = new Map();
+  const structuredLines = database.prepare(`SELECT * FROM maintenance_card_lines
+    WHERE card_id IN (SELECT id FROM maintenance_cards WHERE order_id = ? AND deleted_at IS NULL)
+    ORDER BY card_id, id`).all(order.id);
+  for (const line of structuredLines) {
+    const cardId = Number(line.card_id);
+    if (!structuredLinesByCard.has(cardId)) structuredLinesByCard.set(cardId, []);
+    structuredLinesByCard.get(cardId).push({
+      id: Number(line.id), reasonId: Number(line.reason_id), label: line.reason_label_snapshot,
+      category: line.category_snapshot, actionMeaning: line.action_meaning_snapshot,
+      quantity: Number(line.quantity), unit: line.unit_snapshot, quantityProvenance: line.quantity_provenance,
+    });
+  }
   const technicians = database.prepare(`
     SELECT employee.id, employee.name, employee.job_title, employee.department
     FROM maintenance_order_technicians assigned
@@ -3157,6 +3210,7 @@ export function getMaintenanceOrder(orderId, database = db) {
       reason_ids: reasonIds,
       reason_names: reasonNames,
       reason_name: compositeReasonName,
+      maintenance_lines: structuredLinesByCard.get(Number(card.id)) ?? [],
       before_photos: beforePhotos,
       after_photos: afterPhotos,
       before_photo_rotations: beforePhotoRotations,
@@ -4201,7 +4255,7 @@ async function updateMaintenanceCardUnlocked(orderId, cardId, input, actorId = n
   const id = positiveId(orderId, 'orderId');
   const targetCardId = positiveId(cardId, 'cardId');
   const body = requireObject(input);
-  allowOnlyKeys(body, ['beforePhotos', 'afterPhotos', 'notes', 'reasonId', 'reasonIds', 'machineCode']);
+  allowOnlyKeys(body, ['beforePhotos', 'afterPhotos', 'notes', 'reasonId', 'reasonIds', 'maintenanceLines', 'machineCode']);
   if (!Object.keys(body).length) throw new HttpError(400, 'At least one card field must be provided.');
 
   const order = findMaintenanceOrder(id, database);
@@ -4314,6 +4368,60 @@ async function updateMaintenanceCardUnlocked(orderId, cardId, input, actorId = n
     reasonIdsJson = JSON.stringify(reasonId === null ? [] : [reasonId]);
   }
 
+  let submittedLines = null;
+  if (body.maintenanceLines !== undefined) {
+    if (!Array.isArray(body.maintenanceLines)) throw new HttpError(400, 'maintenanceLines must be an array.');
+    submittedLines = new Map();
+    for (const [index, rawLine] of body.maintenanceLines.entries()) {
+      const line = requireObject(rawLine, `maintenanceLines[${index}]`);
+      allowOnlyKeys(line, ['reasonId', 'quantity', 'justification']);
+      const lineReasonId = positiveId(line.reasonId, `maintenanceLines[${index}].reasonId`);
+      if (submittedLines.has(lineReasonId)) throw new HttpError(400, `Duplicate maintenance line for reason ${lineReasonId}.`);
+      if (!Number.isSafeInteger(line.quantity) || line.quantity <= 0) {
+        throw new HttpError(400, `maintenanceLines[${index}].quantity must be a positive whole number.`);
+      }
+      submittedLines.set(lineReasonId, {
+        quantity: line.quantity,
+        justification: line.justification === undefined ? null : requireText(line.justification, `maintenanceLines[${index}].justification`, { maxLength: 1000 }),
+      });
+    }
+  }
+
+  let selectedReasonIds = JSON.parse(reasonIdsJson);
+  if (submittedLines && submittedLines.size > 0) {
+    const combined = [...new Set([...selectedReasonIds, ...submittedLines.keys()])];
+    if (combined.length !== selectedReasonIds.length) {
+      selectedReasonIds = combined;
+      reasonIdsJson = JSON.stringify(selectedReasonIds);
+      if (reasonId === null) reasonId = selectedReasonIds[0] ?? null;
+    }
+  }
+
+  const existingLines = database.prepare('SELECT * FROM maintenance_card_lines WHERE card_id = ?').all(targetCardId);
+  const currentLinesByReason = new Map(existingLines.map((line) => [Number(line.reason_id), line]));
+  const selectedCountable = selectedReasonIds.length
+    ? database.prepare(`SELECT id, name, category, action_meaning, is_countable, unit
+      FROM maintenance_reasons WHERE id IN (${selectedReasonIds.map(() => '?').join(',')})`).all(...selectedReasonIds)
+      .filter((reason) => reason.is_countable)
+    : [];
+  for (const reason of selectedCountable) {
+    const previous = currentLinesByReason.get(Number(reason.id));
+    const quantity = submittedLines?.get(Number(reason.id))?.quantity;
+    if (submittedLines && quantity === undefined) {
+      throw new HttpError(400, `Enter a quantity for maintenance reason ${reason.id}.`, { apiCode: 'MAINTENANCE_QUANTITY_REQUIRED' });
+    }
+    if (!previous && quantity === undefined) {
+      throw new HttpError(426, `This maintenance reason now requires a quantity. Update the application and submit the quantity for reason ${reason.id}.`, { apiCode: 'MAINTENANCE_STRUCTURED_LINES_REQUIRED' });
+    }
+  }
+  if (submittedLines) {
+    for (const lineReasonId of submittedLines.keys()) {
+      if (!selectedCountable.some((reason) => Number(reason.id) === lineReasonId)) {
+        throw new HttpError(400, `Reason ${lineReasonId} is not a selected countable maintenance item.`);
+      }
+    }
+  }
+
   const update = database.transaction(() => {
     if (machineCodeChanged) {
       if (replacementMachine && replacementMachine.id !== card.machine_id) {
@@ -4340,6 +4448,41 @@ async function updateMaintenanceCardUnlocked(orderId, cardId, input, actorId = n
       SET before_photos_json = ?, after_photos_json = ?, notes = ?, reason_id = ?, reason_ids_json = ?, updated_at = CURRENT_TIMESTAMP
       WHERE id = ? AND order_id = ? AND deleted_at IS NULL
     `).run(JSON.stringify(beforePhotos), JSON.stringify(afterPhotos), notes, reasonId, reasonIdsJson, targetCardId, id);
+    const selectedSet = new Set(selectedReasonIds.map(Number));
+    for (const existingLine of existingLines) {
+      if (!selectedSet.has(Number(existingLine.reason_id))) {
+        database.prepare('DELETE FROM maintenance_card_lines WHERE id = ?').run(existingLine.id);
+      }
+    }
+    for (const reason of selectedCountable) {
+      const previous = currentLinesByReason.get(Number(reason.id));
+      const submitted = submittedLines?.get(Number(reason.id));
+      const quantity = submitted?.quantity ?? previous?.quantity;
+      if (quantity === undefined || quantity === null) continue;
+      const corrected = previous && Number(previous.quantity) !== Number(quantity);
+      if (corrected) {
+        if (!submitted?.justification) {
+          throw new HttpError(400, `A correction justification is required for maintenance reason ${reason.id}.`, { apiCode: 'MAINTENANCE_QUANTITY_JUSTIFICATION_REQUIRED' });
+        }
+        recordAudit({ database, actorId, action: 'correct_quantity', entityType: 'maintenance_card_line',
+          entityId: previous.id, oldValues: { quantity: previous.quantity, provenance: previous.quantity_provenance },
+          newValues: { quantity, provenance: 'admin_correction', cardId: targetCardId, reasonId: reason.id,
+            justification: submitted.justification } });
+      }
+      const provenance = corrected
+        ? 'admin_correction'
+        : (submitted !== undefined ? 'user_entered' : (previous?.quantity_provenance ?? 'user_entered'));
+      database.prepare(`INSERT INTO maintenance_card_lines
+        (card_id, reason_id, reason_label_snapshot, category_snapshot, action_meaning_snapshot,
+         quantity, unit_snapshot, quantity_provenance, created_by, updated_by)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(card_id, reason_id) DO UPDATE SET
+          quantity = excluded.quantity,
+          quantity_provenance = excluded.quantity_provenance,
+          updated_by = excluded.updated_by, updated_at = CURRENT_TIMESTAMP`)
+        .run(targetCardId, reason.id, reason.name, reason.category, reason.action_meaning, quantity, reason.unit,
+          provenance, actorId, actorId);
+    }
     if (body.notes !== undefined && String(notes ?? '').trim()
         && String(notes).trim() !== String(card.notes ?? '').trim()) {
       appendMachineNoteHistory({

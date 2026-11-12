@@ -1510,7 +1510,7 @@ const finishTutorial = () => {
     await onLogout();
   };
 
-  const saveVisit = async ({ visitUuid: draftVisitUuid, machineCondition, reasonIds, notes, beforePhotos, afterPhotos, beforeCapturedAt, afterCapturedAt, capturedAt, location }) => {
+  const saveVisit = async ({ visitUuid: draftVisitUuid, machineCondition, reasonIds, maintenanceLines, notes, beforePhotos, afterPhotos, beforeCapturedAt, afterCapturedAt, capturedAt, location }) => {
     const visitUuid = draftVisitUuid || createVisitUuid();
     const payload = {
       visitUuid,
@@ -1519,6 +1519,7 @@ const finishTutorial = () => {
       regionName: selectedMachine.regionName,
       machineCondition,
       reasonIds,
+      maintenanceLines: maintenanceLines || [],
       notes,
       capturedAt,
       beforeCapturedAt,

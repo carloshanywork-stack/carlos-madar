@@ -718,13 +718,76 @@ export default function MaintenanceOrderDetail() {
 
   function getCardDraft(card) {
     const defaultReasonIds = card.reason_ids ?? (card.reason_id ? [card.reason_id] : []);
-    return cardDraftsRef.current[card.id] ?? { reasonIds: defaultReasonIds, notes: card.notes ?? '' };
+    const defaultLines = Array.isArray(card.maintenance_lines)
+      ? card.maintenance_lines.map((l) => ({ reasonId: Number(l.reasonId), quantity: Number(l.quantity) }))
+      : [];
+    return cardDraftsRef.current[card.id] ?? {
+      reasonIds: defaultReasonIds,
+      maintenanceLines: defaultLines,
+      notes: card.notes ?? '',
+    };
   }
 
-  async function saveCardFields(card, reasonIds, notes, { showSuccess = true } = {}) {
+  function getCardQuantity(card, rid) {
+    const draft = getCardDraft(card);
+    const line = (draft.maintenanceLines || []).find((l) => Number(l.reasonId) === Number(rid));
+    if (line && line.quantity !== undefined && line.quantity !== null) return line.quantity;
+    const serverLine = (card.maintenance_lines || []).find((l) => Number(l.reasonId) === Number(rid));
+    return serverLine?.quantity ?? 1;
+  }
+
+  function setCardQuantity(card, rid, qty) {
+    const draft = getCardDraft(card);
+    const existingLines = draft.maintenanceLines || [];
+    const hasLine = existingLines.some((l) => Number(l.reasonId) === Number(rid));
+    const nextLines = hasLine
+      ? existingLines.map((l) => (Number(l.reasonId) === Number(rid) ? { ...l, quantity: qty } : l))
+      : [...existingLines, { reasonId: Number(rid), quantity: qty }];
+    setCardDraft(card.id, {
+      ...draft,
+      maintenanceLines: nextLines,
+    });
+  }
+
+  async function saveCardFields(card, reasonIds, notes, { showSuccess = true, maintenanceLines: explicitLines, justification } = {}) {
     const normalizedReasonIds = Array.isArray(reasonIds) ? reasonIds.map(Number).filter(Boolean) : [];
     const normalizedNotes = notes ?? '';
-    const payload = { reasonIds: normalizedReasonIds, notes: normalizedNotes };
+    const draft = getCardDraft(card);
+    const submittedLines = explicitLines ?? draft.maintenanceLines ?? [];
+
+    const countableReasons = normalizedReasonIds
+      .map((rid) => (reasons || []).find((r) => Number(r.id) === Number(rid)))
+      .filter((r) => Boolean(r?.countable || r?.is_countable));
+
+    const finalLines = [];
+    for (const countable of countableReasons) {
+      const line = submittedLines.find((l) => Number(l.reasonId) === Number(countable.id));
+      const qNum = Number(line?.quantity ?? 1);
+      if (!Number.isSafeInteger(qNum) || qNum <= 0) {
+        if (showSuccess) showToast(`يرجى إدخال كمية صحيحة موجبة للبند: ${countable.name}`);
+        return false;
+      }
+      const existingServerLine = (card.maintenance_lines || []).find((l) => Number(l.reasonId) === Number(countable.id));
+      let lineJustification = line?.justification ?? justification;
+      if (existingServerLine && Number(existingServerLine.quantity) !== qNum && !lineJustification) {
+        lineJustification = window.prompt(`أدخل تبرير تعديل كمية "${countable.name}" (من ${existingServerLine.quantity} إلى ${qNum}):`) || '';
+        if (!lineJustification.trim()) {
+          if (showSuccess) showToast('يلزم تبرير تعديل الكمية المعتمدة لحفظ التغيير.');
+          return false;
+        }
+      }
+      finalLines.push({
+        reasonId: Number(countable.id),
+        quantity: qNum,
+        ...(lineJustification ? { justification: lineJustification.trim() } : {}),
+      });
+    }
+
+    const payload = {
+      reasonIds: normalizedReasonIds,
+      maintenanceLines: finalLines,
+      notes: normalizedNotes,
+    };
     const saveTimer = cardNoteSaveTimersRef.current.get(card.id);
     if (saveTimer) window.clearTimeout(saveTimer);
     cardNoteSaveTimersRef.current.delete(card.id);
@@ -732,9 +795,12 @@ export default function MaintenanceOrderDetail() {
 
     const serverCard = orderRef.current?.cards?.find((item) => item.id === card.id) ?? card;
     const serverReasonIds = serverCard.reason_ids ?? (serverCard.reason_id ? [serverCard.reason_id] : []);
-    const sameAsServer = serverReasonIds.length === normalizedReasonIds.length
-      && serverReasonIds.every((reasonId, index) => reasonId === normalizedReasonIds[index])
-      && (serverCard.notes ?? '') === normalizedNotes;
+    const serverLines = serverCard.maintenance_lines ?? [];
+    const sameReasons = serverReasonIds.length === normalizedReasonIds.length
+      && serverReasonIds.every((reasonId, index) => reasonId === normalizedReasonIds[index]);
+    const sameLines = serverLines.length === finalLines.length
+      && serverLines.every((sl) => finalLines.some((fl) => fl.reasonId === sl.reasonId && fl.quantity === sl.quantity));
+    const sameAsServer = sameReasons && sameLines && (serverCard.notes ?? '') === normalizedNotes;
     if (sameAsServer
       && !cardSavePayloadsRef.current.has(card.id)
       && !cardSavePromisesRef.current.has(card.id)) {
@@ -772,6 +838,7 @@ export default function MaintenanceOrderDetail() {
             if (draftMatchesSaved) {
               setCardDraft(card.id, {
                 reasonIds: updatedCard.reason_ids ?? (updatedCard.reason_id ? [updatedCard.reason_id] : []),
+                maintenanceLines: updatedCard.maintenance_lines ?? [],
                 notes: updatedCard.notes ?? '',
               });
             }
@@ -838,14 +905,24 @@ export default function MaintenanceOrderDetail() {
     const num = Number(value);
     if ((draft.reasonIds ?? []).includes(num)) return;
     const nextIds = [...(draft.reasonIds ?? []), num];
-    void saveCardFields(card, nextIds, draft.notes);
+    const found = (reasons || []).find((r) => Number(r.id) === num);
+    let nextLines = draft.maintenanceLines || [];
+    if (found && (found.countable || found.is_countable)) {
+      if (!nextLines.some((l) => Number(l.reasonId) === num)) {
+        nextLines = [...nextLines, { reasonId: num, quantity: 1 }];
+      }
+    }
+    setCardDraft(card.id, { ...draft, reasonIds: nextIds, maintenanceLines: nextLines });
+    void saveCardFields(card, nextIds, draft.notes, { maintenanceLines: nextLines });
   }
 
   function removeCardReason(card, value) {
     const draft = getCardDraft(card);
     const num = Number(value);
     const nextIds = (draft.reasonIds ?? []).filter((id) => id !== num);
-    void saveCardFields(card, nextIds, draft.notes);
+    const nextLines = (draft.maintenanceLines ?? []).filter((l) => Number(l.reasonId) !== num);
+    setCardDraft(card.id, { ...draft, reasonIds: nextIds, maintenanceLines: nextLines });
+    void saveCardFields(card, nextIds, draft.notes, { maintenanceLines: nextLines });
   }
 
   function updateCardNotesDraft(card, value) {
@@ -994,9 +1071,11 @@ export default function MaintenanceOrderDetail() {
                   }}
                 >
                   {(getCardDraft(card).reasonIds ?? []).map((rid) => {
-                    const found = (reasons ?? []).find((r) => r.id === rid);
+                    const found = (reasons ?? []).find((r) => Number(r.id) === Number(rid));
+                    const isCountable = Boolean(found?.countable || found?.is_countable);
                     const name = found?.name
                       ?? (card.reason_names?.[card.reason_ids?.indexOf(rid)] || `أمر صيانة #${rid}`);
+                    const unitLabel = found?.unit === 'piece' ? 'قطعة' : found?.unit === 'set' ? 'طقم' : (found?.unit || 'قطعة');
                     return (
                       <span
                         key={rid}
@@ -1014,6 +1093,34 @@ export default function MaintenanceOrderDetail() {
                         }}
                       >
                         <span>{name}</span>
+                        {isCountable && (
+                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', margin: '0 4px' }}>
+                            <input
+                              type="number"
+                              min="1"
+                              step="1"
+                              aria-label={`كمية ${name}`}
+                              value={getCardQuantity(card, rid)}
+                              onChange={(e) => setCardQuantity(card, rid, e.target.value)}
+                              onBlur={() => {
+                                const d = getCardDraft(card);
+                                void saveCardFields(card, d.reasonIds, d.notes, { showSuccess: false });
+                              }}
+                              style={{
+                                width: '48px',
+                                padding: '1px 4px',
+                                borderRadius: '4px',
+                                border: '1px solid rgba(36, 166, 160, 0.6)',
+                                background: 'rgba(15, 23, 42, 0.6)',
+                                color: '#fff',
+                                fontSize: '12px',
+                                textAlign: 'center',
+                                fontWeight: 600,
+                              }}
+                            />
+                            <span style={{ fontSize: '11px', color: '#94a3b8' }}>{unitLabel}</span>
+                          </div>
+                        )}
                         {order.canEditReasons && <button
                           type="button"
                           onClick={() => removeCardReason(card, rid)}
@@ -1661,9 +1768,9 @@ export default function MaintenanceOrderDetail() {
           orderId={id}
           reasons={reasons}
           cardDrafts={cardDrafts}
-          onUpdateReasons={(card, reasonIds) => {
+          onUpdateReasons={(card, reasonIds, lines) => {
             const draft = getCardDraft(card);
-            return saveCardFields(card, reasonIds, draft.notes);
+            return saveCardFields(card, reasonIds, draft.notes, { maintenanceLines: lines });
           }}
           onShowToast={showToast}
           machineCodeEditorOpen={Boolean(machineCodeCard)}
@@ -2106,7 +2213,12 @@ function PhotoLightboxModal({
                 onChange={(event) => {
                   const reasonId = Number(event.target.value);
                   if (reasonId && !currentReasonIds.includes(reasonId)) {
-                    onUpdateReasons?.(currentCard, [...currentReasonIds, reasonId]);
+                    const foundReason = (reasons ?? []).find((r) => Number(r.id) === reasonId);
+                    const existingLines = cardDrafts[currentCard?.id]?.maintenanceLines ?? currentCard?.maintenance_lines ?? [];
+                    const nextLines = (foundReason?.countable || foundReason?.is_countable)
+                      ? [...existingLines.filter((l) => Number(l.reasonId) !== reasonId), { reasonId, quantity: 1 }]
+                      : existingLines;
+                    onUpdateReasons?.(currentCard, [...currentReasonIds, reasonId], nextLines);
                   }
                 }}
                 style={{ minWidth: '180px', maxWidth: 'min(300px, 70vw)', fontSize: '12px', padding: '4px 8px' }}
@@ -2119,8 +2231,13 @@ function PhotoLightboxModal({
             )}
             <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
               {currentReasonIds.map((reasonId) => {
-                const reasonName = (reasons ?? []).find((reason) => Number(reason.id) === Number(reasonId))?.name
-                  ?? `أمر صيانة #${reasonId}`;
+                const found = (reasons ?? []).find((reason) => Number(reason.id) === Number(reasonId));
+                const reasonName = found?.name ?? `أمر صيانة #${reasonId}`;
+                const isCountable = Boolean(found?.countable || found?.is_countable);
+                const line = (cardDrafts[currentCard?.id]?.maintenanceLines ?? currentCard?.maintenance_lines ?? [])
+                  .find((l) => Number(l.reasonId) === Number(reasonId));
+                const qty = line?.quantity ?? 1;
+                const unitLabel = found?.unit === 'piece' ? 'قطعة' : found?.unit === 'set' ? 'طقم' : (found?.unit || 'قطعة');
                 return (
                   <span
                     key={reasonId}
@@ -2130,11 +2247,47 @@ function PhotoLightboxModal({
                       color: '#38bdf8', border: '1px solid rgba(56, 189, 248, 0.3)',
                     }}
                   >
-                    {reasonName}
+                    <span>{reasonName}</span>
+                    {isCountable && (
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '2px' }}>
+                        <input
+                          type="number"
+                          min="1"
+                          step="1"
+                          aria-label={`كمية ${reasonName}`}
+                          value={qty}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            const existingLines = cardDrafts[currentCard?.id]?.maintenanceLines ?? currentCard?.maintenance_lines ?? [];
+                            const nextLines = existingLines.map((l) => Number(l.reasonId) === Number(reasonId) ? { ...l, quantity: val } : l);
+                            if (!existingLines.some((l) => Number(l.reasonId) === Number(reasonId))) {
+                              nextLines.push({ reasonId: Number(reasonId), quantity: val });
+                            }
+                            onUpdateReasons?.(currentCard, currentReasonIds, nextLines);
+                          }}
+                          style={{
+                            width: '42px',
+                            padding: '1px 3px',
+                            borderRadius: '3px',
+                            border: '1px solid #38bdf8',
+                            background: '#0f172a',
+                            color: '#fff',
+                            fontSize: '11px',
+                            textAlign: 'center',
+                          }}
+                        />
+                        <small style={{ fontSize: '10px', color: '#94a3b8' }}>{unitLabel}</small>
+                      </span>
+                    )}
                     {canEditReasons && (
                       <button
                         type="button"
-                        onClick={() => onUpdateReasons?.(currentCard, currentReasonIds.filter((id) => Number(id) !== Number(reasonId)))}
+                        onClick={() => {
+                          const nextReasons = currentReasonIds.filter((id) => Number(id) !== Number(reasonId));
+                          const existingLines = cardDrafts[currentCard?.id]?.maintenanceLines ?? currentCard?.maintenance_lines ?? [];
+                          const nextLines = existingLines.filter((l) => Number(l.reasonId) !== Number(reasonId));
+                          onUpdateReasons?.(currentCard, nextReasons, nextLines);
+                        }}
                         title="إزالة هذا السبب"
                         aria-label={`إزالة سبب الصيانة ${reasonName}`}
                         style={{ background: 'none', border: 'none', color: '#f87171', cursor: 'pointer', padding: 0 }}

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -176,11 +177,63 @@ test('Phase 4 finance lifecycle keeps integer-cents, stock, custody, billing, an
     0,
     'creating a purchase invoice records a liability but must not move treasury cash',
   );
-  const partialPurchasePayment = await request(
-    `/api/finance/invoices/${purchase.body.id}/payment`,
-    jsonOptions('POST', { amountCents: 600_000, notes: 'First supplier installment.' }),
-  );
+  const purchasePaymentOperationId = randomUUID();
+  const firstPaymentPayload = {
+    amountCents: 600_000,
+    notes: 'First supplier installment.',
+    operationId: purchasePaymentOperationId,
+  };
+  const [partialPurchasePayment, concurrentPaymentRetry] = await Promise.all([
+    request(`/api/finance/invoices/${purchase.body.id}/payment`, jsonOptions('POST', firstPaymentPayload)),
+    request(`/api/finance/invoices/${purchase.body.id}/payment`, jsonOptions('POST', firstPaymentPayload)),
+  ]);
   assert.equal(partialPurchasePayment.response.status, 201, JSON.stringify(partialPurchasePayment.body));
+  assert.equal(concurrentPaymentRetry.response.status, 201, JSON.stringify(concurrentPaymentRetry.body));
+  assert.equal(concurrentPaymentRetry.body.idempotent, true);
+  assert.equal(concurrentPaymentRetry.body.treasuryEntry.id, partialPurchasePayment.body.treasuryEntry.id);
+  const committedPaymentRetry = await request(
+    `/api/finance/invoices/${purchase.body.id}/payment`, jsonOptions('POST', firstPaymentPayload),
+  );
+  assert.equal(committedPaymentRetry.response.status, 201);
+  assert.equal(committedPaymentRetry.body.idempotent, true);
+  assert.equal(committedPaymentRetry.body.treasuryEntry.id, partialPurchasePayment.body.treasuryEntry.id);
+  const [identicalRace, conflictingRace] = await Promise.all([
+    request(`/api/finance/invoices/${purchase.body.id}/payment`, jsonOptions('POST', firstPaymentPayload)),
+    request(`/api/finance/invoices/${purchase.body.id}/payment`, jsonOptions('POST', {
+      ...firstPaymentPayload,
+      amountCents: 599_998,
+    })),
+  ]);
+  assert.equal(identicalRace.response.status, 201);
+  assert.equal(identicalRace.body.idempotent, true);
+  assert.equal(conflictingRace.response.status, 409);
+  assert.equal(conflictingRace.body.code, 'FINANCE_OPERATION_ID_CONFLICT');
+  assert.equal(
+    db.prepare('SELECT COUNT(*) AS count FROM treasury_entries WHERE invoice_id = ?').get(purchase.body.id).count,
+    1,
+  );
+  const changedOperationPayload = await request(
+    `/api/finance/invoices/${purchase.body.id}/payment`,
+    jsonOptions('POST', { ...firstPaymentPayload, amountCents: 599_999 }),
+  );
+  assert.equal(changedOperationPayload.response.status, 409);
+  assert.equal(changedOperationPayload.body.code, 'FINANCE_OPERATION_ID_CONFLICT');
+  const changedInvoiceOperation = await request(
+    `/api/finance/invoices/999999/payment`, jsonOptions('POST', firstPaymentPayload),
+  );
+  assert.equal(changedInvoiceOperation.response.status, 409);
+  assert.equal(changedInvoiceOperation.body.code, 'FINANCE_OPERATION_ID_CONFLICT');
+  const changedOperationType = await request(
+    `/api/finance/invoices/${purchase.body.id}/receipt`, jsonOptions('POST', firstPaymentPayload),
+  );
+  assert.equal(changedOperationType.response.status, 409);
+  assert.equal(changedOperationType.body.code, 'FINANCE_OPERATION_ID_CONFLICT');
+  const otherActorReplay = await request(
+    `/api/finance/invoices/${purchase.body.id}/payment`,
+    jsonOptions('POST', firstPaymentPayload),
+    financeLogin.cookie,
+  );
+  assert.equal(otherActorReplay.response.status, 409);
   assert.equal(partialPurchasePayment.body.invoice.paid_total_cents, 600_000);
   assert.equal(partialPurchasePayment.body.invoice.remaining_cents, 400_000);
   assert.equal(partialPurchasePayment.body.invoice.payment_status, 'partial');
@@ -194,14 +247,37 @@ test('Phase 4 finance lifecycle keeps integer-cents, stock, custody, billing, an
   );
   assert.equal(overpayPurchase.response.status, 409);
   assert.equal((await request('/api/finance/treasury')).body.cashBalanceCents, 9_400_000);
+  const retryAfterRollbackOperationId = randomUUID();
+  db.exec(`CREATE TRIGGER test_abort_purchase_payment_audit BEFORE INSERT ON audit_log
+    WHEN NEW.action = 'purchase_payment' BEGIN SELECT RAISE(ABORT, 'test rollback'); END;`);
+  const rollbackPayload = { amountCents: 400_000, operationId: retryAfterRollbackOperationId };
+  const rollbackAttempt = await request(
+    `/api/finance/invoices/${purchase.body.id}/payment`, jsonOptions('POST', rollbackPayload),
+  );
+  assert.equal(rollbackAttempt.response.status, 500);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM finance_settlement_operations WHERE operation_id = ?')
+    .get(retryAfterRollbackOperationId).count, 0);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM treasury_entries WHERE invoice_id = ?').get(purchase.body.id).count, 1);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM audit_log WHERE action = 'purchase_payment' AND entity_id = ?")
+    .get(purchase.body.id).count, 1);
+  assert.equal((await request('/api/finance/treasury')).body.cashBalanceCents, 9_400_000);
+  db.exec('DROP TRIGGER test_abort_purchase_payment_audit');
   const finalPurchasePayment = await request(
     `/api/finance/invoices/${purchase.body.id}/payment`,
-    jsonOptions('POST', { amountCents: 400_000 }),
+    jsonOptions('POST', rollbackPayload),
   );
   assert.equal(finalPurchasePayment.response.status, 201, JSON.stringify(finalPurchasePayment.body));
   assert.equal(finalPurchasePayment.body.invoice.paid_total_cents, 1_000_000);
   assert.equal(finalPurchasePayment.body.invoice.remaining_cents, 0);
   assert.equal(finalPurchasePayment.body.invoice.payment_status, 'paid');
+  assert.notEqual(finalPurchasePayment.body.treasuryEntry.id, partialPurchasePayment.body.treasuryEntry.id);
+  const fullSettlementReplay = await request(
+    `/api/finance/invoices/${purchase.body.id}/payment`, jsonOptions('POST', rollbackPayload),
+  );
+  assert.equal(fullSettlementReplay.response.status, 201);
+  assert.equal(fullSettlementReplay.body.idempotent, true);
+  assert.equal(fullSettlementReplay.body.invoice.payment_status, 'paid');
+  assert.equal(fullSettlementReplay.body.treasuryEntry.id, finalPurchasePayment.body.treasuryEntry.id);
   assert.equal((await request('/api/finance/treasury')).body.cashBalanceCents, 9_000_000);
   assert.deepEqual(
     db.prepare(`
@@ -296,9 +372,14 @@ test('Phase 4 finance lifecycle keeps integer-cents, stock, custody, billing, an
   assert.equal(duplicateDelivery.response.status, 409);
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM invoices WHERE kind = 'sales'").get().count, 1);
 
+  const receiptPayload = {
+    amountCents: 1_500_000,
+    notes: 'First installment.',
+    operationId: randomUUID(),
+  };
   const receipt = await request(
     `/api/finance/invoices/${delivered.body.invoice.id}/receipt`,
-    jsonOptions('POST', { amountCents: 1_500_000, notes: 'First installment.' }),
+    jsonOptions('POST', receiptPayload),
   );
   assert.equal(receipt.response.status, 201);
   assert.equal(receipt.body.invoice.paid_total_cents, 1_500_000);
@@ -309,6 +390,16 @@ test('Phase 4 finance lifecycle keeps integer-cents, stock, custody, billing, an
   assert.equal(receipt.body.treasuryEntry.invoice_id, delivered.body.invoice.id);
   assert.equal(receipt.body.treasuryEntry.reference, delivered.body.invoice.code);
   assert.equal((await request('/api/finance/treasury')).body.cashBalanceCents, 10_500_000);
+  const receiptRetry = await request(
+    `/api/finance/invoices/${delivered.body.invoice.id}/receipt`, jsonOptions('POST', receiptPayload),
+  );
+  assert.equal(receiptRetry.response.status, 201);
+  assert.equal(receiptRetry.body.idempotent, true);
+  assert.equal(receiptRetry.body.treasuryEntry.id, receipt.body.treasuryEntry.id);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM treasury_entries WHERE invoice_id = ?')
+    .get(delivered.body.invoice.id).count, 1);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM audit_log WHERE action = 'sales_receipt' AND entity_id = ?")
+    .get(delivered.body.invoice.id).count, 1);
   const overpayment = await request(
     `/api/finance/invoices/${delivered.body.invoice.id}/receipt`,
     jsonOptions('POST', { amountCents: 1_000_001 }),
@@ -406,6 +497,15 @@ test('Phase 4 finance lifecycle keeps integer-cents, stock, custody, billing, an
   }));
   assert.equal(unaffordableExpense.response.status, 409);
   assert.equal((await request('/api/finance/treasury')).body.cashBalanceCents, 10_350_000);
+  const legacyReceipt = await request(
+    `/api/finance/invoices/${delivered.body.invoice.id}/receipt`,
+    jsonOptions('POST', { amountCents: 1_000_000 }),
+  );
+  assert.equal(legacyReceipt.response.status, 201);
+  assert.equal(legacyReceipt.body.invoice.payment_status, 'paid');
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM finance_settlement_operations WHERE invoice_id = ?')
+    .get(delivered.body.invoice.id).count, 1, 'legacy requests remain valid and do not create idempotency records');
+  assert.equal((await request('/api/finance/treasury')).body.cashBalanceCents, 11_350_000);
 });
 
 test('monthly attendance matrix exports, bulk-marks present idempotently, and feeds draft payroll', async () => {

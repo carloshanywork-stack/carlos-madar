@@ -335,15 +335,15 @@ router.get('/reasons', (req, res, next) => {
     next(error);
   }
 });
-router.post('/reasons', (req, res, next) => {
+router.post('/reasons', requireRole('admin'), (req, res, next) => {
   try { res.status(201).json(createMaintenanceReason(req.body, requestActorId(req))); }
   catch (error) { next(error); }
 });
-router.patch('/reasons/:id', (req, res, next) => {
+router.patch('/reasons/:id', requireRole('admin'), (req, res, next) => {
   try { res.json(updateMaintenanceReason(req.params.id, req.body, requestActorId(req))); }
   catch (error) { next(error); }
 });
-router.delete('/reasons/:id', (req, res, next) => {
+router.delete('/reasons/:id', requireRole('admin'), (req, res, next) => {
   try { res.json(deactivateMaintenanceReason(req.params.id, requestActorId(req))); }
   catch (error) { next(error); }
 });
@@ -659,7 +659,7 @@ router.get('/orders/:id/cards/:cardId/photos/:phase/:filename/thumbnail', asyncH
 }));
 
 router.patch('/orders/:id/cards/:cardId', asyncHandler(async (req, res) => {
-  if ((req.body?.reasonId !== undefined || req.body?.reasonIds !== undefined)
+  if ((req.body?.reasonId !== undefined || req.body?.reasonIds !== undefined || req.body?.maintenanceLines !== undefined)
     && !['admin', 'operations'].includes(req.user?.role)) {
     throw new HttpError(403, 'Administrator or Operations access is required to edit maintenance reasons.');
   }

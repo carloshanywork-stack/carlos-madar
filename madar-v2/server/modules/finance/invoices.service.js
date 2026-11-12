@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { db } from '../../database/connection.js';
 import { recordAudit } from '../audit.js';
 import {
@@ -15,6 +16,43 @@ const PURCHASE_CATEGORY = 'مشتريات خامات ومواد';
 const RECEIPT_CATEGORY = 'تحصيل مبيعات';
 const MAX_QUANTITY = 1_000_000_000_000;
 const INVOICE_KINDS = ['sales', 'purchase', 'other_expense'];
+
+function settlementOperation(body, actorId, operationType, invoiceId, amountCents, notes) {
+  const operationId = body.operationId;
+  if (operationId === undefined) return null;
+  if (typeof operationId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(operationId)) {
+    throw new HttpError(400, 'operationId must be a UUID v4.');
+  }
+  if (!Number.isSafeInteger(actorId) || actorId < 1) {
+    throw new HttpError(401, 'An authenticated finance actor is required for idempotent settlement.');
+  }
+  const payload = JSON.stringify({ operationType, invoiceId, amountCents, notes: notes ?? null });
+  return {
+    operationId: operationId.toLowerCase(),
+    actorId,
+    operationType,
+    invoiceId,
+    payloadSha256: createHash('sha256').update(payload).digest('hex'),
+  };
+}
+
+function replaySettlement(database, operation) {
+  if (!operation) return null;
+  const existing = database.prepare(`
+    SELECT actor_id, operation_type, invoice_id, payload_sha256, response_json
+    FROM finance_settlement_operations WHERE operation_id = ?
+  `).get(operation.operationId);
+  if (!existing) return null;
+  if (Number(existing.actor_id) !== operation.actorId
+      || existing.operation_type !== operation.operationType
+      || Number(existing.invoice_id) !== operation.invoiceId
+      || existing.payload_sha256 !== operation.payloadSha256) {
+    throw new HttpError(409, 'operationId was already used for different financial content or by another actor.', {
+      apiCode: 'FINANCE_OPERATION_ID_CONFLICT',
+    });
+  }
+  return { ...JSON.parse(existing.response_json), idempotent: true };
+}
 
 function positiveQuantity(value, label) {
   if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0 || value > MAX_QUANTITY) {
@@ -290,12 +328,15 @@ export function insertSalesInvoiceForWorkshopOrder(workshopOrderId, actorId = nu
 export function recordPurchasePayment(invoiceId, input, actorId = null, database = db) {
   const id = positiveId(invoiceId, 'invoiceId');
   const body = requireObject(input);
-  allowOnlyKeys(body, ['amountCents', 'notes']);
+  allowOnlyKeys(body, ['amountCents', 'notes', 'operationId']);
   const amountCents = nonNegativeInteger(body.amountCents, 'amountCents');
   if (amountCents < 1) throw new HttpError(400, 'amountCents must be greater than zero.');
   const notes = optionalText(body.notes, 'notes', { maxLength: 2000 });
+  const operation = settlementOperation(body, actorId, 'purchase_payment', id, amountCents, notes);
 
   const result = database.transaction(() => {
+    const replay = replaySettlement(database, operation);
+    if (replay) return replay;
     const invoice = database.prepare(`
       SELECT id, code, kind, status, supplier, employee_id,
         total_cents, paid_total_cents, remaining_cents
@@ -349,24 +390,36 @@ export function recordPurchasePayment(invoiceId, input, actorId = null, database
         treasury_entry_id: treasuryEntryId,
       },
     });
-    return { treasuryEntryId };
+    const response = {
+      invoice: readInvoice(id, database),
+      treasuryEntry: database.prepare('SELECT * FROM treasury_entries WHERE id = ?').get(treasuryEntryId),
+    };
+    if (operation) {
+      database.prepare(`
+        INSERT INTO finance_settlement_operations
+          (operation_id, actor_id, operation_type, invoice_id, payload_sha256, response_json)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).run(operation.operationId, operation.actorId, operation.operationType, operation.invoiceId,
+        operation.payloadSha256, JSON.stringify(response));
+    }
+    return response;
   }).immediate();
 
-  return {
-    invoice: readInvoice(id, database),
-    treasuryEntry: database.prepare('SELECT * FROM treasury_entries WHERE id = ?').get(result.treasuryEntryId),
-  };
+  return result;
 }
 
 export function recordSalesReceipt(invoiceId, input, actorId = null, database = db) {
   const id = positiveId(invoiceId, 'invoiceId');
   const body = requireObject(input);
-  allowOnlyKeys(body, ['amountCents', 'notes']);
+  allowOnlyKeys(body, ['amountCents', 'notes', 'operationId']);
   const amountCents = nonNegativeInteger(body.amountCents, 'amountCents');
   if (amountCents < 1) throw new HttpError(400, 'amountCents must be greater than zero.');
   const notes = optionalText(body.notes, 'notes', { maxLength: 2000 });
+  const operation = settlementOperation(body, actorId, 'sales_receipt', id, amountCents, notes);
 
   const result = database.transaction(() => {
+    const replay = replaySettlement(database, operation);
+    if (replay) return replay;
     const invoice = database.prepare(`
       SELECT id, code, kind, status, total_cents, paid_total_cents, remaining_cents
       FROM invoices WHERE id = ? AND deleted_at IS NULL
@@ -417,11 +470,20 @@ export function recordSalesReceipt(invoiceId, input, actorId = null, database = 
         treasury_entry_id: treasuryEntryId,
       },
     });
-    return { treasuryEntryId };
+    const response = {
+      invoice: readInvoice(id, database),
+      treasuryEntry: database.prepare('SELECT * FROM treasury_entries WHERE id = ?').get(treasuryEntryId),
+    };
+    if (operation) {
+      database.prepare(`
+        INSERT INTO finance_settlement_operations
+          (operation_id, actor_id, operation_type, invoice_id, payload_sha256, response_json)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).run(operation.operationId, operation.actorId, operation.operationType, operation.invoiceId,
+        operation.payloadSha256, JSON.stringify(response));
+    }
+    return response;
   }).immediate();
 
-  return {
-    invoice: readInvoice(id, database),
-    treasuryEntry: database.prepare('SELECT * FROM treasury_entries WHERE id = ?').get(result.treasuryEntryId),
-  };
+  return result;
 }

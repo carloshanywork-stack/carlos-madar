@@ -285,14 +285,16 @@ test('admins can edit archived card reasons, notes, and machine codes while phot
   assert.equal(orderResponse.response.status, 201, JSON.stringify(orderResponse.body));
   const card = orderResponse.body.cards.find((item) => item.machine_id === machineResponse.body.id);
   assert.ok(card);
-  const createReason = async (name) => {
-    const result = await request('/api/maintenance/reasons', json('POST', { name }));
+  const createReason = async (name, config = {}) => {
+    const result = await request('/api/maintenance/reasons', json('POST', { name, ...config }));
     assert.equal(result.response.status, 201, JSON.stringify(result.body));
     return result.body.id;
   };
   const removedReasonId = await createReason('سبب أرشيفي سيُزال');
   const keptReasonId = await createReason('سبب أرشيفي باقٍ');
-  const addedReasonId = await createReason('سبب أرشيفي جديد');
+  const addedReasonId = await createReason('سبب أرشيفي جديد', {
+    category: 'spotlights_transformers', actionMeaning: 'executed_work', countable: true, unit: 'piece',
+  });
   const initialUpdate = await request(`/api/maintenance/orders/${orderResponse.body.id}/cards/${card.id}`, json('PATCH', {
     reasonIds: [removedReasonId, keptReasonId],
     notes: 'ملاحظة قبل الأرشفة',
@@ -301,14 +303,38 @@ test('admins can edit archived card reasons, notes, and machine codes while phot
 
   db.prepare("UPDATE maintenance_orders SET status = 'archived', archived_at = '2026-11-05 12:00:00' WHERE id = ?")
     .run(orderResponse.body.id);
+  const missingCount = await request(`/api/maintenance/orders/${orderResponse.body.id}/cards/${card.id}`, json('PATCH', {
+    reasonIds: [keptReasonId, addedReasonId], notes: 'محاولة بدون كمية',
+  }));
+  assert.equal(missingCount.response.status, 426);
+  assert.equal(missingCount.body.code, 'MAINTENANCE_STRUCTURED_LINES_REQUIRED');
+  const fractionalCount = await request(`/api/maintenance/orders/${orderResponse.body.id}/cards/${card.id}`, json('PATCH', {
+    reasonIds: [keptReasonId, addedReasonId], maintenanceLines: [{ reasonId: addedReasonId, quantity: 1.5 }],
+  }));
+  assert.equal(fractionalCount.response.status, 400);
   const archivedUpdate = await request(`/api/maintenance/orders/${orderResponse.body.id}/cards/${card.id}`, json('PATCH', {
     reasonIds: [keptReasonId, addedReasonId],
+    maintenanceLines: [{ reasonId: addedReasonId, quantity: 4 }],
     notes: 'ملاحظة فنية محدّثة بعد الأرشفة',
   }));
   assert.equal(archivedUpdate.response.status, 200, JSON.stringify(archivedUpdate.body));
   assert.deepEqual(archivedUpdate.body.reason_ids, [keptReasonId, addedReasonId]);
   assert.equal(archivedUpdate.body.notes, 'ملاحظة فنية محدّثة بعد الأرشفة');
   assert.equal(archivedUpdate.body.reason_id, keptReasonId);
+  assert.equal(archivedUpdate.body.maintenance_lines[0].quantity, 4);
+  assert.equal(archivedUpdate.body.maintenance_lines[0].quantityProvenance, 'user_entered');
+  const unjustifiedCorrection = await request(`/api/maintenance/orders/${orderResponse.body.id}/cards/${card.id}`, json('PATCH', {
+    maintenanceLines: [{ reasonId: addedReasonId, quantity: 5 }],
+  }));
+  assert.equal(unjustifiedCorrection.response.status, 400);
+  assert.equal(unjustifiedCorrection.body.code, 'MAINTENANCE_QUANTITY_JUSTIFICATION_REQUIRED');
+  const correctedQuantity = await request(`/api/maintenance/orders/${orderResponse.body.id}/cards/${card.id}`, json('PATCH', {
+    maintenanceLines: [{ reasonId: addedReasonId, quantity: 5, justification: 'مطابقة مع محضر العمل' }],
+  }));
+  assert.equal(correctedQuantity.response.status, 200, JSON.stringify(correctedQuantity.body));
+  assert.equal(correctedQuantity.body.maintenance_lines[0].quantity, 5);
+  assert.equal(correctedQuantity.body.maintenance_lines[0].quantityProvenance, 'admin_correction');
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM audit_log WHERE action = 'correct_quantity' AND entity_type = 'maintenance_card_line'").get().count, 1);
 
   const updatedMachineCode = await request(`/api/maintenance/orders/${orderResponse.body.id}/cards/${card.id}`, json('PATCH', {
     machineCode: 'ARCHIVED-CARD-EDIT-01-RENAMED',

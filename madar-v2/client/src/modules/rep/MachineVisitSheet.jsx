@@ -36,6 +36,20 @@ function distanceMeters(first, second) {
 export default function MachineVisitSheet({ machine, repName = '', reasons, gps, gpsError, captureLocation, onClose, onSave, onConfirmLocation, onReportCorrection }) {
   const [notes, setNotes] = useState('');
   const [photos, setPhotos] = useState({ before: [], after: [] });
+  const [selectedReasonIds, setSelectedReasonIds] = useState(() => {
+    if (Array.isArray(machine?.reasonIds) && machine.reasonIds.length) return machine.reasonIds.map(Number);
+    if (Array.isArray(machine?.reason_ids) && machine.reason_ids.length) return machine.reason_ids.map(Number);
+    return [];
+  });
+  const [quantities, setQuantities] = useState(() => {
+    const initial = {};
+    if (Array.isArray(machine?.maintenance_lines)) {
+      for (const line of machine.maintenance_lines) {
+        if (line.reasonId && line.quantity) initial[Number(line.reasonId)] = line.quantity;
+      }
+    }
+    return initial;
+  });
   const [activePhase, setActivePhase] = useState('before');
   const [processingPhase, setProcessingPhase] = useState('');
   const [saving, setSaving] = useState(false);
@@ -287,6 +301,37 @@ export default function MachineVisitSheet({ machine, repName = '', reasons, gps,
     }
   };
 
+  const addReason = (id) => {
+    const numId = Number(id);
+    if (!numId || selectedReasonIds.includes(numId)) return;
+    setSelectedReasonIds((current) => [...current, numId]);
+    const reasonObj = (reasons || []).find((r) => Number(r.id) === numId);
+    if (reasonObj && (reasonObj.countable || reasonObj.is_countable)) {
+      setQuantities((current) => ({
+        ...current,
+        [numId]: current[numId] ?? '',
+      }));
+    }
+  };
+
+  const removeReason = (id) => {
+    const numId = Number(id);
+    setSelectedReasonIds((current) => current.filter((rId) => rId !== numId));
+    setQuantities((current) => {
+      const next = { ...current };
+      delete next[numId];
+      return next;
+    });
+  };
+
+  const updateQuantity = (id, value) => {
+    const numId = Number(id);
+    setQuantities((current) => ({
+      ...current,
+      [numId]: value,
+    }));
+  };
+
   const save = async () => {
     if (deletingPhotoRef.current) {
       setError('انتظر اكتمال حذف الصورة قبل حفظ الزيارة.');
@@ -317,10 +362,26 @@ export default function MachineVisitSheet({ machine, repName = '', reasons, gps,
           - Number(currentLocation.accuracy ?? 0));
         throw new Error(`أنت خارج نطاق الماكينة (المسافة الفعالة: ${Math.round(distance)} متر، المسموح: ${radius} متر).`);
       }
+
+      const selectedReasonsList = selectedReasonIds
+        .map((rid) => (reasons || []).find((r) => Number(r.id) === Number(rid)))
+        .filter(Boolean);
+      const countableSelected = selectedReasonsList.filter((r) => Boolean(r.countable || r.is_countable));
+      const maintenanceLines = [];
+      for (const countable of countableSelected) {
+        const rawQ = quantities[countable.id];
+        const qNum = Number(rawQ);
+        if (!Number.isSafeInteger(qNum) || qNum <= 0) {
+          throw new Error(`يرجى إدخال كمية صحيحة موجبة للبند: "${countable.name}".`);
+        }
+        maintenanceLines.push({ reasonId: Number(countable.id), quantity: qNum });
+      }
+
       await onSave({
         visitUuid: draftVisitUuid,
         machineCondition: 'working',
-        reasonIds: [],
+        reasonIds: selectedReasonIds,
+        maintenanceLines,
         notes: notes.trim(),
         beforePhotos: photos.before.map(({ blob, path, sizeBytes, capturedAt: photoCapturedAt }) => blob ?? ({ path, sizeBytes, capturedAt: photoCapturedAt })),
         afterPhotos: photos.after.map(({ blob, path, sizeBytes, capturedAt: photoCapturedAt }) => blob ?? ({ path, sizeBytes, capturedAt: photoCapturedAt })),
@@ -479,6 +540,103 @@ export default function MachineVisitSheet({ machine, repName = '', reasons, gps,
               </div>
             )}
             <p className="rep-watermark-note">يُدمج ختم واضح ببكسلات كل صورة قبل حفظها: التاريخ واليوم، الوقت بالثواني، إحداثيات GPS والمنطقة المسجلة، وكود الماكينة واسمها.</p>
+          </section>
+
+          <section className="rep-reasons-section" aria-label="أسباب وبنود الصيانة" style={{ marginTop: '16px', marginBottom: '16px' }}>
+            <div className="rep-section-title" style={{ marginBottom: '10px' }}>
+              <div><span className="rep-eyebrow">MAINTENANCE ITEMS</span><h3 style={{ margin: 0 }}>بنود وأسباب الصيانة المنفذة</h3></div>
+              <small style={{ color: '#64748b' }}>اختر الإجراءات أو القطع التي تم تبديلها وأدخل الكميات</small>
+            </div>
+
+            <div className="rep-reason-selector-bar" style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '10px' }}>
+              <select
+                aria-label="إضافة بند أو سبب صيانة"
+                value=""
+                onChange={(e) => addReason(e.target.value)}
+                style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px' }}
+              >
+                <option value="">+ اختر إجراء أو بند صيانة...</option>
+                {(reasons || [])
+                  .filter((r) => !selectedReasonIds.includes(Number(r.id)))
+                  .map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.name} {Boolean(r.countable || r.is_countable) ? `(كمية: ${r.unit === 'piece' ? 'قطعة' : r.unit === 'set' ? 'طقم' : (r.unit || 'قطعة')})` : ''}
+                    </option>
+                  ))}
+              </select>
+            </div>
+
+            <div className="rep-selected-reasons-list" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {selectedReasonIds.map((rid) => {
+                const reason = (reasons || []).find((r) => Number(r.id) === Number(rid));
+                const name = reason?.name ?? `بند #${rid}`;
+                const isCountable = Boolean(reason?.countable || reason?.is_countable);
+                const unitLabel = reason?.unit === 'piece' ? 'قطعة' : reason?.unit === 'set' ? 'طقم' : (reason?.unit || 'قطعة');
+                return (
+                  <div
+                    key={rid}
+                    className="rep-reason-card"
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '8px 12px',
+                      background: '#f8fafc',
+                      borderRadius: '8px',
+                      border: '1px solid #e2e8f0',
+                      gap: '10px',
+                    }}
+                  >
+                    <span style={{ fontWeight: 500, fontSize: '13px', color: '#1e293b', flex: 1 }}>{name}</span>
+                    {isCountable && (
+                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                        <label htmlFor={`rep-qty-${rid}`} style={{ fontSize: '12px', color: '#475569' }}>الكمية:</label>
+                        <input
+                          id={`rep-qty-${rid}`}
+                          type="number"
+                          min="1"
+                          step="1"
+                          value={quantities[rid] ?? ''}
+                          onChange={(e) => updateQuantity(rid, e.target.value)}
+                          placeholder="العدد"
+                          required
+                          style={{
+                            width: '60px',
+                            padding: '4px 6px',
+                            borderRadius: '6px',
+                            border: '1px solid #0f766e',
+                            textAlign: 'center',
+                            fontSize: '13px',
+                            fontWeight: 600,
+                          }}
+                        />
+                        <span style={{ fontSize: '11px', color: '#64748b' }}>{unitLabel}</span>
+                      </div>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => removeReason(rid)}
+                      title="حذف هذا البند"
+                      style={{
+                        background: 'transparent',
+                        border: 'none',
+                        color: '#ef4444',
+                        cursor: 'pointer',
+                        fontSize: '16px',
+                        padding: '2px 6px',
+                      }}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                );
+              })}
+              {selectedReasonIds.length === 0 && (
+                <small style={{ color: '#94a3b8', fontStyle: 'italic' }}>
+                  لم يتم اختيار بنود صيانة بعد. اختر بنود الصيانة أو القطع المستبدلة من القائمة أعلاه إذا تم تنفيذ عمل.
+                </small>
+              )}
+            </div>
           </section>
 
           <label className="rep-notes-field">
