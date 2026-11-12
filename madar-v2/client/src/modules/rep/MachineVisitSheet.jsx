@@ -7,6 +7,7 @@ import {
   nativeFilePreviewUrl,
   processNativeVisitPhoto,
 } from './native-bridges.js';
+import QuantityModal from '../../components/ui/QuantityModal.jsx';
 
 function createDraftVisitUuid() {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
@@ -50,6 +51,7 @@ export default function MachineVisitSheet({ machine, repName = '', reasons, gps,
     }
     return initial;
   });
+  const [quantityModal, setQuantityModal] = useState(null);
   const [activePhase, setActivePhase] = useState('before');
   const [processingPhase, setProcessingPhase] = useState('');
   const [saving, setSaving] = useState(false);
@@ -304,14 +306,20 @@ export default function MachineVisitSheet({ machine, repName = '', reasons, gps,
   const addReason = (id) => {
     const numId = Number(id);
     if (!numId || selectedReasonIds.includes(numId)) return;
-    setSelectedReasonIds((current) => [...current, numId]);
     const reasonObj = (reasons || []).find((r) => Number(r.id) === numId);
     if (reasonObj && (reasonObj.countable || reasonObj.is_countable)) {
-      setQuantities((current) => ({
-        ...current,
-        [numId]: current[numId] ?? '',
-      }));
+      setQuantityModal({ reason: reasonObj, initialValue: '', isNew: true });
+      return;
     }
+    setSelectedReasonIds((current) => [...current, numId]);
+  };
+
+  const confirmReasonQuantity = ({ reasonId, quantity }) => {
+    const reason = quantityModal?.reason;
+    if (!reason) return;
+    if (quantityModal.isNew) setSelectedReasonIds((current) => [...current, Number(reasonId)]);
+    setQuantities((current) => ({ ...current, [reasonId]: quantity }));
+    setQuantityModal(null);
   };
 
   const removeReason = (id) => {
@@ -322,14 +330,6 @@ export default function MachineVisitSheet({ machine, repName = '', reasons, gps,
       delete next[numId];
       return next;
     });
-  };
-
-  const updateQuantity = (id, value) => {
-    const numId = Number(id);
-    setQuantities((current) => ({
-      ...current,
-      [numId]: value,
-    }));
   };
 
   const save = async () => {
@@ -374,7 +374,7 @@ export default function MachineVisitSheet({ machine, repName = '', reasons, gps,
         if (!Number.isSafeInteger(qNum) || qNum <= 0) {
           throw new Error(`يرجى إدخال كمية صحيحة موجبة للبند: "${countable.name}".`);
         }
-        maintenanceLines.push({ reasonId: Number(countable.id), quantity: qNum });
+        maintenanceLines.push({ reasonId: Number(countable.id), quantity: qNum, unit: countable.default_unit ?? countable.unit });
       }
 
       await onSave({
@@ -571,7 +571,8 @@ export default function MachineVisitSheet({ machine, repName = '', reasons, gps,
                 const reason = (reasons || []).find((r) => Number(r.id) === Number(rid));
                 const name = reason?.name ?? `بند #${rid}`;
                 const isCountable = Boolean(reason?.countable || reason?.is_countable);
-                const unitLabel = reason?.unit === 'piece' ? 'قطعة' : reason?.unit === 'set' ? 'طقم' : (reason?.unit || 'قطعة');
+                const reasonUnit = reason?.default_unit ?? reason?.unit;
+                const unitLabel = reasonUnit === 'piece' || reasonUnit === 'قطعة' || !reasonUnit ? 'قطعة' : reasonUnit === 'set' ? 'طقم' : reasonUnit;
                 return (
                   <div
                     key={rid}
@@ -587,32 +588,14 @@ export default function MachineVisitSheet({ machine, repName = '', reasons, gps,
                       gap: '10px',
                     }}
                   >
-                    <span style={{ fontWeight: 500, fontSize: '13px', color: '#1e293b', flex: 1 }}>{name}</span>
-                    {isCountable && (
-                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-                        <label htmlFor={`rep-qty-${rid}`} style={{ fontSize: '12px', color: '#475569' }}>الكمية:</label>
-                        <input
-                          id={`rep-qty-${rid}`}
-                          type="number"
-                          min="1"
-                          step="1"
-                          value={quantities[rid] ?? ''}
-                          onChange={(e) => updateQuantity(rid, e.target.value)}
-                          placeholder="العدد"
-                          required
-                          style={{
-                            width: '60px',
-                            padding: '4px 6px',
-                            borderRadius: '6px',
-                            border: '1px solid #0f766e',
-                            textAlign: 'center',
-                            fontSize: '13px',
-                            fontWeight: 600,
-                          }}
-                        />
-                        <span style={{ fontSize: '11px', color: '#64748b' }}>{unitLabel}</span>
-                      </div>
-                    )}
+                    {isCountable ? (
+                      <button
+                        type="button"
+                        onClick={() => setQuantityModal({ reason, initialValue: quantities[rid] ?? '', isNew: false })}
+                        aria-label={`تعديل كمية ${name}`}
+                        style={{ flex: 1, padding: 0, border: 0, background: 'transparent', textAlign: 'right', color: '#1e293b', fontWeight: 500, fontSize: '13px', cursor: 'pointer' }}
+                      >{name} (العدد: {quantities[rid] ?? '—'} {unitLabel}) ✎</button>
+                    ) : <span style={{ fontWeight: 500, fontSize: '13px', color: '#1e293b', flex: 1 }}>{name}</span>}
                     <button
                       type="button"
                       onClick={() => removeReason(rid)}
@@ -653,6 +636,13 @@ export default function MachineVisitSheet({ machine, repName = '', reasons, gps,
           </button>
         </footer>
       </section>
+      <QuantityModal
+        open={Boolean(quantityModal)}
+        reason={quantityModal?.reason}
+        initialValue={quantityModal?.initialValue ?? ''}
+        onClose={() => setQuantityModal(null)}
+        onConfirm={confirmReasonQuantity}
+      />
     </div>
   );
 }

@@ -13,6 +13,7 @@ import { Input, Select, Textarea } from '../../components/ui/Field.jsx';
 import Icon from '../../components/ui/Icon.jsx';
 import LoadingState from '../../components/ui/LoadingState.jsx';
 import Modal from '../../components/ui/Modal.jsx';
+import QuantityModal from '../../components/ui/QuantityModal.jsx';
 import PageHeader from '../../components/ui/PageHeader.jsx';
 import Tabs from '../../components/ui/Tabs.jsx';
 import Toast from '../../components/ui/Toast.jsx';
@@ -119,6 +120,7 @@ export default function MaintenanceOrderDetail() {
   const [machineCodeDraft, setMachineCodeDraft] = useState('');
   const [machineCodeError, setMachineCodeError] = useState('');
   const [lightboxState, setLightboxState] = useState(null);
+  const [quantityModal, setQuantityModal] = useState(null);
   const [saving, setSaving] = useState(false);
   const [tripProcessing, setTripProcessing] = useState(false);
   const [tripProgress, setTripProgress] = useState(EMPTY_TRIP_PROGRESS);
@@ -736,19 +738,6 @@ export default function MaintenanceOrderDetail() {
     return serverLine?.quantity ?? 1;
   }
 
-  function setCardQuantity(card, rid, qty) {
-    const draft = getCardDraft(card);
-    const existingLines = draft.maintenanceLines || [];
-    const hasLine = existingLines.some((l) => Number(l.reasonId) === Number(rid));
-    const nextLines = hasLine
-      ? existingLines.map((l) => (Number(l.reasonId) === Number(rid) ? { ...l, quantity: qty } : l))
-      : [...existingLines, { reasonId: Number(rid), quantity: qty }];
-    setCardDraft(card.id, {
-      ...draft,
-      maintenanceLines: nextLines,
-    });
-  }
-
   async function saveCardFields(card, reasonIds, notes, { showSuccess = true, maintenanceLines: explicitLines, justification } = {}) {
     const normalizedReasonIds = Array.isArray(reasonIds) ? reasonIds.map(Number).filter(Boolean) : [];
     const normalizedNotes = notes ?? '';
@@ -779,6 +768,7 @@ export default function MaintenanceOrderDetail() {
       finalLines.push({
         reasonId: Number(countable.id),
         quantity: qNum,
+        unit: countable.default_unit ?? countable.unit,
         ...(lineJustification ? { justification: lineJustification.trim() } : {}),
       });
     }
@@ -904,16 +894,35 @@ export default function MaintenanceOrderDetail() {
     const draft = getCardDraft(card);
     const num = Number(value);
     if ((draft.reasonIds ?? []).includes(num)) return;
-    const nextIds = [...(draft.reasonIds ?? []), num];
     const found = (reasons || []).find((r) => Number(r.id) === num);
-    let nextLines = draft.maintenanceLines || [];
     if (found && (found.countable || found.is_countable)) {
-      if (!nextLines.some((l) => Number(l.reasonId) === num)) {
-        nextLines = [...nextLines, { reasonId: num, quantity: 1 }];
-      }
+      setQuantityModal({ card, reason: found, initialValue: '' });
+      return;
     }
+    const nextIds = [...(draft.reasonIds ?? []), num];
+    let nextLines = draft.maintenanceLines || [];
     setCardDraft(card.id, { ...draft, reasonIds: nextIds, maintenanceLines: nextLines });
     void saveCardFields(card, nextIds, draft.notes, { maintenanceLines: nextLines });
+  }
+
+  function openCardQuantityEditor(card, reasonId) {
+    const reason = (reasons ?? []).find((item) => Number(item.id) === Number(reasonId));
+    if (!reason) return;
+    setQuantityModal({ card, reason, initialValue: getCardQuantity(card, reasonId) });
+  }
+
+  function confirmCardQuantity({ reasonId, quantity }) {
+    if (!quantityModal?.card) return;
+    const { card, reason } = quantityModal;
+    const draft = getCardDraft(card);
+    const nextReasonIds = (draft.reasonIds ?? []).includes(Number(reasonId))
+      ? draft.reasonIds
+      : [...(draft.reasonIds ?? []), Number(reasonId)];
+    const nextLines = (draft.maintenanceLines ?? []).filter((line) => Number(line.reasonId) !== Number(reasonId));
+    nextLines.push({ reasonId: Number(reasonId), quantity, unit: reason?.default_unit ?? reason?.unit });
+    setCardDraft(card.id, { ...draft, reasonIds: nextReasonIds, maintenanceLines: nextLines });
+    setQuantityModal(null);
+    void saveCardFields(card, nextReasonIds, draft.notes, { maintenanceLines: nextLines });
   }
 
   function removeCardReason(card, value) {
@@ -1075,7 +1084,8 @@ export default function MaintenanceOrderDetail() {
                     const isCountable = Boolean(found?.countable || found?.is_countable);
                     const name = found?.name
                       ?? (card.reason_names?.[card.reason_ids?.indexOf(rid)] || `أمر صيانة #${rid}`);
-                    const unitLabel = found?.unit === 'piece' ? 'قطعة' : found?.unit === 'set' ? 'طقم' : (found?.unit || 'قطعة');
+                    const reasonUnit = found?.default_unit ?? found?.unit;
+                    const unitLabel = reasonUnit === 'piece' || reasonUnit === 'قطعة' || !reasonUnit ? 'قطعة' : reasonUnit === 'set' ? 'طقم' : reasonUnit;
                     return (
                       <span
                         key={rid}
@@ -1092,35 +1102,17 @@ export default function MaintenanceOrderDetail() {
                           fontWeight: 500,
                         }}
                       >
-                        <span>{name}</span>
-                        {isCountable && (
-                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', margin: '0 4px' }}>
-                            <input
-                              type="number"
-                              min="1"
-                              step="1"
-                              aria-label={`كمية ${name}`}
-                              value={getCardQuantity(card, rid)}
-                              onChange={(e) => setCardQuantity(card, rid, e.target.value)}
-                              onBlur={() => {
-                                const d = getCardDraft(card);
-                                void saveCardFields(card, d.reasonIds, d.notes, { showSuccess: false });
-                              }}
-                              style={{
-                                width: '48px',
-                                padding: '1px 4px',
-                                borderRadius: '4px',
-                                border: '1px solid rgba(36, 166, 160, 0.6)',
-                                background: 'rgba(15, 23, 42, 0.6)',
-                                color: '#fff',
-                                fontSize: '12px',
-                                textAlign: 'center',
-                                fontWeight: 600,
-                              }}
-                            />
-                            <span style={{ fontSize: '11px', color: '#94a3b8' }}>{unitLabel}</span>
-                          </div>
-                        )}
+                        {isCountable ? (
+                          <button
+                            type="button"
+                            onClick={() => openCardQuantityEditor(card, rid)}
+                            disabled={!order.canEditReasons || saving}
+                            aria-label={`تعديل كمية ${name}`}
+                            style={{ padding: 0, border: 0, background: 'transparent', color: 'inherit', font: 'inherit', cursor: order.canEditReasons ? 'pointer' : 'default' }}
+                          >
+                            {name} <span>(العدد: {getCardQuantity(card, rid)} {unitLabel})</span> {order.canEditReasons && <span aria-hidden="true">✎</span>}
+                          </button>
+                        ) : <span>{name}</span>}
                         {order.canEditReasons && <button
                           type="button"
                           onClick={() => removeCardReason(card, rid)}
@@ -1782,6 +1774,13 @@ export default function MaintenanceOrderDetail() {
           rotationBusy={saving}
         />
       )}
+      <QuantityModal
+        open={Boolean(quantityModal)}
+        reason={quantityModal?.reason}
+        initialValue={quantityModal?.initialValue ?? ''}
+        onClose={() => setQuantityModal(null)}
+        onConfirm={confirmCardQuantity}
+      />
       <Toast notice={notice} onClose={clearToast} />
     </>
   );
@@ -1968,6 +1967,7 @@ function PhotoLightboxModal({
   const [tagTargetKey, setTagTargetKey] = useState('');
   const [tagTargetPhase, setTagTargetPhase] = useState('before');
   const [tagTargetsLoading, setTagTargetsLoading] = useState(false);
+  const [quantityModal, setQuantityModal] = useState(null);
   const currentCardIndex = lightboxState
     ? viewerCards.findIndex((card) => card.id === lightboxState.cardId)
     : -1;
@@ -2069,6 +2069,24 @@ function PhotoLightboxModal({
 
   const currentFilename = maintenancePhotoFilename(currentPhoto.url);
   const phasePhotoCount = currentPhoto.phase === 'before' ? beforeUrls.length : afterUrls.length;
+
+  function openLightboxQuantityEditor(reason, initialValue = '') {
+    if (!reason) return;
+    setQuantityModal({ reason, initialValue });
+  }
+
+  function confirmLightboxQuantity({ reasonId, quantity }) {
+    const reason = quantityModal?.reason;
+    if (!reason) return;
+    const currentReasonIds = currentCard.reason_ids ?? (currentCard.reason_id ? [currentCard.reason_id] : []);
+    const existingLines = cardDrafts[currentCard.id]?.maintenanceLines ?? currentCard.maintenance_lines ?? [];
+    const nextLines = existingLines.filter((line) => Number(line.reasonId) !== Number(reasonId));
+    nextLines.push({ reasonId: Number(reasonId), quantity, unit: reason.default_unit ?? reason.unit });
+    void onUpdateReasons?.(currentCard, currentReasonIds.includes(Number(reasonId))
+      ? currentReasonIds
+      : [...currentReasonIds, Number(reasonId)], nextLines);
+    setQuantityModal(null);
+  }
 
   async function savePhotoTag() {
     const [targetOrderText, targetCardText] = tagTargetKey.split(':');
@@ -2215,10 +2233,11 @@ function PhotoLightboxModal({
                   if (reasonId && !currentReasonIds.includes(reasonId)) {
                     const foundReason = (reasons ?? []).find((r) => Number(r.id) === reasonId);
                     const existingLines = cardDrafts[currentCard?.id]?.maintenanceLines ?? currentCard?.maintenance_lines ?? [];
-                    const nextLines = (foundReason?.countable || foundReason?.is_countable)
-                      ? [...existingLines.filter((l) => Number(l.reasonId) !== reasonId), { reasonId, quantity: 1 }]
-                      : existingLines;
-                    onUpdateReasons?.(currentCard, [...currentReasonIds, reasonId], nextLines);
+                    if (foundReason?.countable || foundReason?.is_countable) {
+                      setQuantityModal({ reason: foundReason, initialValue: '' });
+                    } else {
+                      onUpdateReasons?.(currentCard, [...currentReasonIds, reasonId], existingLines);
+                    }
                   }
                 }}
                 style={{ minWidth: '180px', maxWidth: 'min(300px, 70vw)', fontSize: '12px', padding: '4px 8px' }}
@@ -2237,7 +2256,8 @@ function PhotoLightboxModal({
                 const line = (cardDrafts[currentCard?.id]?.maintenanceLines ?? currentCard?.maintenance_lines ?? [])
                   .find((l) => Number(l.reasonId) === Number(reasonId));
                 const qty = line?.quantity ?? 1;
-                const unitLabel = found?.unit === 'piece' ? 'قطعة' : found?.unit === 'set' ? 'طقم' : (found?.unit || 'قطعة');
+                const reasonUnit = found?.default_unit ?? found?.unit;
+                const unitLabel = reasonUnit === 'piece' || reasonUnit === 'قطعة' || !reasonUnit ? 'قطعة' : reasonUnit === 'set' ? 'طقم' : reasonUnit;
                 return (
                   <span
                     key={reasonId}
@@ -2247,38 +2267,15 @@ function PhotoLightboxModal({
                       color: '#38bdf8', border: '1px solid rgba(56, 189, 248, 0.3)',
                     }}
                   >
-                    <span>{reasonName}</span>
-                    {isCountable && (
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '2px' }}>
-                        <input
-                          type="number"
-                          min="1"
-                          step="1"
-                          aria-label={`كمية ${reasonName}`}
-                          value={qty}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            const existingLines = cardDrafts[currentCard?.id]?.maintenanceLines ?? currentCard?.maintenance_lines ?? [];
-                            const nextLines = existingLines.map((l) => Number(l.reasonId) === Number(reasonId) ? { ...l, quantity: val } : l);
-                            if (!existingLines.some((l) => Number(l.reasonId) === Number(reasonId))) {
-                              nextLines.push({ reasonId: Number(reasonId), quantity: val });
-                            }
-                            onUpdateReasons?.(currentCard, currentReasonIds, nextLines);
-                          }}
-                          style={{
-                            width: '42px',
-                            padding: '1px 3px',
-                            borderRadius: '3px',
-                            border: '1px solid #38bdf8',
-                            background: '#0f172a',
-                            color: '#fff',
-                            fontSize: '11px',
-                            textAlign: 'center',
-                          }}
-                        />
-                        <small style={{ fontSize: '10px', color: '#94a3b8' }}>{unitLabel}</small>
-                      </span>
-                    )}
+                    {isCountable ? (
+                      <button
+                        type="button"
+                        disabled={!canEditReasons || disabled}
+                        onClick={() => openLightboxQuantityEditor(found, qty)}
+                        aria-label={`تعديل كمية ${reasonName}`}
+                        style={{ padding: 0, border: 0, background: 'transparent', color: 'inherit', font: 'inherit', cursor: canEditReasons ? 'pointer' : 'default' }}
+                      >{reasonName} (العدد: {qty} {unitLabel}) ✎</button>
+                    ) : <span>{reasonName}</span>}
                     {canEditReasons && (
                       <button
                         type="button"
@@ -2482,6 +2479,13 @@ function PhotoLightboxModal({
           );
         })}
       </footer>
+      <QuantityModal
+        open={Boolean(quantityModal)}
+        reason={quantityModal?.reason}
+        initialValue={quantityModal?.initialValue ?? ''}
+        onClose={() => setQuantityModal(null)}
+        onConfirm={confirmLightboxQuantity}
+      />
     </div>
   );
 }
