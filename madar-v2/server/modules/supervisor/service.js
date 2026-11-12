@@ -398,7 +398,8 @@ export function reviewRepVisit(visitIdInput, input, actorId, database = defaultD
       supervisorLines = new Map();
       for (const [index, rawLine] of body.maintenanceLines.entries()) {
         const line = requireObject(rawLine, `maintenanceLines[${index}]`);
-        allowOnlyKeys(line, ['reasonId', 'quantity', 'justification']);
+        // Unit is catalog metadata; the persisted snapshot is server-owned.
+        allowOnlyKeys(line, ['reasonId', 'quantity', 'unit', 'justification']);
         const lineReasonId = positiveId(line.reasonId, `maintenanceLines[${index}].reasonId`);
         if (supervisorLines.has(lineReasonId)) throw new HttpError(400, `Duplicate maintenance line for reason ${lineReasonId}.`);
         if (!Number.isSafeInteger(line.quantity) || line.quantity <= 0) {

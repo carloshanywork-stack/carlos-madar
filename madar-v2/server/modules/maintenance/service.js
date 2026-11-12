@@ -4374,7 +4374,10 @@ async function updateMaintenanceCardUnlocked(orderId, cardId, input, actorId = n
     submittedLines = new Map();
     for (const [index, rawLine] of body.maintenanceLines.entries()) {
       const line = requireObject(rawLine, `maintenanceLines[${index}]`);
-      allowOnlyKeys(line, ['reasonId', 'quantity', 'justification']);
+      // Current clients include the catalog unit as display metadata. Persist
+      // the server-owned reason unit, but accept it for compatibility with
+      // already-built browser bundles and Android APKs.
+      allowOnlyKeys(line, ['reasonId', 'quantity', 'unit', 'justification']);
       const lineReasonId = positiveId(line.reasonId, `maintenanceLines[${index}].reasonId`);
       if (submittedLines.has(lineReasonId)) throw new HttpError(400, `Duplicate maintenance line for reason ${lineReasonId}.`);
       if (!Number.isSafeInteger(line.quantity) || line.quantity <= 0) {

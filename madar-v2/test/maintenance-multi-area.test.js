@@ -314,7 +314,7 @@ test('admins can edit archived card reasons, notes, and machine codes while phot
   assert.equal(fractionalCount.response.status, 400);
   const archivedUpdate = await request(`/api/maintenance/orders/${orderResponse.body.id}/cards/${card.id}`, json('PATCH', {
     reasonIds: [keptReasonId, addedReasonId],
-    maintenanceLines: [{ reasonId: addedReasonId, quantity: 4 }],
+    maintenanceLines: [{ reasonId: addedReasonId, quantity: 4, unit: 'piece' }],
     notes: 'ملاحظة فنية محدّثة بعد الأرشفة',
   }));
   assert.equal(archivedUpdate.response.status, 200, JSON.stringify(archivedUpdate.body));
@@ -323,6 +323,12 @@ test('admins can edit archived card reasons, notes, and machine codes while phot
   assert.equal(archivedUpdate.body.reason_id, keptReasonId);
   assert.equal(archivedUpdate.body.maintenance_lines[0].quantity, 4);
   assert.equal(archivedUpdate.body.maintenance_lines[0].quantityProvenance, 'user_entered');
+  assert.equal(archivedUpdate.body.maintenance_lines[0].unit, 'piece', 'the persisted unit comes from the server catalog');
+  const refreshedOrder = await request(`/api/maintenance/orders/${orderResponse.body.id}`);
+  const refreshedCard = refreshedOrder.body.cards.find((item) => item.id === card.id);
+  assert.deepEqual(refreshedCard.reason_ids, [keptReasonId, addedReasonId]);
+  assert.equal(refreshedCard.maintenance_lines[0].quantity, 4, 'the entered quantity survives a fresh authoritative read');
+  assert.equal(refreshedCard.maintenance_lines[0].unit, 'piece');
   const unjustifiedCorrection = await request(`/api/maintenance/orders/${orderResponse.body.id}/cards/${card.id}`, json('PATCH', {
     maintenanceLines: [{ reasonId: addedReasonId, quantity: 5 }],
   }));

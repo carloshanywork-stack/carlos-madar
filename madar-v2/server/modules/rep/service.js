@@ -332,7 +332,10 @@ function normalizeVisitInput(input) {
     const seenLineReasons = new Set();
     maintenanceLines = body.maintenanceLines.map((rawLine, index) => {
       const line = requireObject(rawLine, `maintenanceLines[${index}]`);
-      allowOnlyKeys(line, ['reasonId', 'quantity']);
+      // Existing Android APKs send unit as catalog/display metadata. The server
+      // snapshots the configured reason unit below, so omit this hint from the
+      // canonical visit payload/hash while remaining backward compatible.
+      allowOnlyKeys(line, ['reasonId', 'quantity', 'unit']);
       const reasonId = positiveId(line.reasonId, `maintenanceLines[${index}].reasonId`);
       if (seenLineReasons.has(reasonId)) throw new HttpError(400, `Duplicate maintenance line for reason ${reasonId}.`);
       seenLineReasons.add(reasonId);

@@ -702,7 +702,7 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
     regionName: 'التجمع',
     machineCondition: 'faulty',
     reasonIds: [structuredReasonId],
-    maintenanceLines: [{ reasonId: structuredReasonId, quantity: 3 }],
+    maintenanceLines: [{ reasonId: structuredReasonId, quantity: 3, unit: 'piece' }],
     notes: 'تم تنظيف الواجهة وفحص الإضاءة',
     capturedAt: new Date(currentTime).toISOString(),
     beforeCapturedAt: [
@@ -786,8 +786,25 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   assert.equal(visitSync.body.status, 'pending_review');
   assert.equal(visitSync.body.visitUuid, visitUuid);
   assert.equal(visitSync.body.maintenanceLines[0].quantity, 3);
+  assert.equal(visitSync.body.maintenanceLines[0].unit, 'piece');
   assert.equal(db.prepare(`SELECT quantity FROM rep_visit_lines WHERE visit_id =
     (SELECT id FROM rep_visits WHERE visit_uuid = ?)` ).get(visitUuid).quantity, 3);
+  // Model a visit queued with the shipped Android payload while offline, then
+  // uploaded after reconnect. Retry the same immutable bundle and reload it
+  // from the supervisor API; it must be durable and must not duplicate lines.
+  const retriedQueuedVisit = await request('/api/rep/sync-visit', {
+    method: 'POST', body: buildVisitForm(visitPayload),
+  }, login.cookie);
+  assert.equal(retriedQueuedVisit.response.status, 200, JSON.stringify(retriedQueuedVisit.body));
+  assert.equal(retriedQueuedVisit.body.idempotent, true);
+  assert.equal(db.prepare(`SELECT COUNT(*) AS count FROM rep_visits WHERE visit_uuid = ?`).get(visitUuid).count, 1);
+  assert.equal(db.prepare(`SELECT COUNT(*) AS count FROM rep_visit_lines WHERE visit_id =
+    (SELECT id FROM rep_visits WHERE visit_uuid = ?)` ).get(visitUuid).count, 1);
+  const refreshedQueue = await request('/api/supervisor/qa/queue', {}, adminCookie);
+  const refreshedVisit = refreshedQueue.body.visits.find((item) => item.visitUuid === visitUuid);
+  assert.ok(refreshedVisit, 'uploaded visit remains visible after an authoritative queue reload');
+  assert.equal(refreshedVisit.maintenanceLines[0].quantity, 3);
+  assert.equal(refreshedVisit.maintenanceLines[0].unit, 'piece');
   const savedCard = db.prepare('SELECT before_photos_json, after_photos_json, reason_ids_json, notes, status FROM maintenance_cards WHERE id = ?')
     .get(missingAfterCardId);
   assert.equal(savedCard.status, 'pending', 'uploaded evidence must not mutate the maintenance card before supervisor approval');
