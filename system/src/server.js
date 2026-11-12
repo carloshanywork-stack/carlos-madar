@@ -13,6 +13,45 @@ const configuredDatabasePath = path.resolve(configuredProjectRoot,
   configuredDatabaseSetting.startsWith('file:') ? configuredDatabaseSetting.slice('file:'.length) : configuredDatabaseSetting)
 const configuredStorageRoot = path.resolve(configuredProjectRoot, process.env.STORAGE_ROOT_PATH || 'storage')
 const configuredBackupRoot = path.resolve(configuredProjectRoot, process.env.BACKUP_ROOT_PATH || 'Backups')
+function assertBackupRootOnMountedDrive(backupRoot, mountPath) {
+  if (!path.isAbsolute(mountPath)) throw new Error('BACKUP_MOUNT_PATH must be an absolute path.')
+  const mount = path.resolve(mountPath)
+  const backup = path.resolve(backupRoot)
+  const metadata = fs.lstatSync(mount)
+  if (metadata.isSymbolicLink() || !metadata.isDirectory() || fs.realpathSync(mount) !== mount) {
+    throw new Error('BACKUP_MOUNT_PATH must be an existing real directory, not a symbolic link.')
+  }
+  const mounted = fs.readFileSync('/proc/self/mountinfo', 'utf8').split('\n').some((line) => {
+    const fields = line.trim().split(' ')
+    const mountPoint = fields[4]?.replace(/\\([0-7]{3})/g, (_match, octal) => String.fromCharCode(Number.parseInt(octal, 8)))
+    return mountPoint === mount
+  })
+  if (!mounted || metadata.dev === fs.statSync('/').dev) {
+    throw new Error(`BACKUP_MOUNT_PATH is not a separate mounted filesystem (${mount}); refusing to place backups on the system partition.`)
+  }
+  if (!pathIsWithinOrEqual(mount, backup) || backup === mount) {
+    throw new Error('BACKUP_ROOT_PATH must be a child of BACKUP_MOUNT_PATH.')
+  }
+  const relative = path.relative(mount, backup)
+  let current = mount
+  for (const segment of relative.split(path.sep)) {
+    current = path.join(current, segment)
+    let entry
+    try { entry = fs.lstatSync(current) }
+    catch (error) {
+      if (error.code === 'ENOENT') break
+      throw error
+    }
+    if (entry.isSymbolicLink() || entry.dev !== metadata.dev || !entry.isDirectory()) {
+      throw new Error(`Backup path must stay on the mounted filesystem and contain no symlinks (${current}).`)
+    }
+  }
+}
+if (process.env.BACKUP_MOUNT_PATH) {
+  assertBackupRootOnMountedDrive(configuredBackupRoot, process.env.BACKUP_MOUNT_PATH)
+} else if (process.env.BACKUP_ROOT_PATH && path.isAbsolute(process.env.BACKUP_ROOT_PATH)) {
+  throw new Error('BACKUP_MOUNT_PATH is required when BACKUP_ROOT_PATH is absolute.')
+}
 const { recoverInterruptedRestore } = require('./backup-restore')
 recoverInterruptedRestore(path.join(configuredBackupRoot, '.madar-restore-journal.json'), {
   databasePath: configuredDatabasePath,

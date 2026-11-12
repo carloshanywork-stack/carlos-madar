@@ -74,6 +74,7 @@ export const env = Object.freeze({
     process.env.REP_ATTENDANCE_MAX_OFFLINE_AGE_HOURS,
   ),
   storageMountPath: process.env.STORAGE_MOUNT_PATH?.trim() || undefined,
+  backupMountPath: process.env.MADAR_V2_BACKUP_MOUNT_PATH?.trim() || undefined,
   dataDirectory: process.env.MADAR_V2_DATA_DIR?.trim() || undefined,
   databasePath: process.env.MADAR_V2_DATABASE_PATH?.trim() || undefined,
   storageRoot: process.env.MADAR_V2_STORAGE_ROOT?.trim() || undefined,

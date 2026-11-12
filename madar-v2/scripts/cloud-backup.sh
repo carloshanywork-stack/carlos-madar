@@ -18,17 +18,37 @@ if [[ -n "${STORAGE_MOUNT_PATH:-}" ]]; then
   fi
   DEFAULT_DATA_DIRECTORY="$STORAGE_MOUNT_PATH/data"
   DEFAULT_STORAGE_ROOT="$STORAGE_MOUNT_PATH/uploads"
-  DEFAULT_BACKUP_ROOT="$STORAGE_MOUNT_PATH/Backups"
 else
   DEFAULT_DATA_DIRECTORY='data'
   DEFAULT_STORAGE_ROOT='../storage'
-  DEFAULT_BACKUP_ROOT='Backups'
 fi
+BACKUP_MOUNT_PATH="${MADAR_V2_BACKUP_MOUNT_PATH:-/mnt/madar-storage}"
+DEFAULT_BACKUP_ROOT="$BACKUP_MOUNT_PATH/Backups"
 
 DATA_DIRECTORY="$(resolve_from_project "${MADAR_V2_DATA_DIR:-$DEFAULT_DATA_DIRECTORY}")"
 DATABASE_PATH="$(resolve_from_project "${MADAR_V2_DATABASE_PATH:-$DATA_DIRECTORY/madar-v2.sqlite}")"
 BACKUP_ROOT="$(resolve_from_project "${MADAR_V2_BACKUP_ROOT:-$DEFAULT_BACKUP_ROOT}")"
 STORAGE_ROOT="$(resolve_from_project "${MADAR_V2_STORAGE_ROOT:-$DEFAULT_STORAGE_ROOT}")"
+
+if [[ "$BACKUP_MOUNT_PATH" != /* || ! -d "$BACKUP_MOUNT_PATH" || -L "$BACKUP_MOUNT_PATH" ]]; then
+  echo 'MADAR_V2_BACKUP_MOUNT_PATH must be an existing absolute mount directory.' >&2
+  exit 1
+fi
+MOUNT_TARGET="$(findmnt -rn -T "$BACKUP_MOUNT_PATH" -o TARGET)"
+if [[ "$MOUNT_TARGET" != "$(realpath -- "$BACKUP_MOUNT_PATH")" ]] || [[ "$(stat -c '%d' "$BACKUP_MOUNT_PATH")" == "$(stat -c '%d' /)" ]]; then
+  echo "Backup mount is unavailable or is on the system filesystem: $BACKUP_MOUNT_PATH" >&2
+  exit 1
+fi
+BACKUP_CANONICAL="$(realpath -m -- "$BACKUP_ROOT")"
+MOUNT_CANONICAL="$(realpath -- "$BACKUP_MOUNT_PATH")"
+if [[ "$BACKUP_CANONICAL" != "$MOUNT_CANONICAL/"* || "$BACKUP_CANONICAL" == "$MOUNT_CANONICAL" ]]; then
+  echo 'MADAR_V2_BACKUP_ROOT must be a child of MADAR_V2_BACKUP_MOUNT_PATH.' >&2
+  exit 1
+fi
+if [[ "$BACKUP_CANONICAL" != "$BACKUP_ROOT" ]]; then
+  echo 'Backup path must not contain symbolic links or unresolved path components.' >&2
+  exit 1
+fi
 
 if [[ -n "${MADAR_BACKUP_PASSPHRASE_FILE:-}" ]]; then
   PASSPHRASE_FILE="$(resolve_from_project "$MADAR_BACKUP_PASSPHRASE_FILE")"
