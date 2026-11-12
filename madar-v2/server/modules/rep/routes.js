@@ -242,11 +242,12 @@ router.post('/machines/:machineId/confirm-location', (req, res, next) => {
   try {
     const result = confirmRepMachineLocation(req.user, req.params.machineId, req.body);
     if (!result.idempotent) {
-      publishOperationsEvent('rep.machine.location-requested', {
+      publishOperationsEvent('rep.machine.location-reviewed', {
         userId: req.user.id,
         machineId: result.machine.id,
         machineCode: result.machine.code,
-        verificationId: result.verificationId,
+        correctionId: result.correctionId,
+        status: result.status,
       });
     }
     res.set({ 'Cache-Control': 'private, no-store', Pragma: 'no-cache' });

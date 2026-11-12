@@ -700,7 +700,7 @@ function mapConfirmedMachine(row) {
   };
 }
 
-/** First field confirmation submits a location proposal for supervisor review. */
+/** An assigned representative can lock a machine's first, previously empty GPS position. */
 export function confirmRepMachineLocation(rep, machineId, input, database = db) {
   if (rep?.role !== 'rep') throw new HttpError(403, 'Field representative access is required.');
   const body = requireObject(input);
@@ -713,7 +713,7 @@ export function confirmRepMachineLocation(rep, machineId, input, database = db) 
   }
   const id = positiveId(machineId, 'machineId');
   const payloadHash = actionPayloadHash({ repId: Number(rep.id), machineId: id, cardId, location });
-  const existing = database.prepare(`SELECT action_uuid, rep_user_id, machine_id, payload_sha256
+  const existing = database.prepare(`SELECT id, action_uuid, rep_user_id, machine_id, payload_sha256
     FROM machine_correction_requests WHERE action_uuid = ?`).get(uuid);
   if (existing) {
     const request = database.prepare(`SELECT id, request_type, status FROM machine_correction_requests WHERE action_uuid = ?`).get(uuid);
@@ -724,15 +724,15 @@ export function confirmRepMachineLocation(rep, machineId, input, database = db) 
     const machine = database.prepare('SELECT id, code, latitude, longitude, is_location_locked, geofence_radius_meters, area_name FROM machines WHERE id = ?').get(id);
     if (!machine) throw new HttpError(404, 'Machine was not found.');
     return {
-      success: true,
-      idempotent: true,
-      correctionId: Number(request.id),
-      verificationId: Number(request.id),
-      status: request.status,
-      machine: mapConfirmedMachine(machine),
-      proposedLocation: location,
+      success: true, idempotent: true, correctionId: Number(request.id), verificationId: Number(request.id),
+      status: request.status, machine: mapConfirmedMachine(machine), proposedLocation: location,
       locationConfirmation: listLocationConfirmations({ repId: rep.id, status: 'all' }, database).find((item) => item.id === request.id),
     };
+  }
+
+  const ageMs = Date.now() - Date.parse(location.updatedAt);
+  if (ageMs > 5 * 60 * 1000 || ageMs < -60 * 1000) {
+    throw new HttpError(400, 'A current GPS reading is required for first location confirmation.');
   }
 
   const assignedMachine = findAssignedRepMachine(rep, id, cardId, database);
@@ -742,6 +742,9 @@ export function confirmRepMachineLocation(rep, machineId, input, database = db) 
     if (!current || current.active !== 1 || current.deleted_at !== null) throw new HttpError(404, 'Active machine was not found.');
     if (Number(current.is_location_locked) === 1) {
       throw new HttpError(409, 'This machine location has already been confirmed. Submit a correction for administrator review if it is wrong.');
+    }
+    if (current.latitude !== null || current.longitude !== null) {
+      throw new HttpError(409, 'Existing machine coordinates require administrator review before changing the location.');
     }
     const assigned = database.prepare(`SELECT 1 FROM maintenance_order_reps assignment
       JOIN maintenance_cards card ON card.order_id = assignment.order_id
@@ -755,20 +758,31 @@ export function confirmRepMachineLocation(rep, machineId, input, database = db) 
     if (!assigned) throw new HttpError(409, 'The machine assignment changed. Refresh the route and try again.');
     const pendingLocation = database.prepare(`SELECT id FROM machine_correction_requests
       WHERE machine_id = ? AND request_type = 'location_confirmation' AND status = 'pending' LIMIT 1`).get(id);
-    if (pendingLocation) throw new HttpError(409, 'A machine location confirmation is already awaiting supervisor review.');
+    if (pendingLocation) {
+      throw new HttpError(409, 'An earlier location proposal is pending; resolve it before confirming another position.');
+    }
 
     const result = database.prepare(`INSERT INTO machine_correction_requests
       (action_uuid, payload_sha256, rep_user_id, machine_id, card_id, request_type,
        reported_code, reported_name, location_json, captured_at, status)
-      VALUES (?, ?, ?, ?, ?, 'location_confirmation', ?, ?, ?, ?, 'pending')`).run(
+      VALUES (?, ?, ?, ?, ?, 'location_confirmation', ?, ?, ?, ?, 'approved')`).run(
       uuid, payloadHash, rep.id, id, cardId, current.code, current.name_ar,
       JSON.stringify(location), location.updatedAt,
     );
     const correctionId = Number(result.lastInsertRowid);
+    const locked = database.prepare(`UPDATE machines SET latitude = ?, longitude = ?, is_location_locked = 1,
+      geofence_radius_meters = 50, area_name = COALESCE(NULLIF(trim(area_name), ''), area)
+      WHERE id = ? AND is_location_locked = 0 AND latitude IS NULL AND longitude IS NULL
+        AND active = 1 AND deleted_at IS NULL`).run(location.latitude, location.longitude, id);
+    if (locked.changes !== 1) throw new HttpError(409, 'The machine location changed before it could be confirmed.');
+    database.prepare('UPDATE machine_correction_requests SET resolved_machine_id = ? WHERE id = ?').run(id, correctionId);
+    database.prepare(`INSERT INTO machine_correction_reviews
+      (correction_id, action, resolved_machine_id, actor_user_id, approved_code)
+      VALUES (?, 'approved', ?, ?, ?)`).run(correctionId, id, rep.id, current.code);
     recordAudit({
       database,
       actorId: rep.id,
-      action: 'location_confirmation_requested',
+      action: 'machine_location_self_confirmed',
       entityType: 'machine_correction_request',
       entityId: correctionId,
       oldValues: {
@@ -781,7 +795,7 @@ export function confirmRepMachineLocation(rep, machineId, input, database = db) 
         latitude: location.latitude,
         longitude: location.longitude,
         accuracy: location.accuracy,
-        status: 'pending',
+        status: 'approved',
         card_id: cardId,
         captured_at: location.updatedAt,
       },
@@ -791,8 +805,8 @@ export function confirmRepMachineLocation(rep, machineId, input, database = db) 
       idempotent: false,
       correctionId,
       verificationId: correctionId,
-      status: 'pending',
-      machine: mapConfirmedMachine(current),
+      status: 'approved',
+      machine: mapConfirmedMachine(database.prepare('SELECT * FROM machines WHERE id = ?').get(id)),
       proposedLocation: location,
       locationConfirmation: listLocationConfirmations({ repId: rep.id, status: 'all' }, database).find((item) => item.id === correctionId),
     };

@@ -742,13 +742,13 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   assert.match(unpinnedVisit.body.error, /تثبيت موقع الماكينة/);
   const targetMachineId = db.prepare('SELECT id FROM machines WHERE code = ?').get('1434').id;
   // Location lifecycle assertions run independently in location-approval.test.js.
-  // This broader visit scenario requires two administrator-approved fixtures.
+  // This broader visit scenario requires two first-location confirmations.
   const otherRegionMachineId = db.prepare('SELECT id FROM machines WHERE code = ?').get('2400').id;
   const universalLocationConfirmation = await request(`/api/rep/machines/${otherRegionMachineId}/confirm-location`, jsonOptions('POST', {
     actionUuid: randomUUID(), cardId: otherRegionCardId, location: visitPayload.location,
   }), universalLogin.cookie);
   assert.equal(universalLocationConfirmation.response.status, 201, JSON.stringify(universalLocationConfirmation.body));
-  assert.equal((await request(`/api/supervisor/corrections/${universalLocationConfirmation.body.correctionId}/approve`, jsonOptions('POST', {}), adminCookie)).response.status, 200);
+  assert.equal(universalLocationConfirmation.body.status, 'approved');
   const locationConfirmationPayload = {
     actionUuid: randomUUID(),
     cardId: missingAfterCardId,
@@ -757,8 +757,7 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   const locationConfirmation = await request(`/api/rep/machines/${targetMachineId}/confirm-location`, jsonOptions('POST', locationConfirmationPayload), login.cookie);
   assert.equal(locationConfirmation.response.status, 201, JSON.stringify(locationConfirmation.body));
   assert.equal(locationConfirmation.body.success, true);
-  assert.equal(locationConfirmation.body.status, 'pending');
-  assert.equal((await request(`/api/supervisor/corrections/${locationConfirmation.body.correctionId}/approve`, jsonOptions('POST', {}), adminCookie)).response.status, 200);
+  assert.equal(locationConfirmation.body.status, 'approved');
   const representativeCannotSetGeofence = await request(`/api/maintenance/machines/${targetMachineId}/geofence`, jsonOptions('PATCH', {
     latitude: visitPayload.location.latitude,
     longitude: visitPayload.location.longitude,

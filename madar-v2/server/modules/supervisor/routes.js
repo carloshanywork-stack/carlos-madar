@@ -12,6 +12,7 @@ import {
   getSupervisorRepRoute,
   getSupervisorVisitPhoto,
   reviewRepVisit,
+  approveRepVisitsTogether,
 } from './service.js';
 
 const router = Router();
@@ -138,6 +139,17 @@ router.post('/visits/:id/review', (req, res, next) => {
   } catch (error) {
     next(error);
   }
+});
+
+router.post('/visits/approve-all', (req, res, next) => {
+  try {
+    const result = approveRepVisitsTogether(req.body, requestActorId(req));
+    for (const visit of result.newlyApproved) publishOperationsEvent('rep.visit.reviewed', {
+      userId: visit.repUserId, visitId: visit.visitId, status: visit.status,
+    });
+    res.set({ 'Cache-Control': 'private, no-store' });
+    res.json(result);
+  } catch (error) { next(error); }
 });
 
 router.get('/reports/approved-visits.xlsx', asyncHandler(async (req, res) => {

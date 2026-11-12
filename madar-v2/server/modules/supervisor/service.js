@@ -521,6 +521,38 @@ export function reviewRepVisit(visitIdInput, input, actorId, database = defaultD
   }).immediate();
 }
 
+export function approveRepVisitsTogether(input, actorId, database = defaultDatabase) {
+  const body = requireObject(input);
+  allowOnlyKeys(body, ['visitIds']);
+  if (!Array.isArray(body.visitIds) || body.visitIds.length < 1 || body.visitIds.length > 100) {
+    throw new HttpError(400, 'visitIds must contain between 1 and 100 visits.');
+  }
+  const visitIds = body.visitIds.map((value, index) => positiveId(value, `visitIds[${index}]`));
+  if (new Set(visitIds).size !== visitIds.length) throw new HttpError(400, 'visitIds must not contain duplicates.');
+  const actor = positiveId(actorId, 'actorId');
+  return database.transaction(() => {
+    const reviewer = database.prepare("SELECT role FROM users WHERE id = ? AND active = 1 AND deleted_at IS NULL").get(actor);
+    if (reviewer?.role !== 'admin') throw new HttpError(403, 'Administrator access is required.');
+    const rows = database.prepare(`
+      SELECT visit.id, visit.card_id, visit.rep_user_id, review.status
+      FROM rep_visits visit JOIN rep_visit_reviews review ON review.visit_id = visit.id
+      WHERE visit.id IN (${visitIds.map(() => '?').join(',')}) AND visit.status = 'completed'
+    `).all(...visitIds);
+    if (rows.length !== visitIds.length) throw new HttpError(404, 'One or more visits were not found.');
+    if (rows.some((row) => !['pending', 'approved'].includes(row.status))) {
+      throw new HttpError(409, 'A visit needs reshooting or has another review state; no visits were approved.');
+    }
+    if (new Set(rows.map((row) => Number(row.card_id))).size !== rows.length) {
+      throw new HttpError(409, 'Select only one visit per machine card in a bulk approval.');
+    }
+    const newlyApproved = rows.filter((row) => row.status === 'pending')
+      .map((row) => reviewRepVisit(row.id, { action: 'approve' }, actor, database));
+    return { success: true, status: 'approved', approvedCount: newlyApproved.length,
+      alreadyApprovedCount: rows.length - newlyApproved.length,
+      visitIds, newlyApproved, idempotent: newlyApproved.length === 0 };
+  }).immediate();
+}
+
 export function buildApprovedVisitsWorkbook(dayInput, database = defaultDatabase) {
   const range = dayRange(dayInput, database);
   const visits = database.prepare(`
