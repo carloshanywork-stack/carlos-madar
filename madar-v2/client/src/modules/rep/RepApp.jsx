@@ -10,14 +10,14 @@ import {
   deleteGpsSamples,
   deletePendingMachineAction,
   deletePendingVisit,
-  getSnapshot,
-  listGpsSamples,
-  listPendingVisits,
-  listPendingMachineActions,
-  markRouteCardSubmitted,
-  requestPersistentStorage,
-  saveSnapshot,
-  saveGpsSample,
+getSnapshot,
+listGpsSamples,
+listPendingVisits,
+listPendingMachineActions,
+markRouteCardSubmitted,
+requestPersistentStorage,
+saveSnapshot,
+saveGpsSample,
   updatePendingVisit,
   updatePendingMachineAction,
 } from './offline-store.js';
@@ -27,13 +27,15 @@ import {
   addNativeBackListener,
   addNativeNetworkListener,
   acknowledgeNativeDutyTracking,
-  acknowledgeNativeAttendanceAction,
-  authenticateNativeAttendance,
-  deleteNativePendingBackup,
-  exportPendingQueue,
-  getNativeDutyTrackingState,
-  getNativeRepCache,
-  getNativeGpsLocation,
+acknowledgeNativeAttendanceAction,
+authenticateNativeAttendance,
+deleteNativePendingBackup,
+exportPendingQueue,
+importNativeRecoveryPackage,
+getNativeDutyTrackingState,
+getNativeRepCache,
+getNativeRecoveryGps,
+getNativeGpsLocation,
   getNativeNetworkStatus,
   isNativeRepApp,
   listNativeVisits,
@@ -42,14 +44,17 @@ import {
   enqueueNativeMachineAction,
   listNativeMachineActions,
   cacheNativeReasons,
-  cacheNativeRoute,
-  restoreNativePendingBackups,
-  retryNativeVisit,
-  requestNativeSync,
-  saveNativePendingBackup,
-  startNativeDutyTracking,
-  stopNativeDutyTracking,
+cacheNativeRoute,
+restoreNativePendingBackups,
+retryNativeVisit,
+retryNativeMachineAction,
+reconcileNativeMachineActionReview,
+requestNativeSync,
+saveNativePendingBackup,
+startNativeDutyTracking,
+stopNativeDutyTracking,
 } from './native-bridges.js';
+import { mergeMachineActions } from './queue-recovery.js';
 import './rep.css';
 
 const MachineVisitSheet = lazy(() => import('./MachineVisitSheet.jsx'));
@@ -258,6 +263,7 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
   const [pendingVisits, setPendingVisits] = useState([]);
   const [pendingMachineActions, setPendingMachineActions] = useState([]);
   const [pendingAttendanceActions, setPendingAttendanceActions] = useState([]);
+  const [pendingGpsQueue, setPendingGpsQueue] = useState({ pending: [], rejected: [] });
   const [query, setQuery] = useState('');
   const [routeFilter, setRouteFilter] = useState('all');
   const [selectedMachine, setSelectedMachine] = useState(null);
@@ -272,14 +278,15 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
   const [assignmentNotice, setAssignmentNotice] = useState(null);
   const [toast, setToast] = useState('');
   const [tutorialOpen, setTutorialOpen] = useState(false);
-  const [storagePersistent, setStoragePersistent] = useState(null);
-  const [appVersion, setAppVersion] = useState('');
-  const [storageError, setStorageError] = useState('');
-  const [pendingExportBusy, setPendingExportBusy] = useState(false);
-  const syncingRef = useRef(false);
-  const trackingSyncingRef = useRef(false);
-  const gpsRef = useRef(null);
-  const routeRef = useRef(null);
+const [storagePersistent, setStoragePersistent] = useState(null);
+const [appVersion, setAppVersion] = useState('');
+const [storageError, setStorageError] = useState('');
+const [pendingExportBusy, setPendingExportBusy] = useState(false);
+const [pendingImportBusy, setPendingImportBusy] = useState(false);
+const syncingRef = useRef(false);
+const trackingSyncingRef = useRef(false);
+const gpsRef = useRef(null);
+const routeRef = useRef(null);
   const pendingMachineActionsRef = useRef([]);
   const seenReviewNoticesRef = useRef(new Set());
   const mockAuditAtRef = useRef(0);
@@ -313,13 +320,26 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
   }, [attendance?.clock_in_time, attendance?.clock_out_time]);
 
   const refreshPending = useCallback(async () => {
-    const [storedVisits, actions] = await Promise.all([
-      listPendingVisits(userId),
-      listPendingMachineActions(userId),
-    ]);
+    let storedVisits = [];
+    let storedActions = [];
+    let indexedStorageError = null;
+    try {
+      [storedVisits, storedActions] = await Promise.all([
+        listPendingVisits(userId),
+        listPendingMachineActions(userId),
+      ]);
+    } catch (error) {
+      if (!nativeApp) throw error;
+      indexedStorageError = error;
+    }
     let visits = storedVisits;
+    let actions = storedActions;
     if (nativeApp) {
-      const nativeVisits = await listNativeVisits(userId);
+      const [nativeVisits, nativeActions, nativeGps] = await Promise.all([
+        listNativeVisits(userId),
+        listNativeMachineActions(userId),
+        getNativeRecoveryGps(userId),
+      ]);
       const nativeByUuid = new Map(nativeVisits.map((visit) => [visit.visitUuid, visit]));
       const seen = new Set();
       visits = [];
@@ -341,28 +361,9 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
         visits.push({ ...native, beforePhotos: [], afterPhotos: [] });
       }
       visits.sort((left, right) => left.createdAt.localeCompare(right.createdAt));
-
-      const nativeActions = await listNativeMachineActions(userId).catch(() => []);
-      const nativeById = new Map(nativeActions.map((action) => [action.actionUuid, action]));
-      for (const stored of actions) {
-        const native = nativeById.get(stored.actionUuid);
-        if (!native) continue;
-        if (native.status === stored.status && (native.reviewNote ?? '') === (stored.reviewNote ?? '')) continue;
-        Object.assign(stored, {
-          status: native.status,
-          correctionId: native.correctionId ?? stored.correctionId,
-          reviewNote: native.reviewNote ?? stored.reviewNote,
-          lastError: native.lastError ?? stored.lastError,
-          attempts: native.attempts ?? stored.attempts,
-        });
-        await updatePendingMachineAction(stored.actionUuid, {
-          status: stored.status,
-          correctionId: stored.correctionId,
-          reviewNote: stored.reviewNote,
-          lastError: stored.lastError,
-          attempts: stored.attempts,
-        }).catch(() => undefined);
-      }
+      actions = mergeMachineActions(storedActions, nativeActions, userId);
+      setPendingGpsQueue(nativeGps);
+      if (indexedStorageError) setStorageError(`قاعدة المتصفح غير متاحة؛ عُرضت طوابير SQLite الأصلية. ${indexedStorageError.message}`);
     }
     pendingMachineActionsRef.current = actions;
     setPendingMachineActions(actions);
@@ -482,23 +483,27 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
     gpsRef.current = gps;
   }, [gps]);
 
-  const loadLocalSnapshots = useCallback(async () => {
-    try {
-      const recoveredCount = await restoreNativePendingBackups(userId);
-      const [savedRoute, savedReasons, visits, actions, savedAttendance, nativeCache, attendanceActions] = await Promise.all([
-        getSnapshot('route_snapshots', userId),
-        getSnapshot('reason_snapshots', userId),
-        listPendingVisits(userId),
-        listPendingMachineActions(userId),
-        getSnapshot('attendance_snapshots', userId),
-        nativeApp ? getNativeRepCache(userId) : Promise.resolve(null),
-        nativeApp ? listNativeAttendanceActions(userId) : Promise.resolve([]),
-      ]);
-      setPendingAttendanceActions(attendanceActions);
-      pendingMachineActionsRef.current = actions;
-      setPendingMachineActions(actions);
-      const cachedRoute = savedRoute?.route ?? nativeCache?.route;
-      const cachedReasons = savedReasons?.reasons ?? nativeCache?.reasons;
+const loadLocalSnapshots = useCallback(async () => {
+  try {
+    const recoveredCount = await restoreNativePendingBackups(userId);
+    const [savedRoute, savedReasons, visits, storedActions, savedAttendance, nativeCache, attendanceActions, nativeActions, nativeGps] = await Promise.all([
+      getSnapshot('route_snapshots', userId),
+      getSnapshot('reason_snapshots', userId),
+      listPendingVisits(userId),
+      listPendingMachineActions(userId),
+      getSnapshot('attendance_snapshots', userId),
+      nativeApp ? getNativeRepCache(userId) : Promise.resolve(null),
+      nativeApp ? listNativeAttendanceActions(userId) : Promise.resolve([]),
+      nativeApp ? listNativeMachineActions(userId) : Promise.resolve([]),
+      nativeApp ? getNativeRecoveryGps(userId) : Promise.resolve({ pending: [], rejected: [] }),
+    ]);
+    const actions = nativeApp ? mergeMachineActions(storedActions, nativeActions, userId) : storedActions;
+    setPendingAttendanceActions(attendanceActions);
+    setPendingGpsQueue(nativeGps);
+    pendingMachineActionsRef.current = actions;
+    setPendingMachineActions(actions);
+    const cachedRoute = savedRoute?.route ?? nativeCache?.route;
+    const cachedReasons = savedReasons?.reasons ?? nativeCache?.reasons;
       if (cachedRoute) setRoute(applyPendingMachineLocations({ ...cachedRoute, cachedAt: savedRoute?.cachedAt ?? cachedRoute.cachedAt }, actions));
       if (cachedReasons) setReasons(cachedReasons);
       if (savedAttendance?.date === currentBusinessDate() || attendanceActions.length) {
@@ -509,32 +514,38 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
       }
       setPendingVisits(visits);
       if (recoveredCount) setToast(`استُعيدت ${recoveredCount} زيارة من نسخة الهاتف الاحتياطية.`);
-      setStorageError('');
-    } catch (error) {
-      if (nativeApp) {
-        try {
-          const [nativeCache, nativeVisits, nativeAttendanceActions] = await Promise.all([
-            getNativeRepCache(userId),
-            listNativeVisits(userId),
-            listNativeAttendanceActions(userId),
-          ]);
-          setPendingAttendanceActions(nativeAttendanceActions);
-          const offlineAttendance = applyPendingAttendance(null, nativeAttendanceActions);
-          if (offlineAttendance) {
-            setAttendance(offlineAttendance);
-            setOnDuty(Boolean(offlineAttendance.clock_in_time && !offlineAttendance.clock_out_time));
+    setStorageError('');
+  } catch (error) {
+    if (nativeApp) {
+      try {
+        const [nativeCache, nativeVisits, nativeAttendanceActions, nativeMachineActions, nativeGps] = await Promise.all([
+          getNativeRepCache(userId),
+          listNativeVisits(userId),
+          listNativeAttendanceActions(userId),
+          listNativeMachineActions(userId),
+          getNativeRecoveryGps(userId),
+        ]);
+        const machineActions = mergeMachineActions([], nativeMachineActions, userId);
+        setPendingAttendanceActions(nativeAttendanceActions);
+        setPendingGpsQueue(nativeGps);
+        pendingMachineActionsRef.current = machineActions;
+        setPendingMachineActions(machineActions);
+        const offlineAttendance = applyPendingAttendance(null, nativeAttendanceActions);
+        if (offlineAttendance) {
+          setAttendance(offlineAttendance);
+          setOnDuty(Boolean(offlineAttendance.clock_in_time && !offlineAttendance.clock_out_time));
             setAttendanceLoaded(true);
-          }
-          if (nativeCache?.route) setRoute(applyPendingMachineLocations(nativeCache.route));
-          if (Array.isArray(nativeCache?.reasons)) setReasons(nativeCache.reasons);
-          setPendingVisits(nativeVisits.filter((visit) => visit.status !== 'synced'));
-          setStorageError('قاعدة المتصفح غير متاحة؛ يعمل المسار والزيارات من قاعدة SQLite الأصلية على الهاتف.');
-        } catch {
-          setStorageError(error.message || 'تعذر فتح التخزين المحلي على الهاتف.');
         }
-      } else {
-        setStorageError(error.message || 'لا يمكن استخدام قاعدة البيانات المحلية لهذا المتصفح.');
-      }
+    if (nativeCache?.route) setRoute(applyPendingMachineLocations(nativeCache.route));
+    if (Array.isArray(nativeCache?.reasons)) setReasons(nativeCache.reasons);
+    setPendingVisits(nativeVisits.filter((visit) => visit.status !== 'synced'));
+    setStorageError('قاعدة المتصفح غير متاحة؛ عُرضت المسارات والزيارات وإجراءات الماكينة من قواعد SQLite الأصلية على الهاتف.');
+  } catch (nativeError) {
+    setStorageError(`تعذر قراءة إحدى طوابير SQLite الأصلية؛ لم تُعتبر فارغة. ${nativeError.message || error.message || 'خطأ قراءة محلي.'}`);
+  }
+} else {
+  setStorageError(error.message || 'لا يمكن استخدام قاعدة البيانات المحلية لهذا المتصفح.');
+}
     }
   }, [nativeApp, userId]);
 
@@ -1083,29 +1094,54 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
   }, [nativeApp, onDuty, selectedMachine, syncTracking]);
 
   const drainQueue = useCallback(async () => {
-    if (syncingRef.current || offlineOnly || !navigator.onLine || serverState !== 'online') return;
-    syncingRef.current = true;
-    let changedServer = false;
-    try {
-      const actions = await listPendingMachineActions(userId);
-      const reviews = await api.get('/api/rep/location-confirmations', { timeoutMs: 12000 });
-      for (const action of actions.filter((item) => item.type === 'confirm_location')) {
-        const review = reviews.requests?.find((item) => item.actionUuid === action.actionUuid);
-        if (!review) continue;
-        if (action.status !== locationReviewState(review.status)) changedServer = true;
-        Object.assign(action, { status: locationReviewState(review.status), correctionId: review.id, reviewNote: review.reviewNote });
-        await updatePendingMachineAction(action.actionUuid, { status: action.status, correctionId: review.id, reviewNote: review.reviewNote });
-      }
-      const pausedCardIds = new Set();
-      const pausedMachineIds = new Set();
-      let canDrainVisits = true;
-      for (const action of actions) {
-        if (Number(action.repId) !== userId) continue;
-        const cardId = Number(action.payload?.cardId);
+  if (syncingRef.current || offlineOnly || !navigator.onLine || serverState !== 'online') return;
+  syncingRef.current = true;
+  let changedServer = false;
+  try {
+    const [indexedActions, nativeActions] = await Promise.all([
+      listPendingMachineActions(userId),
+      nativeApp ? listNativeMachineActions(userId) : Promise.resolve([]),
+    ]);
+    const actions = nativeApp ? mergeMachineActions(indexedActions, nativeActions, userId) : indexedActions;
+    const reviews = await api.get('/api/rep/location-confirmations', { timeoutMs: 12000 });
+    for (const action of actions.filter((item) => item.type === 'confirm_location')) {
+  const review = reviews.requests?.find((item) => item.actionUuid === action.actionUuid);
+  if (!review) continue;
+  if (action.status !== locationReviewState(review.status)) changedServer = true;
+  Object.assign(action, { status: locationReviewState(review.status), correctionId: review.id, reviewNote: review.reviewNote });
+  if (action.source === 'native-sqlite') {
+    await reconcileNativeMachineActionReview(action.actionUuid, userId, {
+      status: action.status,
+      correctionId: review.id,
+      reviewNote: review.reviewNote,
+    });
+  } else {
+    await updatePendingMachineAction(action.actionUuid, { status: action.status, correctionId: review.id, reviewNote: review.reviewNote });
+  }
+}
+const pausedCardIds = new Set();
+const pausedMachineIds = new Set();
+let canDrainVisits = true;
+    for (const action of actions) {
+      if (Number(action.repId) !== userId) continue;
+      const cardId = Number(action.payload?.cardId);
+      if (nativeApp && action.source === 'native-sqlite') {
         if (action.type === 'confirm_location' && ['approved', 'rejected'].includes(action.status)) {
           const review = reviews.requests?.find((item) => item.actionUuid === action.actionUuid);
           if (!review?.approvedLocation) {
             pausedMachineIds.add(Number(action.machineId));
+            pausedCardIds.add(cardId);
+          }
+        } else if (['queued', 'syncing', 'blocked', 'pending_approval'].includes(action.status)) {
+          if (Number.isSafeInteger(cardId) && cardId > 0) pausedCardIds.add(cardId);
+          if (action.type === 'report_correction') pausedMachineIds.add(Number(action.machineId));
+        }
+        continue;
+      }
+      if (action.type === 'confirm_location' && ['approved', 'rejected'].includes(action.status)) {
+        const review = reviews.requests?.find((item) => item.actionUuid === action.actionUuid);
+        if (!review?.approvedLocation) {
+          pausedMachineIds.add(Number(action.machineId));
             pausedCardIds.add(cardId);
           }
           continue;
@@ -1277,14 +1313,15 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
           break;
         }
       }
-    } catch (error) {
-      setStorageError(error.message || 'تعذر قراءة قائمة المزامنة المحلية.');
-    } finally {
-      syncingRef.current = false;
-      try { await refreshPending(); } catch { /* Keep the previous queue count visible. */ }
-      if (changedServer) void refreshData();
-    }
-  }, [nativeApp, offlineOnly, refreshData, refreshPending, serverState, userId]);
+  } catch (error) {
+    setStorageError(error.message || 'تعذر قراءة قائمة المزامنة المحلية.');
+  } finally {
+    syncingRef.current = false;
+    try { await refreshPending(); }
+    catch (error) { setStorageError(`تعذر إعادة قراءة طوابير المزامنة؛ لم تُعتبر فارغة. ${error.message || ''}`); }
+    if (changedServer) void refreshData();
+  }
+}, [nativeApp, offlineOnly, refreshData, refreshPending, serverState, userId]);
 
   useEffect(() => {
     if (!nativeApp) return undefined;
@@ -1365,15 +1402,16 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
 
   const routeMachines = useMemo(() => (route?.regions ?? []).flatMap((region) => region.machines ?? []), [route]);
   const routeFilterCounts = {
-    all: routeMachines.length,
-    remaining: routeMachines.filter((machine) => !visitSubmitted(machine)).length,
-    completed: routeMachines.filter(visitSubmitted).length,
-  };
-  const pendingQueueCount = pendingVisits.length + pendingMachineActions.length + pendingAttendanceActions.length;
+  all: routeMachines.length,
+  remaining: routeMachines.filter((machine) => !visitSubmitted(machine)).length,
+  completed: routeMachines.filter(visitSubmitted).length,
+};
+const pendingGpsCount = pendingGpsQueue.pending.length + pendingGpsQueue.rejected.length;
+const pendingQueueCount = pendingVisits.length + pendingMachineActions.length + pendingAttendanceActions.length + pendingGpsCount;
 
-  useEffect(() => {
-    if (!pendingQueueCount) return undefined;
-    const protectQueue = (event) => {
+useEffect(() => {
+  if (!pendingQueueCount) return undefined;
+  const protectQueue = (event) => {
       event.preventDefault();
       event.returnValue = 'توجد عناصر بانتظار المزامنة؛ يمكن أن تضيع قبل خروجها.';
       return event.returnValue;
@@ -1387,22 +1425,68 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
     if (!pendingQueueCount) {
       setToast('لا توجد عناصر بانتظار المزامنة لتصديرها.');
       return;
-    }
-    setPendingExportBusy(true);
-    try {
-      const result = await exportPendingQueue(userId, user.username);
-      setToast(`أُنشئ ملف JSON يحمل ${result.visits + result.machineActions + result.attendanceActions} عنصراً: ${result.path}`);
-    } catch (error) {
-      setToast(error.message || 'تعذر إنشاء نسخة JSON من العمل المعلق.');
-    } finally {
-      setPendingExportBusy(false);
-    }
-  };
+  }
+  setPendingExportBusy(true);
+  try {
+    const result = await exportPendingQueue(userId, user.username);
+    setToast(result.complete
+      ? `أُنشئت نسخة استرداد كاملة تضم ${result.totalItems} عنصراً: ${result.path}`
+      : `أُنشئت نسخة غير مكتملة؛ العناصر غير المقروءة: ${result.omittedItems}. راجع ملف الاسترداد قبل الاعتماد عليه: ${result.path}`);
+  } catch (error) {
+    setToast(error.message || 'تعذر إنشاء نسخة JSON من العمل المعلق.');
+  } finally {
+    setPendingExportBusy(false);
+  }
+};
 
-  const finishTutorial = () => {
-    try { window.localStorage.setItem(`tutorial_seen:${userId}`, '1'); } catch { /* Tutorial is dismissed for this session. */ }
-    setTutorialOpen(false);
-  };
+const importRecovery = async (event) => {
+  const file = event.currentTarget.files?.[0];
+  event.currentTarget.value = '';
+  if (!file) return;
+  setPendingImportBusy(true);
+  try {
+    if (!nativeApp) throw new Error('استيراد نسخة الاسترداد متاح من تطبيق أندرويد؛ لا تفتح الملف في متصفح آخر.');
+    if (file.size < 1 || file.size > 128 * 1024 * 1024) throw new Error('حجم ملف الاسترداد يجب أن يكون بين 1 بايت و128 ميغابايت.');
+    const result = await importNativeRecoveryPackage(await file.text(), userId);
+    await loadLocalSnapshots();
+    await refreshPending();
+    setToast(`اكتمل الاسترداد المحلي: ${result.imported} عنصر جديد، ${result.duplicates} عنصر مطابق موجود مسبقاً. لم يُرفع أي ملف إلى الخادم.`);
+  } catch (error) {
+    setStorageError(error.message || 'تعذر التحقق من نسخة الاسترداد أو استيرادها.');
+  } finally {
+    setPendingImportBusy(false);
+  }
+};
+
+const retryMachineAction = async (action) => {
+  if (['rejected', 'pending_approval', 'approved'].includes(action.status)) {
+    setToast('قرار المراجعة لا يُعاد إرساله. أرسل تصحيحاً جديداً من بطاقة الماكينة بمعرّف إجراء جديد.');
+    return;
+  }
+  try {
+    if (nativeApp && action.source === 'native-sqlite') {
+      const nativeAction = await retryNativeMachineAction(action.actionUuid, userId);
+      await updatePendingMachineAction(action.actionUuid, {
+        status: nativeAction.status,
+        lastError: nativeAction.lastError ?? '',
+        attempts: nativeAction.attempts,
+      }).catch((error) => setStorageError(`أُعيد الإجراء في SQLite الأصلية، لكن تعذّر تحديث العرض المساعد: ${error.message}`));
+      await refreshPending();
+      setToast('أُعيد الإجراء الأصلي بنفس المعرّف والمحتوى؛ ستتم مزامنته من طابور أندرويد.');
+      return;
+    }
+    await updatePendingMachineAction(action.actionUuid, { status: 'queued', lastError: '' });
+    await refreshPending();
+    void drainQueue();
+  } catch (error) {
+    setStorageError(error.message || 'تعذرت إعادة إجراء الماكينة؛ بقي محفوظاً دون تغيير.');
+  }
+};
+
+const finishTutorial = () => {
+  try { window.localStorage.setItem(`tutorial_seen:${userId}`, '1'); } catch { /* Tutorial is dismissed for this session. */ }
+  setTutorialOpen(false);
+};
 
   const logout = async () => {
     if (attendance?.clock_in_time && !attendance.clock_out_time) {
@@ -1498,20 +1582,27 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
       createdAt: new Date().toISOString(),
       payload,
       status: 'queued',
-      attempts: 0,
-      lastError: '',
-    };
-    try {
-      await enqueueNativeMachineAction(queuedAction).catch((error) => {
-        console.warn('Native machine action queue was unavailable; IndexedDB remains authoritative.', error);
-      });
-      await addPendingMachineAction(queuedAction);
-      pendingMachineActionsRef.current = [...pendingMachineActionsRef.current, queuedAction];
-      setPendingMachineActions(pendingMachineActionsRef.current);
-      setRoute((current) => {
-        const updated = applyPendingMachineLocations(current, pendingMachineActionsRef.current);
-        void saveSnapshot('route_snapshots', userId, { route: updated, cachedAt: new Date().toISOString() }).catch(() => undefined);
-        return updated;
+  attempts: 0,
+  lastError: '',
+};
+try {
+  if (nativeApp) {
+    try { await enqueueNativeMachineAction(queuedAction); }
+    catch (error) {
+      queuedAction.source = 'indexeddb';
+      setStorageError(`تعذر حفظ الإجراء في SQLite الأصلية؛ حُفظ في IndexedDB كمسار احتياطي وسيزامن من واجهة التطبيق فقط. ${error.message}`);
+    }
+  }
+  try { await addPendingMachineAction(queuedAction); }
+  catch (error) {
+    if (!nativeApp) throw error;
+    setStorageError(`حُفظ الإجراء في SQLite الأصلية، لكن تعذر حفظ نسخة العرض في IndexedDB: ${error.message}`);
+  }
+  await refreshPending();
+  setRoute((current) => {
+    const updated = applyPendingMachineLocations(current, pendingMachineActionsRef.current);
+    void saveSnapshot('route_snapshots', userId, { route: updated, cachedAt: new Date().toISOString() }).catch(() => undefined);
+    return updated;
       });
       setToast('حُفظ الموقع المقترح؛ تظل الزيارة متوقفة حتى اعتماد المدير.');
       void drainQueue();
@@ -1552,20 +1643,27 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
       payload,
       evidence: evidence ?? null,
       status: 'queued',
-      attempts: 0,
-      lastError: '',
-    };
-    try {
-      await enqueueNativeMachineAction(queuedAction, evidence ?? null).catch((error) => {
-        console.warn('Native machine correction queue was unavailable; IndexedDB remains authoritative.', error);
-      });
-      await addPendingMachineAction(queuedAction);
-      pendingMachineActionsRef.current = [...pendingMachineActionsRef.current, queuedAction];
-      setPendingMachineActions(pendingMachineActionsRef.current);
-      setRoute((current) => updateRouteMachineCorrection(current, selectedMachine.machineId));
-      setToast('حُفظ بلاغ اختلاف الماكينة على الهاتف؛ ستتم مزامنته مع صورة الإثبات عند عودة الاتصال.');
-      void drainQueue();
-    } catch (error) {
+  attempts: 0,
+  lastError: '',
+};
+try {
+  if (nativeApp) {
+    try { await enqueueNativeMachineAction(queuedAction, evidence ?? null); }
+    catch (error) {
+      queuedAction.source = 'indexeddb';
+      setStorageError(`تعذر حفظ البلاغ وإثباته في SQLite الأصلية؛ حُفظ في IndexedDB كمسار احتياطي وسيزامن من واجهة التطبيق فقط. ${error.message}`);
+    }
+  }
+  try { await addPendingMachineAction(queuedAction); }
+  catch (error) {
+    if (!nativeApp) throw error;
+    setStorageError(`حُفظ البلاغ وإثباته في SQLite الأصلية، لكن تعذر حفظ نسخة العرض في IndexedDB: ${error.message}`);
+  }
+  await refreshPending();
+  setRoute((current) => updateRouteMachineCorrection(current, selectedMachine.machineId));
+  setToast('حُفظ بلاغ اختلاف الماكينة على الهاتف؛ ستتم مزامنته مع صورة الإثبات عند عودة الاتصال.');
+  void drainQueue();
+} catch (error) {
       setStorageError(error.message || 'تعذر حفظ بلاغ التصحيح على الهاتف.');
       throw error;
     }
@@ -1765,33 +1863,36 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
          <div className="rep-queue-panel-head"><div><span className="rep-eyebrow">التخزين المحلي</span><h2>سجل الإجراءات والمزامنة <small>{pendingQueueCount}</small></h2></div><button className="rep-icon-button" type="button" onClick={() => setShowQueue(false)} aria-label="إخفاء قائمة المزامنة">×</button></div>
          {!pendingQueueCount ? <p className="rep-queue-empty">لا توجد إجراءات معلقة لهذا الحساب.</p> : <ul className="rep-queue-list">
           {pendingMachineActions.map((action) => <li key={action.actionUuid}>
-            {['pending_approval', 'approved', 'rejected'].includes(action.status) && <span>
-              {({ pending_approval: 'بانتظار اعتماد المدير', approved: 'معتمد', rejected: 'مرفوض؛ أعد الإرسال من بطاقة الماكينة' })[action.status]} {action.reviewNote || ''}
-            </span>}
-           <span className={`rep-queue-state ${action.status === 'syncing' ? 'syncing' : ''} ${action.status === 'blocked' ? 'blocked' : ''}`} aria-hidden="true">{action.status === 'syncing' ? '↻' : action.status === 'blocked' ? '!' : '⏳'}</span>
-            <div><strong>{action.type === 'confirm_location' ? `مقترح موقع الماكينة · بطاقة ${action.payload?.cardId || ''}` : `بلاغ ماكينة مختلفة · ${action.payload?.reportedCode || ''}`}</strong><small>حُفظ {formatTime(action.createdAt)}{action.attempts ? ` · محاولات ${action.attempts}` : ''} · {locationReviewLabel(action.status)}</small>{action.evidence && <small>صورة الإثبات محفوظة محلياً · {Math.ceil(action.evidence.size / 1024)} KB</small>}{action.lastError && <small className="rep-queue-error">{action.lastError}</small>}</div>
-           {action.status === 'blocked'
-             ? <button type="button" className="rep-queue-retry" disabled={serverState !== 'online' || offlineOnly} onClick={async () => { await updatePendingMachineAction(action.actionUuid, { status: 'queued', lastError: '' }); await refreshPending(); void drainQueue(); }}>إعادة المحاولة</button>
-             : <span className="rep-queue-local">محفوظ محلياً</span>}
-         </li>)}
-          {pendingVisits.map((visit) => <li key={visit.visitUuid}>
-           <span className={`rep-queue-state ${visit.status === 'syncing' ? 'syncing' : ''} ${visit.status === 'blocked' ? 'blocked' : ''}`} aria-hidden="true">{visit.status === 'syncing' ? '↻' : visit.status === 'blocked' ? '!' : '⏳'}</span>
+     {['pending_approval', 'approved', 'rejected'].includes(action.status) && <span>
+       {({ pending_approval: 'بانتظار اعتماد المدير', approved: 'معتمد', rejected: 'مرفوض؛ أعد الإرسال من بطاقة الماكينة' })[action.status]} {action.reviewNote || ''}
+     </span>}
+    <span className={`rep-queue-state ${action.status === 'syncing' ? 'syncing' : ''} ${action.status === 'blocked' ? 'blocked' : ''}`} aria-hidden="true">{action.status === 'syncing' ? '↻' : action.status === 'blocked' ? '!' : '⏳'}</span>
+     <div><strong>{action.type === 'confirm_location' ? `مقترح موقع الماكينة · بطاقة ${action.payload?.cardId || ''}` : `بلاغ ماكينة مختلفة · ${action.payload?.reportedCode || ''}`}</strong><small>حُفظ {formatTime(action.createdAt)}{action.attempts ? ` · محاولات ${action.attempts}` : ''} · {locationReviewLabel(action.status)}</small>{(action.evidence || action.evidenceAvailable) && <small>صورة الإثبات محفوظة محلياً · {action.evidence ? `${Math.ceil(action.evidence.size / 1024)} KB` : 'ملف أصلي'}</small>}{action.lastError && <small className="rep-queue-error">{action.lastError}</small>}</div>
+     {action.status === 'blocked'
+       ? <button type="button" className="rep-queue-retry" disabled={serverState !== 'online' || offlineOnly} onClick={() => void retryMachineAction(action)}>إعادة المحاولة</button>
+      : <span className="rep-queue-local">محفوظ محلياً</span>}
+  </li>)}
+   {pendingVisits.map((visit) => <li key={visit.visitUuid}>
+    <span className={`rep-queue-state ${visit.status === 'syncing' ? 'syncing' : ''} ${visit.status === 'blocked' ? 'blocked' : ''}`} aria-hidden="true">{visit.status === 'syncing' ? '↻' : visit.status === 'blocked' ? '!' : '⏳'}</span>
            <div><strong>ماكينة {visit.payload.machineCode} · {visit.payload.regionName}</strong><small>حُفظت {formatTime(visit.createdAt)}{visit.attempts ? ` · محاولات ${visit.attempts}` : ''} · {visit.status === 'blocked' ? 'تحتاج مراجعة' : visit.status === 'syncing' ? 'جارٍ الإرسال' : 'بانتظار المزامنة'}</small>{visit.lastError && <small className="rep-queue-error">{visit.lastError}</small>}</div>
-            {visit.status === 'blocked'
-              ? <button type="button" className="rep-queue-retry" disabled={serverState !== 'online' || offlineOnly} onClick={async () => { if (nativeApp && visit.nativeStoragePath?.startsWith('internal://visits/')) await retryNativeVisit(visit.visitUuid, userId); else await updatePendingVisit(visit.visitUuid, { status: 'queued', lastError: '' }); await refreshPending(); void drainQueue(); }}>إعادة المحاولة</button>
-              : <span className="rep-queue-local">محفوظة محلياً</span>}
-          </li>)}
-          {pendingAttendanceActions.map((action) => <li key={action.actionUuid}>
-            <span className="rep-queue-state" aria-hidden="true">⏳</span>
-            <div><strong>{action.action === 'in' ? 'تسجيل حضور محفوظ محلياً' : 'تسجيل انصراف محفوظ محلياً'}</strong><small>{formatTime(action.occurredAt)} · دقة GPS ±{Math.round(action.location?.accuracy ?? 0)}م · {action.status === 'attendance_rejected' ? 'مرفوض؛ يحتاج مراجعة' : action.status || 'pending_attendance_sync'}</small>{action.attempts ? <small>محاولات المزامنة {action.attempts}</small> : null}{action.lastError && <small className="rep-queue-error">{action.lastError}</small>}</div>
-            <span className="rep-queue-local">محفوظ محلياً</span>
-          </li>)}
-          </ul>}
-          <button type="button" className="rep-button rep-button-light rep-sync-now" disabled={!pendingQueueCount || pendingExportBusy} onClick={() => void exportPending()}>{pendingExportBusy ? 'جارٍ تجهيز نسخة JSON…' : 'تصدير نسخة JSON'}</button>
-          <button type="button" className="rep-button rep-button-primary rep-sync-now" disabled={!pendingQueueCount || serverState !== 'online' || offlineOnly} onClick={() => { if (nativeApp && pendingAttendanceActions.length) void requestNativeSync().catch(() => undefined); void drainQueue(); }}>{serverState === 'online' ? 'مزامنة الآن ↻' : 'ستتم المزامنة عند الاتصال'}</button>
-       </section>}
+     {visit.status === 'blocked'
+       ? <button type="button" className="rep-queue-retry" disabled={serverState !== 'online' || offlineOnly} onClick={async () => { if (nativeApp && visit.nativeStoragePath?.startsWith('internal://visits/')) await retryNativeVisit(visit.visitUuid, userId); else await updatePendingVisit(visit.visitUuid, { status: 'queued', lastError: '' }); await refreshPending(); void drainQueue(); }}>إعادة المحاولة</button>
+       : <span className="rep-queue-local">محفوظة محلياً</span>}
+   </li>)}
+    {pendingAttendanceActions.map((action) => <li key={action.actionUuid}>
+     <span className="rep-queue-state" aria-hidden="true">⏳</span>
+     <div><strong>{action.action === 'in' ? 'تسجيل حضور محفوظ محلياً' : 'تسجيل انصراف محفوظ محلياً'}</strong><small>{formatTime(action.occurredAt)} · دقة GPS ±{Math.round(action.location?.accuracy ?? 0)}م · {action.status === 'attendance_rejected' ? 'مرفوض؛ يحتاج مراجعة' : action.status || 'pending_attendance_sync'}</small>{action.attempts ? <small>محاولات المزامنة {action.attempts}</small> : null}{action.lastError && <small className="rep-queue-error">{action.lastError}</small>}</div>
+      <span className="rep-queue-local">محفوظ محلياً</span>
+    </li>)}
+   {pendingGpsQueue.pending.length > 0 && <li><span className="rep-queue-state" aria-hidden="true">⌖</span><div><strong>نقاط GPS محفوظة محلياً · {pendingGpsQueue.pending.length}</strong><small>تبقى على الهاتف حتى تأكيد الخادم مزامنتها.</small></div><span className="rep-queue-local">SQLite</span></li>}
+   {pendingGpsQueue.rejected.map((point) => <li key={`gps-rejected:${point.trackId}`}><span className="rep-queue-state blocked" aria-hidden="true">!</span><div><strong>نقطة GPS تحتاج مراجعة · {formatTime(point.capturedAt)}</strong><small className="rep-queue-error">{point.reason || 'رفض الخادم هذه النقطة دون رسالة.'}</small></div><span className="rep-queue-local">محتفظ بها</span></li>)}
+    </ul>}
+   <button type="button" className="rep-button rep-button-light rep-sync-now" disabled={!pendingQueueCount || pendingExportBusy} onClick={() => void exportPending()}>{pendingExportBusy ? 'جارٍ تجهيز نسخة JSON…' : 'تصدير نسخة JSON'}</button>
+   {nativeApp && <><input type="file" accept="application/json,.json" className="rep-recovery-file-input" aria-label="اختيار نسخة استرداد محلية" onChange={(event) => void importRecovery(event)} /><button type="button" className="rep-button rep-button-light rep-sync-now" disabled={pendingImportBusy} onClick={(event) => event.currentTarget.previousElementSibling?.click()}>{pendingImportBusy ? 'جارٍ التحقق والاسترداد…' : 'استيراد نسخة استرداد محلية'}</button></>}
+   <button type="button" className="rep-button rep-button-primary rep-sync-now" disabled={!pendingQueueCount || serverState !== 'online' || offlineOnly} onClick={() => { if (nativeApp && pendingAttendanceActions.length) void requestNativeSync().catch(() => undefined); void drainQueue(); }}>{serverState === 'online' ? 'مزامنة الآن ↻' : 'ستتم المزامنة عند الاتصال'}</button>
+</section>}
 
-        <footer className="rep-app-footer"><span>مَــدَارْ · تطبيق المندوب الميداني{appVersion ? ` · إصدار ${appVersion}` : ''}</span><span>{gps ? `آخر GPS: ${formatGps(gps)}` : onDuty ? gpsError : nativeApp ? 'فعّل الحضور لتسجيل GPS أثناء الوردية' : 'يُسجّل GPS مع الحضور والانصراف والزيارة'}</span></footer>
+ <footer className="rep-app-footer"><span>مَــدَارْ · تطبيق المندوب الميداني{appVersion ? ` · إصدار ${appVersion}` : ''}</span><span>{gps ? `آخر GPS: ${formatGps(gps)}` : onDuty ? gpsError : nativeApp ? 'فعّل الحضور لتسجيل GPS أثناء الوردية' : 'يُسجّل GPS مع الحضور والانصراف والزيارة'}</span></footer>
 
         {selectedMachine && <MachineVisitSheet machine={{ ...selectedMachine, ...(route?.regions ?? []).flatMap((region) => region.machines).find((machine) => machine.cardId === selectedMachine.cardId) }} repName={user.fullName} reasons={reasons} gps={gps} gpsError={gpsError} captureLocation={captureVisitLocation} onClose={() => setSelectedMachine(null)} onSave={saveVisit} onConfirmLocation={confirmSelectedMachineLocation} onReportCorrection={submitSelectedMachineCorrection} />}
       {tutorialOpen && <Tutorial nativeApp={nativeApp} onFinish={finishTutorial} />}

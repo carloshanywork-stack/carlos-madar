@@ -253,15 +253,15 @@ public final class MadarSyncWorker extends Worker {
                         if ((response.code() == 200 || response.code() == 201) && result != null && result.optBoolean("success", false)) {
                             long correctionId = result.optLong("correctionId", result.optLong("id", 0L));
                             String status = result.optString("status", "pending");
-                            String localStatus = "approved".equals(status) || "rejected".equals(status)
-                                ? status : "pending_approval";
-                            store.markMachineActionPendingApproval(action.actionUuid, correctionId, status);
-                            if (!"pending_approval".equals(localStatus)) {
-                                store.updateMachineActionReview(action.actionUuid, localStatus, correctionId, "");
-                            }
-                            continue;
-                        }
-                        String message = result == null ? ""
+            String localStatus = "approved".equals(status) || "rejected".equals(status)
+                ? status : "pending_approval";
+            store.markMachineActionPendingApproval(action.actionUuid, correctionId, status);
+            if (!"pending_approval".equals(localStatus)) {
+                store.updateMachineActionReview(action.actionUuid, repId, localStatus, correctionId, "");
+            }
+            continue;
+        }
+        String message = result == null ? ""
                             : result.optString("message", result.optString("error", ""));
                         if (response.code() == 401 || response.code() == 403) {
                             store.markMachineActionRetry(action.actionUuid,
@@ -362,15 +362,15 @@ public final class MadarSyncWorker extends Worker {
                 for (int index = 0; index < localActions.length(); index += 1) {
                     JSONObject local = localActions.optJSONObject(index);
                     if (local == null || !"confirm_location".equals(local.optString("type"))) continue;
-                    if (!"pending_approval".equals(local.optString("status"))) continue;
-                    JSONObject review = byAction.get(local.optString("actionUuid"));
-                    if (review == null) continue;
-                    String status = review.optString("status", "pending");
-                    store.updateMachineActionReview(local.optString("actionUuid"),
-                        "pending".equals(status) ? "pending_approval" : status,
-                        review.optLong("id", local.optLong("correctionId", 0L)),
-                        review.optString("reviewNote", ""));
-                }
+    if (!"pending_approval".equals(local.optString("status"))) continue;
+    JSONObject review = byAction.get(local.optString("actionUuid"));
+    if (review == null) continue;
+    String status = review.optString("status", "pending");
+    store.updateMachineActionReview(local.optString("actionUuid"), repId,
+        "pending".equals(status) ? "pending_approval" : status,
+        review.optLong("id", local.optLong("correctionId", 0L)),
+        review.optString("reviewNote", ""));
+}
             }
         } catch (Exception ignored) {
             // The next WorkManager run reconciles review state again.

@@ -18,7 +18,7 @@ import java.util.Set;
 /** Native SQLite cache and durable queue. Source photos live under filesDir/MADAR/uploads. */
 final class RepLocalStore extends SQLiteOpenHelper {
     private static final String DATABASE_NAME = "madar_rep_local.db";
-    private static final int DATABASE_VERSION = 3;
+    private static final int DATABASE_VERSION = 4;
 
     RepLocalStore(Context context) {
         super(context.getApplicationContext(), DATABASE_NAME, null, DATABASE_VERSION);
@@ -35,12 +35,14 @@ final class RepLocalStore extends SQLiteOpenHelper {
         database.execSQL("CREATE TABLE visit_photos (visit_uuid TEXT NOT NULL REFERENCES pending_visits(visit_uuid) ON DELETE CASCADE, phase TEXT NOT NULL, photo_index INTEGER NOT NULL, path TEXT NOT NULL, captured_at TEXT NOT NULL, PRIMARY KEY(visit_uuid, phase, photo_index))");
         createAttendanceQueue(database);
         createMachineActionQueue(database);
+        createRecoveryImportLedger(database);
     }
 
     @Override
     public void onUpgrade(SQLiteDatabase database, int oldVersion, int newVersion) {
         if (oldVersion < 2) createAttendanceQueue(database);
         if (oldVersion < 3) createMachineActionQueue(database);
+        if (oldVersion < 4) createRecoveryImportLedger(database);
     }
 
     private static void createAttendanceQueue(SQLiteDatabase database) {
@@ -65,6 +67,32 @@ final class RepLocalStore extends SQLiteOpenHelper {
             + "ON pending_machine_actions(rep_id, status, created_at)");
         database.execSQL("CREATE INDEX IF NOT EXISTS pending_machine_actions_by_card "
             + "ON pending_machine_actions(rep_id, card_id, status)");
+    }
+
+    private static void createRecoveryImportLedger(SQLiteDatabase database) {
+        database.execSQL("CREATE TABLE IF NOT EXISTS recovery_imports ("
+            + "rep_id INTEGER NOT NULL, source_session_id TEXT NOT NULL, item_type TEXT NOT NULL, "
+            + "item_id TEXT NOT NULL, identity_hash TEXT NOT NULL, imported_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+            + "PRIMARY KEY(rep_id, source_session_id, item_type, item_id))");
+    }
+
+    synchronized String recoveryImportHash(long repId, String sourceSessionId, String itemType, String itemId) {
+        try (Cursor cursor = getReadableDatabase().rawQuery(
+            "SELECT identity_hash FROM recovery_imports WHERE rep_id = ? AND source_session_id = ? AND item_type = ? AND item_id = ?",
+            new String[] { String.valueOf(repId), sourceSessionId, itemType, itemId })) {
+            return cursor.moveToFirst() ? cursor.getString(0) : null;
+        }
+    }
+
+    synchronized void recordRecoveryImport(long repId, String sourceSessionId, String itemType,
+        String itemId, String identityHash) {
+        ContentValues values = new ContentValues();
+        values.put("rep_id", repId);
+        values.put("source_session_id", sourceSessionId);
+        values.put("item_type", itemType);
+        values.put("item_id", itemId);
+        values.put("identity_hash", identityHash);
+        getWritableDatabase().insertOrThrow("recovery_imports", null, values);
     }
 
     synchronized void cacheRoute(long repId, String routeJson) throws Exception {
@@ -189,14 +217,45 @@ final class RepLocalStore extends SQLiteOpenHelper {
             }
             database.setTransactionSuccessful();
         } finally {
-            database.endTransaction();
+        database.endTransaction();
+    }
+}
+
+/** Return true for an identical existing visit; reject changed UUID content before imported bytes are staged. */
+synchronized boolean assertVisitImportCompatible(long repId, JSONObject visit) throws Exception {
+    String uuid = visit.getString("visitUuid");
+    SQLiteDatabase database = getReadableDatabase();
+    try (Cursor row = database.rawQuery("SELECT rep_id, payload_json FROM pending_visits WHERE visit_uuid = ?",
+        new String[] { uuid })) {
+        if (!row.moveToFirst()) return false;
+        if (row.getLong(0) != repId || !row.getString(1).equals(visit.getJSONObject("payload").toString())) {
+            throw new IllegalStateException("This visit UUID already has different local content.");
+        }
+}
+for (String phase : new String[] { "before", "after" }) {
+    JSONArray incoming = visit.optJSONArray("before".equals(phase) ? "beforePhotos" : "afterPhotos");
+    if (incoming == null) throw new IllegalArgumentException("Recovery visit photos are missing.");
+    try (Cursor saved = database.rawQuery("SELECT photo_index, path, captured_at FROM visit_photos WHERE visit_uuid = ? AND phase = ? ORDER BY photo_index",
+        new String[] { uuid, phase })) {
+        if (saved.getCount() != incoming.length()) throw new IllegalStateException("This visit UUID already has different local evidence.");
+        int position = 0;
+        while (saved.moveToNext()) {
+            JSONObject photo = incoming.getJSONObject(position++);
+            byte[] incomingBytes = android.util.Base64.decode(photo.getString("bytesBase64"), android.util.Base64.DEFAULT);
+            if (!saved.getString(2).equals(photo.optString("capturedAt", "")) || !new File(saved.getString(1)).isFile()
+                || !java.util.Arrays.equals(incomingBytes, readEvidenceBytes(new File(saved.getString(1))))) {
+                throw new IllegalStateException("This visit UUID already has different local evidence.");
+            }
+        }
         }
     }
+    return true;
+}
 
-    private static void collectPhotos(Context context, String visitUuid, String phase, JSONArray entries, List<Photo> output) throws Exception {
-        File uploadsRoot = new File(new File(context.getFilesDir(), "MADAR"), "uploads").getCanonicalFile();
-        File legacyDirectory = new File(new File(context.getFilesDir(), "visits"), visitUuid).getCanonicalFile();
-        String phaseDirectory = "before".equals(phase) ? "Before" : "After";
+private static void collectPhotos(Context context, String visitUuid, String phase, JSONArray entries, List<Photo> output) throws Exception {
+    File uploadsRoot = new File(new File(context.getFilesDir(), "MADAR"), "uploads").getCanonicalFile();
+    File legacyDirectory = new File(new File(context.getFilesDir(), "visits"), visitUuid).getCanonicalFile();
+    String phaseDirectory = "before".equals(phase) ? "Before" : "After";
         Set<String> seenPaths = new HashSet<>();
         for (int index = 0; index < entries.length(); index += 1) {
             JSONObject entry = entries.getJSONObject(index);
@@ -397,13 +456,37 @@ final class RepLocalStore extends SQLiteOpenHelper {
             createdAt = format.format(new java.util.Date());
         }
 
-        String evidencePath = "";
-        String evidenceContentType = action.optString("evidenceMimeType", "");
-        String evidenceBase64 = action.optString("evidenceBase64", "");
-        if (!evidenceBase64.isEmpty()) {
-            if (!("report_correction".equals(type))) {
-                throw new IllegalArgumentException("Only machine correction reports may carry evidence.");
+    String evidencePath = "";
+    String evidenceContentType = action.optString("evidenceMimeType", "");
+    String evidenceBase64 = action.optString("evidenceBase64", "");
+    // Check UUID identity before touching the deterministic evidence filename. A
+    // changed retry must never overwrite bytes referenced by an existing row.
+    try (Cursor existing = getReadableDatabase().rawQuery(
+        "SELECT rep_id, machine_id, card_id, payload_json, evidence_path, evidence_content_type "
+            + "FROM pending_machine_actions WHERE action_uuid = ?", new String[] { actionUuid })) {
+        if (existing.moveToFirst()) {
+            if (existing.getLong(0) != repId || existing.getLong(1) != machineId || existing.getLong(2) != cardId
+                || !existing.getString(3).equals(payload.toString())
+                || !existing.getString(5).equals(evidenceContentType)) {
+                throw new IllegalStateException("This machine action UUID already has different local data.");
             }
+            String oldPath = existing.getString(4);
+            if (evidenceBase64.isEmpty()) {
+                if (oldPath != null && !oldPath.isEmpty()) throw new IllegalStateException("This machine action UUID already has different evidence.");
+            } else {
+                byte[] incoming = android.util.Base64.decode(evidenceBase64, android.util.Base64.DEFAULT);
+                if (oldPath == null || oldPath.isEmpty() || !new File(oldPath).isFile()
+                    || !java.util.Arrays.equals(incoming, readEvidenceBytes(new File(oldPath)))) {
+                    throw new IllegalStateException("This machine action UUID already has different evidence.");
+                }
+            }
+            return;
+        }
+    }
+    if (!evidenceBase64.isEmpty()) {
+        if (!("report_correction".equals(type))) {
+            throw new IllegalArgumentException("Only machine correction reports may carry evidence.");
+        }
             if (!("image/jpeg".equals(evidenceContentType) || "image/png".equals(evidenceContentType)
                 || "image/webp".equals(evidenceContentType))) {
                 throw new IllegalArgumentException("Evidence must be a JPEG, PNG, or WebP image.");
@@ -459,14 +542,24 @@ final class RepLocalStore extends SQLiteOpenHelper {
             database.insertOrThrow("pending_machine_actions", null, values);
             database.setTransactionSuccessful();
         } finally {
-            database.endTransaction();
-        }
+        database.endTransaction();
     }
+}
 
-    synchronized MachineAction nextMachineAction(long repId) throws Exception {
-        try (Cursor cursor = getReadableDatabase().rawQuery(
-            "SELECT action_uuid, rep_id, action_type, machine_id, card_id, payload_json, evidence_path, "
-                + "evidence_content_type, attempts FROM pending_machine_actions "
+private static byte[] readEvidenceBytes(File file) throws Exception {
+    try (java.io.FileInputStream input = new java.io.FileInputStream(file);
+         java.io.ByteArrayOutputStream output = new java.io.ByteArrayOutputStream()) {
+        byte[] buffer = new byte[8192];
+        int count;
+        while ((count = input.read(buffer)) != -1) output.write(buffer, 0, count);
+        return output.toByteArray();
+    }
+}
+
+synchronized MachineAction nextMachineAction(long repId) throws Exception {
+    try (Cursor cursor = getReadableDatabase().rawQuery(
+        "SELECT action_uuid, rep_id, action_type, machine_id, card_id, payload_json, evidence_path, "
+            + "evidence_content_type, attempts FROM pending_machine_actions "
                 + "WHERE rep_id = ? AND status IN ('queued', 'syncing') ORDER BY created_at, action_uuid LIMIT 1",
             new String[] { String.valueOf(repId) }
         )) {
@@ -487,30 +580,99 @@ final class RepLocalStore extends SQLiteOpenHelper {
         values.put("status", "pending_approval");
         values.put("correction_id", correctionId);
         values.put("server_status", serverStatus == null ? "" : serverStatus);
-        values.put("last_error", "");
-        getWritableDatabase().update("pending_machine_actions", values, "action_uuid = ?", new String[] { actionUuid });
-    }
+    values.put("last_error", "");
+    getWritableDatabase().update("pending_machine_actions", values, "action_uuid = ?", new String[] { actionUuid });
+}
 
-    synchronized void updateMachineActionReview(String actionUuid, String status, long correctionId, String reviewNote) {
-        ContentValues values = new ContentValues();
-        values.put("status", status);
-        values.put("correction_id", correctionId);
-        values.put("server_status", status);
-        values.put("review_note", reviewNote == null ? "" : reviewNote);
-        getWritableDatabase().update("pending_machine_actions", values, "action_uuid = ?", new String[] { actionUuid });
+synchronized boolean updateMachineActionReview(String actionUuid, long repId, String status, long correctionId, String reviewNote) {
+    if (!("queued".equals(status) || "pending_approval".equals(status) || "approved".equals(status)
+        || "rejected".equals(status) || "blocked".equals(status) || "superseded".equals(status))) {
+        throw new IllegalArgumentException("Invalid machine-action review status.");
     }
+    ContentValues values = new ContentValues();
+    values.put("status", status);
+    values.put("correction_id", correctionId);
+    values.put("server_status", status);
+    values.put("review_note", reviewNote == null ? "" : reviewNote);
+    return getWritableDatabase().update("pending_machine_actions", values, "action_uuid = ? AND rep_id = ?",
+        new String[] { actionUuid, String.valueOf(repId) }) == 1;
+}
 
-    synchronized void markMachineActionRetry(String actionUuid, String error) {
-        ContentValues values = new ContentValues();
+synchronized void markMachineActionRetry(String actionUuid, String error) {
+    ContentValues values = new ContentValues();
         values.put("status", "queued");
-        values.put("last_error", error == null ? "" : error);
-        getWritableDatabase().update("pending_machine_actions", values, "action_uuid = ?", new String[] { actionUuid });
-    }
+    values.put("last_error", error == null ? "" : error);
+    getWritableDatabase().update("pending_machine_actions", values, "action_uuid = ?", new String[] { actionUuid });
+}
 
-    synchronized void markMachineActionBlocked(String actionUuid, String error) {
-        ContentValues values = new ContentValues();
-        values.put("status", "blocked");
-        values.put("last_error", error == null ? "" : error);
+synchronized boolean retryMachineAction(String actionUuid, long repId) {
+    SQLiteDatabase database = getWritableDatabase();
+    try (Cursor cursor = database.rawQuery(
+        "SELECT rep_id, status, server_status FROM pending_machine_actions WHERE action_uuid = ?",
+        new String[] { actionUuid })) {
+        if (!cursor.moveToFirst()) return false;
+        if (cursor.getLong(0) != repId) throw new SecurityException("This machine action belongs to another representative.");
+        if (!"blocked".equals(cursor.getString(1))) throw new IllegalStateException("Only a blocked machine action can be retried.");
+        if ("rejected".equalsIgnoreCase(cursor.getString(2))) {
+            throw new IllegalStateException("A rejected supervisor decision requires a corrected action with a new UUID.");
+        }
+    }
+    ContentValues values = new ContentValues();
+    values.put("status", "queued");
+    values.put("last_error", "");
+    return database.update("pending_machine_actions", values,
+        "action_uuid = ? AND rep_id = ? AND status = 'blocked' AND lower(server_status) != 'rejected'",
+        new String[] { actionUuid, String.valueOf(repId) }) == 1;
+}
+
+synchronized void restoreMachineActionState(String actionUuid, long repId, JSONObject state) {
+    String status = state.optString("status", "queued");
+    if (!("queued".equals(status) || "syncing".equals(status) || "blocked".equals(status)
+        || "pending_approval".equals(status) || "approved".equals(status)
+        || "rejected".equals(status) || "superseded".equals(status))) {
+        throw new IllegalArgumentException("Recovery machine-action status is invalid.");
+    }
+    ContentValues values = new ContentValues();
+    values.put("status", status);
+    values.put("attempts", Math.max(0, state.optInt("attempts", 0)));
+    values.put("last_error", state.optString("lastError", ""));
+    values.put("server_status", state.optString("serverStatus", ""));
+    values.put("review_note", state.optString("reviewNote", ""));
+    if (state.has("correctionId") && !state.isNull("correctionId")) values.put("correction_id", state.optLong("correctionId"));
+    getWritableDatabase().update("pending_machine_actions", values,
+        "action_uuid = ? AND rep_id = ?", new String[] { actionUuid, String.valueOf(repId) });
+}
+
+synchronized void restoreAttendanceActionState(String actionUuid, long repId, JSONObject state) {
+    String status = state.optString("status", "pending_attendance_sync");
+    if (!("pending_attendance_sync".equals(status) || "attendance_rejected".equals(status))) {
+        throw new IllegalArgumentException("Recovery attendance status is invalid.");
+    }
+    ContentValues values = new ContentValues();
+    values.put("status", status);
+    values.put("attempts", Math.max(0, state.optInt("attempts", 0)));
+    values.put("last_error", state.optString("lastError", ""));
+    getWritableDatabase().update("pending_attendance_actions", values,
+        "action_uuid = ? AND rep_id = ?", new String[] { actionUuid, String.valueOf(repId) });
+}
+
+synchronized void restoreVisitState(String visitUuid, long repId, JSONObject state) {
+    String status = state.optString("status", "queued");
+    if (!("queued".equals(status) || "syncing".equals(status) || "blocked".equals(status))) {
+        throw new IllegalArgumentException("Recovery visit status is invalid.");
+    }
+    ContentValues values = new ContentValues();
+    values.put("status", "queued".equals(status) ? "pending" : "syncing".equals(status) ? "uploading" : "blocked");
+    values.put("attempts", Math.max(0, state.optInt("attempts", 0)));
+    values.put("last_error", state.optString("lastError", ""));
+    getWritableDatabase().update("pending_visits", values,
+        "visit_uuid = ? AND rep_id = ?", new String[] { visitUuid, String.valueOf(repId) });
+}
+
+synchronized void markMachineActionBlocked(String actionUuid, String error) {
+    ContentValues values = new ContentValues();
+    values.put("status", "blocked");
+    values.put("last_error", error == null ? "" : error);
         getWritableDatabase().update("pending_machine_actions", values, "action_uuid = ?", new String[] { actionUuid });
     }
 
@@ -573,24 +735,27 @@ final class RepLocalStore extends SQLiteOpenHelper {
         )) {
             while (cursor.moveToNext()) {
                 JSONObject action = new JSONObject();
-                action.put("actionUuid", cursor.getString(0));
-                action.put("repId", repId);
-                action.put("type", cursor.getString(1));
-                action.put("machineId", cursor.getLong(2));
-                action.put("payload", new JSONObject(cursor.getString(4)));
-                action.put("status", cursor.getString(7));
-                action.put("attempts", cursor.getInt(8));
-                action.put("lastError", cursor.getString(9));
+            action.put("actionUuid", cursor.getString(0));
+            action.put("repId", repId);
+            action.put("type", cursor.getString(1));
+            action.put("machineId", cursor.getLong(2));
+            action.put("cardId", cursor.getLong(3));
+            action.put("payload", new JSONObject(cursor.getString(4)));
+            action.put("status", cursor.getString(7));
+            action.put("attempts", cursor.getInt(8));
+            action.put("lastError", cursor.getString(9));
                 if (!cursor.isNull(10)) action.put("correctionId", cursor.getLong(10));
                 action.put("serverStatus", cursor.getString(11));
-                action.put("reviewNote", cursor.getString(12));
-                action.put("createdAt", cursor.getString(13));
-                action.put("evidencePath", cursor.getString(5));
-                action.put("evidenceContentType", cursor.getString(6));
-                actions.put(action);
-            }
+            action.put("reviewNote", cursor.getString(12));
+            action.put("createdAt", cursor.getString(13));
+            action.put("evidencePath", cursor.getString(5));
+            action.put("evidenceContentType", cursor.getString(6));
+            action.put("evidenceAvailable", cursor.getString(5) != null && !cursor.getString(5).isEmpty()
+                && new File(cursor.getString(5)).isFile());
+            actions.put(action);
         }
-        return actions;
+    }
+    return actions;
     }
 
     synchronized boolean deleteAttendanceAction(String actionUuid, long repId) {

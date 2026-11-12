@@ -380,14 +380,18 @@ public final class RepNativeEnginePlugin extends Plugin {
         call.resolve(new JSObject().put("deleted", deleted));
     }
 
-    @PluginMethod
-    public void enqueueVisit(PluginCall call) {
-        JSONObject visit = call.getData();
-        if (visit == null) { call.reject("بيانات الزيارة غير صالحة."); return; }
-        IO.execute(() -> {
-            try (RepLocalStore store = new RepLocalStore(getContext())) {
-                store.enqueueVisit(getContext(), visit);
-                MadarSyncScheduler.ensurePeriodic(getContext());
+@PluginMethod
+public void enqueueVisit(PluginCall call) {
+    JSONObject visit = call.getData();
+    if (visit == null) { call.reject("بيانات الزيارة غير صالحة."); return; }
+    if (RepAuthStore.repId(getContext()) != visit.optLong("repId", 0L)) {
+        call.reject("يلزم حساب المندوب المالك لحفظ الزيارة.", "NATIVE_VISIT_OWNER_MISMATCH");
+        return;
+    }
+    IO.execute(() -> {
+        try (RepLocalStore store = new RepLocalStore(getContext())) {
+            store.enqueueVisit(getContext(), visit);
+            MadarSyncScheduler.ensurePeriodic(getContext());
                 MadarSyncScheduler.enqueueNow(getContext(), false);
                 call.resolve(new JSObject()
                     .put("saved", true)
@@ -414,14 +418,18 @@ public final class RepNativeEnginePlugin extends Plugin {
         });
     }
 
-    @PluginMethod
-    public void enqueueMachineAction(PluginCall call) {
-        JSONObject action = call.getData();
-        if (action == null) { call.reject("بيانات إجراء الماكينة غير صالحة."); return; }
-        IO.execute(() -> {
-            try (RepLocalStore store = new RepLocalStore(getContext())) {
-                store.enqueueMachineAction(getContext(), action);
-                MadarSyncScheduler.ensurePeriodic(getContext());
+@PluginMethod
+public void enqueueMachineAction(PluginCall call) {
+    JSONObject action = call.getData();
+    if (action == null) { call.reject("بيانات إجراء الماكينة غير صالحة."); return; }
+    if (RepAuthStore.repId(getContext()) != action.optLong("repId", 0L)) {
+        call.reject("يلزم حساب المندوب المالك لحفظ إجراء الماكينة.", "NATIVE_MACHINE_ACTION_OWNER_MISMATCH");
+        return;
+    }
+    IO.execute(() -> {
+        try (RepLocalStore store = new RepLocalStore(getContext())) {
+            store.enqueueMachineAction(getContext(), action);
+            MadarSyncScheduler.ensurePeriodic(getContext());
                 MadarSyncScheduler.enqueueNow(getContext(), false);
                 call.resolve(new JSObject().put("saved", true)
                     .put("actionUuid", action.optString("actionUuid"))
@@ -432,14 +440,15 @@ public final class RepNativeEnginePlugin extends Plugin {
         });
     }
 
-    @PluginMethod
-    public void listMachineActions(PluginCall call) {
-        long repId = call.getData().optLong("repId", 0L);
-        if (repId < 1L) { call.reject("معرّف المندوب غير صالح."); return; }
-        IO.execute(() -> {
-            try (RepLocalStore store = new RepLocalStore(getContext())) {
-                JSONArray actions = store.listMachineActions(repId);
-                call.resolve(new JSObject().put("actions", new JSArray(actions.toString())));
+@PluginMethod
+public void listMachineActions(PluginCall call) {
+    long repId = call.getData().optLong("repId", 0L);
+    if (repId < 1L) { call.reject("معرّف المندوب غير صالح."); return; }
+    if (RepAuthStore.repId(getContext()) != repId) { call.reject("حساب المندوب غير مطابق.", "NATIVE_MACHINE_ACTION_OWNER_MISMATCH"); return; }
+    IO.execute(() -> {
+        try (RepLocalStore store = new RepLocalStore(getContext())) {
+            JSONArray actions = store.listMachineActions(repId);
+            call.resolve(new JSObject().put("actions", new JSArray(actions.toString())));
             } catch (Exception error) {
                 call.reject("تعذر قراءة إجراءات الماكينة المعلقة.", "NATIVE_MACHINE_ACTION_READ_FAILED", error);
             }
@@ -447,29 +456,71 @@ public final class RepNativeEnginePlugin extends Plugin {
     }
 
     @PluginMethod
-    public void retryMachineAction(PluginCall call) {
-        String actionUuid = call.getString("actionUuid");
-        long repId = call.getData().optLong("repId", 0L);
-        if (actionUuid == null || repId < 1L) { call.reject("بيانات إعادة المحاولة غير صالحة."); return; }
-        IO.execute(() -> {
-            try (RepLocalStore store = new RepLocalStore(getContext())) {
-                store.markMachineActionRetry(actionUuid, "");
-                MadarSyncScheduler.enqueueNow(getContext(), true);
-                call.resolve(new JSObject().put("updated", true));
-            } catch (Exception error) {
-                call.reject("تعذرت إعادة إجراء الماكينة إلى طابور المزامنة.", "NATIVE_MACHINE_ACTION_RETRY_FAILED", error);
-            }
-        });
+public void retryMachineAction(PluginCall call) {
+    String actionUuid = call.getString("actionUuid");
+    long repId = call.getData().optLong("repId", 0L);
+    if (actionUuid == null || repId < 1L) { call.reject("بيانات إعادة المحاولة غير صالحة."); return; }
+    if (RepAuthStore.repId(getContext()) != repId) {
+        call.reject("يلزم حساب المندوب المالك للإجراء لإعادة المحاولة.", "NATIVE_MACHINE_ACTION_OWNER_MISMATCH");
+        return;
     }
+    IO.execute(() -> {
+        try (RepLocalStore store = new RepLocalStore(getContext())) {
+            boolean updated = store.retryMachineAction(actionUuid, repId);
+            if (!updated) throw new IllegalStateException("لم يعد الإجراء في حالة محظورة قابلة لإعادة المحاولة.");
+            JSONObject action = null;
+            JSONArray actions = store.listMachineActions(repId);
+            for (int index = 0; index < actions.length(); index += 1) {
+                JSONObject candidate = actions.optJSONObject(index);
+                if (candidate != null && actionUuid.equals(candidate.optString("actionUuid"))) {
+                    action = candidate;
+                    break;
+                }
+            }
+            if (action == null) throw new IllegalStateException("تعذر إعادة قراءة الإجراء بعد تحديثه.");
+            MadarSyncScheduler.enqueueNow(getContext(), true);
+            call.resolve(new JSObject().put("updated", true).put("action", new JSObject(action.toString())));
+        } catch (Exception error) {
+            call.reject(error.getMessage() == null ? "تعذرت إعادة إجراء الماكينة إلى طابور المزامنة." : error.getMessage(),
+                error instanceof SecurityException ? "NATIVE_MACHINE_ACTION_OWNER_MISMATCH" : "NATIVE_MACHINE_ACTION_RETRY_FAILED", error);
+        }
+    });
+}
 
-    @PluginMethod
-    public void listAttendanceActions(PluginCall call) {
-        long repId = call.getData().optLong("repId", 0L);
-        if (repId < 1L) { call.reject("معرّف المندوب غير صالح."); return; }
-        IO.execute(() -> {
-            try (RepLocalStore store = new RepLocalStore(getContext())) {
-                JSONArray actions = store.listAttendanceActions(repId);
-                call.resolve(new JSObject().put("actions", new JSArray(actions.toString())));
+@PluginMethod
+public void reconcileMachineActionReview(PluginCall call) {
+    String actionUuid = call.getString("actionUuid");
+    long repId = call.getData().optLong("repId", 0L);
+    String status = call.getString("status");
+    if (actionUuid == null || repId < 1L || status == null) {
+        call.reject("بيانات مراجعة إجراء الماكينة غير صالحة.");
+        return;
+    }
+    if (RepAuthStore.repId(getContext()) != repId) {
+        call.reject("يلزم حساب المندوب المالك لمراجعة الإجراء.", "NATIVE_MACHINE_ACTION_OWNER_MISMATCH");
+        return;
+    }
+    IO.execute(() -> {
+        try (RepLocalStore store = new RepLocalStore(getContext())) {
+            boolean updated = store.updateMachineActionReview(actionUuid, repId, status,
+                call.getData().optLong("correctionId", 0L), call.getString("reviewNote", ""));
+            if (!updated) throw new SecurityException("Machine action was not found for this representative.");
+            call.resolve(new JSObject().put("updated", true));
+        } catch (Exception error) {
+            call.reject("تعذر تحديث حالة إجراء الماكينة الأصلية.", "NATIVE_MACHINE_ACTION_REVIEW_FAILED", error);
+        }
+    });
+}
+
+@PluginMethod
+public void listAttendanceActions(PluginCall call) {
+    long repId = call.getData().optLong("repId", 0L);
+    if (repId < 1L) { call.reject("معرّف المندوب غير صالح."); return; }
+    if (RepAuthStore.repId(getContext()) != repId) { call.reject("حساب المندوب غير مطابق.", "NATIVE_ATTENDANCE_OWNER_MISMATCH"); return; }
+    IO.execute(() -> {
+        try (RepLocalStore store = new RepLocalStore(getContext())) {
+            JSONArray actions = store.listAttendanceActions(repId);
+            call.resolve(new JSObject().put("actions", new JSArray(actions.toString())));
             } catch (Exception error) {
                 call.reject("تعذر قراءة تسجيلات الحضور المعلقة.", "NATIVE_ATTENDANCE_READ_FAILED", error);
             }
@@ -491,65 +542,265 @@ public final class RepNativeEnginePlugin extends Plugin {
         });
     }
 
-    @PluginMethod
-    public void listVisits(PluginCall call) {
-        long repId = call.getData().optLong("repId", 0L);
-        if (repId < 1) { call.reject("معرّف المندوب غير صالح."); return; }
-        IO.execute(() -> {
-            try (RepLocalStore store = new RepLocalStore(getContext())) {
-                JSONArray visits = store.listVisits(repId);
-                JSObject result = new JSObject();
+@PluginMethod
+public void listVisits(PluginCall call) {
+    long repId = call.getData().optLong("repId", 0L);
+    if (repId < 1) { call.reject("معرّف المندوب غير صالح."); return; }
+    if (RepAuthStore.repId(getContext()) != repId) { call.reject("حساب المندوب غير مطابق.", "NATIVE_VISIT_OWNER_MISMATCH"); return; }
+    IO.execute(() -> {
+        try (RepLocalStore store = new RepLocalStore(getContext())) {
+            JSONArray visits = store.listVisits(repId);
+            JSObject result = new JSObject();
                 result.put("visits", new JSArray(visits.toString()));
                 call.resolve(result);
             } catch (Exception error) { call.reject("تعذر قراءة الزيارات المحلية الأصلية.", "NATIVE_VISIT_READ_FAILED", error); }
         });
     }
 
-    @PluginMethod
-    public void exportPendingVisits(PluginCall call) {
-        long repId = call.getData().optLong("repId", 0L);
-        if (repId < 1L) { call.reject("معرّف المندوب غير صالح."); return; }
-        IO.execute(() -> {
-            try (RepLocalStore store = new RepLocalStore(getContext())) {
-                JSONArray storedVisits = store.listVisits(repId);
-                JSONArray exportedVisits = new JSONArray();
-                for (int index = 0; index < storedVisits.length(); index += 1) {
-                    JSONObject source = storedVisits.getJSONObject(index);
-                    String visitUuid = source.getString("visitUuid");
-                    JSONObject exportedVisit = new JSONObject();
-                    exportedVisit.put("visitUuid", visitUuid);
-                    exportedVisit.put("repId", repId);
+@PluginMethod
+public void exportPendingVisits(PluginCall call) {
+    long repId = call.getData().optLong("repId", 0L);
+    if (repId < 1L) { call.reject("معرّف المندوب غير صالح."); return; }
+    if (RepAuthStore.repId(getContext()) != repId) { call.reject("حساب المندوب غير مطابق.", "NATIVE_RECOVERY_OWNER_MISMATCH"); return; }
+    IO.execute(() -> {
+        try (RepLocalStore store = new RepLocalStore(getContext())) {
+            JSONArray storedVisits = store.listVisits(repId);
+            JSONArray exportedVisits = new JSONArray();
+            for (int index = 0; index < storedVisits.length(); index += 1) {
+                JSONObject source = storedVisits.getJSONObject(index);
+                if ("synced".equals(source.optString("status"))) continue;
+                String visitUuid = source.getString("visitUuid");
+                JSONObject exportedVisit = new JSONObject();
+                exportedVisit.put("visitUuid", visitUuid);
+                exportedVisit.put("repId", repId);
                     exportedVisit.put("repUsername", source.optString("repUsername", ""));
                     exportedVisit.put("createdAt", source.optString("createdAt", ""));
                     exportedVisit.put("status", source.optString("status", "queued"));
                     exportedVisit.put("attempts", source.optInt("attempts", 0));
                     exportedVisit.put("lastError", source.optString("lastError", ""));
                     exportedVisit.put("payload", source.optJSONObject("payload"));
-                    exportedVisit.put("beforePhotos", exportPhasePhotos(source.optJSONArray("beforePhotos"), "before", visitUuid));
-                    exportedVisit.put("afterPhotos", exportPhasePhotos(source.optJSONArray("afterPhotos"), "after", visitUuid));
-                    exportedVisits.put(exportedVisit);
-                }
-                JSONObject payload = new JSONObject();
-                payload.put("schemaVersion", 1);
-                payload.put("type", "madar-rep-pending-queue");
-                payload.put("exportedAt", isoTimestamp(new Date()));
-                payload.put("repId", repId);
-                payload.put("visits", exportedVisits);
-                call.resolve(new JSObject()
-                    .put("json", payload.toString())
-                    .put("visitCount", exportedVisits.length()));
-            } catch (Exception error) {
-                call.reject("تعذر تجهيز نسخة JSON من العمل المعلق.", "NATIVE_EXPORT_FAILED", error);
+                exportedVisit.put("beforePhotos", exportPhasePhotos(source.optJSONArray("beforePhotos"), "before", visitUuid));
+                exportedVisit.put("afterPhotos", exportPhasePhotos(source.optJSONArray("afterPhotos"), "after", visitUuid));
+                exportedVisits.put(exportedVisit);
             }
-        });
-    }
+            JSONArray actions = store.listMachineActions(repId);
+            for (int index = 0; index < actions.length(); index += 1) {
+                JSONObject action = actions.getJSONObject(index);
+                String path = action.optString("evidencePath", "");
+                if (!path.isEmpty() && new File(path).isFile()) {
+                    byte[] evidence = readRecoveryFile(new File(path), 8L * 1024L * 1024L);
+                    action.put("evidenceBytesBase64", Base64.encodeToString(evidence, Base64.NO_WRAP));
+                    action.put("evidenceByteSize", evidence.length);
+                } else if (action.optBoolean("evidenceAvailable") || !path.isEmpty()) {
+                    action.put("evidenceOmitted", "ملف الإثبات الأصلي غير قابل للقراءة.");
+                }
+                action.remove("evidencePath");
+            }
+            JSONArray attendance = store.listAttendanceActions(repId);
+            JSONObject gps;
+            try (RepTrackStore trackStore = new RepTrackStore(getContext())) {
+                gps = trackStore.recoveryQueue(repId);
+            }
+            android.content.SharedPreferences identityPrefs = getContext().getSharedPreferences("madar_rep_recovery", Context.MODE_PRIVATE);
+            String sessionId = identityPrefs.getString("local_session_id", "");
+            if (sessionId.isEmpty()) {
+                sessionId = java.util.UUID.randomUUID().toString();
+                identityPrefs.edit().putString("local_session_id", sessionId).commit();
+            }
+            JSONObject payload = new JSONObject();
+            payload.put("schemaVersion", 3);
+            payload.put("type", "madar-rep-recovery");
+            payload.put("exportedAt", isoTimestamp(new Date()));
+            payload.put("repId", repId);
+            payload.put("repUsername", RepAuthStore.username(getContext()));
+            payload.put("localSessionId", sessionId);
+            payload.put("visits", exportedVisits);
+            payload.put("machineActions", actions);
+            payload.put("attendanceActions", attendance);
+            payload.put("pendingGpsPoints", gps.optJSONArray("pending"));
+            payload.put("rejectedGpsPoints", gps.optJSONArray("rejected"));
+            call.resolve(new JSObject().put("json", payload.toString()).put("visitCount", exportedVisits.length()));
+        } catch (Exception error) {
+            call.reject("تعذر تجهيز نسخة JSON من العمل المعلق.", "NATIVE_EXPORT_FAILED", error);
+        }
+    });
+}
 
-    private JSONArray exportPhasePhotos(JSONArray entries, String phase, String visitUuid) throws Exception {
-        JSONArray exportedPhotos = new JSONArray();
-        if (entries == null) return exportedPhotos;
-        for (int position = 0; position < entries.length(); position += 1) {
-            JSONObject entry = entries.getJSONObject(position);
-            int index = entry.optInt("index", position);
+@PluginMethod
+public void importRecoveryPackage(PluginCall call) {
+    long repId = call.getData().optLong("repId", 0L);
+    String packageJson = call.getString("packageJson");
+    if (repId < 1L || packageJson == null || packageJson.length() > 128 * 1024 * 1024) {
+        call.reject("حزمة الاسترداد تتجاوز الحجم المسموح أو أن بياناتها غير صالحة.", "RECOVERY_PACKAGE_INVALID");
+        return;
+    }
+    if (RepAuthStore.repId(getContext()) != repId) {
+        call.reject("يلزم الحساب الأصلي نفسه لاستيراد نسخة الاسترداد.", "RECOVERY_OWNER_MISMATCH");
+        return;
+    }
+    IO.execute(() -> {
+        try {
+            JSONObject recovery = new JSONObject(packageJson);
+            if (!"madar-rep-recovery".equals(recovery.optString("type"))
+                || recovery.optInt("schemaVersion", 0) != 3 || recovery.optLong("repId", 0L) != repId
+                || !recovery.optBoolean("complete", false) || recovery.optJSONArray("omissions") == null
+                || recovery.optJSONArray("omissions").length() != 0) {
+                throw new IllegalArgumentException("حزمة الاسترداد غير مكتملة أو غير مدعومة.");
+            }
+            String sessionId = recovery.getString("localSessionId");
+            if (!sessionId.matches("(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")) {
+                throw new IllegalArgumentException("هوية جلسة الحزمة غير صالحة.");
+            }
+            int imported = 0;
+            int duplicates = 0;
+            try (RepLocalStore store = new RepLocalStore(getContext()); RepTrackStore tracks = new RepTrackStore(getContext())) {
+                JSONArray visits = recovery.optJSONArray("visits");
+                JSONArray actions = recovery.optJSONArray("machineActions");
+                JSONArray attendance = recovery.optJSONArray("attendanceActions");
+                JSONArray pendingGps = recovery.optJSONArray("pendingGpsPoints");
+                JSONArray rejectedGps = recovery.optJSONArray("rejectedGpsPoints");
+                if (visits == null || actions == null || attendance == null || pendingGps == null || rejectedGps == null) {
+                    throw new IllegalArgumentException("تحتوي الحزمة على قوائم مطلوبة مفقودة.");
+                }
+                for (int i = 0; i < visits.length(); i++) {
+                    JSONObject visit = visits.getJSONObject(i);
+                    if (visit.optLong("repId", 0L) != repId) throw new SecurityException("زيارة مملوكة لحساب آخر.");
+                    String uuid = visit.getString("visitUuid");
+                    String existing = store.recoveryImportHash(repId, sessionId, "visit", uuid);
+                    String identityHash = visit.getString("identityHash");
+                    if (existing != null) {
+    if (!existing.equals(identityHash)) throw new IllegalStateException("تعارض محتوى معرّف الزيارة " + uuid);
+    duplicates++;
+    continue;
+}
+if (store.assertVisitImportCompatible(repId, visit)) {
+    store.recordRecoveryImport(repId, sessionId, "visit", uuid, identityHash);
+    duplicates++;
+    continue;
+}
+JSONArray before = importVisitPhotos(visit.optJSONArray("beforePhotos"), uuid, "before");
+JSONArray after = importVisitPhotos(visit.optJSONArray("afterPhotos"), uuid, "after");
+JSONObject nativeVisit = new JSONObject();
+nativeVisit.put("visitUuid", uuid);
+                    nativeVisit.put("repId", repId);
+                    nativeVisit.put("repUsername", visit.optString("repUsername", ""));
+                    nativeVisit.put("createdAt", visit.optString("createdAt", ""));
+                    nativeVisit.put("payload", visit.getJSONObject("payload"));
+                    nativeVisit.put("beforePhotos", before);
+                    nativeVisit.put("afterPhotos", after);
+                    store.enqueueVisit(getContext(), nativeVisit);
+                    store.restoreVisitState(uuid, repId, visit);
+                    store.recordRecoveryImport(repId, sessionId, "visit", uuid, identityHash);
+                    imported++;
+                }
+                for (int i = 0; i < actions.length(); i++) {
+                    JSONObject action = actions.getJSONObject(i);
+                    if (action.optLong("repId", 0L) != repId) throw new SecurityException("إجراء ماكينة مملوك لحساب آخر.");
+                    String uuid = action.getString("actionUuid");
+                    String hash = action.getString("identityHash");
+                    String existing = store.recoveryImportHash(repId, sessionId, "machine", uuid);
+                    if (existing != null) {
+                        if (!existing.equals(hash)) throw new IllegalStateException("تعارض محتوى معرّف إجراء الماكينة " + uuid);
+                        duplicates++;
+                        continue;
+                    }
+                    JSONObject nativeAction = new JSONObject(action.toString());
+                    JSONObject evidence = action.optJSONObject("evidence");
+                    if (evidence != null) {
+                        if (evidence.has("omitted") || evidence.optLong("byteSize", 0L) > 8L * 1024L * 1024L) throw new IllegalArgumentException("إثبات إجراء الماكينة مفقود أو أكبر من الحد.");
+                        nativeAction.put("evidenceMimeType", evidence.optString("mimeType", "image/jpeg"));
+                        nativeAction.put("evidenceBase64", evidence.getString("bytesBase64"));
+                    }
+                    nativeAction.remove("identity"); nativeAction.remove("identityHash"); nativeAction.remove("evidence");
+                    store.enqueueMachineAction(getContext(), nativeAction);
+                    store.restoreMachineActionState(uuid, repId, action);
+                    store.recordRecoveryImport(repId, sessionId, "machine", uuid, hash);
+                    imported++;
+                }
+                for (int i = 0; i < attendance.length(); i++) {
+                    JSONObject action = attendance.getJSONObject(i);
+                    if (action.optLong("repId", 0L) != repId) throw new SecurityException("تسجيل حضور مملوك لحساب آخر.");
+                    String uuid = action.getString("actionUuid"); String hash = action.getString("identityHash");
+                    String existing = store.recoveryImportHash(repId, sessionId, "attendance", uuid);
+if (existing != null) { if (!existing.equals(hash)) throw new IllegalStateException("تعارض معرّف تسجيل الحضور " + uuid); duplicates++; continue; }
+JSONObject nativeAction = action.optJSONObject("payload");
+if (nativeAction == null) nativeAction = new JSONObject(action.toString());
+nativeAction.put("actionUuid", uuid); nativeAction.put("repId", repId);
+if (!nativeAction.optBoolean("biometricVerified", false)) throw new IllegalArgumentException("لا يمكن استيراد تسجيل حضور دون إثبات المصادقة الأصلية.");
+nativeAction.remove("identity"); nativeAction.remove("identityHash"); nativeAction.remove("provenance");
+nativeAction.remove("status"); nativeAction.remove("attempts"); nativeAction.remove("lastError");
+store.enqueueAttendanceAction(nativeAction);
+store.restoreAttendanceActionState(uuid, repId, action);
+store.recordRecoveryImport(repId, sessionId, "attendance", uuid, hash);
+imported++;
+    }
+    for (int i = 0; i < pendingGps.length(); i++) {
+        JSONObject point = pendingGps.getJSONObject(i);
+        if (point.optLong("repId", 0L) != repId) throw new SecurityException("نقطة GPS معلقة مملوكة لحساب آخر.");
+        String id = String.valueOf(point.optLong("trackId", 0L)); String hash = point.getString("identityHash");
+        String existing = store.recoveryImportHash(repId, sessionId, "gps-pending", id);
+        if (existing != null) { if (!existing.equals(hash)) throw new IllegalStateException("تعارض محتوى معرّف نقطة GPS " + id); duplicates++; continue; }
+        long inserted = tracks.importPendingPoint(point, repId);
+        if (inserted < 0L) throw new IllegalStateException("تعارض مع نقطة GPS محلية لها المعرّف نفسه.");
+        store.recordRecoveryImport(repId, sessionId, "gps-pending", id, hash);
+        if (inserted == 0L) duplicates++; else imported++;
+    }
+    for (int i = 0; i < rejectedGps.length(); i++) {
+        JSONObject point = rejectedGps.getJSONObject(i);
+        if (point.optLong("repId", 0L) != repId) throw new SecurityException("نقطة GPS مرفوضة مملوكة لحساب آخر.");
+        String id = String.valueOf(point.optLong("trackId", 0L)); String hash = point.getString("identityHash");
+        String existing = store.recoveryImportHash(repId, sessionId, "gps-rejected", id);
+        if (existing != null) { if (!existing.equals(hash)) throw new IllegalStateException("تعارض محتوى معرّف GPS مرفوض " + id); duplicates++; continue; }
+        if (!tracks.importRejectedPoint(point, repId)) throw new IllegalStateException("تعذر حفظ نقطة GPS المرفوضة.");
+        store.recordRecoveryImport(repId, sessionId, "gps-rejected", id, hash);
+        imported++;
+    }
+}
+call.resolve(new JSObject().put("imported", imported).put("duplicates", duplicates).put("repId", repId));
+        } catch (Exception error) {
+            call.reject(error.getMessage() == null ? "تعذر استيراد نسخة الاسترداد المحلية." : error.getMessage(), "RECOVERY_IMPORT_FAILED", error);
+        }
+    });
+}
+
+private JSONArray importVisitPhotos(JSONArray photos, String uuid, String phase) throws Exception {
+    JSONArray entries = new JSONArray();
+    if (photos == null) throw new IllegalArgumentException("صور الزيارة مفقودة.");
+    File directory = new File(new File(new File(getContext().getFilesDir(), "MADAR"), "uploads"), phase.equals("before") ? "Before" : "After");
+    if (!directory.isDirectory() && !directory.mkdirs()) throw new IOException("تعذر إنشاء مجلد الاسترداد المحلي.");
+    for (int i = 0; i < photos.length(); i++) {
+        JSONObject photo = photos.getJSONObject(i);
+        if (photo.has("omitted") || photo.optLong("byteSize", 0L) < 1L || photo.optLong("byteSize", 0L) > MAX_PHOTO_BYTES) throw new IllegalArgumentException("صورة الزيارة مفقودة أو أكبر من الحد.");
+        byte[] bytes = Base64.decode(photo.getString("bytesBase64"), Base64.DEFAULT);
+        if (bytes.length != photo.optInt("byteSize")) throw new IllegalArgumentException("حجم صورة الاسترداد غير مطابق.");
+        String filename = uuid + "_" + String.format(Locale.US, "%04d", i + 1) + ".jpg";
+        File target = new File(directory, filename).getCanonicalFile();
+        if (!target.getPath().startsWith(directory.getCanonicalPath() + File.separator)) throw new SecurityException("مسار صورة الاسترداد غير آمن.");
+        try (java.io.FileOutputStream output = new java.io.FileOutputStream(target)) { output.write(bytes); output.getFD().sync(); }
+        entries.put(new JSONObject().put("path", target.getAbsolutePath()).put("capturedAt", photo.optString("capturedAt", "")));
+    }
+    if ("before".equals(phase) && entries.length() != 3) throw new IllegalArgumentException("تتطلب الزيارة ثلاث صور قبل العمل.");
+    if ("after".equals(phase) && entries.length() > 3) throw new IllegalArgumentException("عدد صور ما بعد العمل يتجاوز الحد.");
+    return entries;
+}
+
+private static byte[] readRecoveryFile(File file, long maxBytes) throws IOException {
+    if (!file.isFile() || file.length() < 1L || file.length() > maxBytes) throw new IOException("ملف الاسترداد خارج الحد المسموح.");
+    try (FileInputStream input = new FileInputStream(file); ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+        byte[] buffer = new byte[8192];
+        int count;
+        while ((count = input.read(buffer)) != -1) output.write(buffer, 0, count);
+        return output.toByteArray();
+    }
+}
+
+private JSONArray exportPhasePhotos(JSONArray entries, String phase, String visitUuid) throws Exception {
+    JSONArray exportedPhotos = new JSONArray();
+    if (entries == null) return exportedPhotos;
+    for (int position = 0; position < entries.length(); position += 1) {
+        JSONObject entry = entries.getJSONObject(position);
+        int index = entry.optInt("index", position);
+        try {
             File photo = resolveVisitPhotoForDeletion(visitUuid, phase, index, entry.optString("path"));
             if (!photo.isFile() || photo.length() < 1L || photo.length() > MAX_PHOTO_BYTES) {
                 throw new IOException("ملف صورة معلقة غير صالح أو أكبر من الحد المسموح.");
@@ -562,9 +813,14 @@ public final class RepNativeEnginePlugin extends Plugin {
                 .put("mimeType", "image/jpeg")
                 .put("byteSize", bytes.length)
                 .put("bytesBase64", Base64.encodeToString(bytes, Base64.NO_WRAP)));
+        } catch (Exception error) {
+            exportedPhotos.put(new JSONObject().put("phase", phase).put("index", index)
+                .put("capturedAt", entry.optString("capturedAt", ""))
+                .put("omitted", "تعذرت قراءة صورة الزيارة: " + (error.getMessage() == null ? "خطأ محلي" : error.getMessage())));
         }
-        return exportedPhotos;
     }
+    return exportedPhotos;
+}
 
     private static byte[] readAllBytes(File file) throws IOException {
         long length = file.length();

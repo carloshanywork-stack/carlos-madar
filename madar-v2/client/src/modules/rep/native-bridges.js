@@ -12,6 +12,7 @@ import {
   listPendingVisits,
 } from './offline-store.js';
 import { isNativeRepApp, RepEngine } from './native-session.js';
+import { canonicalJson, REP_RECOVERY_PACKAGE_TYPE, REP_RECOVERY_SCHEMA_VERSION, sha256Hex, sha256Json, validateRepRecoveryPackage } from './queue-recovery.js';
 
 const PENDING_ROOT = 'Pending';
 const RepLocation = registerPlugin('RepLocation');
@@ -79,6 +80,67 @@ export async function listNativeMachineActions(repId) {
   return Array.isArray(result.actions) ? result.actions : [];
 }
 
+export async function retryNativeMachineAction(actionUuid, repId) {
+  if (!isNativeRepApp()) return null;
+  const result = await RepEngine.retryMachineAction({ actionUuid, repId: Number(repId) });
+  if (!result?.updated || !result.action) throw new Error('لم يؤكد التخزين الأصلي إعادة إجراء الماكينة إلى قائمة الانتظار.');
+  return result.action;
+}
+
+export async function reconcileNativeMachineActionReview(actionUuid, repId, review) {
+  if (!isNativeRepApp()) return null;
+  return RepEngine.reconcileMachineActionReview({ actionUuid, repId: Number(repId), ...review });
+}
+
+export async function importNativeRecoveryPackage(json, repId) {
+  if (!isNativeRepApp()) throw new Error('استيراد حزمة الاسترداد متاح داخل تطبيق أندرويد فقط.');
+  // Validation happens in the web layer before native writes; native repeats the account check.
+  const recovery = await validateRepRecoveryPackage(json, repId);
+  // Refuse an import if an existing IndexedDB identity cannot be compared. In
+  // particular, don't let a native import hide conflicting legacy work.
+  const [indexedVisits, indexedActions] = await Promise.all([
+    listPendingVisits(Number(repId)),
+    listPendingMachineActions(Number(repId)),
+  ]);
+  for (const action of recovery.machineActions) {
+    const existing = indexedActions.find((item) => item.actionUuid === action.actionUuid);
+    if (!existing) continue;
+    const evidenceHash = existing.evidence instanceof Blob ? await sha256Hex(new Uint8Array(await existing.evidence.arrayBuffer())) : null;
+    const comparable = {
+      actionUuid: existing.actionUuid,
+      repId: Number(existing.repId),
+      type: existing.type,
+      machineId: Number(existing.machineId),
+      cardId: Number(existing.cardId ?? existing.payload?.cardId),
+      payload: existing.payload,
+      evidenceSha256: evidenceHash,
+    };
+    if (canonicalJson(comparable) !== canonicalJson(action.identity)) {
+      throw new Error(`رفض الاستيراد: معرّف إجراء الماكينة ${action.actionUuid} موجود بمحتوى مختلف في IndexedDB.`);
+    }
+  }
+  for (const visit of recovery.visits) {
+    const existing = indexedVisits.find((item) => item.visitUuid === visit.visitUuid);
+    if (!existing) continue;
+    if (Number(existing.repId) !== Number(visit.repId) || canonicalJson(existing.payload) !== canonicalJson(visit.payload)) {
+      throw new Error(`رفض الاستيراد: معرّف الزيارة ${visit.visitUuid} موجود بمحتوى مختلف في IndexedDB.`);
+    }
+    if (existing.nativeStoragePath?.startsWith('internal://')) continue; // Native SQLite compares all photo bytes before import.
+    const getBlobHashes = async (photos) => Promise.all((photos ?? []).map(async (photo) => {
+      const blob = photo instanceof Blob ? photo : photo?.blob instanceof Blob ? photo.blob : null;
+      return blob ? sha256Hex(new Uint8Array(await blob.arrayBuffer())) : null;
+    }));
+    const [beforeHashes, afterHashes] = await Promise.all([getBlobHashes(existing.beforePhotos), getBlobHashes(existing.afterPhotos)]);
+    if (canonicalJson(beforeHashes) !== canonicalJson(visit.identity.beforeHashes)
+        || canonicalJson(afterHashes) !== canonicalJson(visit.identity.afterHashes)) {
+      throw new Error(`رفض الاستيراد: إثبات الزيارة ${visit.visitUuid} مختلف أو غير قابل للمقارنة مع IndexedDB.`);
+    }
+  }
+  const result = await RepEngine.importRecoveryPackage({ packageJson: JSON.stringify(recovery), repId: Number(repId) });
+  if (result?.imported !== true) throw new Error('لم يؤكد التخزين الأصلي استيراد نسخة الاسترداد.');
+  return result;
+}
+
 export async function listNativeAttendanceActions(repId) {
   if (!isNativeRepApp()) return [];
   const result = await RepEngine.listAttendanceActions({ repId: Number(repId) });
@@ -89,6 +151,15 @@ export async function acknowledgeNativeAttendanceAction(actionUuid, repId) {
   if (!isNativeRepApp()) return false;
   const result = await RepEngine.acknowledgeAttendanceAction({ actionUuid, repId: Number(repId) });
   return Boolean(result.removed);
+}
+
+export async function getNativeRecoveryGps(repId) {
+  if (!isNativeRepApp()) return { pending: [], rejected: [] };
+  const result = await RepLocation.getRecoveryQueue({ repId: Number(repId) });
+  return {
+    pending: Array.isArray(result?.pending) ? result.pending : [],
+    rejected: Array.isArray(result?.rejected) ? result.rejected : [],
+  };
 }
 
 export async function requestNativeBackgroundPermission() {
@@ -432,24 +503,41 @@ function exportTimestamp() {
 export async function exportPendingQueue(repId, repUsername) {
   const numericRepId = Number(repId);
   const isNative = isNativeRepApp();
-  const [indexedVisits, indexedActions] = await Promise.all([
-    listPendingVisits(numericRepId),
-    listPendingMachineActions(numericRepId),
-  ]);
+  let indexedVisits = [];
+  let indexedActions = [];
+  let indexedReadError = null;
+  try {
+    [indexedVisits, indexedActions] = await Promise.all([
+      listPendingVisits(numericRepId),
+      listPendingMachineActions(numericRepId),
+    ]);
+  } catch (error) {
+    if (!isNative) throw error;
+    indexedReadError = error;
+  }
 
   let nativeVisits = [];
+  let nativeMachineActions = [];
   let attendanceActions = [];
+  let pendingGpsPoints = [];
+  let rejectedGpsPoints = [];
+  let localSessionId = globalThis.crypto?.randomUUID?.();
   if (isNative) {
     try {
-      const [result, pendingAttendance] = await Promise.all([
+      const [result, pendingAttendance, recoveryGps] = await Promise.all([
         RepEngine.exportPendingVisits({ repId: numericRepId }),
         listNativeAttendanceActions(numericRepId),
+        getNativeRecoveryGps(numericRepId),
       ]);
       const parsed = JSON.parse(result?.json ?? '{}');
       nativeVisits = Array.isArray(parsed.visits) ? parsed.visits : [];
       attendanceActions = pendingAttendance;
+      nativeMachineActions = Array.isArray(parsed.machineActions) ? parsed.machineActions : [];
+      pendingGpsPoints = recoveryGps.pending;
+      rejectedGpsPoints = recoveryGps.rejected;
+      localSessionId = parsed.localSessionId || localSessionId;
     } catch (error) {
-      throw new Error('تعذر تجهيز نسخة JSON من طابور أندرويد المحلي. حاول مرة أخرى قبل الخروج.');
+      throw new Error(`تعذر تجهيز نسخة الاسترداد الكاملة من طوابير أندرويد المحلية؛ لم يُنشأ ملف على أنه كامل. ${error.message || ''}`);
     }
   }
 
@@ -459,19 +547,95 @@ export async function exportPendingQueue(repId, repUsername) {
     if (nativeIds.has(visit.visitUuid)) continue;
     visits.push(await serializePendingVisit(visit));
   }
-  const machineActions = await Promise.all(indexedActions.map(serializeMachineAction));
+  const machineById = new Map();
+  for (const action of nativeMachineActions) machineById.set(action.actionUuid, action);
+  for (const action of indexedActions) if (!machineById.has(action.actionUuid)) machineById.set(action.actionUuid, { ...action, source: 'indexeddb' });
+  const machineActions = await Promise.all([...machineById.values()].map(serializeRecoveryAction));
+  const recoveryVisits = await Promise.all(visits.map(serializeRecoveryVisit));
+  const recoveryAttendance = await Promise.all(attendanceActions.map(serializeRecoveryAttendance));
+  const gps = [...pendingGpsPoints, ...rejectedGpsPoints].map((point) => serializeRecoveryGps(point));
   const payload = {
-    schemaVersion: 2,
-    type: 'madar-rep-pending-queue',
+    schemaVersion: REP_RECOVERY_SCHEMA_VERSION,
+    type: REP_RECOVERY_PACKAGE_TYPE,
     exportedAt: new Date().toISOString(),
     repId: numericRepId,
     repUsername: repUsername ?? '',
+    localSessionId: localSessionId || globalThis.crypto?.randomUUID?.() || `${Date.now()}-recovery-session`,
     source: isNative ? 'android-sqlite' : 'indexeddb',
-    visits,
+    complete: true,
+    omissions: indexedReadError ? [{ type: 'indexeddb-queues', reason: `تعذرت قراءة نسخة IndexedDB القديمة: ${indexedReadError.message || 'خطأ محلي'}` }] : [],
+    visits: recoveryVisits,
     machineActions,
-    attendanceActions,
+    attendanceActions: recoveryAttendance,
+    pendingGpsPoints: gps.filter((point) => point.status !== 'rejected'),
+    rejectedGpsPoints: gps.filter((point) => point.status === 'rejected'),
   };
+  for (const visit of payload.visits) {
+    for (const [phase, photos] of [['before', visit.beforePhotos], ['after', visit.afterPhotos]]) {
+      for (const [index, photo] of photos.entries()) if (photo.omitted) {
+        payload.omissions.push({ type: 'visit-photo', id: visit.visitUuid, phase, index, reason: photo.reason || 'الصورة الأصلية غير متاحة.' });
+      }
+    }
+  }
+  for (const action of payload.machineActions) if (action.evidence?.omitted) {
+    payload.omissions.push({ type: 'machine-action-evidence', id: action.actionUuid, reason: action.evidence.reason || 'ملف الإثبات الأصلي غير متاح.' });
+  }
+  payload.complete = payload.omissions.length === 0;
+  const serialized = JSON.stringify(payload);
+  if (new TextEncoder().encode(serialized).length > 128 * 1024 * 1024) throw new Error('تعذر إنشاء الحزمة: تجاوزت حد الحجم 128 ميغابايت.');
   return savePendingQueueExport(payload, exportTimestamp());
+}
+
+async function fileObject(bytesBase64, { name = '', mimeType = 'application/octet-stream', capturedAt = '' } = {}) {
+  if (typeof bytesBase64 !== 'string') return { omitted: true, name, mimeType, capturedAt };
+  const binary = atob(bytesBase64);
+  const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+  return { name, mimeType, capturedAt, byteSize: bytes.length, sha256: await sha256Hex(bytes), bytesBase64 };
+}
+
+async function serializeRecoveryVisit(visit) {
+  const convert = async (photos) => Promise.all((photos ?? []).map((photo) => photo.omitted
+    ? { omitted: true, reason: photo.omitted, name: `${visit.visitUuid}-${photo.phase}-${photo.index}.jpg`, mimeType: 'image/jpeg', capturedAt: photo.capturedAt }
+    : fileObject(photo.bytesBase64, {
+      name: `${visit.visitUuid}-${photo.phase}-${photo.index}.jpg`, mimeType: photo.mimeType || 'image/jpeg', capturedAt: photo.capturedAt,
+    })));
+  const beforePhotos = await convert(visit.beforePhotos);
+  const afterPhotos = await convert(visit.afterPhotos);
+  const identity = {
+    visitUuid: visit.visitUuid,
+    repId: Number(visit.repId),
+    payload: visit.payload,
+    beforeHashes: beforePhotos.map((photo) => photo.sha256 ?? null),
+    afterHashes: afterPhotos.map((photo) => photo.sha256 ?? null),
+    beforeCapturedAt: beforePhotos.map((photo) => photo.capturedAt ?? ''),
+    afterCapturedAt: afterPhotos.map((photo) => photo.capturedAt ?? ''),
+  };
+  return {
+    ...visit,
+    repId: Number(visit.repId), beforePhotos, afterPhotos, identity, identityHash: await sha256Json(identity),
+    provenance: visit.provenance || visit.source || (visit.nativeStoragePath?.startsWith('internal://') ? 'native-sqlite' : 'indexeddb'),
+  };
+}
+
+async function serializeRecoveryAction(action) {
+  let evidence = null;
+  if (action.evidenceBytesBase64) evidence = await fileObject(action.evidenceBytesBase64, { name: `${action.actionUuid}.evidence`, mimeType: action.evidenceContentType || 'image/jpeg' });
+  else if (action.evidence instanceof Blob) evidence = await fileObject(await blobToBase64(action.evidence), { name: action.evidence.name, mimeType: action.evidence.type || 'image/jpeg' });
+  else if (action.evidenceOmitted) evidence = { omitted: true, reason: action.evidenceOmitted };
+  const payload = action.payload ?? {};
+  const identity = { actionUuid: action.actionUuid, repId: Number(action.repId), type: action.type, machineId: Number(action.machineId), cardId: Number(action.cardId ?? payload.cardId), payload, evidenceSha256: evidence?.sha256 ?? null };
+  return { ...action, repId: Number(action.repId), payload, evidence, identity, identityHash: await sha256Json(identity), provenance: action.source || (isNativeRepApp() ? 'native-sqlite' : 'indexeddb') };
+}
+
+async function serializeRecoveryAttendance(action) {
+  const identity = { actionUuid: action.actionUuid, repId: Number(action.repId), action: action.action, payload: action };
+  return { ...action, repId: Number(action.repId), identity, identityHash: await sha256Json(identity), provenance: 'native-sqlite' };
+}
+
+async function serializeRecoveryGps(point) {
+  const normalized = { ...point, trackId: Number(point.trackId), repId: Number(point.repId), capturedAt: point.capturedAt || new Date(Number(point.timestamp)).toISOString() };
+  const identity = { trackId: normalized.trackId, repId: normalized.repId, timestamp: Number(normalized.timestamp), latitude: Number(normalized.latitude), longitude: Number(normalized.longitude), accuracy: Number(normalized.accuracy), speed: Number(normalized.speed ?? 0), reason: normalized.reason ?? '' };
+  return { ...normalized, status: normalized.status || 'pending', identity, identityHash: await sha256Json(identity), provenance: 'native-gps-sqlite' };
 }
 
 async function savePendingQueueExport(payload, stamp) {
@@ -489,7 +653,7 @@ async function savePendingQueueExport(payload, stamp) {
       directory: Directory.Documents,
       encoding: 'utf8',
     });
-  return { filename, path: `Documents/MADAR/Exports/${filename}`, visits: payload.visits.length, machineActions: payload.machineActions.length, attendanceActions: payload.attendanceActions.length };
+  return { filename, path: `Documents/MADAR/Exports/${filename}`, visits: payload.visits.length, machineActions: payload.machineActions.length, attendanceActions: payload.attendanceActions.length, totalItems: payload.visits.length + payload.machineActions.length + payload.attendanceActions.length + payload.pendingGpsPoints.length + payload.rejectedGpsPoints.length, complete: payload.complete, omittedItems: payload.omissions.length };
   }
 
   const blob = new Blob([json], { type: 'application/json;charset=utf-8' });
@@ -501,5 +665,5 @@ async function savePendingQueueExport(payload, stamp) {
   anchor.click();
   anchor.remove();
   URL.revokeObjectURL(url);
-  return { filename, path: filename, visits: payload.visits.length, machineActions: payload.machineActions.length, attendanceActions: payload.attendanceActions.length };
+  return { filename, path: filename, visits: payload.visits.length, machineActions: payload.machineActions.length, attendanceActions: payload.attendanceActions.length, totalItems: payload.visits.length + payload.machineActions.length + payload.attendanceActions.length + payload.pendingGpsPoints.length + payload.rejectedGpsPoints.length, complete: payload.complete, omittedItems: payload.omissions.length };
 }
