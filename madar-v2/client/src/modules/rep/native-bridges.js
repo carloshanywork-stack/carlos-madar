@@ -137,7 +137,7 @@ export async function importNativeRecoveryPackage(json, repId) {
     }
   }
   const result = await RepEngine.importRecoveryPackage({ packageJson: JSON.stringify(recovery), repId: Number(repId) });
-  if (result?.imported !== true) throw new Error('لم يؤكد التخزين الأصلي استيراد نسخة الاسترداد.');
+  if (result?.completed !== true) throw new Error('لم يؤكد التخزين الأصلي استيراد نسخة الاسترداد.');
   return result;
 }
 
@@ -553,7 +553,7 @@ export async function exportPendingQueue(repId, repUsername) {
   const machineActions = await Promise.all([...machineById.values()].map(serializeRecoveryAction));
   const recoveryVisits = await Promise.all(visits.map(serializeRecoveryVisit));
   const recoveryAttendance = await Promise.all(attendanceActions.map(serializeRecoveryAttendance));
-  const gps = [...pendingGpsPoints, ...rejectedGpsPoints].map((point) => serializeRecoveryGps(point));
+  const gps = await Promise.all([...pendingGpsPoints, ...rejectedGpsPoints].map(serializeRecoveryGps));
   const payload = {
     schemaVersion: REP_RECOVERY_SCHEMA_VERSION,
     type: REP_RECOVERY_PACKAGE_TYPE,
@@ -628,8 +628,9 @@ async function serializeRecoveryAction(action) {
 }
 
 async function serializeRecoveryAttendance(action) {
-  const identity = { actionUuid: action.actionUuid, repId: Number(action.repId), action: action.action, payload: action };
-  return { ...action, repId: Number(action.repId), identity, identityHash: await sha256Json(identity), provenance: 'native-sqlite' };
+  const payload = action.payload ?? Object.fromEntries(Object.entries(action).filter(([key]) => !['status', 'attempts', 'lastError', 'createdAt', 'identity', 'identityHash', 'provenance'].includes(key)));
+  const identity = { actionUuid: action.actionUuid, repId: Number(action.repId), action: action.action, payload };
+  return { ...action, payload, repId: Number(action.repId), identity, identityHash: await sha256Json(identity), provenance: 'native-sqlite' };
 }
 
 async function serializeRecoveryGps(point) {

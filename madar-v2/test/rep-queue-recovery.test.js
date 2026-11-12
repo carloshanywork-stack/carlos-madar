@@ -36,7 +36,8 @@ const action = { actionUuid, repId, type: 'report_correction', machineId: 4, car
 action.identity = { actionUuid, repId, type: action.type, machineId: action.machineId, cardId: action.cardId, payload: action.payload, evidenceSha256: evidence.sha256 };
 action.identityHash = await sha256Json(action.identity);
 const attendance = { actionUuid: '80483995-ae4e-4f06-85c0-2e8e73d4da4d', repId, action: 'in', status: 'attendance_rejected', provenance: 'native-sqlite' };
-attendance.identity = { actionUuid: attendance.actionUuid, repId, action: 'in', payload: { action: 'in' } };
+attendance.payload = { actionUuid: attendance.actionUuid, repId, action: 'in', occurredAt: '2026-11-11T09:00:00.000Z', biometricVerified: true, location: { latitude: 25, longitude: 55, accuracy: 8 } };
+  attendance.identity = { actionUuid: attendance.actionUuid, repId, action: 'in', payload: attendance.payload };
 attendance.identityHash = await sha256Json(attendance.identity);
 const point = { trackId: 8, repId, timestamp: 1770000000000, capturedAt: new Date(1770000000000).toISOString(), latitude: 25, longitude: 55, accuracy: 8, speed: 0, status: 'pending', provenance: 'native-gps-sqlite' };
 point.identity = { trackId: 8, repId, timestamp: point.timestamp, latitude: 25, longitude: 55, accuracy: 8, speed: 0, reason: '' };
@@ -82,4 +83,25 @@ test('native-only actions are merged once; changed UUID content is a surfaced co
   assert.equal(mergeMachineActions([{ ...native, status: 'queued' }], [native], repId).length, 1);
   assert.throws(() => mergeMachineActions([{ ...native, payload: { cardId: 9, reportedCode: 'Y' } }], [native], repId), /conflicting local content/);
   assert.throws(() => mergeMachineActions([], [{ ...native, repId: repId + 1 }], repId), /ownership/);
+});
+
+
+test('rejects changed payloads and GPS fields even when the old identity hash remains valid', async () => {
+  for (const queue of ['visits', 'machineActions', 'attendanceActions', 'pendingGpsPoints']) {
+    const recovery = await recoveryPackage();
+    if (queue === 'pendingGpsPoints') recovery[queue][0].latitude = 26;
+    else recovery[queue][0].payload.changed = true;
+    // Keep the signed content snapshot unchanged, as it would be in a tampered archive.
+    if (queue === 'attendanceActions') recovery[queue][0].identity.payload = { ...recovery[queue][0].identity.payload };
+    // Avoid fixture object aliasing before changing the outer payload.
+    const original = await recoveryPackage();
+    recovery[queue][0].identity = original[queue][0].identity;
+    await assert.rejects(validateRepRecoveryPackage(recovery, repId), /immutable|identity/);
+  }
+});
+
+test('rejects a GPS capture time changed independently of its durable timestamp', async () => {
+  const recovery = await recoveryPackage();
+  recovery.pendingGpsPoints[0].capturedAt = '2026-01-01T00:00:00.000Z';
+  await assert.rejects(validateRepRecoveryPackage(recovery, repId), /identity/);
 });

@@ -51,12 +51,20 @@ async function validateIdentity(item, idField, label) {
   if (String(item.identity[idField] ?? '').toLowerCase() !== String(item[idField] ?? '').toLowerCase()) {
     throw new Error(`${label}: immutable ID does not match its identity.`);
   }
+  if (Number(item.identity.repId) !== Number(item.repId)) throw new Error(`${label}: immutable ownership mismatch.`);
+  const keys = idField === 'visitUuid' ? ['payload'] : idField === 'trackId' ? ['timestamp', 'latitude', 'longitude', 'accuracy', 'speed'] : item.type ? ['type', 'machineId', 'payload'] : ['action', 'payload'];
+  for (const key of keys) {
+    if (canonicalJson(item[key]) !== canonicalJson(item.identity[key])) throw new Error(`${label}: ${key} does not match immutable identity.`);
+  }
+  if (item.type && Number(item.identity.cardId) !== Number(item.payload?.cardId)) throw new Error(`${label}: card identity mismatch.`);
+  if (idField === 'trackId' && (item.identity.reason !== (item.reason ?? '') || Date.parse(item.capturedAt) !== item.timestamp)) throw new Error(`${label}: GPS identity mismatch.`);
   const digest = await sha256Json(item.identity);
   if (digest !== item.identityHash) throw new Error(`${label}: immutable identity hash does not match.`);
 }
 
 /** Validate structure, ownership, identities, file sizes and content hashes before any local write. */
 export async function validateRepRecoveryPackage(input, expectedRepId, { requireComplete = true } = {}) {
+  if (new TextEncoder().encode(typeof input === 'string' ? input : JSON.stringify(input)).length > MAX_PACKAGE_BYTES) throw new Error('Recovery package exceeds the 128 MiB total-size limit.');
   const recovery = typeof input === 'string' ? JSON.parse(input) : input;
   const repId = Number(expectedRepId);
   if (!recovery || typeof recovery !== 'object' || Array.isArray(recovery)
@@ -79,7 +87,7 @@ export async function validateRepRecoveryPackage(input, expectedRepId, { require
     throw new Error('Recovery package is incomplete; omitted items must be recovered before import.');
   }
 
-  let accountedBytes = new TextEncoder().encode(typeof input === 'string' ? input : canonicalJson(input)).length;
+  let accountedBytes = 0;
   const ids = new Set();
   const assertItemOwner = (item, label) => {
     if (Number(item?.repId) !== repId) throw new Error(`${label}: representative ownership does not match the signed-in account.`);
@@ -90,8 +98,8 @@ for (const [index, visit] of recovery.visits.entries()) {
   if (!['queued', 'syncing', 'blocked'].includes(visit.status) || typeof visit.provenance !== 'string' || !visit.provenance.trim()) {
     throw new Error(`${label}: status or provenance is invalid.`);
   }
-  if (!UUID_PATTERN.test(visit.visitUuid ?? '') || ids.has(`visit:${visit.visitUuid}`)) throw new Error(`${label}: visit UUID is invalid or duplicated.`);
-  ids.add(`visit:${visit.visitUuid}`);
+  if (!UUID_PATTERN.test(visit.visitUuid ?? '') || ids.has(`visit:${visit.visitUuid.toLowerCase()}`)) throw new Error(`${label}: visit UUID is invalid or duplicated.`);
+  ids.add(`visit:${visit.visitUuid.toLowerCase()}`);
   await validateIdentity(visit, 'visitUuid', label);
   if (!visit.payload || typeof visit.payload !== 'object' || Array.isArray(visit.payload)) throw new Error(`${label}: payload is invalid.`);
     for (const phase of ['beforePhotos', 'afterPhotos']) {
@@ -101,10 +109,10 @@ for (const [index, visit] of recovery.visits.entries()) {
       accountedBytes += await validateFile(photo, `${label} ${phase}[${photoIndex + 1}]`, 3 * 1024 * 1024);
       const expectedHashes = phase === 'beforePhotos' ? visit.identity.beforeHashes : visit.identity.afterHashes;
       const expectedCapturedAt = phase === 'beforePhotos' ? visit.identity.beforeCapturedAt : visit.identity.afterCapturedAt;
-      if (!Array.isArray(expectedHashes) || expectedHashes[photoIndex] !== photo.sha256) {
+      if (!Array.isArray(expectedHashes) || expectedHashes.length !== visit[phase].length || expectedHashes[photoIndex] !== photo.sha256) {
         throw new Error(`${label}: evidence hash does not match immutable visit identity.`);
     }
-    if (!Array.isArray(expectedCapturedAt) || expectedCapturedAt[photoIndex] !== (photo.capturedAt ?? '')) {
+    if (!Array.isArray(expectedCapturedAt) || expectedCapturedAt.length !== visit[phase].length || expectedCapturedAt[photoIndex] !== (photo.capturedAt ?? '')) {
       throw new Error(`${label}: evidence capture time does not match immutable visit identity.`);
     }
   }
@@ -145,7 +153,7 @@ for (const [index, point] of [...recovery.pendingGpsPoints, ...recovery.rejected
       || !Number.isFinite(point.latitude) || point.latitude < -90 || point.latitude > 90
       || !Number.isFinite(point.longitude) || point.longitude < -180 || point.longitude > 180
       || !Number.isFinite(point.accuracy) || point.accuracy < 0 || typeof point.capturedAt !== 'string'
-        || !Number.isFinite(Date.parse(point.capturedAt))) throw new Error(`${label}: coordinates, timestamp, or local ID is invalid.`);
+        || !Number.isFinite(Date.parse(point.capturedAt)) || !Number.isFinite(point.speed ?? 0) || point.accuracy > 100000) throw new Error(`${label}: coordinates, timestamp, or local ID is invalid.`);
     await validateIdentity(point, 'trackId', label);
   }
   if (accountedBytes > MAX_PACKAGE_BYTES) throw new Error('Recovery package exceeds the 128 MiB total-size limit.');

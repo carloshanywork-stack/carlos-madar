@@ -228,7 +228,7 @@ synchronized boolean assertVisitImportCompatible(long repId, JSONObject visit) t
     try (Cursor row = database.rawQuery("SELECT rep_id, payload_json FROM pending_visits WHERE visit_uuid = ?",
         new String[] { uuid })) {
         if (!row.moveToFirst()) return false;
-        if (row.getLong(0) != repId || !row.getString(1).equals(visit.getJSONObject("payload").toString())) {
+        if (row.getLong(0) != repId || !RepRecoveryValidator.canonical(new JSONObject(row.getString(1))).equals(RepRecoveryValidator.canonical(visit.getJSONObject("payload")))) {
             throw new IllegalStateException("This visit UUID already has different local content.");
         }
 }
@@ -332,7 +332,7 @@ private static void collectPhotos(Context context, String visitUuid, String phas
             new String[] { visitUuid, String.valueOf(repId) }) == 1;
     }
 
-    synchronized void enqueueAttendanceAction(JSONObject action) throws Exception {
+    synchronized boolean enqueueAttendanceAction(JSONObject action) throws Exception {
         String actionUuid = action.getString("actionUuid");
         if (!actionUuid.matches("(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")) {
             throw new IllegalArgumentException("A valid attendance action UUID is required.");
@@ -366,11 +366,11 @@ private static void collectPhotos(Context context, String visitUuid, String phas
                 new String[] { actionUuid }
             )) {
                 if (existing.moveToFirst()) {
-                    if (existing.getLong(0) != repId || !existing.getString(1).equals(action.toString())) {
+                    if (existing.getLong(0) != repId || !RepRecoveryValidator.canonical(new JSONObject(existing.getString(1))).equals(RepRecoveryValidator.canonical(action))) {
                         throw new IllegalStateException("This attendance action UUID already has different local data.");
                     }
                     database.setTransactionSuccessful();
-                    return;
+                    return false;
                 }
             }
             ContentValues values = new ContentValues();
@@ -388,7 +388,8 @@ private static void collectPhotos(Context context, String visitUuid, String phas
         } finally {
             database.endTransaction();
         }
-    }
+        return true;
+}
 
     synchronized AttendanceAction nextAttendanceAction(long repId) throws Exception {
         try (Cursor cursor = getReadableDatabase().rawQuery(
@@ -405,11 +406,12 @@ private static void collectPhotos(Context context, String visitUuid, String phas
         JSONArray actions = new JSONArray();
         try (Cursor cursor = getReadableDatabase().rawQuery(
             "SELECT action_uuid, payload_json, status, attempts, last_error, created_at "
-                + "FROM pending_attendance_actions WHERE rep_id = ? ORDER BY occurred_at, created_at LIMIT 500",
+                + "FROM pending_attendance_actions WHERE rep_id = ? ORDER BY occurred_at, created_at",
             new String[] { String.valueOf(repId) }
         )) {
             while (cursor.moveToNext()) {
                 JSONObject action = new JSONObject(cursor.getString(1));
+                action.put("payload", new JSONObject(cursor.getString(1)));
                 action.put("status", cursor.getString(2));
                 action.put("attempts", cursor.getInt(3));
                 action.put("lastError", cursor.getString(4));
@@ -435,7 +437,7 @@ private static void collectPhotos(Context context, String visitUuid, String phas
             new Object[] { error == null ? "" : error, actionUuid });
     }
 
-    synchronized void enqueueMachineAction(Context context, JSONObject action) throws Exception {
+    synchronized boolean enqueueMachineAction(Context context, JSONObject action) throws Exception {
         String actionUuid = action.getString("actionUuid");
         if (!actionUuid.matches("(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")) {
             throw new IllegalArgumentException("A valid machine action UUID is required.");
@@ -466,7 +468,7 @@ private static void collectPhotos(Context context, String visitUuid, String phas
             + "FROM pending_machine_actions WHERE action_uuid = ?", new String[] { actionUuid })) {
         if (existing.moveToFirst()) {
             if (existing.getLong(0) != repId || existing.getLong(1) != machineId || existing.getLong(2) != cardId
-                || !existing.getString(3).equals(payload.toString())
+                || !RepRecoveryValidator.canonical(new JSONObject(existing.getString(3))).equals(RepRecoveryValidator.canonical(payload))
                 || !existing.getString(5).equals(evidenceContentType)) {
                 throw new IllegalStateException("This machine action UUID already has different local data.");
             }
@@ -480,7 +482,7 @@ private static void collectPhotos(Context context, String visitUuid, String phas
                     throw new IllegalStateException("This machine action UUID already has different evidence.");
                 }
             }
-            return;
+            return false;
         }
     }
     if (!evidenceBase64.isEmpty()) {
@@ -521,11 +523,11 @@ private static void collectPhotos(Context context, String visitUuid, String phas
             )) {
                 if (existing.moveToFirst()) {
                     if (existing.getLong(0) != repId || existing.getLong(1) != machineId
-                        || existing.getLong(2) != cardId || !existing.getString(3).equals(payload.toString())) {
+                        || existing.getLong(2) != cardId || !RepRecoveryValidator.canonical(new JSONObject(existing.getString(3))).equals(RepRecoveryValidator.canonical(payload))) {
                         throw new IllegalStateException("This machine action UUID already has different local data.");
                     }
                     database.setTransactionSuccessful();
-                    return;
+                    return false;
                 }
             }
             ContentValues values = new ContentValues();
@@ -544,6 +546,7 @@ private static void collectPhotos(Context context, String visitUuid, String phas
         } finally {
         database.endTransaction();
     }
+    return true;
 }
 
 private static byte[] readEvidenceBytes(File file) throws Exception {
@@ -633,7 +636,7 @@ synchronized void restoreMachineActionState(String actionUuid, long repId, JSONO
         throw new IllegalArgumentException("Recovery machine-action status is invalid.");
     }
     ContentValues values = new ContentValues();
-    values.put("status", status);
+    values.put("status", "syncing".equals(status) ? "queued" : status);
     values.put("attempts", Math.max(0, state.optInt("attempts", 0)));
     values.put("last_error", state.optString("lastError", ""));
     values.put("server_status", state.optString("serverStatus", ""));
@@ -649,7 +652,7 @@ synchronized void restoreAttendanceActionState(String actionUuid, long repId, JS
         throw new IllegalArgumentException("Recovery attendance status is invalid.");
     }
     ContentValues values = new ContentValues();
-    values.put("status", status);
+    values.put("status", "syncing".equals(status) ? "queued" : status);
     values.put("attempts", Math.max(0, state.optInt("attempts", 0)));
     values.put("last_error", state.optString("lastError", ""));
     getWritableDatabase().update("pending_attendance_actions", values,
@@ -662,7 +665,7 @@ synchronized void restoreVisitState(String visitUuid, long repId, JSONObject sta
         throw new IllegalArgumentException("Recovery visit status is invalid.");
     }
     ContentValues values = new ContentValues();
-    values.put("status", "queued".equals(status) ? "pending" : "syncing".equals(status) ? "uploading" : "blocked");
+    values.put("status", "blocked".equals(status) ? "blocked" : "pending");
     values.put("attempts", Math.max(0, state.optInt("attempts", 0)));
     values.put("last_error", state.optString("lastError", ""));
     getWritableDatabase().update("pending_visits", values,
@@ -730,7 +733,7 @@ synchronized void markMachineActionBlocked(String actionUuid, String error) {
             "SELECT action_uuid, action_type, machine_id, card_id, payload_json, evidence_path, "
                 + "evidence_content_type, status, attempts, last_error, correction_id, server_status, "
                 + "review_note, created_at FROM pending_machine_actions WHERE rep_id = ? "
-                + "ORDER BY created_at, action_uuid LIMIT 500",
+                + "ORDER BY created_at, action_uuid",
             new String[] { String.valueOf(repId) }
         )) {
             while (cursor.moveToNext()) {
@@ -787,7 +790,7 @@ synchronized void markMachineActionBlocked(String actionUuid, String error) {
         JSONArray visits = new JSONArray();
         SQLiteDatabase database = getReadableDatabase();
         try (Cursor cursor = database.rawQuery(
-            "SELECT visit_uuid, rep_username, payload_json, status, attempts, last_error, created_at FROM pending_visits WHERE rep_id = ? ORDER BY created_at ASC LIMIT 500",
+            "SELECT visit_uuid, rep_username, payload_json, status, attempts, last_error, created_at FROM pending_visits WHERE rep_id = ? ORDER BY created_at ASC",
             new String[] { String.valueOf(repId) }
         )) {
             while (cursor.moveToNext()) {

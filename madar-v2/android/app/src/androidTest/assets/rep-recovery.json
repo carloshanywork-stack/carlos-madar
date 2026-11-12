@@ -1,0 +1,166 @@
+{
+  "type": "madar-rep-recovery",
+  "schemaVersion": 3,
+  "repId": 41,
+  "repUsername": "rep-a",
+  "localSessionId": "b62a930f-083d-4a0e-9d2c-e50e1c953769",
+  "complete": true,
+  "omissions": [],
+  "visits": [
+    {
+      "visitUuid": "f712ce53-b00d-4720-a802-79412adfac11",
+      "repId": 41,
+      "payload": {
+        "cardId": 9,
+        "machineCode": "M-9"
+      },
+      "beforePhotos": [
+        {
+          "name": "evidence.jpg",
+          "mimeType": "image/jpeg",
+          "byteSize": 25,
+          "bytesBase64": "cmVhbCBpbWFnZSBldmlkZW5jZSBieXRlcw==",
+          "sha256": "a3fc896d404ee69ab662b3e6f1cd4f44017aae072bff5c22f64d0459567b3632"
+        },
+        {
+          "name": "evidence.jpg",
+          "mimeType": "image/jpeg",
+          "byteSize": 25,
+          "bytesBase64": "cmVhbCBpbWFnZSBldmlkZW5jZSBieXRlcw==",
+          "sha256": "a3fc896d404ee69ab662b3e6f1cd4f44017aae072bff5c22f64d0459567b3632"
+        },
+        {
+          "name": "evidence.jpg",
+          "mimeType": "image/jpeg",
+          "byteSize": 25,
+          "bytesBase64": "cmVhbCBpbWFnZSBldmlkZW5jZSBieXRlcw==",
+          "sha256": "a3fc896d404ee69ab662b3e6f1cd4f44017aae072bff5c22f64d0459567b3632"
+        }
+      ],
+      "afterPhotos": [],
+      "status": "queued",
+      "provenance": "native-sqlite",
+      "identity": {
+        "visitUuid": "f712ce53-b00d-4720-a802-79412adfac11",
+        "repId": 41,
+        "payload": {
+          "cardId": 9,
+          "machineCode": "M-9"
+        },
+        "beforeHashes": [
+          "a3fc896d404ee69ab662b3e6f1cd4f44017aae072bff5c22f64d0459567b3632",
+          "a3fc896d404ee69ab662b3e6f1cd4f44017aae072bff5c22f64d0459567b3632",
+          "a3fc896d404ee69ab662b3e6f1cd4f44017aae072bff5c22f64d0459567b3632"
+        ],
+        "afterHashes": [],
+        "beforeCapturedAt": [
+          "",
+          "",
+          ""
+        ],
+        "afterCapturedAt": []
+      },
+      "identityHash": "4755a693018d2c1c3ffbc173857a0b1f1775479560adeaa1fbdbdf65290e02e3"
+    }
+  ],
+  "machineActions": [
+    {
+      "actionUuid": "48fd08d4-3844-451c-a0bf-343e3d9874b2",
+      "repId": 41,
+      "type": "report_correction",
+      "machineId": 4,
+      "cardId": 9,
+      "payload": {
+        "cardId": 9,
+        "reportedCode": "X"
+      },
+      "evidence": {
+        "name": "evidence.jpg",
+        "mimeType": "image/jpeg",
+        "byteSize": 25,
+        "bytesBase64": "cmVhbCBpbWFnZSBldmlkZW5jZSBieXRlcw==",
+        "sha256": "a3fc896d404ee69ab662b3e6f1cd4f44017aae072bff5c22f64d0459567b3632"
+      },
+      "status": "blocked",
+      "provenance": "native-sqlite",
+      "identity": {
+        "actionUuid": "48fd08d4-3844-451c-a0bf-343e3d9874b2",
+        "repId": 41,
+        "type": "report_correction",
+        "machineId": 4,
+        "cardId": 9,
+        "payload": {
+          "cardId": 9,
+          "reportedCode": "X"
+        },
+        "evidenceSha256": "a3fc896d404ee69ab662b3e6f1cd4f44017aae072bff5c22f64d0459567b3632"
+      },
+      "identityHash": "dc270d48992d341ee3738f8c53e6d877889c7ec1b0369f60316701feafaef03e"
+    }
+  ],
+  "attendanceActions": [
+    {
+      "actionUuid": "80483995-ae4e-4f06-85c0-2e8e73d4da4d",
+      "repId": 41,
+      "action": "in",
+      "status": "attendance_rejected",
+      "provenance": "native-sqlite",
+      "payload": {
+        "actionUuid": "80483995-ae4e-4f06-85c0-2e8e73d4da4d",
+        "repId": 41,
+        "action": "in",
+        "occurredAt": "2026-11-11T09:00:00.000Z",
+        "biometricVerified": true,
+        "location": {
+          "latitude": 25,
+          "longitude": 55,
+          "accuracy": 8
+        }
+      },
+      "identity": {
+        "actionUuid": "80483995-ae4e-4f06-85c0-2e8e73d4da4d",
+        "repId": 41,
+        "action": "in",
+        "payload": {
+          "actionUuid": "80483995-ae4e-4f06-85c0-2e8e73d4da4d",
+          "repId": 41,
+          "action": "in",
+          "occurredAt": "2026-11-11T09:00:00.000Z",
+          "biometricVerified": true,
+          "location": {
+            "latitude": 25,
+            "longitude": 55,
+            "accuracy": 8
+          }
+        }
+      },
+      "identityHash": "1679180410a57578271b9d110372f2a38c473430e8517f303a166883c2a85f1d"
+    }
+  ],
+  "pendingGpsPoints": [
+    {
+      "trackId": 8,
+      "repId": 41,
+      "timestamp": 1770000000000,
+      "capturedAt": "2026-02-02T02:40:00.000Z",
+      "latitude": 25,
+      "longitude": 55,
+      "accuracy": 8,
+      "speed": 0,
+      "status": "pending",
+      "provenance": "native-gps-sqlite",
+      "identity": {
+        "trackId": 8,
+        "repId": 41,
+        "timestamp": 1770000000000,
+        "latitude": 25,
+        "longitude": 55,
+        "accuracy": 8,
+        "speed": 0,
+        "reason": ""
+      },
+      "identityHash": "2f427896108e45abbd2015052213ba41a39b4d79f06329c2b959f27d467441fe"
+    }
+  ],
+  "rejectedGpsPoints": []
+}

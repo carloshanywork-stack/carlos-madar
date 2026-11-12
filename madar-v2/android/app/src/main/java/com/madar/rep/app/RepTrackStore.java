@@ -109,34 +109,18 @@ public final class RepTrackStore extends SQLiteOpenHelper {
 
 /** Append a point only for an authenticated representative; unattributed points are never guessed. */
 public long append(Location location, long repId) {
-    if (repId < 1L) return -1L;
-    SQLiteDatabase database = getWritableDatabase();
-    try (Cursor existing = database.rawQuery("SELECT rep_id, timestamp, latitude, longitude, accuracy, speed FROM " + TABLE + " WHERE _id = ?",
-        new String[] { String.valueOf(point.optLong("trackId", 0L)) })) {
-        if (existing.moveToFirst()) {
-            boolean same = existing.getLong(0) == repId && existing.getLong(1) == timestamp
-                && Double.compare(existing.getDouble(2), latitude) == 0 && Double.compare(existing.getDouble(3), longitude) == 0
-                && Double.compare(existing.getDouble(4), accuracy) == 0 && Double.compare(existing.getDouble(5), speed) == 0;
-            return same ? 0L : -1L;
-        }
+        if (repId < 1L) return -1L;
+        ContentValues values = new ContentValues();
+        values.put("rep_id", repId);
+        values.put("timestamp", location.getTime());
+        values.put("latitude", location.getLatitude());
+        values.put("longitude", location.getLongitude());
+        values.put("accuracy", (double) location.getAccuracy());
+        values.put("speed", location.hasSpeed() ? (double) location.getSpeed() : 0.0);
+        return getWritableDatabase().insertWithOnConflict(TABLE, null, values, SQLiteDatabase.CONFLICT_IGNORE);
     }
-    ContentValues values = new ContentValues();
-    values.put("_id", point.optLong("trackId"));
-    values.put("rep_id", repId);
-    values.put("timestamp", location.getTime());
-    values.put("latitude", location.getLatitude());
-    values.put("longitude", location.getLongitude());
-    values.put("accuracy", (double) location.getAccuracy());
-    values.put("speed", location.hasSpeed() ? (double) location.getSpeed() : 0.0);
-    long inserted = database.insert(TABLE, null, values);
-    if (inserted > 0L) return inserted;
-    try (Cursor existing = database.rawQuery("SELECT 1 FROM " + TABLE + " WHERE rep_id = ? AND timestamp = ? AND latitude = ? AND longitude = ? AND accuracy = ? AND speed = ? LIMIT 1",
-        new String[] { String.valueOf(repId), String.valueOf(timestamp), String.valueOf(latitude), String.valueOf(longitude), String.valueOf(accuracy), String.valueOf(speed) })) {
-        return existing.moveToFirst() ? 0L : -1L;
-    }
-}
 
-public JSONArray pendingTrail(long repId) throws JSONException {
+    public JSONArray pendingTrail(long repId) throws JSONException {
     JSONArray points = new JSONArray();
         if (repId < 1L) return points;
         try (Cursor cursor = getReadableDatabase().rawQuery(
@@ -181,11 +165,14 @@ public JSONArray pendingTrail(long repId) throws JSONException {
 /** Pending and rejected, attributable points for an explicit local recovery export. */
 public JSONObject recoveryQueue(long repId) throws JSONException {
     JSONObject result = new JSONObject();
-    JSONArray pending = pendingTrail(repId);
+    JSONArray pending = new JSONArray();
+        try (Cursor cursor = getReadableDatabase().rawQuery("SELECT _id, timestamp, latitude, longitude, accuracy, speed FROM " + TABLE + " WHERE rep_id = ? ORDER BY _id", new String[] {String.valueOf(repId)})) {
+            while (cursor.moveToNext()) pending.put(new JSONObject().put("trackId", cursor.getLong(0)).put("repId", repId).put("timestamp", cursor.getLong(1)).put("latitude", cursor.getDouble(2)).put("longitude", cursor.getDouble(3)).put("accuracy", cursor.getDouble(4)).put("speed", cursor.getDouble(5)).put("status", "pending"));
+        }
     JSONArray rejected = new JSONArray();
     try (Cursor cursor = getReadableDatabase().rawQuery(
         "SELECT source_track_id, rep_id, timestamp, latitude, longitude, accuracy, speed, reason, rejected_at "
-            + "FROM " + REJECTED_TABLE + " WHERE rep_id = ? ORDER BY rejected_at, _id LIMIT " + READ_BATCH_LIMIT,
+            + "FROM " + REJECTED_TABLE + " WHERE rep_id = ? ORDER BY rejected_at, _id",
         new String[] { String.valueOf(repId) })) {
         while (cursor.moveToNext()) {
             JSONObject point = new JSONObject();
