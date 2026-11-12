@@ -38,6 +38,7 @@ getNativeDutyTrackingState,
 getNativeRepCache,
 getNativeRecoveryGps,
 getNativeGpsLocation,
+  getNativeGpsAvailability,
   getNativeNetworkStatus,
   isNativeRepApp,
   listNativeVisits,
@@ -461,6 +462,8 @@ const routeRef = useRef(null);
     try {
       let location;
       if (nativeApp) {
+        const availability = await getNativeGpsAvailability();
+        if (availability && !availability.enabled) throw new Error('GPS مغلق على الهاتف؛ فعّله من الإعدادات.');
         location = await getNativeGpsLocation();
       } else if (navigator.geolocation) {
         const position = await new Promise((resolve, reject) => navigator.geolocation.getCurrentPosition(resolve, reject, {
@@ -492,9 +495,31 @@ const routeRef = useRef(null);
         void reportMockLocation(purpose);
       }
       setGpsError(error.message || 'تعذر تحديث GPS عند حفظ الزيارة.');
+      if (/GPS مغلق/.test(error.message ?? '')) setGps(null);
       return null;
     }
   }, [nativeApp, reportMockLocation]);
+
+  useEffect(() => {
+    if (!nativeApp) return undefined;
+    let active = true;
+    const check = async () => {
+      try {
+        const state = await getNativeGpsAvailability();
+        if (!active) return;
+        if (state && !state.enabled) {
+          setGps(null);
+          setGpsError('GPS مغلق على الهاتف؛ فعّله من الإعدادات قبل تسجيل الحضور أو التصوير.');
+        } else if (state?.enabled) {
+          setGpsError((current) => current.startsWith('GPS مغلق على الهاتف') ? '' : current);
+        }
+      } catch { /* The capture path reports a concrete native error. */ }
+    };
+    void check();
+    const timer = window.setInterval(check, 10000);
+    document.addEventListener('visibilitychange', check);
+    return () => { active = false; window.clearInterval(timer); document.removeEventListener('visibilitychange', check); };
+  }, [nativeApp]);
 
   useEffect(() => {
     gpsRef.current = gps;
@@ -611,6 +636,27 @@ const loadLocalSnapshots = useCallback(async () => {
     }
     setRouteLoading(false);
   }, [loadLocalSnapshots, nativeApp, offlineOnly, user.username, userId]);
+
+  const startMachineWork = useCallback(async (cardId, visitUuid, location) => {
+    if (offlineOnly || serverState !== 'online') return { offline: true };
+    try {
+      const result = await api.post(`/api/rep/machines/${cardId}/start-work`, { visitUuid, location });
+      void refreshData();
+      return result;
+    } catch (error) {
+      if (error?.status) throw error;
+      setStorageError('تعذر إبلاغ باقي المناديب بأن الماكينة قيد التنفيذ؛ ستبقى الصور محلية حتى عودة الاتصال.');
+      return { offline: true };
+    }
+  }, [offlineOnly, refreshData, serverState]);
+
+  const stopMachineWork = useCallback(async (cardId, visitUuid) => {
+    if (offlineOnly || serverState !== 'online') return;
+    try {
+      await api.post(`/api/rep/machines/${cardId}/stop-work`, { visitUuid });
+      void refreshData();
+    } catch { /* The server-side lease expires if the close request is interrupted. */ }
+  }, [offlineOnly, refreshData, serverState]);
 
   const refreshAttendance = useCallback(async () => {
     if (offlineOnly || !navigator.onLine) return null;
@@ -826,7 +872,8 @@ const loadLocalSnapshots = useCallback(async () => {
       try {
         const event = JSON.parse(message.data);
         if (event.type === 'system.reconcile-required') { void refreshData(); void refreshAttendance(); void refreshPending(); }
-        else if (event.type === 'maintenance.changed' || event.type === 'rep.machine.location-reset') { void refreshData(); void refreshPending(); }
+        else if (event.type === 'maintenance.changed' || event.type === 'rep.machine.location-reset'
+          || event.type === 'rep.machine.work-started' || event.type === 'rep.machine.work-ended') { void refreshData(); void refreshPending(); }
         else if (event.type === 'rep.visit.submitted') { void refreshData(); void refreshPending(); }
         else if (event.type === 'maintenance.order.assigned') {
           const areas = Array.isArray(event.areas) ? event.areas.filter(Boolean) : [];
@@ -1001,6 +1048,8 @@ const loadLocalSnapshots = useCallback(async () => {
       let nextIntervalMs = GPS_POLLING.movingIntervalMs;
       const readNativePosition = async () => {
         try {
+          const availability = await getNativeGpsAvailability();
+          if (availability && !availability.enabled) throw new Error('GPS مغلق على الهاتف؛ فعّله من الإعدادات.');
           let location;
           if (onDuty) {
             const state = await getNativeDutyTrackingState();
@@ -1035,6 +1084,7 @@ const loadLocalSnapshots = useCallback(async () => {
           if (!active) return;
           stationarySince = null;
           setGpsError(error.message || 'إشارة GPS غير متاحة حالياً.');
+          if (/GPS مغلق/.test(error.message ?? '')) setGps(null);
           if (/تزييف الموقع/.test(error.message ?? '')) {
             setGps(null);
             setOnDuty(false);
@@ -1291,6 +1341,7 @@ let canDrainVisits = true;
                     ...machine,
                     isCompleted: result.status === 'approved',
                     isSubmitted: result.status !== 'reshoot_requested',
+                    workStatus: result.status === 'reshoot_requested' ? 'available' : 'done',
                     reviewStatus: result.status === 'approved' ? 'approved' : result.status === 'reshoot_requested' ? 'reshoot' : 'pending',
                     canVisit: result.status === 'reshoot_requested',
                   }
@@ -1572,6 +1623,15 @@ const finishTutorial = () => {
         setStorageError(error.message || 'حُفظت الزيارة في قاعدة أندرويد المحلية، وتعذر تحديث عرض قائمة الزيارات.');
       });
       setPendingVisits((current) => [...current, storedVisit].sort((left, right) => left.createdAt.localeCompare(right.createdAt)));
+      setRoute((current) => current?.regions ? {
+        ...current,
+        regions: current.regions.map((region) => ({
+          ...region,
+          machines: region.machines.map((machine) => Number(machine.cardId) === Number(payload.cardId)
+            ? { ...machine, workStatus: 'in_progress', workOwnerId: userId, canVisit: false }
+            : machine),
+        })),
+      } : current);
       try { await refreshPending(); } catch { /* The IndexedDB add transaction already confirmed durable storage. */ }
       setSelectedMachine(null);
       setShowQueue(true);
@@ -1823,7 +1883,7 @@ try {
         {filteredRegions.length ? (
           <div className="rep-region-list">
             {filteredRegions.map((region) => {
-              const done = region.machines.filter((machine) => machine.isCompleted).length;
+              const done = region.machines.filter((machine) => machine.workStatus === 'done').length;
               return (
                 <details className="rep-region-folder" key={region.regionName} open>
                   <summary>
@@ -1837,11 +1897,11 @@ try {
                       <article className="rep-machine-card-wrap" key={`${machine.cardId}-${machine.machineCode}`}>
                         <button
                           type="button"
-                          className={`rep-machine-card ${machine.isCompleted ? 'is-complete' : ''} ${machine.canVisit === false ? 'is-locked' : ''}`}
+                          className={`rep-machine-card ${machine.workStatus === 'done' ? 'is-complete' : ''} ${machine.canVisit === false ? 'is-locked' : ''}`}
                           onClick={() => setSelectedMachine({ ...machine, regionName: region.regionName })}
                           disabled={machine.canVisit === false}
                         >
-                           <div className="rep-machine-card-top"><span className="rep-machine-code" dir="ltr">{machine.machineCode}</span><span className="rep-machine-status">{machine.isCompleted ? '✅ معتمدة' : machine.correctionPending ? '⚠️ بلاغ تصحيح قيد المراجعة' : machine.reviewStatus === 'pending' ? '🟡 بانتظار الاعتماد' : machine.reviewStatus === 'reshoot' ? '🔁 إعادة تصوير' : machine.canVisit === false ? 'مغلقة' : '⏳ متبقية'}</span></div>
+                           <div className="rep-machine-card-top"><span className="rep-machine-code" dir="ltr">{machine.machineCode}</span><span className="rep-machine-status">{machine.workStatus === 'done' ? '✅ تم' : machine.workStatus === 'in_progress' ? '🟠 قيد التنفيذ' : machine.correctionPending ? '⚠️ بلاغ تصحيح قيد المراجعة' : machine.reviewStatus === 'reshoot' ? '🔁 إعادة تصوير' : machine.canVisit === false ? 'مغلقة' : '⏳ متبقية'}</span></div>
                           <small className="rep-work-order-code">أمر الصيانة · {machine.workOrderCode}</small>
                           {machine.clientName && <strong className="rep-machine-branch">{machine.clientName}</strong>}
                           <span className="rep-machine-name">{machine.arabicName || `ماكينة ${machine.machineCode}`}</span>
@@ -1925,7 +1985,7 @@ try {
  </section>}
  <footer className="rep-app-footer"><span>مَــدَارْ · تطبيق المندوب الميداني{appVersion ? ` · إصدار ${appVersion}` : ''}</span><span>{gps ? `آخر GPS: ${formatGps(gps)}` : onDuty ? gpsError : nativeApp ? 'فعّل الحضور لتسجيل GPS أثناء الوردية' : 'يُسجّل GPS مع الحضور والانصراف والزيارة'}</span></footer>
 
-        {selectedMachine && <MachineVisitSheet machine={{ ...selectedMachine, ...(route?.regions ?? []).flatMap((region) => region.machines).find((machine) => machine.cardId === selectedMachine.cardId) }} repName={user.fullName} reasons={reasons} gps={gps} gpsError={gpsError} captureLocation={captureVisitLocation} onClose={() => setSelectedMachine(null)} onSave={saveVisit} onConfirmLocation={confirmSelectedMachineLocation} onReportCorrection={submitSelectedMachineCorrection} />}
+        {selectedMachine && <MachineVisitSheet machine={{ ...selectedMachine, ...(route?.regions ?? []).flatMap((region) => region.machines).find((machine) => machine.cardId === selectedMachine.cardId) }} repName={user.fullName} reasons={reasons} gps={gps} gpsError={gpsError} captureLocation={captureVisitLocation} onStartWork={startMachineWork} onStopWork={stopMachineWork} onClose={() => setSelectedMachine(null)} onSave={saveVisit} onConfirmLocation={confirmSelectedMachineLocation} onReportCorrection={submitSelectedMachineCorrection} />}
       {tutorialOpen && <Tutorial nativeApp={nativeApp} onFinish={finishTutorial} />}
       {toast && <div className="rep-toast" role="status">✓ {toast}</div>}
     </main>

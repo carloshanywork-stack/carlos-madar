@@ -442,6 +442,7 @@ export async function markRouteCardSubmitted(repId, cardId, status = 'pending_re
         if (Number(machine.cardId) === Number(cardId)) {
           machine.isCompleted = status === 'approved';
           machine.isSubmitted = status !== 'reshoot_requested';
+          machine.workStatus = status === 'reshoot_requested' ? 'available' : 'done';
           machine.reviewStatus = status === 'approved' ? 'approved' : status === 'reshoot_requested' ? 'reshoot' : 'pending';
           machine.canVisit = status === 'reshoot_requested';
         }

@@ -225,6 +225,10 @@ export function getRepTodayRoute(rep, database = db) {
   const correctionPendingMachineIds = new Set(database.prepare(`
     SELECT DISTINCT machine_id FROM machine_correction_requests WHERE status = 'pending'
   `).all().map((row) => Number(row.machine_id)));
+  const activeWorkByCard = new Map(database.prepare(`
+    SELECT card_id, rep_user_id, visit_uuid FROM rep_machine_work_leases
+    WHERE expires_at_ms > ?
+  `).all(Date.now()).map((row) => [Number(row.card_id), row]));
 
   const regionsByKey = new Map();
   let totalMachines = 0;
@@ -241,12 +245,14 @@ export function getRepTodayRoute(rep, database = db) {
     const afterPhotos = parsePhotoList(row.after_photos_json);
     const latestVisit = reviewByCard.get(Number(row.card_id));
     const correctionPending = correctionPendingMachineIds.has(Number(row.machine_id));
+    const activeWork = activeWorkByCard.get(Number(row.card_id));
     const isCompleted = latestVisit
       ? latestVisit.review_status === 'approved'
       // Legacy card photo uploads have no visit/review record; keep those complete only when both phases exist.
       // New visits use the supervisor-approved review above, where After photos are optional.
       : uploadedToday.has(Number(row.card_id)) && beforePhotos.length > 0 && afterPhotos.length > 0;
     const isSubmitted = Boolean(latestVisit && latestVisit.review_status !== 'reshoot');
+    const workStatus = isSubmitted || isCompleted ? 'done' : activeWork ? 'in_progress' : 'available';
     if (!regionsByKey.has(groupKey)) regionsByKey.set(groupKey, { regionName, machines: [] });
     regionsByKey.get(groupKey).machines.push({
       machineCode: row.machine_code,
@@ -259,6 +265,8 @@ export function getRepTodayRoute(rep, database = db) {
       areaName: row.area_name || row.region_name || 'المنطقة العامة',
       isCompleted,
       isSubmitted,
+      workStatus,
+      workOwnerId: workStatus === 'in_progress' ? Number(activeWork.rep_user_id) : null,
       reviewStatus: latestVisit?.review_status ?? null,
       reviewNote: latestVisit?.review_status === 'reshoot' ? latestVisit.review_note : null,
       correctionPending,
@@ -266,7 +274,8 @@ export function getRepTodayRoute(rep, database = db) {
       approvedLocation: row.is_location_locked === 1 && row.latitude !== null && row.longitude !== null
         ? { latitude: Number(row.latitude), longitude: Number(row.longitude) } : null,
       cardId: Number(row.card_id),
-      canVisit: row.order_status !== 'archived' && !isCompleted && !isSubmitted && !correctionPending,
+      canVisit: row.order_status !== 'archived' && !isCompleted && !isSubmitted && !correctionPending
+        && (!activeWork || Number(activeWork.rep_user_id) === Number(rep.id)),
       latitude: row.latitude === null ? null : Number(row.latitude),
       longitude: row.longitude === null ? null : Number(row.longitude),
       isLocationLocked: Number(row.is_location_locked) === 1,
@@ -297,6 +306,74 @@ export function getRepTodayRoute(rep, database = db) {
     },
     regions,
   };
+}
+
+export function claimRepMachineWork(rep, cardIdValue, input, database = db) {
+  const cardId = positiveId(cardIdValue, 'cardId');
+  const body = requireObject(input, 'work claim');
+  allowOnlyKeys(body, ['visitUuid', 'location']);
+  const visitUuid = actionUuid(body.visitUuid, 'visitUuid');
+  const location = normalizeRepLocation(body.location);
+  const locationAgeMs = Date.now() - Date.parse(location.updatedAt);
+  if (locationAgeMs > 5 * 60 * 1000 || locationAgeMs < -60 * 1000 || location.accuracy > 120) {
+    throw new HttpError(400, 'A recent accurate GPS position is required to start work.');
+  }
+  const result = database.transaction(() => {
+    const route = getRepTodayRoute(rep, database);
+    const card = route.regions.flatMap((region) => region.machines)
+      .find((machine) => machine.cardId === cardId);
+    if (!card) throw new HttpError(403, 'This machine is not on your assigned route.');
+    if (!card.canVisit) throw new HttpError(409, 'This machine is already in progress or completed. Refresh the route.');
+    const machine = database.prepare(`
+      SELECT latitude, longitude, is_location_locked, geofence_radius_meters
+      FROM machines WHERE id = ?
+    `).get(card.machineId);
+    validateMachineGeofence(machine, location);
+    const previous = database.prepare('SELECT * FROM rep_machine_work_leases WHERE card_id = ?').get(cardId);
+    const now = Date.now();
+    if (previous && previous.expires_at_ms > now && Number(previous.rep_user_id) !== Number(rep.id)) {
+      throw new HttpError(409, 'Another representative is working on this machine.');
+    }
+    if (previous && previous.expires_at_ms > now && previous.visit_uuid !== visitUuid) {
+      throw new HttpError(409, 'This machine already has an active visit. Continue that visit or wait for the claim to expire.');
+    }
+    database.prepare(`
+      INSERT INTO rep_machine_work_leases (card_id, rep_user_id, visit_uuid, expires_at_ms)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(card_id) DO UPDATE SET rep_user_id = excluded.rep_user_id,
+        visit_uuid = excluded.visit_uuid, expires_at_ms = excluded.expires_at_ms,
+        updated_at = CURRENT_TIMESTAMP
+    `).run(cardId, rep.id, visitUuid, now + 30 * 60 * 1000);
+    const recipients = database.prepare(`
+      SELECT user_id FROM maintenance_order_reps WHERE order_id = ?
+    `).all(card.workOrderId).map((row) => Number(row.user_id));
+    return { success: true, status: 'in_progress', cardId, visitUuid,
+      expiresAt: new Date(now + 30 * 60 * 1000).toISOString(),
+      recipientUserIds: recipients,
+      idempotent: Boolean(previous && Number(previous.rep_user_id) === Number(rep.id)
+        && previous.visit_uuid === visitUuid && previous.expires_at_ms > now) };
+  }).immediate();
+  return result;
+}
+
+export function releaseRepMachineWork(rep, cardIdValue, input, database = db) {
+  const cardId = positiveId(cardIdValue, 'cardId');
+  const body = requireObject(input, 'work release');
+  allowOnlyKeys(body, ['visitUuid']);
+  const visitUuid = actionUuid(body.visitUuid, 'visitUuid');
+  return database.transaction(() => {
+    const current = database.prepare('SELECT rep_user_id, visit_uuid FROM rep_machine_work_leases WHERE card_id = ?').get(cardId);
+    if (!current || Number(current.rep_user_id) !== Number(rep.id) || current.visit_uuid !== visitUuid) {
+      return { success: true, released: false, recipientUserIds: [] };
+    }
+    const recipients = database.prepare(`
+      SELECT assignment.user_id FROM maintenance_order_reps assignment
+      JOIN maintenance_cards card ON card.order_id = assignment.order_id
+      WHERE card.id = ?
+    `).all(cardId).map((row) => Number(row.user_id));
+    database.prepare('DELETE FROM rep_machine_work_leases WHERE card_id = ?').run(cardId);
+    return { success: true, released: true, recipientUserIds: recipients };
+  }).immediate();
 }
 
 function normalizeVisitInput(input) {
@@ -450,6 +527,8 @@ function visitResult(row, database = db, { idempotent = false, processing = fals
     success: true,
     status: reviewStatus === 'approved' ? 'approved' : reviewStatus === 'reshoot' ? 'reshoot_requested' : 'pending_review',
     visitUuid: row.visit_uuid,
+    cardId: Number(row.card_id),
+    workOrderId: Number(row.order_id),
     machineCode: row.machine_code,
     beforePhotoCount: counts.before ?? 0,
     afterPhotoCount: counts.after ?? 0,
@@ -972,6 +1051,25 @@ function createVisitReservation(rep, visit, payloadHash, card, stagingPath, fina
       requireVisitOwner(existing, rep.id, payloadHash);
       if (existing.status === 'completed') return { row: existing, kind: 'completed' };
       if (existing.status === 'receiving') return { row: existing, kind: 'processing' };
+    }
+
+    const activeWork = database.prepare(`
+      SELECT rep_user_id FROM rep_machine_work_leases
+      WHERE card_id = ? AND expires_at_ms > ?
+    `).get(card.card_id, Date.now());
+    if (activeWork && Number(activeWork.rep_user_id) !== Number(rep.id)) {
+      throw new HttpError(409, 'Another representative is working on this machine. Keep your local visit and retry after review.');
+    }
+    const submitted = database.prepare(`
+      SELECT visit.visit_uuid FROM rep_visits visit
+      JOIN rep_visit_reviews review ON review.visit_id = visit.id
+      WHERE visit.card_id = ? AND visit.status = 'completed'
+        AND review.status IN ('pending', 'approved')
+      LIMIT 1
+    `).get(card.card_id);
+    if (submitted) throw new HttpError(409, 'This machine was already submitted. Refresh the route.');
+
+    if (existing) {
       persistRepVisitLines(visit, existing.id, database);
       database.prepare(`
         UPDATE rep_visits SET status = 'receiving', failure_message = NULL,
@@ -1040,6 +1138,7 @@ function recordReceivedVisit(rep, visit, visitId, photoRows, database) {
       ON CONFLICT(visit_id) DO UPDATE SET status = 'pending', review_note = NULL,
         reviewed_by = NULL, reviewed_at = NULL
     `).run(visitId);
+    database.prepare('DELETE FROM rep_machine_work_leases WHERE card_id = ?').run(visit.cardId);
     recordAudit({
       database,
       actorId: rep.id,

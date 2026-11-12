@@ -34,7 +34,7 @@ function distanceMeters(first, second) {
   return 6371000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(Math.max(0, 1 - a)));
 }
 
-export default function MachineVisitSheet({ machine, repName = '', reasons, gps, gpsError, captureLocation, onClose, onSave, onConfirmLocation, onReportCorrection }) {
+export default function MachineVisitSheet({ machine, repName = '', reasons, gps, gpsError, captureLocation, onStartWork, onStopWork, onClose, onSave, onConfirmLocation, onReportCorrection }) {
   const [notes, setNotes] = useState('');
   const [photos, setPhotos] = useState({ before: [], after: [] });
   const [selectedReasonIds, setSelectedReasonIds] = useState(() => {
@@ -75,6 +75,26 @@ export default function MachineVisitSheet({ machine, repName = '', reasons, gps,
   photosRef.current = photos;
   const deletingPhotoRef = useRef(false);
   const nativeApp = isNativeRepApp();
+  const stopWorkRef = useRef(onStopWork);
+  stopWorkRef.current = onStopWork;
+
+  useEffect(() => () => {
+    if (!draftSaved.current) void stopWorkRef.current?.(machine.cardId, draftVisitUuid);
+  }, [draftVisitUuid, machine.cardId]);
+
+  useEffect(() => {
+    if (photos.before.length + photos.after.length === 0 || !onStartWork) return undefined;
+    const timer = window.setInterval(() => {
+      if (draftSaved.current) return;
+      void (async () => {
+        const location = await captureLocation?.();
+        if (!location) return;
+        try { await onStartWork(machine.cardId, draftVisitUuid, locationPayload(location)); }
+        catch (error) { setError(error.message || 'تعذر تجديد حالة الماكينة قيد التنفيذ.'); }
+      })();
+    }, 5 * 60 * 1000);
+    return () => window.clearInterval(timer);
+  }, [captureLocation, draftVisitUuid, machine.cardId, onStartWork, photos.after.length, photos.before.length]);
 
   useEffect(() => () => {
     for (const previewUrl of previewUrls.current) URL.revokeObjectURL(previewUrl);
@@ -170,7 +190,7 @@ export default function MachineVisitSheet({ machine, repName = '', reasons, gps,
     }
     setError('');
     const capturedLocation = await captureLocation?.();
-    const currentLocation = capturedLocation ?? gps;
+    const currentLocation = capturedLocation;
     if (!currentLocation) {
       setError('يلزم تحديد موقع GPS قبل التقاط صور الزيارة.');
       return;
@@ -183,6 +203,12 @@ export default function MachineVisitSheet({ machine, repName = '', reasons, gps,
       distanceMeters(currentLocation, { latitude: activeMachine.latitude, longitude: activeMachine.longitude })
         - Number(currentLocation.accuracy ?? 0)) > radius) {
       setError('أنت خارج نطاق الماكينة؛ اقترب منها لتفعيل التصوير.');
+      return;
+    }
+    try {
+      await onStartWork?.(machine.cardId, draftVisitUuid, locationPayload(currentLocation));
+    } catch (claimError) {
+      setError(claimError.message || 'بدأ مندوب آخر العمل على هذه الماكينة؛ حدّث المسار.');
       return;
     }
     const preparedPhotos = [];
@@ -353,7 +379,7 @@ export default function MachineVisitSheet({ machine, repName = '', reasons, gps,
     setSaving(true);
     try {
       const capturedLocation = await captureLocation?.();
-      const currentLocation = capturedLocation ?? gps;
+      const currentLocation = capturedLocation;
       if (!currentLocation) throw new Error('يلزم تحديد موقع GPS قبل حفظ الزيارة.');
       if (correctionOpen) throw new Error('أغلق بلاغ اختلاف الماكينة أو أرسله قبل متابعة الزيارة.');
       if (!locationLocked || !hasMachinePin) {
@@ -381,6 +407,7 @@ export default function MachineVisitSheet({ machine, repName = '', reasons, gps,
         maintenanceLines.push({ reasonId: Number(countable.id), quantity: qNum, unit: countable.default_unit ?? countable.unit });
       }
 
+      draftSaved.current = true;
       await onSave({
         visitUuid: draftVisitUuid,
         machineCondition: 'working',
@@ -394,8 +421,8 @@ export default function MachineVisitSheet({ machine, repName = '', reasons, gps,
         capturedAt: draftCapturedAt,
         location: locationPayload(currentLocation),
       });
-      draftSaved.current = true;
     } catch (saveError) {
+      draftSaved.current = false;
       setError(saveError.message || 'تعذر حفظ الزيارة محلياً. لم تُحذف الصور؛ حاول مرة أخرى.');
     } finally {
       setSaving(false);

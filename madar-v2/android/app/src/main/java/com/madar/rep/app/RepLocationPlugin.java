@@ -51,6 +51,13 @@ public class RepLocationPlugin extends Plugin {
     private static final float MAX_FALLBACK_ACCURACY_METERS = 250f;
 
     @PluginMethod
+    public void getGpsAvailability(PluginCall call) {
+        LocationManager manager = (LocationManager) getContext().getSystemService(Context.LOCATION_SERVICE);
+        boolean enabled = manager != null && manager.isProviderEnabled(LocationManager.GPS_PROVIDER);
+        call.resolve(new JSObject().put("enabled", enabled).put("fineLocationGranted", hasFineLocationPermission()));
+    }
+
+    @PluginMethod
     public void requestDutyPermissions(PluginCall call) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             requestPermissionForAliases(new String[] { "location", "notifications" }, call, "dutyPermissionsCallback");

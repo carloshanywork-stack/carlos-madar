@@ -777,6 +777,58 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   assert.equal(machineDirectory.body.machines[0].is_location_locked, 1);
   assert.equal(machineDirectory.body.machines[0].area_name, 'محافظة القاهرة - الدقي');
 
+  const firstWorkClaim = await request(`/api/rep/machines/${missingAfterCardId}/start-work`, jsonOptions('POST', {
+    visitUuid, location: visitPayload.location,
+  }), login.cookie);
+  assert.equal(firstWorkClaim.response.status, 200, JSON.stringify(firstWorkClaim.body));
+  assert.equal(firstWorkClaim.body.status, 'in_progress');
+  assert.equal(firstWorkClaim.body.idempotent, false);
+  const duplicateWorkClaim = await request(`/api/rep/machines/${missingAfterCardId}/start-work`, jsonOptions('POST', {
+    visitUuid, location: visitPayload.location,
+  }), login.cookie);
+  assert.equal(duplicateWorkClaim.response.status, 200);
+  assert.equal(duplicateWorkClaim.body.idempotent, true);
+  const otherRepInProgress = await request('/api/rep/today-route?username=rep-all-regions', {}, universalLogin.cookie);
+  const inProgressCard = otherRepInProgress.body.regions.flatMap((region) => region.machines)
+    .find((machine) => machine.cardId === missingAfterCardId);
+  assert.equal(inProgressCard.workStatus, 'in_progress');
+  assert.equal(inProgressCard.canVisit, false);
+  const conflictingWorkClaim = await request(`/api/rep/machines/${missingAfterCardId}/start-work`, jsonOptions('POST', {
+    visitUuid: randomUUID(), location: visitPayload.location,
+  }), universalLogin.cookie);
+  assert.equal(conflictingWorkClaim.response.status, 409);
+  const changedVisitClaim = await request(`/api/rep/machines/${missingAfterCardId}/start-work`, jsonOptions('POST', {
+    visitUuid: randomUUID(), location: visitPayload.location,
+  }), login.cookie);
+  assert.equal(changedVisitClaim.response.status, 409);
+  const wrongRelease = await request(`/api/rep/machines/${missingAfterCardId}/stop-work`, jsonOptions('POST', {
+    visitUuid,
+  }), universalLogin.cookie);
+  assert.equal(wrongRelease.response.status, 200);
+  assert.equal(wrongRelease.body.released, false);
+  const ownerRelease = await request(`/api/rep/machines/${missingAfterCardId}/stop-work`, jsonOptions('POST', {
+    visitUuid,
+  }), login.cookie);
+  assert.equal(ownerRelease.response.status, 200);
+  assert.equal(ownerRelease.body.released, true);
+  const claimAfterClose = await request(`/api/rep/machines/${missingAfterCardId}/start-work`, jsonOptions('POST', {
+    visitUuid, location: visitPayload.location,
+  }), login.cookie);
+  assert.equal(claimAfterClose.response.status, 200);
+  assert.equal(claimAfterClose.body.idempotent, false);
+  db.prepare('UPDATE rep_machine_work_leases SET expires_at_ms = ? WHERE card_id = ?')
+    .run(Date.now() - 1, missingAfterCardId);
+  const expiredWorkRoute = await request('/api/rep/today-route?username=rep-all-regions', {}, universalLogin.cookie);
+  const availableAgain = expiredWorkRoute.body.regions.flatMap((region) => region.machines)
+    .find((machine) => machine.cardId === missingAfterCardId);
+  assert.equal(availableAgain.workStatus, 'available');
+  assert.equal(availableAgain.canVisit, true);
+  const refreshedWorkClaim = await request(`/api/rep/machines/${missingAfterCardId}/start-work`, jsonOptions('POST', {
+    visitUuid, location: visitPayload.location,
+  }), login.cookie);
+  assert.equal(refreshedWorkClaim.response.status, 200);
+  assert.equal(refreshedWorkClaim.body.idempotent, false);
+
   const visitSync = await request('/api/rep/sync-visit', {
     method: 'POST',
     body: buildVisitForm(visitPayload),
@@ -784,6 +836,12 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   assert.equal(visitSync.response.status, 200);
   assert.equal(visitSync.body.success, true);
   assert.equal(visitSync.body.status, 'pending_review');
+  assert.equal(db.prepare('SELECT 1 FROM rep_machine_work_leases WHERE card_id = ?').get(missingAfterCardId), undefined);
+  const otherRepDone = await request('/api/rep/today-route?username=rep-all-regions', {}, universalLogin.cookie);
+  const doneCard = otherRepDone.body.regions.flatMap((region) => region.machines)
+    .find((machine) => machine.cardId === missingAfterCardId);
+  assert.equal(doneCard.workStatus, 'done');
+  assert.equal(doneCard.canVisit, false);
   assert.equal(visitSync.body.visitUuid, visitUuid);
   assert.equal(visitSync.body.maintenanceLines[0].quantity, 3);
   assert.equal(visitSync.body.maintenanceLines[0].unit, 'piece');

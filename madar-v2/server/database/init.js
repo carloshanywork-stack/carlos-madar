@@ -1802,6 +1802,25 @@ export function migrateOperationsPublicationIdentity(database) {
   })();
 }
 
+export function migrateRepMachineWorkLeases(database) {
+  const version = '20261112-rep-machine-work-leases';
+  if (database.prepare('SELECT 1 FROM schema_migrations WHERE version = ?').get(version)) return;
+  database.transaction(() => {
+    database.exec(`
+      CREATE TABLE rep_machine_work_leases (
+        card_id INTEGER PRIMARY KEY REFERENCES maintenance_cards(id) ON DELETE CASCADE,
+        rep_user_id INTEGER NOT NULL REFERENCES users(id),
+        visit_uuid TEXT NOT NULL,
+        expires_at_ms INTEGER NOT NULL,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX idx_rep_machine_work_leases_expiry ON rep_machine_work_leases(expires_at_ms);
+    `);
+    database.prepare('INSERT INTO schema_migrations(version) VALUES (?)').run(version);
+  })();
+}
+
 export function initializeDatabase({ database = db, initialAdminPassword = env.initialAdminPassword } = {}) {
   const schema = readFileSync(schemaPath, 'utf8');
   let adminCreated = false;
@@ -1857,6 +1876,7 @@ export function initializeDatabase({ database = db, initialAdminPassword = env.i
     migrateMaintenancePhysicalPhotoRotations(database);
     migrateDurableOperationsEvents(database);
     migrateOperationsPublicationIdentity(database);
+    migrateRepMachineWorkLeases(database);
     migrateMachineMaintenanceNotes(database);
     migrateMachineNotesHistory(database);
     migrateMaintenanceUnmatchedFolderDuplicates(database);

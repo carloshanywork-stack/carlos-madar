@@ -265,6 +265,11 @@ export async function getNativeGpsLocation() {
   };
 }
 
+export async function getNativeGpsAvailability() {
+  if (!isNativeRepApp()) return null;
+  return RepLocation.getGpsAvailability();
+}
+
 export async function startNativeDutyTracking() {
   if (!isNativeRepApp()) return { active: false, native: false };
   await ensureForegroundLocationPermission();
