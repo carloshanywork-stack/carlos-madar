@@ -1,0 +1,90 @@
+{
+  "database": {
+    "path": "/home/carlos/Desktop/MADAR/madar-v2/data/madar-v2.sqlite",
+    "sizeBytes": 3792896,
+    "mode": "0o666",
+    "journalMode": "wal",
+    "integrity": "ok",
+    "foreignKeyViolationCount": 0,
+    "tableNames": [
+      "audit_log",
+      "client_machines",
+      "clients",
+      "employee_daily_attendance",
+      "employee_payroll_adjustments",
+      "employee_salary_advances",
+      "employee_tool_custody",
+      "employees",
+      "inventory_movements",
+      "invoice_items",
+      "invoices",
+      "machine_correction_rename_operations",
+      "machine_correction_requests",
+      "machine_correction_reviews",
+      "machine_notes_history",
+      "machines",
+      "maintenance_card_deletion_operations",
+      "maintenance_card_photo_rotations",
+      "maintenance_cards",
+      "maintenance_machine_decommission_operations",
+      "maintenance_order_deletion_operations",
+      "maintenance_order_reps",
+      "maintenance_order_technicians",
+      "maintenance_orders",
+      "maintenance_reasons",
+      "maintenance_unmatched_folder_deletion_operations",
+      "maintenance_unmatched_folders",
+      "materials",
+      "operations_events",
+      "payroll_lines",
+      "payroll_runs",
+      "rep_attendance_sync_actions",
+      "rep_duty_sessions",
+      "rep_location_breadcrumbs",
+      "rep_location_points",
+      "rep_machine_location_verifications",
+      "rep_visit_photos",
+      "rep_visit_reviews",
+      "rep_visits",
+      "schema_migrations",
+      "secondary_warehouse_offcuts",
+      "sessions",
+      "settings",
+      "sqlite_sequence",
+      "stock_count_lines",
+      "stock_count_sessions",
+      "treasury_entries",
+      "users",
+      "workshop_design_files",
+      "workshop_order_technicians",
+      "workshop_orders"
+    ],
+    "readOnly": true
+  },
+  "paths": {
+    "storage": {
+      "resolved": "/mnt/madar-storage/madar-storage",
+      "symlink": true,
+      "mode": "0o777",
+      "device": 2049
+    },
+    "madar-v2/data": {
+      "resolved": "/home/carlos/Desktop/MADAR/madar-v2/data",
+      "symlink": false,
+      "mode": "0o777",
+      "device": 2066
+    },
+    "madar-v2/Backups": {
+      "resolved": "/home/carlos/Desktop/MADAR/madar-v2/Backups",
+      "symlink": false,
+      "mode": "0o777",
+      "device": 2066
+    }
+  },
+  "backupFiles": {
+    "directory": "madar-v2/Backups",
+    "count": 3,
+    "offDeviceEvidence": false,
+    "contentsNotRead": true
+  }
+}

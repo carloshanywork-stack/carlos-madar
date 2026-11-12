@@ -1,0 +1,13 @@
+✔ Android application ID, namespace, Capacitor ID, and native packages are aligned (5.30022ms)
+✔ native rep gate, private SQLite queue, and WorkManager upload contract are configured (4.63445ms)
+✔ FileProvider authority is application-specific and only exposes app-owned camera files (0.542938ms)
+✔ representative Android bundle stays local in standalone mode and lazy-loads capture and map modules (1.594406ms)
+✔ release signing credentials are loaded locally and missing signing blocks release builds (0.825409ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 5
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 22.723075

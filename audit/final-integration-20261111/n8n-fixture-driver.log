@@ -1,0 +1,99 @@
+[
+  {
+    "step": "import-n8n-evidence-map",
+    "exitCode": 0,
+    "log": "n8n-runtime-import-n8n-evidence-map.log"
+  },
+  {
+    "step": "import-n8n-operational-verifier",
+    "exitCode": 0,
+    "log": "n8n-runtime-import-n8n-operational-verifier.log"
+  },
+  {
+    "step": "import-n8n-executable-verifier",
+    "exitCode": 0,
+    "log": "n8n-runtime-import-n8n-executable-verifier.log"
+  },
+  {
+    "step": "import-fixture-credential",
+    "exitCode": 0,
+    "log": "n8n-runtime-import-fixture-credential.log"
+  },
+  {
+    "step": "operational-success",
+    "exitCode": 0,
+    "log": "n8n-runtime-operational-success.log"
+  },
+  {
+    "step": "release-success",
+    "exitCode": 0,
+    "log": "n8n-runtime-release-success.log"
+  },
+  {
+    "step": "deliberate-failure",
+    "exitCode": 1,
+    "log": "n8n-runtime-deliberate-failure.log"
+  },
+  {
+    "importedWorkflows": [
+      {
+        "id": "MadarFinalAuditMap20261111",
+        "name": "MADAR final audit \u2014 DOCUMENTATION evidence map",
+        "active": false
+      },
+      {
+        "id": "MadarFinalAuditOps20261111",
+        "name": "MADAR final audit \u2014 fast operational HTTP check",
+        "active": false
+      },
+      {
+        "id": "MadarFinalAuditRelease20261111",
+        "name": "MADAR final audit \u2014 authenticated release evidence verifier",
+        "active": false
+      }
+    ]
+  },
+  {
+    "executions": [
+      {
+        "id": 1,
+        "workflowId": "MadarFinalAuditOps20261111",
+        "status": "success"
+      },
+      {
+        "id": 2,
+        "workflowId": "MadarFinalAuditRelease20261111",
+        "status": "success"
+      },
+      {
+        "id": 3,
+        "workflowId": "MadarFinalAuditRelease20261111",
+        "status": "error"
+      }
+    ]
+  },
+  {
+    "fixtureRequests": [
+      {
+        "path": "/api/health",
+        "authenticated": false
+      },
+      {
+        "path": "/api/health",
+        "authenticated": false
+      },
+      {
+        "path": "/audit/release-result",
+        "authenticated": true
+      },
+      {
+        "path": "/api/health",
+        "authenticated": false
+      },
+      {
+        "path": "/audit/release-result",
+        "authenticated": true
+      }
+    ]
+  }
+]

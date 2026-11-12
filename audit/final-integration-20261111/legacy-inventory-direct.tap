@@ -1,0 +1,13 @@
+✔ rounds fractional consumption up in the main warehouse and records the reusable remainder (3.589839ms)
+✔ uses existing offcuts first and stores any new remainder (0.439222ms)
+✔ can issue from the sub-warehouse without withdrawing a full unit (0.312951ms)
+✔ allows explicit source selection and records main-warehouse rounding as an offcut (0.97151ms)
+✔ rejects insufficient combined stock and fractional main stock (0.531891ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 5
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 17.608409

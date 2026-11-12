@@ -1,0 +1,50 @@
+vite v6.4.5 building for production...
+transforming...
+✓ 124 modules transformed.
+rendering chunks...
+computing gzip size...
+audit-dist/index.html                                       1.43 kB │ gzip:  0.61 kB
+audit-dist/asset-manifest.json                             14.99 kB │ gzip:  1.67 kB
+audit-dist/assets/StaffDirectoryPage-BbBjCgIU.css           0.53 kB │ gzip:  0.27 kB
+audit-dist/assets/AccountingPage-CrUGqSbe.css               5.83 kB │ gzip:  1.45 kB
+audit-dist/assets/MaintenancePage-DZhdPcbB.css              8.04 kB │ gzip:  1.84 kB
+audit-dist/assets/SupervisorRadarPage-D2UHDm1X.css         17.16 kB │ gzip:  3.85 kB
+audit-dist/assets/RepApp-6RRGBJre.css                      42.06 kB │ gzip:  8.86 kB
+audit-dist/assets/index-Cev9dzRS.css                       78.26 kB │ gzip: 14.00 kB
+audit-dist/assets/regions--NgafTtu.js                       0.25 kB │ gzip:  0.23 kB
+audit-dist/assets/Badge-CWoW54zE.js                         0.25 kB │ gzip:  0.22 kB
+audit-dist/assets/Tabs-Cu-GGHV2.js                          0.48 kB │ gzip:  0.33 kB
+audit-dist/assets/Toast-yxDn-aBQ.js                         0.67 kB │ gzip:  0.43 kB
+audit-dist/assets/Checkbox-CEYtWA8Z.js                      0.68 kB │ gzip:  0.31 kB
+audit-dist/assets/web-C1mXobd5.js                           0.99 kB │ gzip:  0.46 kB
+audit-dist/assets/EmployeeCheckboxList-DOP1FGo8.js          1.10 kB │ gzip:  0.68 kB
+audit-dist/assets/web-BV_1IfCk.js                           1.30 kB │ gzip:  0.62 kB
+audit-dist/assets/Modal-BL-mqBjc.js                         1.92 kB │ gzip:  0.75 kB
+audit-dist/assets/web-BOBC8Gl2.js                           2.52 kB │ gzip:  1.00 kB
+audit-dist/assets/Alert-BA8wP73Q.js                         2.72 kB │ gzip:  1.35 kB
+audit-dist/assets/scheduler-vendor-CoSDG3-6.js              4.17 kB │ gzip:  1.81 kB
+audit-dist/assets/OverviewPage-Ba_7GdCS.js                  6.54 kB │ gzip:  2.28 kB
+audit-dist/assets/WorkshopOrderDetail-CODJby0H.js           6.63 kB │ gzip:  2.60 kB
+audit-dist/assets/OfflineRouteMap-CVCMiI42.js               7.00 kB │ gzip:  2.96 kB
+audit-dist/assets/react-vendor-DGbYTHPG.js                  7.90 kB │ gzip:  3.01 kB
+audit-dist/assets/OfflineMapPanel--d_k41IL.js               8.94 kB │ gzip:  3.66 kB
+audit-dist/assets/web-CeAlhThn.js                           8.95 kB │ gzip:  3.08 kB
+audit-dist/assets/MaintenancePptxExportModal-BSCq8Vvx.js    9.93 kB │ gzip:  3.65 kB
+audit-dist/assets/WorkshopPage-CdsLEdeq.js                 10.04 kB │ gzip:  3.59 kB
+audit-dist/assets/ArchivePage-C6t7e6bE.js                  11.06 kB │ gzip:  3.74 kB
+audit-dist/assets/StaffDirectoryPage-DnA76wwW.js           11.39 kB │ gzip:  4.01 kB
+audit-dist/assets/ClientsPage-DV36AN74.js                  13.52 kB │ gzip:  4.06 kB
+audit-dist/assets/offline-store-EhwvxCsp.js                13.68 kB │ gzip:  4.06 kB
+audit-dist/assets/FinancePage-Dj-XsGnl.js                  16.18 kB │ gzip:  4.43 kB
+audit-dist/assets/WarehousePage-Be2YqFAq.js                20.20 kB │ gzip:  5.52 kB
+audit-dist/assets/MachineVisitSheet-DDqolgMZ.js            21.29 kB │ gzip:  7.44 kB
+audit-dist/assets/SettingsPage-CDET_wkj.js                 25.16 kB │ gzip:  7.26 kB
+audit-dist/assets/SupervisorRadarPage-BrZ7lAfH.js          25.87 kB │ gzip:  8.33 kB
+audit-dist/assets/router-vendor-CHc_B4Kd.js                38.64 kB │ gzip: 13.96 kB
+audit-dist/assets/AccountingPage-B5MM1nZd.js               38.88 kB │ gzip: 11.29 kB
+audit-dist/assets/index-DvCYrPb6.js                        48.66 kB │ gzip: 16.47 kB
+audit-dist/assets/MaintenancePage-DWeQNZd2.js              54.61 kB │ gzip: 14.79 kB
+audit-dist/assets/OrderDetail-Dc5XkAJo.js                  80.77 kB │ gzip: 21.54 kB
+audit-dist/assets/RepApp-BFxcoFnj.js                       81.61 kB │ gzip: 24.71 kB
+audit-dist/assets/react-dom-vendor-CtNGUtKY.js            130.45 kB │ gzip: 41.79 kB
+✓ built in 3.31s

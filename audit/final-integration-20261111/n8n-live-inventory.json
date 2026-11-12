@@ -1,0 +1,1612 @@
+{
+  "observedAt": "2026-11-12T05:47:06.932782+00:00",
+  "method": "SQLite mode=ro metadata only; no credentials or execution bodies exported",
+  "database": "/home/carlos/.n8n/database.sqlite",
+  "installedN8nVersion": "2.46.7",
+  "nodeVersion": "24.22.2",
+  "workflows": [
+    {
+      "id": "n3j490U8nTqSRjWK",
+      "name": "MADAR V2 - Field Operations & System Health Monitor",
+      "databaseActive": false,
+      "settings": {},
+      "nodes": [
+        {
+          "name": "بدء الفحص يدويًا",
+          "type": "n8n-nodes-base.manualTrigger",
+          "typeVersion": 1,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "فحص دوري كل 15 دقيقة",
+          "type": "n8n-nodes-base.scheduleTrigger",
+          "typeVersion": 1.2,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": {
+            "interval": [
+              {
+                "field": "minutes",
+                "minutesInterval": 15
+              }
+            ]
+          },
+          "requestTimeout": null
+        },
+        {
+          "name": "فحص سيرفر مدار V2",
+          "type": "n8n-nodes-base.httpRequest",
+          "typeVersion": 4.2,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": 5000
+        },
+        {
+          "name": "هل السيرفر سليم ومستقر؟",
+          "type": "n8n-nodes-base.if",
+          "typeVersion": 2,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "فحص النسخ الاحتياطي وقاعدة البيانات",
+          "type": "n8n-nodes-base.executeCommand",
+          "typeVersion": 1,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "فحص حزم الخرائط وتطبيق المندوب",
+          "type": "n8n-nodes-base.httpRequest",
+          "typeVersion": 4.2,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "تقرير الحالة الموحد",
+          "type": "n8n-nodes-base.code",
+          "typeVersion": 2,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        }
+      ]
+    },
+    {
+      "id": "B3tTpSP74K3zogEW",
+      "name": "MADAR V2 - Field Operations & System Health Monitor",
+      "databaseActive": false,
+      "settings": {
+        "executionOrder": "v1",
+        "binaryMode": "separate"
+      },
+      "nodes": [
+        {
+          "name": "بدء الفحص يدويًا",
+          "type": "n8n-nodes-base.manualTrigger",
+          "typeVersion": 1,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "فحص دوري كل 15 دقيقة",
+          "type": "n8n-nodes-base.scheduleTrigger",
+          "typeVersion": 1.2,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": {
+            "interval": [
+              {
+                "field": "minutes",
+                "minutesInterval": 15
+              }
+            ]
+          },
+          "requestTimeout": null
+        },
+        {
+          "name": "فحص سيرفر مدار V2",
+          "type": "n8n-nodes-base.httpRequest",
+          "typeVersion": 4.2,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": 5000
+        },
+        {
+          "name": "هل السيرفر سليم ومستقر؟",
+          "type": "n8n-nodes-base.if",
+          "typeVersion": 2,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "فحص قاعدة البيانات وقائمة الأعطال",
+          "type": "n8n-nodes-base.httpRequest",
+          "typeVersion": 4.2,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "فحص حزم الخرائط وتطبيق المندوب",
+          "type": "n8n-nodes-base.httpRequest",
+          "typeVersion": 4.2,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "تقرير الحالة الموحد",
+          "type": "n8n-nodes-base.code",
+          "typeVersion": 2,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        }
+      ]
+    },
+    {
+      "id": "3w5dFqu6v9QPvjZr",
+      "name": "MADAR V2 - Field Operations & System Health Monitor (Tailscale)",
+      "databaseActive": false,
+      "settings": {},
+      "nodes": [
+        {
+          "name": "بدء الفحص يدويًا",
+          "type": "n8n-nodes-base.manualTrigger",
+          "typeVersion": 1,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "فحص دوري كل 15 دقيقة",
+          "type": "n8n-nodes-base.scheduleTrigger",
+          "typeVersion": 1.2,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": {
+            "interval": [
+              {
+                "field": "minutes",
+                "minutesInterval": 15
+              }
+            ]
+          },
+          "requestTimeout": null
+        },
+        {
+          "name": "فحص سيرفر مدار V2 عبر Tailscale",
+          "type": "n8n-nodes-base.httpRequest",
+          "typeVersion": 4.2,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": 8000
+        },
+        {
+          "name": "هل السيرفر سليم ومستقر؟",
+          "type": "n8n-nodes-base.if",
+          "typeVersion": 2,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "فحص قاعدة البيانات وقائمة الأعطال",
+          "type": "n8n-nodes-base.httpRequest",
+          "typeVersion": 4.2,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": 8000
+        },
+        {
+          "name": "فحص حزم الخرائط وتطبيق المندوب",
+          "type": "n8n-nodes-base.httpRequest",
+          "typeVersion": 4.2,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": 8000
+        },
+        {
+          "name": "تقرير الحالة الموحد عبر Tailscale",
+          "type": "n8n-nodes-base.code",
+          "typeVersion": 2,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        }
+      ]
+    },
+    {
+      "id": "9kxTdhHAUu4RP0Z2",
+      "name": "MADAR V2 - Field Operations & System Health Monitor (Tailscale)",
+      "databaseActive": false,
+      "settings": {},
+      "nodes": [
+        {
+          "name": "بدء الفحص يدويًا",
+          "type": "n8n-nodes-base.manualTrigger",
+          "typeVersion": 1,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "فحص دوري كل 15 دقيقة",
+          "type": "n8n-nodes-base.scheduleTrigger",
+          "typeVersion": 1.2,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": {
+            "interval": [
+              {
+                "field": "minutes",
+                "minutesInterval": 15
+              }
+            ]
+          },
+          "requestTimeout": null
+        },
+        {
+          "name": "فحص سيرفر مدار V2 عبر Tailscale",
+          "type": "n8n-nodes-base.httpRequest",
+          "typeVersion": 4.2,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": 8000
+        },
+        {
+          "name": "هل السيرفر سليم ومستقر؟",
+          "type": "n8n-nodes-base.if",
+          "typeVersion": 2,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "فحص استجابة واجهة الويب",
+          "type": "n8n-nodes-base.httpRequest",
+          "typeVersion": 4.2,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": 8000
+        },
+        {
+          "name": "تقرير الحالة الموحد عبر Tailscale",
+          "type": "n8n-nodes-base.code",
+          "typeVersion": 2,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        }
+      ]
+    },
+    {
+      "id": "8tXdBeOLnKTLXDt3",
+      "name": "MADAR V2 - Complete Ecosystem Master Flowchart",
+      "databaseActive": false,
+      "settings": {},
+      "nodes": [
+        {
+          "name": "تشغيل فحص النظام الشامل",
+          "type": "n8n-nodes-base.manualTrigger",
+          "typeVersion": 1,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "جدولة كل 30 دقيقة",
+          "type": "n8n-nodes-base.scheduleTrigger",
+          "typeVersion": 1.2,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": {
+            "interval": [
+              {
+                "field": "minutes",
+                "minutesInterval": 30
+              }
+            ]
+          },
+          "requestTimeout": null
+        },
+        {
+          "name": "1. فحص قلب السيرفر والباك إند",
+          "type": "n8n-nodes-base.httpRequest",
+          "typeVersion": 4.2,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": 8000
+        },
+        {
+          "name": "هل قلب السيرفر سليم؟",
+          "type": "n8n-nodes-base.if",
+          "typeVersion": 2,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "2. واجهة الويب ولوحة الإدارة",
+          "type": "n8n-nodes-base.httpRequest",
+          "typeVersion": 4.2,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": 8000
+        },
+        {
+          "name": "3. محرك تطبيق المندوب (com.madar.rep.app)",
+          "type": "n8n-nodes-base.code",
+          "typeVersion": 2,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "4. صيانات المناطق وكروت الماكينات",
+          "type": "n8n-nodes-base.code",
+          "typeVersion": 2,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "التقرير الشامل للمنظومة",
+          "type": "n8n-nodes-base.code",
+          "typeVersion": 2,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        }
+      ]
+    },
+    {
+      "id": "Y2S6eFmdBV1iunhU",
+      "name": "MADAR V2 - Complete Master System Architecture Flow",
+      "databaseActive": false,
+      "settings": {},
+      "nodes": [
+        {
+          "name": "⚡ انطلاق العمليات ودورة النظام",
+          "type": "n8n-nodes-base.manualTrigger",
+          "typeVersion": 1,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "1. السيرفر وشبكة Tailscale المشفرة",
+          "type": "n8n-nodes-base.httpRequest",
+          "typeVersion": 4.2,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": 8000
+        },
+        {
+          "name": "2. العمال والموظفون (الحضور والانصراف)",
+          "type": "n8n-nodes-base.code",
+          "typeVersion": 2,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "3. تطبيق المندوب والزيارة الميدانية",
+          "type": "n8n-nodes-base.code",
+          "typeVersion": 2,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "4. الرفع والمزامنة الخلفية للسيرفر",
+          "type": "n8n-nodes-base.code",
+          "typeVersion": 2,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "5. صيانة المناطق وكروت الماكينات",
+          "type": "n8n-nodes-base.code",
+          "typeVersion": 2,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "6. الورشة والمخزن وقطع الغيار",
+          "type": "n8n-nodes-base.code",
+          "typeVersion": 2,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "7. الحسابات والخزينة النقدية 100%",
+          "type": "n8n-nodes-base.code",
+          "typeVersion": 2,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "8. واجهة الويب ولوحة الإدارة (Live Dashboard)",
+          "type": "n8n-nodes-base.httpRequest",
+          "typeVersion": 4.2,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": 8000
+        },
+        {
+          "name": "9. التقرير الشامل ومصفوفة الربط الكلية",
+          "type": "n8n-nodes-base.code",
+          "typeVersion": 2,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        }
+      ]
+    },
+    {
+      "id": "7ab6c6736abad58c1624513571c7a838",
+      "name": "MADAR V2 - Active CI, API & Storage Health",
+      "databaseActive": true,
+      "settings": {
+        "executionOrder": "v1",
+        "timezone": "Africa/Cairo",
+        "binaryMode": "separate",
+        "timeSavedMode": "fixed",
+        "callerPolicy": "workflowsFromSameOwner",
+        "availableInMCP": false
+      },
+      "nodes": [
+        {
+          "name": "Run manually",
+          "type": "n8n-nodes-base.manualTrigger",
+          "typeVersion": 1,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "Daily at 06:00 Cairo",
+          "type": "n8n-nodes-base.scheduleTrigger",
+          "typeVersion": 1.2,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": {
+            "interval": [
+              {
+                "field": "days",
+                "daysInterval": 1,
+                "triggerAtHour": 6,
+                "triggerAtMinute": 0
+              }
+            ]
+          },
+          "requestTimeout": null
+        },
+        {
+          "name": "Run tests and local health checks",
+          "type": "n8n-nodes-base.executeCommand",
+          "typeVersion": 1,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "Build supervisor report and fail the run on errors",
+          "type": "n8n-nodes-base.code",
+          "typeVersion": 2,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        }
+      ]
+    },
+    {
+      "id": "e65f7b319ba84cb6a2e24071ad0a6b92",
+      "name": "MADAR V2 - Full Lifecycle Architecture & Evidence Map",
+      "databaseActive": false,
+      "settings": {
+        "executionOrder": "v1",
+        "timezone": "Africa/Cairo",
+        "binaryMode": "separate"
+      },
+      "nodes": [
+        {
+          "name": "Run architecture map (manual only)",
+          "type": "n8n-nodes-base.manualTrigger",
+          "typeVersion": 1,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "Static evidence index (no live calls)",
+          "type": "n8n-nodes-base.code",
+          "typeVersion": 2,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "🗺 Architecture map only - wires are lineage, not execution",
+          "type": "n8n-nodes-base.noOp",
+          "typeVersion": 1,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "Static index emitted - diagram nodes are not executed",
+          "type": "n8n-nodes-base.noOp",
+          "typeVersion": 1,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "Read me - evidence legend and boundary",
+          "type": "n8n-nodes-base.stickyNote",
+          "typeVersion": 1,
+          "reachableFromEntry": false,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "Visit status and photo cardinality",
+          "type": "n8n-nodes-base.stickyNote",
+          "typeVersion": 1,
+          "reachableFromEntry": false,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "Evidence corrections to proposed green and yellow labels",
+          "type": "n8n-nodes-base.stickyNote",
+          "typeVersion": 1,
+          "reachableFromEntry": false,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "Open implementation and operational gaps",
+          "type": "n8n-nodes-base.stickyNote",
+          "typeVersion": 1,
+          "reachableFromEntry": false,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "Source and test references",
+          "type": "n8n-nodes-base.stickyNote",
+          "typeVersion": 1,
+          "reachableFromEntry": false,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "🟡 Transport - Tailscale HTTPS plus Funnel",
+          "type": "n8n-nodes-base.noOp",
+          "typeVersion": 1,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "🟢 MADAR V2 Express API boundary",
+          "type": "n8n-nodes-base.noOp",
+          "typeVersion": 1,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "🟢 Rep login - session cookie and Android bearer token",
+          "type": "n8n-nodes-base.noOp",
+          "typeVersion": 1,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "🟢 Assigned route and offline map-pack APIs",
+          "type": "n8n-nodes-base.noOp",
+          "typeVersion": 1,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "🟡 Local route, reason and map caches",
+          "type": "n8n-nodes-base.noOp",
+          "typeVersion": 1,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "🟡 Native GPS duty tracking and mock detection",
+          "type": "n8n-nodes-base.noOp",
+          "typeVersion": 1,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "🟡 Camera - EXIF orientation, portrait and watermark",
+          "type": "n8n-nodes-base.noOp",
+          "typeVersion": 1,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "🟡 Local SQLite queue and WorkManager multipart upload",
+          "type": "n8n-nodes-base.noOp",
+          "typeVersion": 1,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "🟢 POST /api/rep/sync-visit",
+          "type": "n8n-nodes-base.noOp",
+          "typeVersion": 1,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "🟢 UUID plus payload hash idempotency and file staging",
+          "type": "n8n-nodes-base.noOp",
+          "typeVersion": 1,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "🟠 Visit received; supervisor review is pending",
+          "type": "n8n-nodes-base.noOp",
+          "typeVersion": 1,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "🟠 Supervisor QA - approve or request reshoot",
+          "type": "n8n-nodes-base.noOp",
+          "typeVersion": 1,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "🟢 Reshoot branch back to field operations",
+          "type": "n8n-nodes-base.noOp",
+          "typeVersion": 1,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "🟢 Approval commits maintenance card completed",
+          "type": "n8n-nodes-base.noOp",
+          "typeVersion": 1,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "🟢 Visit note history written at successful sync",
+          "type": "n8n-nodes-base.noOp",
+          "typeVersion": 1,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "🟢 Area notes timeline and selective XLSX export",
+          "type": "n8n-nodes-base.noOp",
+          "typeVersion": 1,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "🟢 Sharp-derived viewer, thumbnails and exports",
+          "type": "n8n-nodes-base.noOp",
+          "typeVersion": 1,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "🟢 Lightbox rotation API saves audited angle metadata",
+          "type": "n8n-nodes-base.noOp",
+          "typeVersion": 1,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "🟢 Employee master and linked login identities",
+          "type": "n8n-nodes-base.noOp",
+          "typeVersion": 1,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "🟡 Attendance - Cairo shift, GPS and biometricVerified",
+          "type": "n8n-nodes-base.noOp",
+          "typeVersion": 1,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "🟢 Overtime review and monthly payroll calculation",
+          "type": "n8n-nodes-base.noOp",
+          "typeVersion": 1,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "🟢 Payroll finalization posts treasury expense",
+          "type": "n8n-nodes-base.noOp",
+          "typeVersion": 1,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "🟢 Maintenance orders, cards and rep assignments",
+          "type": "n8n-nodes-base.noOp",
+          "typeVersion": 1,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "🟢 Maintenance petty cash, actuals and archive refund",
+          "type": "n8n-nodes-base.noOp",
+          "typeVersion": 1,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "🟢 Workshop MFG production order and technicians",
+          "type": "n8n-nodes-base.noOp",
+          "typeVersion": 1,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "🟢 Main material or secondary offcut issue to production",
+          "type": "n8n-nodes-base.noOp",
+          "typeVersion": 1,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "🟢 Inventory movements and stock audit",
+          "type": "n8n-nodes-base.noOp",
+          "typeVersion": 1,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "🟢 Ready transition registers reusable offcuts",
+          "type": "n8n-nodes-base.noOp",
+          "typeVersion": 1,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "🟢 Secondary warehouse offcut reuse",
+          "type": "n8n-nodes-base.noOp",
+          "typeVersion": 1,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "🟢 Workshop delivery - paid sales invoice and cash income",
+          "type": "n8n-nodes-base.noOp",
+          "typeVersion": 1,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "🟢 Purchase invoice - stock movement and cash expense",
+          "type": "n8n-nodes-base.noOp",
+          "typeVersion": 1,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "🟢 Treasury cash ledger and Finance/Admin RBAC",
+          "type": "n8n-nodes-base.noOp",
+          "typeVersion": 1,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "🟢 Persistent audit log - Admin-only browsing",
+          "type": "n8n-nodes-base.noOp",
+          "typeVersion": 1,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "🟢 Operations event bus - in-process and volatile",
+          "type": "n8n-nodes-base.noOp",
+          "typeVersion": 1,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "🟢 Rep and supervisor SSE streams",
+          "type": "n8n-nodes-base.noOp",
+          "typeVersion": 1,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "🟢 SQLite database - WAL enabled",
+          "type": "n8n-nodes-base.noOp",
+          "typeVersion": 1,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "🟢 Configured local storage root - Areas and business files",
+          "type": "n8n-nodes-base.noOp",
+          "typeVersion": 1,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "🟢 Daily local snapshot plus storage ZIP backup",
+          "type": "n8n-nodes-base.noOp",
+          "typeVersion": 1,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "🟡 Restore endpoint - temporary integration tests only",
+          "type": "n8n-nodes-base.noOp",
+          "typeVersion": 1,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "🟢 Restored database and files (separate recovery target)",
+          "type": "n8n-nodes-base.noOp",
+          "typeVersion": 1,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "🔴 GAP - no structured ATM module or warehouse serial tracking",
+          "type": "n8n-nodes-base.noOp",
+          "typeVersion": 1,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "🔴 GAP - main-stock whole-unit rounding not evidenced",
+          "type": "n8n-nodes-base.noOp",
+          "typeVersion": 1,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "🟡 LIMIT - no Android field-device verification",
+          "type": "n8n-nodes-base.noOp",
+          "typeVersion": 1,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "🟡 LIMIT - SSE has no durable event replay",
+          "type": "n8n-nodes-base.noOp",
+          "typeVersion": 1,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "🟡 LIMIT - no permanent/off-site backup proof",
+          "type": "n8n-nodes-base.noOp",
+          "typeVersion": 1,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        }
+      ]
+    },
+    {
+      "id": "6dae5a55-b25b-4d9a-9c8f-de5c275036ea",
+      "name": "MADAR V2 - Biometric Fix, Automated Testing & APK Verification Pipeline",
+      "databaseActive": true,
+      "settings": {
+        "executionOrder": "v1"
+      },
+      "nodes": [
+        {
+          "name": "Webhook / Manual Trigger — Start Verification",
+          "type": "n8n-nodes-base.manualTrigger",
+          "typeVersion": 1,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "Java Threading Patch Node — Run Biometric on Main Thread",
+          "type": "n8n-nodes-base.noOp",
+          "typeVersion": 1,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "Gradle Build Node — Compile APK API 36",
+          "type": "n8n-nodes-base.noOp",
+          "typeVersion": 1,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "ADB UI Test Runner — Biometrics + Camera + WorkManager",
+          "type": "n8n-nodes-base.noOp",
+          "typeVersion": 1,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        },
+        {
+          "name": "Consolidated Verification & Release Node — System Ready",
+          "type": "n8n-nodes-base.noOp",
+          "typeVersion": 1,
+          "reachableFromEntry": true,
+          "credentialTypes": [],
+          "retryOnFail": false,
+          "maxTries": null,
+          "onError": null,
+          "schedule": null,
+          "requestTimeout": null
+        }
+      ]
+    }
+  ],
+  "executionMetadata": [
+    {
+      "id": 25,
+      "workflowId": "7ab6c6736abad58c1624513571c7a838",
+      "status": "success",
+      "startedAt": "2026-11-12 04:00:12.076",
+      "stoppedAt": "2026-11-12 04:00:21.000"
+    },
+    {
+      "id": 24,
+      "workflowId": "e65f7b319ba84cb6a2e24071ad0a6b92",
+      "status": "success",
+      "startedAt": "2026-11-10 08:59:45.610",
+      "stoppedAt": "2026-11-10 08:59:46.615"
+    },
+    {
+      "id": 23,
+      "workflowId": "e65f7b319ba84cb6a2e24071ad0a6b92",
+      "status": "success",
+      "startedAt": "2026-11-10 08:59:28.940",
+      "stoppedAt": "2026-11-10 08:59:29.097"
+    },
+    {
+      "id": 22,
+      "workflowId": "e65f7b319ba84cb6a2e24071ad0a6b92",
+      "status": "success",
+      "startedAt": "2026-11-10 08:49:38.871",
+      "stoppedAt": "2026-11-10 08:49:40.152"
+    },
+    {
+      "id": 21,
+      "workflowId": "e65f7b319ba84cb6a2e24071ad0a6b92",
+      "status": "success",
+      "startedAt": "2026-11-10 08:47:00.440",
+      "stoppedAt": "2026-11-10 08:47:01.885"
+    },
+    {
+      "id": 20,
+      "workflowId": "7ab6c6736abad58c1624513571c7a838",
+      "status": "success",
+      "startedAt": "2026-11-10 07:51:49.555",
+      "stoppedAt": "2026-11-10 07:51:56.947"
+    },
+    {
+      "id": 19,
+      "workflowId": "7ab6c6736abad58c1624513571c7a838",
+      "status": "success",
+      "startedAt": "2026-11-10 07:43:17.904",
+      "stoppedAt": "2026-11-10 07:43:25.759"
+    },
+    {
+      "id": 18,
+      "workflowId": "7ab6c6736abad58c1624513571c7a838",
+      "status": "success",
+      "startedAt": "2026-11-10 07:30:55.742",
+      "stoppedAt": "2026-11-10 07:31:03.161"
+    },
+    {
+      "id": 17,
+      "workflowId": "7ab6c6736abad58c1624513571c7a838",
+      "status": "crashed",
+      "startedAt": "2026-11-10 07:25:59.004",
+      "stoppedAt": "2026-11-10 07:34:56.823"
+    },
+    {
+      "id": 16,
+      "workflowId": "Y2S6eFmdBV1iunhU",
+      "status": "success",
+      "startedAt": "2026-11-09 22:06:56.887",
+      "stoppedAt": "2026-11-09 22:06:57.385"
+    },
+    {
+      "id": 15,
+      "workflowId": "8tXdBeOLnKTLXDt3",
+      "status": "success",
+      "startedAt": "2026-11-09 21:58:56.395",
+      "stoppedAt": "2026-11-09 21:58:56.943"
+    },
+    {
+      "id": 14,
+      "workflowId": "9kxTdhHAUu4RP0Z2",
+      "status": "success",
+      "startedAt": "2026-11-09 21:57:52.013",
+      "stoppedAt": "2026-11-09 21:57:52.283"
+    },
+    {
+      "id": 13,
+      "workflowId": "9kxTdhHAUu4RP0Z2",
+      "status": "success",
+      "startedAt": "2026-11-09 21:57:47.097",
+      "stoppedAt": "2026-11-09 21:57:47.274"
+    },
+    {
+      "id": 12,
+      "workflowId": "9kxTdhHAUu4RP0Z2",
+      "status": "error",
+      "startedAt": "2026-11-09 21:57:41.525",
+      "stoppedAt": "2026-11-09 21:57:41.719"
+    },
+    {
+      "id": 11,
+      "workflowId": "9kxTdhHAUu4RP0Z2",
+      "status": "success",
+      "startedAt": "2026-11-09 21:57:36.985",
+      "stoppedAt": "2026-11-09 21:57:37.101"
+    },
+    {
+      "id": 10,
+      "workflowId": "9kxTdhHAUu4RP0Z2",
+      "status": "success",
+      "startedAt": "2026-11-09 21:56:32.914",
+      "stoppedAt": "2026-11-09 21:56:33.279"
+    },
+    {
+      "id": 9,
+      "workflowId": "3w5dFqu6v9QPvjZr",
+      "status": "error",
+      "startedAt": "2026-11-09 21:53:52.153",
+      "stoppedAt": "2026-11-09 21:53:52.415"
+    },
+    {
+      "id": 8,
+      "workflowId": "B3tTpSP74K3zogEW",
+      "status": "success",
+      "startedAt": "2026-11-09 21:51:49.851",
+      "stoppedAt": "2026-11-09 21:51:49.895"
+    },
+    {
+      "id": 7,
+      "workflowId": "B3tTpSP74K3zogEW",
+      "status": "success",
+      "startedAt": "2026-11-09 21:51:48.403",
+      "stoppedAt": "2026-11-09 21:51:48.445"
+    },
+    {
+      "id": 6,
+      "workflowId": "B3tTpSP74K3zogEW",
+      "status": "success",
+      "startedAt": "2026-11-09 21:51:44.585",
+      "stoppedAt": "2026-11-09 21:51:44.774"
+    },
+    {
+      "id": 5,
+      "workflowId": "B3tTpSP74K3zogEW",
+      "status": "success",
+      "startedAt": "2026-11-09 21:51:24.907",
+      "stoppedAt": "2026-11-09 21:51:25.077"
+    },
+    {
+      "id": 4,
+      "workflowId": "B3tTpSP74K3zogEW",
+      "status": "success",
+      "startedAt": "2026-11-09 21:51:21.494",
+      "stoppedAt": "2026-11-09 21:51:21.716"
+    },
+    {
+      "id": 3,
+      "workflowId": "B3tTpSP74K3zogEW",
+      "status": "success",
+      "startedAt": "2026-11-09 21:51:18.548",
+      "stoppedAt": "2026-11-09 21:51:18.618"
+    },
+    {
+      "id": 2,
+      "workflowId": "B3tTpSP74K3zogEW",
+      "status": "success",
+      "startedAt": "2026-11-09 21:51:08.191",
+      "stoppedAt": "2026-11-09 21:51:08.315"
+    }
+  ],
+  "limitations": [
+    "Database active field is configuration, not evidence schedule fired or alert delivered",
+    "Historical execution status does not verify payload/business checks",
+    "Primary observed live PM2 process madar-n8n PID2348 port5678; sandbox process view alone was incomplete"
+  ]
+}

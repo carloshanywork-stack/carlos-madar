@@ -1,0 +1,4 @@
+{"check":"sales identical retry after discarded committed response","firstTreasury":1,"secondTreasury":2,"paid":2000,"remaining":8000,"entries":2,"audits":2,"status":"VERIFIED_FAIL","expectedPaid":1000}
+{"check":"sales stable operation identity contract","httpStatus":400,"message":"Unsupported field: operationId."}
+{"check":"purchase identical retry after discarded committed response","firstTreasury":4,"secondTreasury":5,"paid":2000,"remaining":8000,"entries":2,"audits":2,"status":"VERIFIED_FAIL","expectedPaid":1000}
+{"check":"purchase stable operation identity contract","httpStatus":400,"message":"Unsupported field: operationId."}

@@ -1,0 +1,518 @@
+{
+  "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+  "timezone": "Africa/Cairo",
+  "generatedAt": "2026-11-12T07:33:07.538431+00:00",
+  "scope": "Audit-only deliverables; manifest own digest excluded",
+  "files": [
+    {
+      "filename": "COVERAGE.md",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/COVERAGE.md",
+      "sizeBytes": 14506,
+      "sha256": "ded4c56f31faefb5e8c1ed0dd1bb1ed65dfbe2d30aa1720da8aefd904532eaa9"
+    },
+    {
+      "filename": "DELIVERABLES.md",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/DELIVERABLES.md",
+      "sizeBytes": 21265,
+      "sha256": "b5bf3711bb2e11f900105aceaafff3399b3e80524b736bf1820a7f306ad8fe8c"
+    },
+    {
+      "filename": "FINDINGS.md",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/FINDINGS.md",
+      "sizeBytes": 9664,
+      "sha256": "41c8d4f331d99d95f7e03b80c8854ef61d8f657ecec9c12fbc80ef013cd088d4"
+    },
+    {
+      "filename": "JOURNEYS.md",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/JOURNEYS.md",
+      "sizeBytes": 19872,
+      "sha256": "129a0dfaf8f6e11a65342ad332f393f8c3fa4411ad59cd5e3e8b6d3a2f9389a1"
+    },
+    {
+      "filename": "README.md",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/README.md",
+      "sizeBytes": 15316,
+      "sha256": "4f7322e8dea6463b34db62f0ccb5da92df8cc2d1881f3983c5082429f8ac67e4"
+    },
+    {
+      "filename": "TEST-PLAN.md",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/TEST-PLAN.md",
+      "sizeBytes": 3310,
+      "sha256": "32b0bf47cd0db5988aef86d8550862c8f8640d941660c957e887d858ea5389b3"
+    },
+    {
+      "filename": "TEST-RESULTS.md",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/TEST-RESULTS.md",
+      "sizeBytes": 8588,
+      "sha256": "0ad8b629419852f4fb82f82b3b48d38bc2f54dda73f056e32440adb08cf582ee"
+    },
+    {
+      "filename": "android-connections.json",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/android-connections.json",
+      "sizeBytes": 8889,
+      "sha256": "2a8f3bb8348ff66b53cb33f52d9584591a77435ea7481663cd26a862223a0c86"
+    },
+    {
+      "filename": "android-packaging-direct.tap",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/android-packaging-direct.tap",
+      "sizeBytes": 640,
+      "sha256": "920ed016a41af71e748cbf412984eb5ff3c33889ccc93ed60e9d505b76b17aa7"
+    },
+    {
+      "filename": "android-tests.tap",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/android-tests.tap",
+      "sizeBytes": 421,
+      "sha256": "5a3db5e9ec128e75cb75cae7d96eb9d77a804ab5321499a6794eb48f5921649f"
+    },
+    {
+      "filename": "android.md",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/android.md",
+      "sizeBytes": 12692,
+      "sha256": "e5e74dfac32389d9ca9612c80aa4d7b91b6c8b8ba5bdf4f3a238d599063f7300"
+    },
+    {
+      "filename": "apk-correspondence.json",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/apk-correspondence.json",
+      "sizeBytes": 4310,
+      "sha256": "e01b7506061b2bbbb4d80770e17497d9cba6f67cd8abf3e51f670a282b184a8f"
+    },
+    {
+      "filename": "apk-identity.json",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/apk-identity.json",
+      "sizeBytes": 921,
+      "sha256": "405a55a530a72060bdd63df3a4a1b61673043f22e7c598e21d4aac90463b3fdf"
+    },
+    {
+      "filename": "baseline.json",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/baseline.json",
+      "sizeBytes": 983,
+      "sha256": "931508234ef21299941235ccc1d50e8c6992195bf6de657a19aea9fca71c7e3e"
+    },
+    {
+      "filename": "build-location.json",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/build-location.json",
+      "sizeBytes": 779,
+      "sha256": "64ea70ba1a66dd96d64102caf6ad86842be0f8109fd0211a55079cc6ea224473"
+    },
+    {
+      "filename": "business-attendance-direct.log",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/business-attendance-direct.log",
+      "sizeBytes": 870,
+      "sha256": "12de1025ca524aa9212d0fde062747fc9b73ac9439cf3c41777c15bc9c9e048b"
+    },
+    {
+      "filename": "business-connections.json",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/business-connections.json",
+      "sizeBytes": 5513,
+      "sha256": "6b4fc4060ca771fa215c102a80c11cfc01a2c833058e2312195de31a90b3ac42"
+    },
+    {
+      "filename": "business-direct.tap",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/business-direct.tap",
+      "sizeBytes": 814,
+      "sha256": "3237f68e6ee0dc46edc184c68f04aeb43fe3e8476df999e7c8296b67f53be36b"
+    },
+    {
+      "filename": "business-focused.tap",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/business-focused.tap",
+      "sizeBytes": 1918,
+      "sha256": "3a528d2ca1d3bf15e1a2f883a07e105314a5cc40793ab636dfcefd28e40630c3"
+    },
+    {
+      "filename": "business-full-suite.tap",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/business-full-suite.tap",
+      "sizeBytes": 325910,
+      "sha256": "1842d8440fe558e57a4565e1600ffd94c9f988bb1d57514437afcef6488539d9"
+    },
+    {
+      "filename": "business-migration-direct.log",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/business-migration-direct.log",
+      "sizeBytes": 1253,
+      "sha256": "8a242f2b7a4ede19a9d23395021119470829b4b513b8bbbadd58fa2b975050b8"
+    },
+    {
+      "filename": "business-policy-direct.log",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/business-policy-direct.log",
+      "sizeBytes": 2268,
+      "sha256": "e6dee77bad47ffe39ca85a0ec8174c9c9097fedcc594a1df8b28c600e87f5f69"
+    },
+    {
+      "filename": "business-replay-independent.log",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/business-replay-independent.log",
+      "sizeBytes": 640,
+      "sha256": "3b3c7d3206fc087f66f743dd97dce75482d7d36e2609297c20bc4af31a9e719d"
+    },
+    {
+      "filename": "business-replay-probe.log",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/business-replay-probe.log",
+      "sizeBytes": 640,
+      "sha256": "3b3c7d3206fc087f66f743dd97dce75482d7d36e2609297c20bc4af31a9e719d"
+    },
+    {
+      "filename": "business-replay-probe.mjs",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/business-replay-probe.mjs",
+      "sizeBytes": 2478,
+      "sha256": "081a8c361c568650f1e677a2719bf3fbc124268e5578023b313bd75e646ca3f2"
+    },
+    {
+      "filename": "business-test-plan.md",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/business-test-plan.md",
+      "sizeBytes": 1178,
+      "sha256": "edadd55970053c7bae70156fdaaaa5cbd152e8710cef92808a3c81e4b6c89d7f"
+    },
+    {
+      "filename": "business.md",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/business.md",
+      "sizeBytes": 15930,
+      "sha256": "5f05c84160c706ebbf7d05d24c24956a7f4608adf3bdc0e67f918b1017c94714"
+    },
+    {
+      "filename": "connection-inventory.json",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/connection-inventory.json",
+      "sizeBytes": 31914,
+      "sha256": "a4f874beae60ac540f470d1cbda807d846021ce166b4896578d4e2bdd21c52e6"
+    },
+    {
+      "filename": "coverage-inventory.json",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/coverage-inventory.json",
+      "sizeBytes": 20217,
+      "sha256": "d20e3d45da0a64ad2892050c3fd333612f5c7577d1ad02eda7a8be37c25b3add"
+    },
+    {
+      "filename": "dependency-inventory.json",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/dependency-inventory.json",
+      "sizeBytes": 15506,
+      "sha256": "4b8f6d7095f71aba55f4b31f7c85ff45f652f3c7888c767d92ac7172383b4ada"
+    },
+    {
+      "filename": "deployment-config.json",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/deployment-config.json",
+      "sizeBytes": 2266,
+      "sha256": "16ae5a1f34f15126f5eaf36deda5d5b95ef28eb897aa6987b958f98f895579b9"
+    },
+    {
+      "filename": "events-first-fixture-error.log",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/events-first-fixture-error.log",
+      "sizeBytes": 418,
+      "sha256": "768d678366dc1b0e7d88a3dc7e9c64f074aea116ccc829bfe118b32dbe6d2016"
+    },
+    {
+      "filename": "events-injected-error.log",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/events-injected-error.log",
+      "sizeBytes": 122,
+      "sha256": "4db562bb3e1571c7b0588610150c2cf1d06e97a80c67f91fa807aea7cca4b177"
+    },
+    {
+      "filename": "events-probe.mjs",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/events-probe.mjs",
+      "sizeBytes": 2948,
+      "sha256": "e0c32078af16578f1f5df168e0f8113e1b663960ca5541d151dc08dbfc9d40b7"
+    },
+    {
+      "filename": "events-result.json",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/events-result.json",
+      "sizeBytes": 721,
+      "sha256": "ed9d16ac6711450684e2eb00a04902be728794c6711a876b0183382ec4cdb8a7"
+    },
+    {
+      "filename": "evidence-reference-validation.json",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/evidence-reference-validation.json",
+      "sizeBytes": 133,
+      "sha256": "8b5f3727ca56ed19702c9b2dd1f135870094720686e85245559af09892cd2b20"
+    },
+    {
+      "filename": "findings.json",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/findings.json",
+      "sizeBytes": 14084,
+      "sha256": "59dc2e7aa985f565f11ae012df5ccc0194732a57a517c8d808563426d4c4693a"
+    },
+    {
+      "filename": "flow-engine-tests.tap",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/flow-engine-tests.tap",
+      "sizeBytes": 1183,
+      "sha256": "726d4b7c6c3d9ba4a65e0a5f8d0225e78bf86cdace33eb8595c823412b00ac50"
+    },
+    {
+      "filename": "generate-n8n.py",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/generate-n8n.py",
+      "sizeBytes": 14599,
+      "sha256": "a87887be2c28f086a44e413ac671411723ad5b8cee7497945403254ef4c5d0d5"
+    },
+    {
+      "filename": "gps-independent-result.json",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/gps-independent-result.json",
+      "sizeBytes": 609,
+      "sha256": "c2b3c7eb9fbac984b45273e0fcf0b5631b38fd286b19dc0f0327dde3769fa38a"
+    },
+    {
+      "filename": "gps-repro-result.json",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/gps-repro-result.json",
+      "sizeBytes": 609,
+      "sha256": "c2b3c7eb9fbac984b45273e0fcf0b5631b38fd286b19dc0f0327dde3769fa38a"
+    },
+    {
+      "filename": "gps-repro.mjs",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/gps-repro.mjs",
+      "sizeBytes": 1840,
+      "sha256": "1d0ed03b739ce9015cdb9fdb78c7e2087e8baa175219fcd33c3d06deb2454f34"
+    },
+    {
+      "filename": "http-contract-probe.mjs",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/http-contract-probe.mjs",
+      "sizeBytes": 3292,
+      "sha256": "009f595db4e7a1e39bb32f1d3dbd9cdf39ff1dcbcff2b19cd68b8d12627749fc"
+    },
+    {
+      "filename": "http-contract-result.json",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/http-contract-result.json",
+      "sizeBytes": 1488,
+      "sha256": "7f95af08dccbd65783c2636d8feaddd319bbfaf231b5024b49aed2279930094b"
+    },
+    {
+      "filename": "http-contract.log",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/http-contract.log",
+      "sizeBytes": 2011,
+      "sha256": "95a1278ac4847d6560fcbf08c73c71bc4d117517502674419017da7ea524266c"
+    },
+    {
+      "filename": "isolated-web-build.zip",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/isolated-web-build.zip",
+      "sizeBytes": 305585,
+      "sha256": "e9065d76e678d9ec8e375c007939b9ff5866f42ef59f68e8ecb4af378e87d2df"
+    },
+    {
+      "filename": "legacy-inventory-direct.tap",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/legacy-inventory-direct.tap",
+      "sizeBytes": 554,
+      "sha256": "051e196752d672df8a1d82d05a1be3782924918c43d0c148b6c8d441893e056b"
+    },
+    {
+      "filename": "legacy-migration-direct.tap",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/legacy-migration-direct.tap",
+      "sizeBytes": 424,
+      "sha256": "42e343de02dd2d9abc18f0ea4868af0d60554bb83fc2f4c3b5418c131053f3d9"
+    },
+    {
+      "filename": "legacy-tests.tap",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/legacy-tests.tap",
+      "sizeBytes": 199,
+      "sha256": "1755757759078d6208596c9d9dc334fee27c8f586e06deff628119f36c62842e"
+    },
+    {
+      "filename": "live-http.json",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/live-http.json",
+      "sizeBytes": 684,
+      "sha256": "2da40245d7d82c0479fe5c825523121500eb4e71fbd4c0edc042da7e62182059"
+    },
+    {
+      "filename": "live-processes.json",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/live-processes.json",
+      "sizeBytes": 912,
+      "sha256": "cdad2295fa02e0ad924d2bfa24c76a802e5cea145a89d3f971f828a2d665797f"
+    },
+    {
+      "filename": "n8n-code-contract-tests.cjs",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/n8n-code-contract-tests.cjs",
+      "sizeBytes": 3645,
+      "sha256": "b119152d989da96c3ae1d91badc72894c4f391b5b6d143d0fa7f723723aa8cca"
+    },
+    {
+      "filename": "n8n-code-fixture-results.json",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/n8n-code-fixture-results.json",
+      "sizeBytes": 3770,
+      "sha256": "cee0fb7872ec462cb4e014a54da2665f62f77d64e6b612cb312e23fee2d96f68"
+    },
+    {
+      "filename": "n8n-connections.json",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/n8n-connections.json",
+      "sizeBytes": 5319,
+      "sha256": "6dfa57da39b7dc6953e51692d5c7c9969b45a9cb2822f9cd07edc3343e753851"
+    },
+    {
+      "filename": "n8n-evidence-map.json",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/n8n-evidence-map.json",
+      "sizeBytes": 19147,
+      "sha256": "ef724525b516b6cf3a2378a274f4b272063ef4cf3e6fefdeb5aa24b8b47312ad"
+    },
+    {
+      "filename": "n8n-executable-verifier.json",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/n8n-executable-verifier.json",
+      "sizeBytes": 9524,
+      "sha256": "599a9351025d50aa718f7fe0dc8468a7d8519d73bfc4372acda5bec555b3624a"
+    },
+    {
+      "filename": "n8n-executed-artifact-hashes.json",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/n8n-executed-artifact-hashes.json",
+      "sizeBytes": 1054,
+      "sha256": "626e7d86335c93cc103f65812d53f32ddfa4d8bdb07821ac5cf327092c237bef"
+    },
+    {
+      "filename": "n8n-final-validation.log",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/n8n-final-validation.log",
+      "sizeBytes": 1192,
+      "sha256": "a245f1bb173738fcf6abc862a398ea1f5aacd732fa01b615c9ea8be2ec996552"
+    },
+    {
+      "filename": "n8n-fixture-driver.log",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/n8n-fixture-driver.log",
+      "sizeBytes": 2204,
+      "sha256": "02cec899406f65bba36b56cfaf684b4cc2ee1f4dd8c6c22cbac30d2f06f49075"
+    },
+    {
+      "filename": "n8n-fixture-driver.py",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/n8n-fixture-driver.py",
+      "sizeBytes": 4998,
+      "sha256": "75dfca20aab82c27dd544391102d98dbb409043713596570ad7633345fa4d628"
+    },
+    {
+      "filename": "n8n-live-inventory.json",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/n8n-live-inventory.json",
+      "sizeBytes": 49644,
+      "sha256": "63c4940c773806558af59f7ffabf16f66d4448ec82acccfd2c5a931805961dac"
+    },
+    {
+      "filename": "n8n-operational-verifier.json",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/n8n-operational-verifier.json",
+      "sizeBytes": 4889,
+      "sha256": "b7a2a6e9a7b766e1fa6e964f813a921a71f0c76c123ae81fc57eed60dbdd65c6"
+    },
+    {
+      "filename": "n8n-runtime-deliberate-failure.log",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/n8n-runtime-deliberate-failure.log",
+      "sizeBytes": 11726,
+      "sha256": "72361fbb51034042a1fb9e5569e5ca8b3688b85b529c3cd264ea979718bf8758"
+    },
+    {
+      "filename": "n8n-runtime-import-fixture-credential.log",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/n8n-runtime-import-fixture-credential.log",
+      "sizeBytes": 1,
+      "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+    },
+    {
+      "filename": "n8n-runtime-import-n8n-evidence-map.log",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/n8n-runtime-import-n8n-evidence-map.log",
+      "sizeBytes": 1,
+      "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+    },
+    {
+      "filename": "n8n-runtime-import-n8n-executable-verifier.log",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/n8n-runtime-import-n8n-executable-verifier.log",
+      "sizeBytes": 1,
+      "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+    },
+    {
+      "filename": "n8n-runtime-import-n8n-operational-verifier.log",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/n8n-runtime-import-n8n-operational-verifier.log",
+      "sizeBytes": 1,
+      "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+    },
+    {
+      "filename": "n8n-runtime-operational-success.log",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/n8n-runtime-operational-success.log",
+      "sizeBytes": 1,
+      "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+    },
+    {
+      "filename": "n8n-runtime-release-success.log",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/n8n-runtime-release-success.log",
+      "sizeBytes": 1,
+      "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+    },
+    {
+      "filename": "n8n-runtime-results.json",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/n8n-runtime-results.json",
+      "sizeBytes": 2667,
+      "sha256": "28c86eaf1fab452b14502fd0d1ede31cdeffa9843a68028aaf48bdf1aca530a5"
+    },
+    {
+      "filename": "n8n-scheduled-execution-summary.json",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/n8n-scheduled-execution-summary.json",
+      "sizeBytes": 3396,
+      "sha256": "8f98518e4bae6a1d44264b77a6a89f3fc9a1b75e35bbe1679329888ed761065c"
+    },
+    {
+      "filename": "n8n-static-validation.json",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/n8n-static-validation.json",
+      "sizeBytes": 1326,
+      "sha256": "23fabf5748590104d8a60d1dd84605046ab0da16576a806a168ab0549416a2a8"
+    },
+    {
+      "filename": "n8n.md",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/n8n.md",
+      "sizeBytes": 17924,
+      "sha256": "a470afba20855670107dc66f3f6457dd1818abb58a2d3b80c6c4e169293b9bd7"
+    },
+    {
+      "filename": "offline-gps-direct.tap",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/offline-gps-direct.tap",
+      "sizeBytes": 453,
+      "sha256": "a5200ceb9c6006f9621aeb7637ac785e5b9d23eb0107c15d942f729e6466cc15"
+    },
+    {
+      "filename": "operations-connections.json",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/operations-connections.json",
+      "sizeBytes": 10268,
+      "sha256": "74b7e7c23e1f8a721d393228f6aad7ee48094a28c31d33a46d76cb80e5ce225a"
+    },
+    {
+      "filename": "operations.md",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/operations.md",
+      "sizeBytes": 12660,
+      "sha256": "8b7005f0974d73acfbce21b021dc25b4afa6b727de2b2a432edc21d45f32961e"
+    },
+    {
+      "filename": "output-validation.json",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/output-validation.json",
+      "sizeBytes": 11779,
+      "sha256": "5a2e5cb2d4c5cd03b3f0fca95d9e3101f8f8678794876560070e181189f0b7c6"
+    },
+    {
+      "filename": "quantity-contract-probe.mjs",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/quantity-contract-probe.mjs",
+      "sizeBytes": 1687,
+      "sha256": "e10a47eefdf6633d4875a02c6b7223f0a3da501185d6fceb6a30052ab3413284"
+    },
+    {
+      "filename": "quantity-contract-result.json",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/quantity-contract-result.json",
+      "sizeBytes": 936,
+      "sha256": "04c5436fb18b183688c6399b510b42e128ea67374febb82dbe5fc55fea7a467a"
+    },
+    {
+      "filename": "run-business-suite.sh",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/run-business-suite.sh",
+      "sizeBytes": 836,
+      "sha256": "51eaad716b08ba83e12bf9e6511f07c92bd5a11f90a961f9e32e53df7f14e023"
+    },
+    {
+      "filename": "source-module-inventory.json",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/source-module-inventory.json",
+      "sizeBytes": 188234,
+      "sha256": "e4b3947f7f39f06b6bc0d5f8b6be0b7c16d9639bdd6000f43db6e6a22653f48c"
+    },
+    {
+      "filename": "storage-metadata.json",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/storage-metadata.json",
+      "sizeBytes": 2445,
+      "sha256": "f60f17ba61850846347484a3f35d7dfaca3365c6c4b53535db5c156b26467d87"
+    },
+    {
+      "filename": "v2-suite-summary.json",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/v2-suite-summary.json",
+      "sizeBytes": 573,
+      "sha256": "c5b4dba49461fef7736bd3f6fca541691733dd18bdeb83c324479e5ef06fc111"
+    },
+    {
+      "filename": "validate-n8n.cjs",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/validate-n8n.cjs",
+      "sizeBytes": 3524,
+      "sha256": "e283fce272f831e3bd49da6b6e12591bfd82f81ca648a7633509da3cb828ba43"
+    },
+    {
+      "filename": "web-build.log",
+      "absolutePath": "/home/carlos/Desktop/MADAR/audit/final-integration-20261111/web-build.log",
+      "sizeBytes": 3974,
+      "sha256": "0bde0095807e95dea90362b980167b770da19d643ff40d306387dfe9531f09e6"
+    }
+  ]
+}

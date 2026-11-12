@@ -1,0 +1,22 @@
+TAP version 13
+# Subtest: madar-v2/test/android-packaging.test.js
+ok 1 - madar-v2/test/android-packaging.test.js
+  ---
+  duration_ms: 106.185011
+  type: 'test'
+  ...
+# Subtest: madar-v2/test/offline-gps-store.test.js
+ok 2 - madar-v2/test/offline-gps-store.test.js
+  ---
+  duration_ms: 122.733769
+  type: 'test'
+  ...
+1..2
+# tests 2
+# suites 0
+# pass 2
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 144.647333

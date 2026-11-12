@@ -1,0 +1,251 @@
+{
+  "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+  "findings": [
+    {
+      "finding_id": "BIZ-001",
+      "severity": "HIGH",
+      "classification": "confirmed defect",
+      "expected": "Identical settlement retry must return saved result without duplicate financial effects.",
+      "actual": "Sales and purchase partial retries each produce paid2000 vs1000, two treasury entries/two audits; operationId400.",
+      "source_evidence": [
+        "madar-v2/server/modules/finance/invoices.service.js:290",
+        "madar-v2/server/modules/finance/invoices.service.js:361"
+      ],
+      "reproduction_evidence": "business-replay-independent.log",
+      "smallest_safe_remediation": "Transactional actor-scoped operation ID/content hash and saved response after current authorization.",
+      "required_acceptance_test": "Identical/conflicting/concurrent/response-loss/cross-role replay preserves invoice/treasury/stock/audit counts."
+    },
+    {
+      "finding_id": "BIZ-002",
+      "severity": "HIGH",
+      "classification": "confirmed defect",
+      "expected": "Requested countable maintenance quantities must survive selection/offline queue/approval/analytics/PPTX with provenance.",
+      "actual": "ReasonIDs-only contract/schema; quantity field unsupported.",
+      "source_evidence": [
+        "madar-v2/server/modules/rep/service.js:303",
+        "madar-v2/server/database/init.js:820"
+      ],
+      "reproduction_evidence": "quantity-contract-result.json",
+      "smallest_safe_remediation": "Additive per-visit reason quantities, countability, legacy provenance, audited corrections and downstream aggregation/export.",
+      "required_acceptance_test": "Positive integer validation, distinct historical default1, multiple reasons/quantities through approved records and PPTX."
+    },
+    {
+      "finding_id": "AND-001",
+      "severity": "HIGH",
+      "classification": "confirmed defect",
+      "expected": "Late GPS ingestion must not reopen a closed duty session.",
+      "actual": "Worker always sends onDuty:true; open sessions0\u21921 after closed-session backlog.",
+      "source_evidence": [
+        "madar-v2/android/app/src/main/java/com/madar/rep/app/MadarSyncWorker.java:415",
+        "madar-v2/server/modules/rep/service.js:1277"
+      ],
+      "reproduction_evidence": "gps-independent-result.json",
+      "smallest_safe_remediation": "Separate ingestion from duty transitions and persist originating session association.",
+      "required_acceptance_test": "Closed-session backlog stored/acknowledged without new session/attendance effects."
+    },
+    {
+      "finding_id": "AND-002",
+      "severity": "HIGH",
+      "classification": "confirmed defect",
+      "expected": "Stable GPS identity must reject changed-content reuse and survive installs/accounts.",
+      "actual": "Server does not persist clientPointId/hash; changed coordinate/time under reused ID accepted.",
+      "source_evidence": [
+        "madar-v2/server/modules/rep/service.js:1299"
+      ],
+      "reproduction_evidence": "gps-independent-result.json",
+      "smallest_safe_remediation": "Persist owner-scoped globally stable installation/point identity and canonical hash.",
+      "required_acceptance_test": "Identical replay duplicate; conflicting content rejected; same-time distinct points and cross-install/account handling explicit."
+    },
+    {
+      "finding_id": "AND-003",
+      "severity": "HIGH",
+      "classification": "confirmed defect",
+      "expected": "Distributed release must use approved signing, nondebug configuration and reviewed provenance.",
+      "actual": "Actual fallback APK Android Debug signed, debuggable, disagrees with current generated web assets.",
+      "source_evidence": [
+        "madar-v2/server/config/paths.js:25",
+        "madar-v2/android/app/build.gradle:18"
+      ],
+      "reproduction_evidence": "apk-identity.json;apk-correspondence.json",
+      "smallest_safe_remediation": "Reviewed release process preserving approved certificate and version progression; do not replace during audit.",
+      "required_acceptance_test": "Endpoint bytes/hash/signature/version/URL/source manifest plus pending-preserving device upgrade."
+    },
+    {
+      "finding_id": "AND-004",
+      "severity": "MEDIUM",
+      "classification": "confirmed defect",
+      "expected": "Native-only queued machine actions must appear in recovery UI/export.",
+      "actual": "Only preexisting IDB actions are merged; native-only actions omitted.",
+      "source_evidence": [
+        "madar-v2/client/src/modules/rep/RepApp.jsx:345",
+        "madar-v2/client/src/modules/rep/native-bridges.js:435"
+      ],
+      "reproduction_evidence": "android.md",
+      "smallest_safe_remediation": "Merge native authoritative action records/evidence/ownership into UI and export.",
+      "required_acceptance_test": "Delete fixture IDB mirror; native-only work remains visible/retryable/exportable with files."
+    },
+    {
+      "finding_id": "AND-005",
+      "severity": "MEDIUM",
+      "classification": "confirmed defect",
+      "expected": "Offered recovery export must have a defined safe restore/import path when recovery is claimed.",
+      "actual": "No matching exported-JSON importer found; native backup restoration is different.",
+      "source_evidence": [
+        "madar-v2/client/src/modules/rep/native-bridges.js:368",
+        "madar-v2/client/src/modules/rep/RepApp.jsx:1385"
+      ],
+      "reproduction_evidence": "android.md",
+      "smallest_safe_remediation": "Define versioned owner/hash-validated import or explicitly narrow recovery promise.",
+      "required_acceptance_test": "All queue/file types roundtrip; wrong owner/malformed/duplicate content rejected safely."
+    },
+    {
+      "finding_id": "AND-006",
+      "severity": "MEDIUM",
+      "classification": "unverified",
+      "expected": "Server assurance label must match what client assertion proves.",
+      "actual": "Biometric true boolean stored; weak biometric/device credential allowed; no signed server challenge/attestation.",
+      "source_evidence": [
+        "madar-v2/server/modules/employees/attendance.js:418",
+        "madar-v2/android/app/src/main/java/com/madar/rep/app/RepBiometricAuth.java:60"
+      ],
+      "reproduction_evidence": "android.md",
+      "smallest_safe_remediation": "Label local device-authentication assertion accurately; product decision for stronger proof.",
+      "required_acceptance_test": "Forged boolean is never reported as cryptographic biometric proof; verify PIN-fallback wording/device behavior."
+    },
+    {
+      "finding_id": "AND-007",
+      "severity": "MEDIUM",
+      "classification": "confirmed defect",
+      "expected": "Interrupted local evidence write must preserve/recover old or new committed bytes.",
+      "actual": "Source deletes target before temp rename; no corresponding recovery scan/hash binding found.",
+      "source_evidence": [
+        "madar-v2/android/app/src/main/java/com/madar/rep/app/RepNativeEnginePlugin.java:654",
+        "madar-v2/android/app/src/main/java/com/madar/rep/app/RepLocalStore.java:164"
+      ],
+      "reproduction_evidence": "android.md",
+      "smallest_safe_remediation": "Atomic immutable evidence/manifest with hashes and interrupted-temp recovery.",
+      "required_acceptance_test": "Crash between delete/rename preserves/reconstructs evidence; changed-photo reuse conflicts. Device injection still blocked."
+    },
+    {
+      "finding_id": "OPS-001",
+      "severity": "HIGH",
+      "classification": "unverified",
+      "expected": "Reviewed source, loaded deployment, endpoint artifact and installed app must correspond.",
+      "actual": "No loaded backend SHA or live authenticated APK byte/override proof; no installed-device baseline.",
+      "source_evidence": [
+        "madar-v2/server/app.js:86",
+        "madar-v2/server/config/paths.js:25"
+      ],
+      "reproduction_evidence": "live-http.json;live-processes.json;http-contract-result.json",
+      "smallest_safe_remediation": "Revision-bound build/deployment manifest and authorized endpoint/device evidence.",
+      "required_acceptance_test": "Trace approved SHA\u2192signed build\u2192live bytes\u2192installed version/cert; clean Git status alone insufficient."
+    },
+    {
+      "finding_id": "OPS-002",
+      "severity": "MEDIUM",
+      "classification": "confirmed defect",
+      "expected": "Business event guarantee must survive postcommit append failure.",
+      "actual": "Event persistence error swallowed; actual probe delivers live-only event that cannot replay.",
+      "source_evidence": [
+        "madar-v2/server/modules/operations-events.js:39",
+        "madar-v2/server/modules/rep/routes.js:129"
+      ],
+      "reproduction_evidence": "events-result.json",
+      "smallest_safe_remediation": "Transactional outbox/event append and postcommit fanout.",
+      "required_acceptance_test": "Inject append failure and crash after business commit; durable replay or explicit recovery signal remains."
+    },
+    {
+      "finding_id": "OPS-003",
+      "severity": "MEDIUM",
+      "classification": "unverified",
+      "expected": "Stale event cursor must lead to authoritative state recovery.",
+      "actual": "Retained suffix silently returned; foreground APIs mitigate, complete UI recovery not demonstrated.",
+      "source_evidence": [
+        "madar-v2/server/modules/operations-events.js:24",
+        "madar-v2/client/src/modules/rep/RepApp.jsx:769"
+      ],
+      "reproduction_evidence": "events-result.json",
+      "smallest_safe_remediation": "Explicit cursor floor/reset and full refresh on connect/reconnect.",
+      "required_acceptance_test": "Expire cursor then compare browser/native state to authoritative route/review/attendance APIs."
+    },
+    {
+      "finding_id": "OPS-004",
+      "severity": "MEDIUM",
+      "classification": "confirmed defect",
+      "expected": "Secrets/DB/backups require least-privilege filesystem access.",
+      "actual": "Root .env and DB0666; data/backups/storage0777. V2.env0600.",
+      "source_evidence": [
+        "madar-v2/server/config/env.js:8",
+        "madar-v2/server/database/connection.js:12"
+      ],
+      "reproduction_evidence": "storage-metadata.json;operations.md",
+      "smallest_safe_remediation": "Approved ownership/mode hardening without changing application business data.",
+      "required_acceptance_test": "Unprivileged host user cannot read/write keys, DB or backups while service/restore works."
+    },
+    {
+      "finding_id": "OPS-005",
+      "severity": "HIGH",
+      "classification": "unverified",
+      "expected": "Disaster recovery needs an approved protected off-device archive and drill.",
+      "actual": "Only local ZIP count and isolated current-schema tests; no off-device/real drill evidence.",
+      "source_evidence": [
+        "madar-v2/server/modules/system/backup.js:603"
+      ],
+      "reproduction_evidence": "storage-metadata.json;business.md",
+      "smallest_safe_remediation": "Authorize isolated off-device restore drill and historical-version support matrix.",
+      "required_acceptance_test": "Integrity/FK/history/attachment manifests and failed/interrupted recovery yield usable isolated app."
+    },
+    {
+      "finding_id": "N8N-001",
+      "severity": "HIGH",
+      "classification": "confirmed defect",
+      "expected": "Pipeline labels must not imply patch/build/ADB/release verification without real operations.",
+      "actual": "Manual trigger plus four empty noOp nodes; no execution evidence for this workflow.",
+      "source_evidence": [
+        "audit/final-integration-20261111/n8n-live-inventory.json:1368"
+      ],
+      "reproduction_evidence": "n8n.md",
+      "smallest_safe_remediation": "Relabel documentary or replace only with separately authorized genuine runner integration.",
+      "required_acceptance_test": "A real failed build/device result visibly fails; unavailable device remains blocked. Severity high if treated as release gate."
+    },
+    {
+      "finding_id": "N8N-002",
+      "severity": "MEDIUM",
+      "classification": "outdated documentation/test",
+      "expected": "Architecture labels must reflect audited source.",
+      "actual": "Live map stale on cash settlement, durable event replay and offcuts.",
+      "source_evidence": [
+        "madar-v2/n8n/MADAR_V2_FULL_LIFECYCLE_ARCHITECTURE.json:1"
+      ],
+      "reproduction_evidence": "n8n-live-inventory.json;n8n.md",
+      "smallest_safe_remediation": "Review new evidence map; no live overwrite performed.",
+      "required_acceptance_test": "Map IDs/status/evidence/source SHA match final inventory."
+    },
+    {
+      "finding_id": "N8N-003",
+      "severity": "INFORMATIONAL",
+      "classification": "resolved",
+      "expected": "Schedule operation requires execution evidence beyond active config.",
+      "actual": "Actual scheduled execution25 at06Cairo returned WARN; scope only7operational/subset checks.",
+      "source_evidence": [
+        "audit/final-integration-20261111/n8n-scheduled-execution-summary.json:1"
+      ],
+      "reproduction_evidence": "n8n-scheduled-execution-summary.json",
+      "smallest_safe_remediation": "Keep operational execution evidence separate from CI/release/device acceptance.",
+      "required_acceptance_test": "Retain real execution scope/time/status; no implied alerts or complete release certification."
+    },
+    {
+      "finding_id": "N8N-004",
+      "severity": "INFORMATIONAL",
+      "classification": "proposed capability",
+      "expected": "Optional alerts need an authorized destination and delivered-notification evidence.",
+      "actual": "No configured alert node/credential/destination; execution result alone.",
+      "source_evidence": [
+        "madar-v2/n8n/MADAR_V2_ACTIVE_CI_HEALTH.json:1"
+      ],
+      "reproduction_evidence": "n8n.md",
+      "smallest_safe_remediation": "Product/operations choose and authorize destination; no live modification in audit.",
+      "required_acceptance_test": "Actual delivered notification evidence distinct from workflow success."
+    }
+  ]
+}

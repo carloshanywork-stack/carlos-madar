@@ -1,0 +1,564 @@
+{
+  "madar-v2": {
+    "package": {
+      "name": "madar-v2",
+      "version": "2.0.0",
+      "engines": {
+        "node": ">=22"
+      }
+    },
+    "dependencies": [
+      {
+        "name": "@capacitor/android",
+        "manifest": "^8.6.0",
+        "lockRoot": "^8.6.0",
+        "lockedVersion": "8.6.0",
+        "installedVersion": "8.6.0",
+        "manifestLockAligned": true,
+        "installedMatchesLock": true
+      },
+      {
+        "name": "@capacitor/app",
+        "manifest": "^8.1.2",
+        "lockRoot": "^8.1.2",
+        "lockedVersion": "8.1.2",
+        "installedVersion": "8.1.2",
+        "manifestLockAligned": true,
+        "installedMatchesLock": true
+      },
+      {
+        "name": "@capacitor/camera",
+        "manifest": "^8.2.6",
+        "lockRoot": "^8.2.6",
+        "lockedVersion": "8.2.6",
+        "installedVersion": "8.2.6",
+        "manifestLockAligned": true,
+        "installedMatchesLock": true
+      },
+      {
+        "name": "@capacitor/cli",
+        "manifest": "^8.6.0",
+        "lockRoot": "^8.6.0",
+        "lockedVersion": "8.6.0",
+        "installedVersion": "8.6.0",
+        "manifestLockAligned": true,
+        "installedMatchesLock": true
+      },
+      {
+        "name": "@capacitor/core",
+        "manifest": "^8.6.0",
+        "lockRoot": "^8.6.0",
+        "lockedVersion": "8.6.0",
+        "installedVersion": "8.6.0",
+        "manifestLockAligned": true,
+        "installedMatchesLock": true
+      },
+      {
+        "name": "@capacitor/filesystem",
+        "manifest": "^8.1.5",
+        "lockRoot": "^8.1.5",
+        "lockedVersion": "8.1.5",
+        "installedVersion": "8.1.5",
+        "manifestLockAligned": true,
+        "installedMatchesLock": true
+      },
+      {
+        "name": "@capacitor/geolocation",
+        "manifest": "^8.2.4",
+        "lockRoot": "^8.2.4",
+        "lockedVersion": "8.2.4",
+        "installedVersion": "8.2.4",
+        "manifestLockAligned": true,
+        "installedMatchesLock": true
+      },
+      {
+        "name": "@capacitor/network",
+        "manifest": "^8.0.1",
+        "lockRoot": "^8.0.1",
+        "lockedVersion": "8.0.1",
+        "installedVersion": "8.0.1",
+        "manifestLockAligned": true,
+        "installedMatchesLock": true
+      },
+      {
+        "name": "archiver",
+        "manifest": "^8.0.0",
+        "lockRoot": "^8.0.0",
+        "lockedVersion": "8.0.0",
+        "installedVersion": "8.0.0",
+        "manifestLockAligned": true,
+        "installedMatchesLock": true
+      },
+      {
+        "name": "bcryptjs",
+        "manifest": "^2.4.3",
+        "lockRoot": "^2.4.3",
+        "lockedVersion": "2.4.3",
+        "installedVersion": "2.4.3",
+        "manifestLockAligned": true,
+        "installedMatchesLock": true
+      },
+      {
+        "name": "better-sqlite3",
+        "manifest": "^13.0.0",
+        "lockRoot": "^13.0.0",
+        "lockedVersion": "13.0.3",
+        "installedVersion": "13.0.3",
+        "manifestLockAligned": true,
+        "installedMatchesLock": true
+      },
+      {
+        "name": "cors",
+        "manifest": "^2.8.5",
+        "lockRoot": "^2.8.5",
+        "lockedVersion": "2.8.6",
+        "installedVersion": "2.8.6",
+        "manifestLockAligned": true,
+        "installedMatchesLock": true
+      },
+      {
+        "name": "docx",
+        "manifest": "^9.15.0",
+        "lockRoot": "^9.15.0",
+        "lockedVersion": "9.15.0",
+        "installedVersion": "9.15.0",
+        "manifestLockAligned": true,
+        "installedMatchesLock": true
+      },
+      {
+        "name": "dotenv",
+        "manifest": "^16.4.5",
+        "lockRoot": "^16.4.5",
+        "lockedVersion": "16.6.1",
+        "installedVersion": "16.6.1",
+        "manifestLockAligned": true,
+        "installedMatchesLock": true
+      },
+      {
+        "name": "express",
+        "manifest": "^4.21.0",
+        "lockRoot": "^4.21.0",
+        "lockedVersion": "4.22.3",
+        "installedVersion": "4.22.3",
+        "manifestLockAligned": true,
+        "installedMatchesLock": true
+      },
+      {
+        "name": "express-rate-limit",
+        "manifest": "^8.7.3",
+        "lockRoot": "^8.7.3",
+        "lockedVersion": "8.7.3",
+        "installedVersion": "8.7.3",
+        "manifestLockAligned": true,
+        "installedMatchesLock": true
+      },
+      {
+        "name": "jsonwebtoken",
+        "manifest": "^9.0.2",
+        "lockRoot": "^9.0.2",
+        "lockedVersion": "9.0.3",
+        "installedVersion": "9.0.3",
+        "manifestLockAligned": true,
+        "installedMatchesLock": true
+      },
+      {
+        "name": "multer",
+        "manifest": "^2.5.0",
+        "lockRoot": "^2.5.0",
+        "lockedVersion": "2.5.0",
+        "installedVersion": "2.5.0",
+        "manifestLockAligned": true,
+        "installedMatchesLock": true
+      },
+      {
+        "name": "pptxgenjs",
+        "manifest": "^4.0.1",
+        "lockRoot": "^4.0.1",
+        "lockedVersion": "4.0.1",
+        "installedVersion": "4.0.1",
+        "manifestLockAligned": true,
+        "installedMatchesLock": true
+      },
+      {
+        "name": "sharp",
+        "manifest": "^0.35.5",
+        "lockRoot": "^0.35.5",
+        "lockedVersion": "0.35.5",
+        "installedVersion": "0.35.5",
+        "manifestLockAligned": true,
+        "installedMatchesLock": true
+      },
+      {
+        "name": "xlsx",
+        "manifest": "^0.18.5",
+        "lockRoot": "^0.18.5",
+        "lockedVersion": "0.18.5",
+        "installedVersion": "0.18.5",
+        "manifestLockAligned": true,
+        "installedMatchesLock": true
+      },
+      {
+        "name": "xlsx-js-style",
+        "manifest": "^1.2.0",
+        "lockRoot": "^1.2.0",
+        "lockedVersion": "1.2.0",
+        "installedVersion": "1.2.0",
+        "manifestLockAligned": true,
+        "installedMatchesLock": true
+      },
+      {
+        "name": "yauzl",
+        "manifest": "^3.4.0",
+        "lockRoot": "^3.4.0",
+        "lockedVersion": "3.4.0",
+        "installedVersion": "3.4.0",
+        "manifestLockAligned": true,
+        "installedMatchesLock": true
+      }
+    ]
+  },
+  "madar-v2/client": {
+    "package": {
+      "name": "madar-v2-client",
+      "version": "2.0.0",
+      "engines": null
+    },
+    "dependencies": [
+      {
+        "name": "react",
+        "manifest": "^18.3.1",
+        "lockRoot": "^18.3.1",
+        "lockedVersion": "18.3.1",
+        "installedVersion": "18.3.1",
+        "manifestLockAligned": true,
+        "installedMatchesLock": true
+      },
+      {
+        "name": "react-dom",
+        "manifest": "^18.3.1",
+        "lockRoot": "^18.3.1",
+        "lockedVersion": "18.3.1",
+        "installedVersion": "18.3.1",
+        "manifestLockAligned": true,
+        "installedMatchesLock": true
+      },
+      {
+        "name": "react-router-dom",
+        "manifest": "^7.18.5",
+        "lockRoot": "^7.18.5",
+        "lockedVersion": "7.18.5",
+        "installedVersion": "7.18.5",
+        "manifestLockAligned": true,
+        "installedMatchesLock": true
+      }
+    ]
+  },
+  "system": {
+    "package": {
+      "name": "madar-erp",
+      "version": "1.0.0",
+      "engines": {
+        "node": ">=22"
+      }
+    },
+    "dependencies": [
+      {
+        "name": "@dnd-kit/core",
+        "manifest": "^6.3.1",
+        "lockRoot": "^6.3.1",
+        "lockedVersion": "6.3.1",
+        "installedVersion": "6.3.1",
+        "manifestLockAligned": true,
+        "installedMatchesLock": true
+      },
+      {
+        "name": "@dnd-kit/utilities",
+        "manifest": "^3.2.2",
+        "lockRoot": "^3.2.2",
+        "lockedVersion": "3.2.2",
+        "installedVersion": "3.2.2",
+        "manifestLockAligned": true,
+        "installedMatchesLock": true
+      },
+      {
+        "name": "@tanstack/react-virtual",
+        "manifest": "^3.14.23",
+        "lockRoot": "^3.14.23",
+        "lockedVersion": "3.14.23",
+        "installedVersion": "3.14.23",
+        "manifestLockAligned": true,
+        "installedMatchesLock": true
+      },
+      {
+        "name": "archiver",
+        "manifest": "^8.0.0",
+        "lockRoot": "^8.0.0",
+        "lockedVersion": "8.0.0",
+        "installedVersion": "8.0.0",
+        "manifestLockAligned": true,
+        "installedMatchesLock": true
+      },
+      {
+        "name": "bcryptjs",
+        "manifest": "^2.4.3",
+        "lockRoot": "^2.4.3",
+        "lockedVersion": "2.4.3",
+        "installedVersion": "2.4.3",
+        "manifestLockAligned": true,
+        "installedMatchesLock": true
+      },
+      {
+        "name": "better-sqlite3",
+        "manifest": "^13.0.3",
+        "lockRoot": "^13.0.3",
+        "lockedVersion": "13.0.3",
+        "installedVersion": "13.0.3",
+        "manifestLockAligned": true,
+        "installedMatchesLock": true
+      },
+      {
+        "name": "chokidar",
+        "manifest": "^4.0.3",
+        "lockRoot": "^4.0.3",
+        "lockedVersion": "4.0.3",
+        "installedVersion": "4.0.3",
+        "manifestLockAligned": true,
+        "installedMatchesLock": true
+      },
+      {
+        "name": "compression",
+        "manifest": "^1.8.0",
+        "lockRoot": "^1.8.0",
+        "lockedVersion": "1.8.2",
+        "installedVersion": "1.8.2",
+        "manifestLockAligned": true,
+        "installedMatchesLock": true
+      },
+      {
+        "name": "csv-parse",
+        "manifest": "^7.0.3",
+        "lockRoot": "^7.0.3",
+        "lockedVersion": "7.0.3",
+        "installedVersion": "7.0.3",
+        "manifestLockAligned": true,
+        "installedMatchesLock": true
+      },
+      {
+        "name": "docx",
+        "manifest": "^9.15.0",
+        "lockRoot": "^9.15.0",
+        "lockedVersion": "9.15.0",
+        "installedVersion": "9.15.0",
+        "manifestLockAligned": true,
+        "installedMatchesLock": true
+      },
+      {
+        "name": "dotenv",
+        "manifest": "^16.4.7",
+        "lockRoot": "^16.4.7",
+        "lockedVersion": "16.6.1",
+        "installedVersion": "16.6.1",
+        "manifestLockAligned": true,
+        "installedMatchesLock": true
+      },
+      {
+        "name": "exifr",
+        "manifest": "^7.1.3",
+        "lockRoot": "^7.1.3",
+        "lockedVersion": "7.1.3",
+        "installedVersion": "7.1.3",
+        "manifestLockAligned": true,
+        "installedMatchesLock": true
+      },
+      {
+        "name": "express",
+        "manifest": "^4.21.2",
+        "lockRoot": "^4.21.2",
+        "lockedVersion": "4.22.3",
+        "installedVersion": "4.22.3",
+        "manifestLockAligned": true,
+        "installedMatchesLock": true
+      },
+      {
+        "name": "express-rate-limit",
+        "manifest": "^8.7.1",
+        "lockRoot": "^8.7.1",
+        "lockedVersion": "8.7.1",
+        "installedVersion": "8.7.1",
+        "manifestLockAligned": true,
+        "installedMatchesLock": true
+      },
+      {
+        "name": "fs-extra",
+        "manifest": "^11.2.0",
+        "lockRoot": "^11.2.0",
+        "lockedVersion": "11.4.1",
+        "installedVersion": "11.4.1",
+        "manifestLockAligned": true,
+        "installedMatchesLock": true
+      },
+      {
+        "name": "helmet",
+        "manifest": "^8.0.0",
+        "lockRoot": "^8.0.0",
+        "lockedVersion": "8.3.0",
+        "installedVersion": "8.3.0",
+        "manifestLockAligned": true,
+        "installedMatchesLock": true
+      },
+      {
+        "name": "jsonwebtoken",
+        "manifest": "^9.0.3",
+        "lockRoot": "^9.0.3",
+        "lockedVersion": "9.0.3",
+        "installedVersion": "9.0.3",
+        "manifestLockAligned": true,
+        "installedMatchesLock": true
+      },
+      {
+        "name": "lucide-react",
+        "manifest": "^0.468.0",
+        "lockRoot": "^0.468.0",
+        "lockedVersion": "0.468.0",
+        "installedVersion": "0.468.0",
+        "manifestLockAligned": true,
+        "installedMatchesLock": true
+      },
+      {
+        "name": "multer",
+        "manifest": "^2.5.0",
+        "lockRoot": "^2.5.0",
+        "lockedVersion": "2.5.0",
+        "installedVersion": "2.5.0",
+        "manifestLockAligned": true,
+        "installedMatchesLock": true
+      },
+      {
+        "name": "node-cron",
+        "manifest": "^4.6.0",
+        "lockRoot": "^4.6.0",
+        "lockedVersion": "4.6.0",
+        "installedVersion": "4.6.0",
+        "manifestLockAligned": true,
+        "installedMatchesLock": true
+      },
+      {
+        "name": "pdfkit",
+        "manifest": "^0.20.2",
+        "lockRoot": "^0.20.2",
+        "lockedVersion": "0.20.2",
+        "installedVersion": "0.20.2",
+        "manifestLockAligned": true,
+        "installedMatchesLock": true
+      },
+      {
+        "name": "pptxgenjs",
+        "manifest": "^3.12.0",
+        "lockRoot": "^3.12.0",
+        "lockedVersion": "3.12.0",
+        "installedVersion": "3.12.0",
+        "manifestLockAligned": true,
+        "installedMatchesLock": true
+      },
+      {
+        "name": "react",
+        "manifest": "^18.3.1",
+        "lockRoot": "^18.3.1",
+        "lockedVersion": "18.3.1",
+        "installedVersion": "18.3.1",
+        "manifestLockAligned": true,
+        "installedMatchesLock": true
+      },
+      {
+        "name": "react-dom",
+        "manifest": "^18.3.1",
+        "lockRoot": "^18.3.1",
+        "lockedVersion": "18.3.1",
+        "installedVersion": "18.3.1",
+        "manifestLockAligned": true,
+        "installedMatchesLock": true
+      },
+      {
+        "name": "react-router-dom",
+        "manifest": "^6.30.6",
+        "lockRoot": "^6.30.6",
+        "lockedVersion": "6.30.6",
+        "installedVersion": "6.30.6",
+        "manifestLockAligned": true,
+        "installedMatchesLock": true
+      },
+      {
+        "name": "sequelize",
+        "manifest": "^6.37.8",
+        "lockRoot": "^6.37.8",
+        "lockedVersion": "6.37.8",
+        "installedVersion": "6.37.8",
+        "manifestLockAligned": true,
+        "installedMatchesLock": true
+      },
+      {
+        "name": "sharp",
+        "manifest": "^0.35.5",
+        "lockRoot": "^0.35.5",
+        "lockedVersion": "0.35.5",
+        "installedVersion": "0.35.5",
+        "manifestLockAligned": true,
+        "installedMatchesLock": true
+      },
+      {
+        "name": "socket.io",
+        "manifest": "^4.8.4",
+        "lockRoot": "^4.8.4",
+        "lockedVersion": "4.8.4",
+        "installedVersion": "4.8.4",
+        "manifestLockAligned": true,
+        "installedMatchesLock": true
+      },
+      {
+        "name": "socket.io-client",
+        "manifest": "^4.8.4",
+        "lockRoot": "^4.8.4",
+        "lockedVersion": "4.8.4",
+        "installedVersion": "4.8.4",
+        "manifestLockAligned": true,
+        "installedMatchesLock": true
+      },
+      {
+        "name": "sqlite3",
+        "manifest": "^6.0.1",
+        "lockRoot": "^6.0.1",
+        "lockedVersion": "6.0.1",
+        "installedVersion": "6.0.1",
+        "manifestLockAligned": true,
+        "installedMatchesLock": true
+      },
+      {
+        "name": "xlsx",
+        "manifest": "^0.18.5",
+        "lockRoot": "^0.18.5",
+        "lockedVersion": "0.18.5",
+        "installedVersion": "0.18.5",
+        "manifestLockAligned": true,
+        "installedMatchesLock": true
+      },
+      {
+        "name": "xlsx-populate",
+        "manifest": "^1.21.0",
+        "lockRoot": "^1.21.0",
+        "lockedVersion": "1.21.0",
+        "installedVersion": "1.21.0",
+        "manifestLockAligned": true,
+        "installedMatchesLock": true
+      },
+      {
+        "name": "yauzl",
+        "manifest": "^3.4.0",
+        "lockRoot": "^3.4.0",
+        "lockedVersion": "3.4.0",
+        "installedVersion": "3.4.0",
+        "manifestLockAligned": true,
+        "installedMatchesLock": true
+      }
+    ]
+  }
+}

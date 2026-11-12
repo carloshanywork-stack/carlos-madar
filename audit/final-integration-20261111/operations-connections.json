@@ -1,0 +1,256 @@
+[
+  {
+    "connection_id": "O-01",
+    "subsystem": "operations",
+    "producer": "running API",
+    "consumer": "read-only localhost probe",
+    "interface": "GET /api/health",
+    "source_evidence": "madar-v2/server/app.js:86",
+    "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "verification_method": "live HTTP",
+    "last_verification_time": "2026-11-12T05:42:30.717980+00:00",
+    "status": "VERIFIED_PASS",
+    "failure_or_limitation": "Health only; no DB readiness or loaded commit claim",
+    "relevant_test_ids": [
+      "live-http"
+    ],
+    "relevant_finding_ids": []
+  },
+  {
+    "connection_id": "O-02",
+    "subsystem": "web release",
+    "producer": "client/dist",
+    "consumer": "running HTTP server",
+    "interface": "GET / and /asset-manifest.json",
+    "source_evidence": "madar-v2/server/app.js:163",
+    "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "verification_method": "HTTP SHA256 vs disk",
+    "last_verification_time": "2026-11-12T05:42:30.717980+00:00",
+    "status": "VERIFIED_PASS",
+    "failure_or_limitation": "Index matches disk; complete loaded source SHA and full asset release provenance not established",
+    "relevant_test_ids": [
+      "live-http"
+    ],
+    "relevant_finding_ids": [
+      "OPS-001"
+    ]
+  },
+  {
+    "connection_id": "O-03",
+    "subsystem": "build",
+    "producer": "audited client source copy",
+    "consumer": "isolated generated assets",
+    "interface": "Vite6.4.5 build --configLoader native",
+    "source_evidence": "madar-v2/client/vite.config.js:19",
+    "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "verification_method": "isolated build, existing dependencies",
+    "last_verification_time": "2026-11-12T05:42:30.717980+00:00",
+    "status": "VERIFIED_PASS",
+    "failure_or_limitation": "Does not establish signed APK or deployed-source correspondence",
+    "relevant_test_ids": [
+      "web-build"
+    ],
+    "relevant_finding_ids": []
+  },
+  {
+    "connection_id": "O-04",
+    "subsystem": "events",
+    "producer": "business service commit",
+    "consumer": "SQLite events then live fanout",
+    "interface": "publishOperationsEvent",
+    "source_evidence": "madar-v2/server/modules/operations-events.js:39;madar-v2/server/modules/rep/routes.js:129",
+    "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "verification_method": "source plus actual SQLite injected event write failure",
+    "last_verification_time": "2026-11-12T05:42:30.717980+00:00",
+    "status": "VERIFIED_FAIL",
+    "failure_or_limitation": "Business commit and event append are separate; persistence failure swallowed, live event cannot replay",
+    "relevant_test_ids": [
+      "EVT-TEST-02"
+    ],
+    "relevant_finding_ids": [
+      "OPS-002"
+    ]
+  },
+  {
+    "connection_id": "O-05",
+    "subsystem": "events",
+    "producer": "retained SQLite event log",
+    "consumer": "SSE receiving clients",
+    "interface": "Last-Event-ID cursor",
+    "source_evidence": "madar-v2/server/modules/operations-events.js:24;madar-v2/server/modules/rep/routes.js:83;madar-v2/client/src/modules/rep/RepApp.jsx:769",
+    "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "verification_method": "stale-cursor SQLite probe and source tracing",
+    "last_verification_time": "2026-11-12T05:42:30.717980+00:00",
+    "status": "IMPLEMENTED_NOT_VERIFIED",
+    "failure_or_limitation": "Retained suffix has no stale-cursor reset; foreground periodic APIs mitigate. Full reconnect browser/device acceptance absent.",
+    "relevant_test_ids": [
+      "EVT-TEST-01"
+    ],
+    "relevant_finding_ids": [
+      "OPS-003"
+    ]
+  },
+  {
+    "connection_id": "O-06",
+    "subsystem": "storage",
+    "producer": "production SQLite",
+    "consumer": "read-only integrity inspector",
+    "interface": "PRAGMA integrity_check/foreign_key_check",
+    "source_evidence": "madar-v2/server/database/connection.js:6",
+    "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "verification_method": "read-only real database",
+    "last_verification_time": "2026-11-12T05:42:30.717980+00:00",
+    "status": "VERIFIED_PASS",
+    "failure_or_limitation": "Snapshot only; not backup consistency or restore acceptance",
+    "relevant_test_ids": [
+      "storage-metadata"
+    ],
+    "relevant_finding_ids": []
+  },
+  {
+    "connection_id": "O-07",
+    "subsystem": "recovery",
+    "producer": "local ZIP backups",
+    "consumer": "off-device protected storage/restore drill",
+    "interface": "backup transport and restore",
+    "source_evidence": "madar-v2/server/modules/system/backup.js:1",
+    "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "verification_method": "source and filesystem metadata",
+    "last_verification_time": "2026-11-12T05:42:30.717980+00:00",
+    "status": "BLOCKED_PREREQUISITE",
+    "failure_or_limitation": "No authorized off-device archive or production restore-drill evidence supplied",
+    "relevant_test_ids": [],
+    "relevant_finding_ids": [
+      "OPS-005"
+    ]
+  },
+  {
+    "connection_id": "O-08",
+    "subsystem": "APK HTTP",
+    "producer": "source-selected APK file",
+    "consumer": "authenticated admin/rep download",
+    "interface": "GET /download/apk",
+    "source_evidence": "madar-v2/server/app.js:90;madar-v2/server/config/paths.js:25",
+    "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "verification_method": "actual HTTP fixture temporary DB; distributed file hash",
+    "last_verification_time": "2026-11-12T05:42:30.717980+00:00",
+    "status": "VERIFIED_PASS",
+    "failure_or_limitation": "Source default selects madar-rep.apk; live authenticated download bytes and startup override unverified",
+    "relevant_test_ids": [
+      "HTTP-01",
+      "HTTP-02",
+      "HTTP-03",
+      "HTTP-04"
+    ],
+    "relevant_finding_ids": [
+      "AND-003",
+      "OPS-001"
+    ]
+  },
+  {
+    "connection_id": "O-09",
+    "subsystem": "auth",
+    "producer": "temporary authenticated users",
+    "consumer": "protected API/logout/session expiry",
+    "interface": "Bearer session plus DB sessions",
+    "source_evidence": "madar-v2/server/modules/auth/service.js:212;madar-v2/server/app.js:142",
+    "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "verification_method": "isolated real HTTP",
+    "last_verification_time": "2026-11-12T05:42:30.717980+00:00",
+    "status": "VERIFIED_PASS",
+    "failure_or_limitation": "Nine focused HTTP checks; not exhaustive RBAC/device switching",
+    "relevant_test_ids": [
+      "HTTP-05",
+      "HTTP-06",
+      "HTTP-07",
+      "HTTP-08",
+      "HTTP-09"
+    ],
+    "relevant_finding_ids": []
+  },
+  {
+    "connection_id": "O-10",
+    "subsystem": "legacy warehouse",
+    "producer": "whole-unit/offcut inputs",
+    "consumer": "pure stock arithmetic",
+    "interface": "inventory module",
+    "source_evidence": "system/src/inventory.js:1",
+    "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "verification_method": "five direct Node behavioral tests",
+    "last_verification_time": "2026-11-12T05:42:30.717980+00:00",
+    "status": "VERIFIED_PASS",
+    "failure_or_limitation": "Pure arithmetic only, not live legacy instance",
+    "relevant_test_ids": [
+      "legacy-inventory-direct"
+    ],
+    "relevant_finding_ids": []
+  },
+  {
+    "connection_id": "O-11",
+    "subsystem": "legacy migration",
+    "producer": "historical fixture schema",
+    "consumer": "migrated SQLite",
+    "interface": "additive migration module",
+    "source_evidence": "system/src/db.js:1",
+    "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "verification_method": "three temporary DB tests",
+    "last_verification_time": "2026-11-12T05:42:30.717980+00:00",
+    "status": "VERIFIED_PASS",
+    "failure_or_limitation": "Specific historical fixtures only, not all possible historical schemas",
+    "relevant_test_ids": [
+      "legacy-migration-direct"
+    ],
+    "relevant_finding_ids": []
+  },
+  {
+    "connection_id": "O-12",
+    "subsystem": "Madar Flow engine",
+    "producer": "template DAG and loopback HTTP fixtures",
+    "consumer": "engine result",
+    "interface": "manual/webhook/schedule/HTTP/IF/merge/retry/error",
+    "source_evidence": "madar-flow/packages/engine/src/nodes/registry.ts:20",
+    "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "verification_method": "14 engine/template tests",
+    "last_verification_time": "2026-11-12T05:42:30.717980+00:00",
+    "status": "VERIFIED_PASS",
+    "failure_or_limitation": "Not production Postgres/Valkey/worker/scheduler acceptance; no MADAR business transaction integration proven",
+    "relevant_test_ids": [
+      "flow-engine-tests"
+    ],
+    "relevant_finding_ids": []
+  },
+  {
+    "connection_id": "O-13",
+    "subsystem": "Madar Flow platform",
+    "producer": "API transaction/outbox",
+    "consumer": "BullMQ worker and scheduler",
+    "interface": "PostgreSQL/Valkey",
+    "source_evidence": "madar-flow/apps/api/src/lib/outbox.ts:12;madar-flow/apps/worker/src/runner.ts:1;madar-flow/apps/scheduler/src/index.ts:1",
+    "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "verification_method": "source inspection",
+    "last_verification_time": "2026-11-12T05:42:30.717980+00:00",
+    "status": "IMPLEMENTED_NOT_VERIFIED",
+    "failure_or_limitation": "Isolated PostgreSQL/Valkey prerequisite unavailable; no live deployment identity established",
+    "relevant_test_ids": [],
+    "relevant_finding_ids": []
+  },
+  {
+    "connection_id": "O-14",
+    "subsystem": "configuration protection",
+    "producer": "root .env/database/backups",
+    "consumer": "host local file access",
+    "interface": "Unix mode bits",
+    "source_evidence": "madar-v2/server/config/env.js:8;madar-v2/server/database/connection.js:12",
+    "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "verification_method": "actual stat metadata",
+    "last_verification_time": "2026-11-12T05:42:30.717980+00:00",
+    "status": "VERIFIED_FAIL",
+    "failure_or_limitation": "root .env and DB0666; directories0777; local confidentiality/integrity protections insufficient",
+    "relevant_test_ids": [
+      "storage-metadata"
+    ],
+    "relevant_finding_ids": [
+      "OPS-004"
+    ]
+  }
+]

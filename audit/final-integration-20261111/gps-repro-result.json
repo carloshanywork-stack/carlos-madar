@@ -1,0 +1,34 @@
+{
+  "isolated": true,
+  "first": [
+    {
+      "clientPointId": "fixed-id",
+      "status": "accepted",
+      "index": 0
+    }
+  ],
+  "changedIdentifier": [
+    {
+      "clientPointId": "fixed-id",
+      "status": "accepted",
+      "index": 0
+    }
+  ],
+  "openBeforeClosedUpload": 0,
+  "closedUpload": {
+    "onDuty": true,
+    "acceptedPoints": 0,
+    "duplicatePoints": 1,
+    "rejectedPoints": 0,
+    "points": [
+      {
+        "clientPointId": "late-id",
+        "status": "duplicate",
+        "index": 0
+      }
+    ],
+    "locationResult": null,
+    "sessionId": 2
+  },
+  "openAfterClosedUpload": 1
+}

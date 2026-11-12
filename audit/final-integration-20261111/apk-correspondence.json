@@ -1,0 +1,91 @@
+{
+  "client/dist": {
+    "apkFiles": 51,
+    "missing": [
+      "madar-v2/client/dist/assets/AccountingPage-C_dlUm-b.css",
+      "madar-v2/client/dist/assets/OfflineRouteMap-DfariaP5.js",
+      "madar-v2/client/dist/assets/SupervisorRadarPage-Bqc8LC5T.css",
+      "madar-v2/client/dist/assets/index-D0MGBho7.css",
+      "madar-v2/client/dist/assets/offline-store-CU3jRgGX.js",
+      "madar-v2/client/dist/cordova.js",
+      "madar-v2/client/dist/cordova_plugins.js",
+      "madar-v2/client/dist/assets/AccountingPage-CFMkVU5U.js",
+      "madar-v2/client/dist/assets/Alert-B4-xJPer.js",
+      "madar-v2/client/dist/assets/ArchivePage-CqkgO_uN.js",
+      "madar-v2/client/dist/assets/Badge-CqJ1Qn85.js",
+      "madar-v2/client/dist/assets/ClientsPage-CfiL4c1S.js",
+      "madar-v2/client/dist/assets/EmployeeCheckboxList-UC7v3995.js",
+      "madar-v2/client/dist/assets/FinancePage-DHG8sHjU.js",
+      "madar-v2/client/dist/assets/MachineVisitSheet-Q3eOYvgn.js",
+      "madar-v2/client/dist/assets/MaintenancePage-Bp0lO2Rh.js",
+      "madar-v2/client/dist/assets/MaintenancePptxExportModal-Bhcho2lt.js",
+      "madar-v2/client/dist/assets/Modal-CZ4mKenT.js",
+      "madar-v2/client/dist/assets/OfflineMapPanel-CkYy2Q-E.js",
+      "madar-v2/client/dist/assets/OrderDetail-BBCXJ4eI.js",
+      "madar-v2/client/dist/assets/OverviewPage-BfAb6Nv6.js",
+      "madar-v2/client/dist/assets/RepApp-DYyw1meA.js",
+      "madar-v2/client/dist/assets/SettingsPage-DcsTE32J.js",
+      "madar-v2/client/dist/assets/StaffDirectoryPage-DOqQK0HO.js",
+      "madar-v2/client/dist/assets/SupervisorRadarPage-BTG-1TUa.js",
+      "madar-v2/client/dist/assets/Toast-VnKJpAA9.js",
+      "madar-v2/client/dist/assets/WarehousePage-khVak2mV.js",
+      "madar-v2/client/dist/assets/WorkshopOrderDetail-B-VeENh4.js",
+      "madar-v2/client/dist/assets/WorkshopPage-DH_lYajN.js",
+      "madar-v2/client/dist/assets/index-Dj9YZFTy.js",
+      "madar-v2/client/dist/assets/web-BAxpntSi.js",
+      "madar-v2/client/dist/assets/web-Bajeu6pX.js",
+      "madar-v2/client/dist/assets/web-CQogoFP2.js",
+      "madar-v2/client/dist/assets/web-D9pF1K6G.js"
+    ],
+    "mismatch": [
+      "madar-v2/client/dist/asset-manifest.json",
+      "madar-v2/client/dist/index.html"
+    ]
+  },
+  "public/rep": {
+    "apkFiles": 51,
+    "missing": [
+      "madar-v2/public/rep/cordova.js",
+      "madar-v2/public/rep/cordova_plugins.js",
+      "madar-v2/public/rep/assets/AccountingPage-CFMkVU5U.js",
+      "madar-v2/public/rep/assets/Alert-B4-xJPer.js",
+      "madar-v2/public/rep/assets/ArchivePage-CqkgO_uN.js",
+      "madar-v2/public/rep/assets/Badge-CqJ1Qn85.js",
+      "madar-v2/public/rep/assets/ClientsPage-CfiL4c1S.js",
+      "madar-v2/public/rep/assets/EmployeeCheckboxList-UC7v3995.js",
+      "madar-v2/public/rep/assets/FinancePage-DHG8sHjU.js",
+      "madar-v2/public/rep/assets/MachineVisitSheet-Q3eOYvgn.js",
+      "madar-v2/public/rep/assets/MaintenancePage-Bp0lO2Rh.js",
+      "madar-v2/public/rep/assets/MaintenancePptxExportModal-Bhcho2lt.js",
+      "madar-v2/public/rep/assets/Modal-CZ4mKenT.js",
+      "madar-v2/public/rep/assets/OfflineMapPanel-CkYy2Q-E.js",
+      "madar-v2/public/rep/assets/OrderDetail-BBCXJ4eI.js",
+      "madar-v2/public/rep/assets/OverviewPage-BfAb6Nv6.js",
+      "madar-v2/public/rep/assets/RepApp-DYyw1meA.js",
+      "madar-v2/public/rep/assets/SettingsPage-DcsTE32J.js",
+      "madar-v2/public/rep/assets/StaffDirectoryPage-DOqQK0HO.js",
+      "madar-v2/public/rep/assets/SupervisorRadarPage-BTG-1TUa.js",
+      "madar-v2/public/rep/assets/Toast-VnKJpAA9.js",
+      "madar-v2/public/rep/assets/WarehousePage-khVak2mV.js",
+      "madar-v2/public/rep/assets/WorkshopOrderDetail-B-VeENh4.js",
+      "madar-v2/public/rep/assets/WorkshopPage-DH_lYajN.js",
+      "madar-v2/public/rep/assets/index-Dj9YZFTy.js",
+      "madar-v2/public/rep/assets/web-BAxpntSi.js",
+      "madar-v2/public/rep/assets/web-Bajeu6pX.js",
+      "madar-v2/public/rep/assets/web-CQogoFP2.js",
+      "madar-v2/public/rep/assets/web-D9pF1K6G.js"
+    ],
+    "mismatch": [
+      "madar-v2/public/rep/asset-manifest.json",
+      "madar-v2/public/rep/index.html"
+    ]
+  },
+  "android/app/src/main/assets/public": {
+    "apkFiles": 51,
+    "missing": [],
+    "mismatch": []
+  },
+  "embeddedTailscaleUrls": [
+    "https://carlos-pc.tail852ef0.ts.net"
+  ]
+}

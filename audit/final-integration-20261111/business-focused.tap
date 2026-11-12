@@ -1,0 +1,62 @@
+✖ madar-v2/test/attendance-offline-policy.test.js (168.620762ms)
+✔ madar-v2/test/attendance-offline-sync.test.js (324.691862ms)
+✔ madar-v2/test/database-maintenance.test.js (1421.423079ms)
+node:events:505
+    throw er; // Unhandled 'error' event
+    ^
+
+Error: listen EPERM: operation not permitted 127.0.0.1
+    at Server.setupListenHandle [as _listen2] (node:net:2368:21)
+    at listenInCluster (node:net:2499:12)
+    at node:net:2728:7
+    at process.processTicksAndRejections (node:internal/process/task_queues:90:21)
+Emitted 'error' event on Server instance at:
+    at emitErrorNT (node:net:2478:8)
+    at process.processTicksAndRejections (node:internal/process/task_queues:90:21) {
+  code: 'EPERM',
+  errno: -1,
+  syscall: 'listen',
+  address: '127.0.0.1'
+}
+
+Node.js v24.22.2
+✖ madar-v2/test/location-approval.test.js (2846.888332ms)
+node:net:2368
+      const error = new UVExceptionWithHostPort(rval, 'listen', address, port);
+                    ^
+
+Error: listen EPERM: operation not permitted 127.0.0.1
+    at Server.setupListenHandle [as _listen2] (node:net:2368:21)
+    at listenInCluster (node:net:2499:12)
+    at node:net:2728:7
+    at process.processTicksAndRejections (node:internal/process/task_queues:90:21) {
+  code: 'EPERM',
+  errno: -1,
+  syscall: 'listen',
+  address: '127.0.0.1'
+}
+
+Node.js v24.22.2
+✖ madar-v2/test/phase4-finance.test.js (1923.697273ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 2
+ℹ fail 3
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 6703.429815
+
+✖ failing tests:
+
+test at madar-v2/test/attendance-offline-policy.test.js:1:1
+✖ madar-v2/test/attendance-offline-policy.test.js (168.620762ms)
+  'test failed'
+
+test at madar-v2/test/location-approval.test.js:1:1
+✖ madar-v2/test/location-approval.test.js (2846.888332ms)
+  'test failed'
+
+test at madar-v2/test/phase4-finance.test.js:1:1
+✖ madar-v2/test/phase4-finance.test.js (1923.697273ms)
+  'test failed'

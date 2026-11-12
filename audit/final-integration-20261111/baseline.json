@@ -1,0 +1,29 @@
+{
+  "sourceCommit": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+  "branch": "main",
+  "initialWorkingTree": "clean",
+  "cachedOriginDivergence": {
+    "ahead": 0,
+    "behind": 0
+  },
+  "auditRecordedAt": "2026-11-12T05:32:51.383817+00:00",
+  "timezone": "Africa/Cairo",
+  "gatewayServers": [],
+  "liveSourceRevision": "not established; PM2 cwd is insufficient",
+  "productionMutationsPerformed": false,
+  "remoteMainReadOnlyLsRemote": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+  "auditContinuedOn": "2026-11-12 Africa/Cairo",
+  "finalSourceCommit": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+  "finalTrackedDiff": "",
+  "finalWorkingTree": "?? audit/",
+  "finalVerificationTime": "2026-11-12T07:32:18.517793+00:00",
+  "phaseWorktrees": {
+    "branches": [
+      "codex/android-apk-reliability-phase1",
+      "codex/maintenance-items-phase1",
+      "codex/phase1-idempotent-settlements"
+    ],
+    "allRefsAtAuditCommit": true,
+    "registeredPathsMissingAndPrunable": true
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "isolated": true,
+  "scope": "actual service field whitelist and initialized schema only; no invented quantity contract or full valid-visit submission",
+  "result": {
+    "httpEquivalentStatus": 400,
+    "error": "Unsupported field: reasonQuantities."
+  },
+  "maintenanceReasonColumns": [
+    "id",
+    "name",
+    "active",
+    "created_at"
+  ],
+  "visitColumns": [
+    "id",
+    "visit_uuid",
+    "rep_user_id",
+    "order_id",
+    "card_id",
+    "machine_id",
+    "order_code",
+    "machine_code",
+    "region_name",
+    "payload_sha256",
+    "status",
+    "machine_condition",
+    "reason_ids_json",
+    "notes",
+    "captured_at",
+    "before_captured_at",
+    "after_captured_at",
+    "location_json",
+    "staging_path",
+    "final_path",
+    "before_path",
+    "after_path",
+    "failure_message",
+    "created_at",
+    "updated_at",
+    "completed_at"
+  ],
+  "finding": "BIZ-002",
+  "capabilityStatus": "NOT_IMPLEMENTED"
+}

@@ -1,0 +1,135 @@
+{
+  "executionId": 25,
+  "mode": "trigger",
+  "status": "success",
+  "startedAtUTC": "2026-11-12T04:00:12.076Z",
+  "nodeNames": [
+    "Daily at 06:00 Cairo",
+    "Run tests and local health checks",
+    "Build supervisor report and fail the run on errors"
+  ],
+  "reports": [
+    {
+      "node": "Run tests and local health checks",
+      "overall": "WARN",
+      "checkedAt": "2026-11-12T04:00:20.867Z",
+      "summary": {
+        "checks": 7,
+        "failed": 0,
+        "warnings": 1
+      },
+      "checks": [
+        {
+          "name": "MADAR V2 API health",
+          "status": "PASS",
+          "details": {
+            "httpStatus": 200,
+            "service": "madar-v2"
+          }
+        },
+        {
+          "name": "Representative API authentication boundary",
+          "status": "PASS",
+          "details": {}
+        },
+        {
+          "name": "n8n and Netdata telemetry",
+          "status": "WARN",
+          "details": {}
+        },
+        {
+          "name": "SQLite WAL and integrity (read-only)",
+          "status": "PASS",
+          "details": {
+            "journalMode": "wal",
+            "integrity": "ok",
+            "foreignKeyViolations": 0
+          }
+        },
+        {
+          "name": "Representative APK artifact",
+          "status": "PASS",
+          "details": {
+            "sha256": "de5db6f610da4858ff498bd874518d72ea84eeefb1364ec69250e815c06fea55",
+            "signatureAndDeviceInstallVerified": false
+          }
+        },
+        {
+          "name": "Configured storage capacity",
+          "status": "PASS",
+          "details": {}
+        },
+        {
+          "name": "Rep API integration tests",
+          "status": "PASS",
+          "details": {
+            "tests": 3,
+            "passed": 3,
+            "failed": 0
+          }
+        }
+      ]
+    },
+    {
+      "node": "Build supervisor report and fail the run on errors",
+      "overall": "WARN",
+      "checkedAt": "2026-11-12T04:00:20.867Z",
+      "summary": {
+        "checks": 7,
+        "failed": 0,
+        "warnings": 1
+      },
+      "checks": [
+        {
+          "name": "MADAR V2 API health",
+          "status": "PASS",
+          "details": {
+            "httpStatus": 200,
+            "service": "madar-v2"
+          }
+        },
+        {
+          "name": "Representative API authentication boundary",
+          "status": "PASS",
+          "details": {}
+        },
+        {
+          "name": "n8n and Netdata telemetry",
+          "status": "WARN",
+          "details": {}
+        },
+        {
+          "name": "SQLite WAL and integrity (read-only)",
+          "status": "PASS",
+          "details": {
+            "journalMode": "wal",
+            "integrity": "ok",
+            "foreignKeyViolations": 0
+          }
+        },
+        {
+          "name": "Representative APK artifact",
+          "status": "PASS",
+          "details": {
+            "sha256": "de5db6f610da4858ff498bd874518d72ea84eeefb1364ec69250e815c06fea55",
+            "signatureAndDeviceInstallVerified": false
+          }
+        },
+        {
+          "name": "Configured storage capacity",
+          "status": "PASS",
+          "details": {}
+        },
+        {
+          "name": "Rep API integration tests",
+          "status": "PASS",
+          "details": {
+            "tests": 3,
+            "passed": 3,
+            "failed": 0
+          }
+        }
+      ]
+    }
+  ]
+}

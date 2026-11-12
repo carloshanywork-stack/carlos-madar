@@ -1,0 +1,26 @@
+{
+  "isolated": true,
+  "checks": [
+    {
+      "id": "EVT-TEST-01",
+      "result": "observed",
+      "retained": {
+        "oldest": 251,
+        "newest": 10250,
+        "count": 10000
+      },
+      "requestedCursor": 1,
+      "firstReplayId": 251,
+      "resetMarkerPresent": false,
+      "meaning": "Stale cursor silently receives retained suffix; periodic authoritative API reconciliation is required."
+    },
+    {
+      "id": "EVT-TEST-02",
+      "result": "observed",
+      "liveDelivered": true,
+      "persisted": false,
+      "idType": "string",
+      "meaning": "Persistence error is swallowed and produces non-replayable live notification; source business routes publish after service commit."
+    }
+  ]
+}

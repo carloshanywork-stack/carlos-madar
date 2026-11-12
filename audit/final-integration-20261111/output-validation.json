@@ -1,0 +1,438 @@
+{
+  "verifiedAt": "2026-11-12T07:33:07.517937+00:00",
+  "records": [
+    {
+      "file": "COVERAGE.md",
+      "status": "PASS",
+      "method": "UTF-8 text parsed; script syntax validated separately"
+    },
+    {
+      "file": "DELIVERABLES.md",
+      "status": "PASS",
+      "method": "UTF-8 text parsed; script syntax validated separately"
+    },
+    {
+      "file": "FINDINGS.md",
+      "status": "PASS",
+      "method": "UTF-8 text parsed; script syntax validated separately"
+    },
+    {
+      "file": "JOURNEYS.md",
+      "status": "PASS",
+      "method": "UTF-8 text parsed; script syntax validated separately"
+    },
+    {
+      "file": "README.md",
+      "status": "PASS",
+      "method": "UTF-8 text parsed; script syntax validated separately"
+    },
+    {
+      "file": "TEST-PLAN.md",
+      "status": "PASS",
+      "method": "UTF-8 text parsed; script syntax validated separately"
+    },
+    {
+      "file": "TEST-RESULTS.md",
+      "status": "PASS",
+      "method": "UTF-8 text parsed; script syntax validated separately"
+    },
+    {
+      "file": "android-connections.json",
+      "status": "PASS",
+      "method": "JSON parsed"
+    },
+    {
+      "file": "android-packaging-direct.tap",
+      "status": "PASS",
+      "method": "UTF-8 text parsed; script syntax validated separately"
+    },
+    {
+      "file": "android-tests.tap",
+      "status": "PASS",
+      "method": "UTF-8 text parsed; script syntax validated separately"
+    },
+    {
+      "file": "android.md",
+      "status": "PASS",
+      "method": "UTF-8 text parsed; script syntax validated separately"
+    },
+    {
+      "file": "apk-correspondence.json",
+      "status": "PASS",
+      "method": "JSON parsed"
+    },
+    {
+      "file": "apk-identity.json",
+      "status": "PASS",
+      "method": "JSON parsed"
+    },
+    {
+      "file": "artifact-manifest.json",
+      "status": "PASS",
+      "method": "JSON parsed"
+    },
+    {
+      "file": "baseline.json",
+      "status": "PASS",
+      "method": "JSON parsed"
+    },
+    {
+      "file": "build-location.json",
+      "status": "PASS",
+      "method": "JSON parsed"
+    },
+    {
+      "file": "business-attendance-direct.log",
+      "status": "PASS",
+      "method": "UTF-8 text parsed; script syntax validated separately"
+    },
+    {
+      "file": "business-connections.json",
+      "status": "PASS",
+      "method": "JSON parsed"
+    },
+    {
+      "file": "business-direct.tap",
+      "status": "PASS",
+      "method": "UTF-8 text parsed; script syntax validated separately"
+    },
+    {
+      "file": "business-focused.tap",
+      "status": "PASS",
+      "method": "UTF-8 text parsed; script syntax validated separately"
+    },
+    {
+      "file": "business-full-suite.tap",
+      "status": "PASS",
+      "method": "UTF-8 text parsed; script syntax validated separately"
+    },
+    {
+      "file": "business-migration-direct.log",
+      "status": "PASS",
+      "method": "UTF-8 text parsed; script syntax validated separately"
+    },
+    {
+      "file": "business-policy-direct.log",
+      "status": "PASS",
+      "method": "UTF-8 text parsed; script syntax validated separately"
+    },
+    {
+      "file": "business-replay-independent.log",
+      "status": "PASS",
+      "method": "UTF-8 text parsed; script syntax validated separately"
+    },
+    {
+      "file": "business-replay-probe.log",
+      "status": "PASS",
+      "method": "UTF-8 text parsed; script syntax validated separately"
+    },
+    {
+      "file": "business-replay-probe.mjs",
+      "status": "PASS",
+      "method": "UTF-8 text parsed; script syntax validated separately"
+    },
+    {
+      "file": "business-test-plan.md",
+      "status": "PASS",
+      "method": "UTF-8 text parsed; script syntax validated separately"
+    },
+    {
+      "file": "business.md",
+      "status": "PASS",
+      "method": "UTF-8 text parsed; script syntax validated separately"
+    },
+    {
+      "file": "connection-inventory.json",
+      "status": "PASS",
+      "method": "JSON parsed"
+    },
+    {
+      "file": "coverage-inventory.json",
+      "status": "PASS",
+      "method": "JSON parsed"
+    },
+    {
+      "file": "dependency-inventory.json",
+      "status": "PASS",
+      "method": "JSON parsed"
+    },
+    {
+      "file": "deployment-config.json",
+      "status": "PASS",
+      "method": "JSON parsed"
+    },
+    {
+      "file": "events-first-fixture-error.log",
+      "status": "PASS",
+      "method": "UTF-8 text parsed; script syntax validated separately"
+    },
+    {
+      "file": "events-injected-error.log",
+      "status": "PASS",
+      "method": "UTF-8 text parsed; script syntax validated separately"
+    },
+    {
+      "file": "events-probe.mjs",
+      "status": "PASS",
+      "method": "UTF-8 text parsed; script syntax validated separately"
+    },
+    {
+      "file": "events-result.json",
+      "status": "PASS",
+      "method": "JSON parsed"
+    },
+    {
+      "file": "evidence-reference-validation.json",
+      "status": "PASS",
+      "method": "JSON parsed"
+    },
+    {
+      "file": "findings.json",
+      "status": "PASS",
+      "method": "JSON parsed"
+    },
+    {
+      "file": "flow-engine-tests.tap",
+      "status": "PASS",
+      "method": "UTF-8 text parsed; script syntax validated separately"
+    },
+    {
+      "file": "generate-n8n.py",
+      "status": "PASS",
+      "method": "UTF-8 text parsed; script syntax validated separately"
+    },
+    {
+      "file": "gps-independent-result.json",
+      "status": "PASS",
+      "method": "JSON parsed"
+    },
+    {
+      "file": "gps-repro-result.json",
+      "status": "PASS",
+      "method": "JSON parsed"
+    },
+    {
+      "file": "gps-repro.mjs",
+      "status": "PASS",
+      "method": "UTF-8 text parsed; script syntax validated separately"
+    },
+    {
+      "file": "http-contract-probe.mjs",
+      "status": "PASS",
+      "method": "UTF-8 text parsed; script syntax validated separately"
+    },
+    {
+      "file": "http-contract-result.json",
+      "status": "PASS",
+      "method": "JSON parsed"
+    },
+    {
+      "file": "http-contract.log",
+      "status": "PASS",
+      "method": "UTF-8 text parsed; script syntax validated separately"
+    },
+    {
+      "file": "isolated-web-build.zip",
+      "status": "PASS",
+      "method": "ZIP integrity passed"
+    },
+    {
+      "file": "legacy-inventory-direct.tap",
+      "status": "PASS",
+      "method": "UTF-8 text parsed; script syntax validated separately"
+    },
+    {
+      "file": "legacy-migration-direct.tap",
+      "status": "PASS",
+      "method": "UTF-8 text parsed; script syntax validated separately"
+    },
+    {
+      "file": "legacy-tests.tap",
+      "status": "PASS",
+      "method": "UTF-8 text parsed; script syntax validated separately"
+    },
+    {
+      "file": "live-http.json",
+      "status": "PASS",
+      "method": "JSON parsed"
+    },
+    {
+      "file": "live-processes.json",
+      "status": "PASS",
+      "method": "JSON parsed"
+    },
+    {
+      "file": "n8n-code-contract-tests.cjs",
+      "status": "PASS",
+      "method": "UTF-8 text parsed; script syntax validated separately"
+    },
+    {
+      "file": "n8n-code-fixture-results.json",
+      "status": "PASS",
+      "method": "JSON parsed"
+    },
+    {
+      "file": "n8n-connections.json",
+      "status": "PASS",
+      "method": "JSON parsed"
+    },
+    {
+      "file": "n8n-evidence-map.json",
+      "status": "PASS",
+      "method": "JSON parsed"
+    },
+    {
+      "file": "n8n-executable-verifier.json",
+      "status": "PASS",
+      "method": "JSON parsed"
+    },
+    {
+      "file": "n8n-executed-artifact-hashes.json",
+      "status": "PASS",
+      "method": "JSON parsed"
+    },
+    {
+      "file": "n8n-final-validation.log",
+      "status": "PASS",
+      "method": "UTF-8 text parsed; script syntax validated separately"
+    },
+    {
+      "file": "n8n-fixture-driver.log",
+      "status": "PASS",
+      "method": "UTF-8 text parsed; script syntax validated separately"
+    },
+    {
+      "file": "n8n-fixture-driver.py",
+      "status": "PASS",
+      "method": "UTF-8 text parsed; script syntax validated separately"
+    },
+    {
+      "file": "n8n-live-inventory.json",
+      "status": "PASS",
+      "method": "JSON parsed"
+    },
+    {
+      "file": "n8n-operational-verifier.json",
+      "status": "PASS",
+      "method": "JSON parsed"
+    },
+    {
+      "file": "n8n-runtime-deliberate-failure.log",
+      "status": "PASS",
+      "method": "UTF-8 text parsed; script syntax validated separately"
+    },
+    {
+      "file": "n8n-runtime-import-fixture-credential.log",
+      "status": "PASS",
+      "method": "UTF-8 text parsed; script syntax validated separately"
+    },
+    {
+      "file": "n8n-runtime-import-n8n-evidence-map.log",
+      "status": "PASS",
+      "method": "UTF-8 text parsed; script syntax validated separately"
+    },
+    {
+      "file": "n8n-runtime-import-n8n-executable-verifier.log",
+      "status": "PASS",
+      "method": "UTF-8 text parsed; script syntax validated separately"
+    },
+    {
+      "file": "n8n-runtime-import-n8n-operational-verifier.log",
+      "status": "PASS",
+      "method": "UTF-8 text parsed; script syntax validated separately"
+    },
+    {
+      "file": "n8n-runtime-operational-success.log",
+      "status": "PASS",
+      "method": "UTF-8 text parsed; script syntax validated separately"
+    },
+    {
+      "file": "n8n-runtime-release-success.log",
+      "status": "PASS",
+      "method": "UTF-8 text parsed; script syntax validated separately"
+    },
+    {
+      "file": "n8n-runtime-results.json",
+      "status": "PASS",
+      "method": "JSON parsed"
+    },
+    {
+      "file": "n8n-scheduled-execution-summary.json",
+      "status": "PASS",
+      "method": "JSON parsed"
+    },
+    {
+      "file": "n8n-static-validation.json",
+      "status": "PASS",
+      "method": "JSON parsed"
+    },
+    {
+      "file": "n8n.md",
+      "status": "PASS",
+      "method": "UTF-8 text parsed; script syntax validated separately"
+    },
+    {
+      "file": "offline-gps-direct.tap",
+      "status": "PASS",
+      "method": "UTF-8 text parsed; script syntax validated separately"
+    },
+    {
+      "file": "operations-connections.json",
+      "status": "PASS",
+      "method": "JSON parsed"
+    },
+    {
+      "file": "operations.md",
+      "status": "PASS",
+      "method": "UTF-8 text parsed; script syntax validated separately"
+    },
+    {
+      "file": "output-validation.json",
+      "status": "PASS",
+      "method": "JSON parsed"
+    },
+    {
+      "file": "quantity-contract-probe.mjs",
+      "status": "PASS",
+      "method": "UTF-8 text parsed; script syntax validated separately"
+    },
+    {
+      "file": "quantity-contract-result.json",
+      "status": "PASS",
+      "method": "JSON parsed"
+    },
+    {
+      "file": "run-business-suite.sh",
+      "status": "PASS",
+      "method": "UTF-8 text parsed; script syntax validated separately"
+    },
+    {
+      "file": "source-module-inventory.json",
+      "status": "PASS",
+      "method": "JSON parsed"
+    },
+    {
+      "file": "storage-metadata.json",
+      "status": "PASS",
+      "method": "JSON parsed"
+    },
+    {
+      "file": "v2-suite-summary.json",
+      "status": "PASS",
+      "method": "JSON parsed"
+    },
+    {
+      "file": "validate-n8n.cjs",
+      "status": "PASS",
+      "method": "UTF-8 text parsed; script syntax validated separately"
+    },
+    {
+      "file": "web-build.log",
+      "status": "PASS",
+      "method": "UTF-8 text parsed; script syntax validated separately"
+    }
+  ],
+  "workflowValidation": "n8n-static-validation.json; actual runtime in n8n-runtime-results.json",
+  "scriptValidation": "node --check, Python AST and bash -n previously passed; no subsequent script changes",
+  "manifestNote": "Final manifest generated after this parse and parsed again separately; digest excludes itself."
+}

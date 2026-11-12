@@ -1,0 +1,140 @@
+[
+  {
+    "connection_id": "BIZ-C01",
+    "subsystem": "finance",
+    "producer": "finance client",
+    "consumer": "payment/receipt service",
+    "interface": "POST /api/finance/invoices/:id/payment|receipt",
+    "source_evidence": [
+      "madar-v2/server/modules/finance/routes.js:25",
+      "madar-v2/server/modules/finance/invoices.service.js:290"
+    ],
+    "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "verification_method": "source inspection and isolated SQLite service replay probe",
+    "last_verification_time": "2026-11-12T05:45:44.056476+00:00",
+    "status": "VERIFIED_FAIL",
+    "failure_or_limitation": "Sales and purchase each repeat partial settlement: paid2000 vs1000, 2 treasury and audit effects; operationId rejected400. Exact service boundary, no TCP loss injection.",
+    "relevant_test_ids": [
+      "business-replay-probe.mjs"
+    ],
+    "relevant_finding_ids": [
+      "BIZ-001"
+    ]
+  },
+  {
+    "connection_id": "BIZ-C02",
+    "subsystem": "maintenance",
+    "producer": "visit selection",
+    "consumer": "visit storage/analytics/export",
+    "interface": "reasonIds JSON",
+    "source_evidence": [
+      "madar-v2/server/modules/rep/service.js:304",
+      "madar-v2/server/modules/rep/service.js:937"
+    ],
+    "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "verification_method": "source inspection; isolated test attempt",
+    "last_verification_time": "2026-11-12T05:45:44.056511+00:00",
+    "status": "NOT_IMPLEMENTED",
+    "failure_or_limitation": "Quantity-bearing contract absent",
+    "relevant_test_ids": [],
+    "relevant_finding_ids": [
+      "BIZ-002"
+    ]
+  },
+  {
+    "connection_id": "BIZ-C03",
+    "subsystem": "attendance",
+    "producer": "offline attendance action",
+    "consumer": "attendance/payroll",
+    "interface": "UUID replay + age policy",
+    "source_evidence": [
+      "madar-v2/test/attendance-offline-sync.test.js:60"
+    ],
+    "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "verification_method": "original test direct execution against isolated temporary SQLite",
+    "last_verification_time": "2026-11-12T05:45:44.056517+00:00",
+    "status": "VERIFIED_PASS",
+    "failure_or_limitation": "8/8 attendance boundary/replay tests pass; receiving native client acceptance outside this connection",
+    "relevant_test_ids": [
+      "attendance-offline-sync.test.js"
+    ],
+    "relevant_finding_ids": []
+  },
+  {
+    "connection_id": "BIZ-C04",
+    "subsystem": "location",
+    "producer": "representative proposal",
+    "consumer": "supervisor approval/dependent visit",
+    "interface": "location review HTTP",
+    "source_evidence": [
+      "madar-v2/test/location-approval.test.js:70",
+      "madar-v2/test/location-approval.test.js:194"
+    ],
+    "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "verification_method": "full isolated V2 HTTP suite, 118/118 total",
+    "last_verification_time": "2026-11-12T05:45:44.056522+00:00",
+    "status": "VERIFIED_PASS",
+    "failure_or_limitation": "Location approval/restart/dependent visit tests pass; physical APK receiving-client acceptance remains separate",
+    "relevant_test_ids": [
+      "location-approval.test.js"
+    ],
+    "relevant_finding_ids": []
+  },
+  {
+    "connection_id": "BIZ-C05",
+    "subsystem": "backup",
+    "producer": "backup archive",
+    "consumer": "restored database/storage",
+    "interface": "ZIP validation + staged restore",
+    "source_evidence": [
+      "madar-v2/server/modules/system/backup.js:252",
+      "madar-v2/server/modules/system/backup.js:274"
+    ],
+    "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "verification_method": "full isolated V2 HTTP suite, 118/118 total",
+    "last_verification_time": "2026-11-12T05:45:44.056527+00:00",
+    "status": "VERIFIED_PASS",
+    "failure_or_limitation": "Current-schema backup/restore and interrupted rollback pass; differing historical schema/off-device drill not verified",
+    "relevant_test_ids": [
+      "phase6-parity.test.js"
+    ],
+    "relevant_finding_ids": []
+  },
+  {
+    "connection_id": "BIZ-C06",
+    "subsystem": "auth",
+    "producer": "login token",
+    "consumer": "API authorization",
+    "interface": "hashed JWT sessions",
+    "source_evidence": [
+      "madar-v2/server/modules/auth/service.js:216",
+      "madar-v2/server/modules/auth/service.js:275"
+    ],
+    "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "verification_method": "source inspection; isolated test attempt",
+    "last_verification_time": "2026-11-12T05:45:44.056531+00:00",
+    "status": "IMPLEMENTED_NOT_VERIFIED",
+    "failure_or_limitation": "Source inspection; HTTP tested separately by primary",
+    "relevant_test_ids": [],
+    "relevant_finding_ids": []
+  },
+  {
+    "connection_id": "BIZ-C07",
+    "subsystem": "migrations",
+    "producer": "historical schema",
+    "consumer": "startup migrations",
+    "interface": "SQLite initializeDatabase",
+    "source_evidence": [
+      "madar-v2/test/database-maintenance.test.js:24"
+    ],
+    "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "verification_method": "original test direct execution isolated database",
+    "last_verification_time": "2026-11-12T05:48:41.816071+00:00",
+    "status": "VERIFIED_PASS",
+    "failure_or_limitation": "11/11 tests pass; tested fixtures do not prove every historical backup",
+    "relevant_test_ids": [
+      "database-maintenance.test.js"
+    ],
+    "relevant_finding_ids": []
+  }
+]

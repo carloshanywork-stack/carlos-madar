@@ -1,0 +1,33 @@
+{
+  "method": "sanitized pm2 jlist from existing daemon after verifying pid exists; no service actions",
+  "processes": [
+    {
+      "name": "madar-v2",
+      "pid": 2336,
+      "status": "online",
+      "cwd": "/home/carlos/Desktop/MADAR/madar-v2",
+      "script": "server/index.js",
+      "node": "24.22.2",
+      "mode": "fork_mode",
+      "port": 3000
+    },
+    {
+      "name": "madar-autodeploy",
+      "pid": 2344,
+      "status": "online",
+      "script": "madar-v2/scripts/watcher.cjs",
+      "node": "22.22.1"
+    },
+    {
+      "name": "madar-n8n",
+      "pid": 2348,
+      "status": "online",
+      "script": "/usr/local/bin/n8n",
+      "cwd": "/home/carlos",
+      "node": "24.22.2",
+      "port": 5678
+    }
+  ],
+  "capturedAt": "2026-11-12; process uptime values 1794429635764/1794429635835/1794429635856 ms",
+  "sourceRevision": "not established; script path and live health are insufficient"
+}

@@ -1,0 +1,199 @@
+{
+  "name": "MADAR final audit — authenticated release evidence verifier",
+  "id": "MadarFinalAuditRelease20261111",
+  "active": false,
+  "nodes": [
+    {
+      "id": "21628ed7-c6b6-5513-8cab-39cbb1fc6040",
+      "name": "Manual safe entry",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "parameters": {},
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "c666a059-c338-5d42-a12f-ba8f8040bfc5",
+      "name": "Configuration",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "jsCode": "// Explicit configuration: edit only these non-secret values after import.\nconst config = {\n  operationalBaseUrl: 'http://127.0.0.1:18181',\n  resultBaseUrl: 'http://127.0.0.1:18181',\n  expectedRevision: '26a9f6549ece44e0f17c50e453c23a0fc076071a',\n  maxResultAgeMinutes: 60,\n  maxFutureSeconds: 60,\n  requiredChecks: ['v2-suite','artifact-correspondence','failure-injection','restore-drill'],\n  fixtureOnly: true,\n  reportPath: 'audit/final-integration-20261111/README.md'\n};\nfor (const key of ['operationalBaseUrl','resultBaseUrl']) {\n  const value=config[key];\n  if (!/^https:\\/\\/[^\\s]+$/.test(value) && !/^http:\\/\\/127\\.0\\.0\\.1:\\d+$/.test(value)) throw new Error('BLOCKED_PREREQUISITE: use HTTPS or an explicit loopback fixture URL');\n  if (value.includes('@') || value.includes('?') || value.endsWith('/')) throw new Error('BLOCKED_PREREQUISITE: URL must have no credentials, query, or trailing slash');\n}\nif (!/^[0-9a-f]{40}$/.test(config.expectedRevision)) throw new Error('BLOCKED_PREREQUISITE: exact source SHA required');\nif (!(config.maxResultAgeMinutes>0 && config.maxResultAgeMinutes<=1440)) throw new Error('BLOCKED_PREREQUISITE: bounded freshness required');\nreturn [{json:config}];"
+      },
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "id": "9e0c6338-5646-5909-8fb4-f7b427ce5d3d",
+      "name": "Read operational health",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('Configuration').first().json.operationalBaseUrl + '/api/health' }}",
+        "options": {
+          "timeout": 5000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "position": [
+        440,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 1000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "74951669-4d8d-5a7d-a3d9-47d77d52b7d6",
+      "name": "Validate operational response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "jsCode": "const response=$input.first().json;\nconst check={id:'N8N-OP-01',status:response.statusCode===200 && response.body?.status==='ok' && response.body?.service==='madar-v2' ? 'VERIFIED_PASS':'VERIFIED_FAIL', evidence:{httpStatus:response.statusCode??null,service:response.body?.service??null},scope:'direct read-only HTTP health; does not establish deployment revision'};\nif(check.status!=='VERIFIED_PASS') throw new Error(JSON.stringify({overall:'VERIFIED_FAIL',checks:[check],error:response.error?'request failed':null}));\nreturn [{json:{checkedAt:new Date().toISOString(),checks:[check],fixtureOnly:$('Configuration').first().json.fixtureOnly}}];"
+      },
+      "position": [
+        660,
+        0
+      ]
+    },
+    {
+      "id": "cd8f07fa-6eb4-5950-9330-c7603f494f83",
+      "name": "Read authenticated release result",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('Configuration').first().json.resultBaseUrl + '/audit/release-result' }}",
+        "options": {
+          "timeout": 5000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "position": [
+        880,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 1000,
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "MADAR_AUDIT_RESULT_HEADER_AUTH",
+          "name": "MADAR Audit Result Header Auth"
+        }
+      }
+    },
+    {
+      "id": "80d81117-5268-5d0b-b942-d16aad8e245f",
+      "name": "Validate revision-bound release evidence",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "jsCode": "const cfg=$('Configuration').first().json;\nconst prior=$('Validate operational response').first().json;\nconst response=$input.first().json;\nconst report=response.body;\nconst problems=[];\nif(response.statusCode!==200) problems.push('runner HTTP status is not 200 (or credential/network prerequisite missing)');\nif(!report || report.schemaVersion!==1) problems.push('runner schemaVersion must equal 1');\nif(report?.sourceRevision!==cfg.expectedRevision) problems.push('source revision mismatch');\nif(report?.fixtureOnly!==cfg.fixtureOnly) problems.push('fixture provenance mismatch');\nif(report?.provenance!==(cfg.fixtureOnly?'synthetic-fixture':'ci-runner')) problems.push('result provenance mismatch');\nconst age=Date.now()-Date.parse(report?.verifiedAt??'');\nif(!Number.isFinite(age)||age>cfg.maxResultAgeMinutes*60000||age < -cfg.maxFutureSeconds*1000) problems.push('stale, future, or invalid result time');\nif(typeof report?.runId!=='string'||!report.runId||typeof report?.evidenceUrl!=='string'||!/^https?:\\/\\//.test(report.evidenceUrl)) problems.push('runner runId and evidence URL required');\nconst checks=Array.isArray(report?.checks)?report.checks:[];\nconst ids=checks.map(c=>c.id);\nif(new Set(ids).size!==ids.length) problems.push('duplicate check identifiers');\nfor(const id of cfg.requiredChecks){const c=checks.find(c=>c.id===id);if(!c||c.status!=='VERIFIED_PASS'||typeof c.evidence!=='string'||!c.evidence) problems.push('required check missing, failed, blocked, or without evidence: '+id);}\nconst validStatuses=['VERIFIED_PASS','VERIFIED_FAIL','IMPLEMENTED_NOT_VERIFIED','NOT_IMPLEMENTED','BLOCKED_PREREQUISITE','NOT_APPLICABLE'];\nif(checks.some(c=>!validStatuses.includes(c.status))) problems.push('unknown check status');\nconst summary={schemaVersion:1,overall:problems.length?'VERIFIED_FAIL':'VERIFIED_PASS',scope:cfg.fixtureOnly?'synthetic fixture verifies workflow mechanics only':'authenticated revision-bound runner result plus direct health',fixtureOnly:cfg.fixtureOnly,sourceRevision:cfg.expectedRevision,checkedAt:new Date().toISOString(),checks:[...prior.checks,...checks],runner:{runId:report?.runId??null,evidenceUrl:report?.evidenceUrl??null,verifiedAt:report?.verifiedAt??null},limitations:['n8n consumes external runner evidence; it does not execute CI, compile APKs, or operate devices','health alone does not prove deployment source correspondence','runner service and evidence integrity remain trust prerequisites','no alert destination is configured; no schedule is included'],problems};\nif(problems.length) throw new Error(JSON.stringify(summary));\nreturn [{json:summary}];"
+      },
+      "position": [
+        1100,
+        0
+      ]
+    },
+    {
+      "id": "79eb9170-7046-5e85-833a-2380e897d585",
+      "name": "Prerequisites and scope",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "parameters": {
+        "content": "## Executable release verifier — inactive, manual only\nTarget n8n 2.46.7. Configure URLs and fixtureOnly in Configuration. Select a Header Auth credential on the runner request. All requests GET, timeout 5s, at most 2 attempts. Health failure stops release evidence fetch. No shell, build, installation, workflow activation, business writes, or alerts. CI results must come from an authenticated trusted external runner with exact revision + evidence. Default target is an isolated fixture, not MADAR production. See n8n.md.",
+        "width": 1000,
+        "height": 230
+      },
+      "position": [
+        0,
+        -280
+      ]
+    }
+  ],
+  "connections": {
+    "Manual safe entry": {
+      "main": [
+        [
+          {
+            "node": "Configuration",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Configuration": {
+      "main": [
+        [
+          {
+            "node": "Read operational health",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read operational health": {
+      "main": [
+        [
+          {
+            "node": "Validate operational response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate operational response": {
+      "main": [
+        [
+          {
+            "node": "Read authenticated release result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read authenticated release result": {
+      "main": [
+        [
+          {
+            "node": "Validate revision-bound release evidence",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Africa/Cairo"
+  },
+  "pinData": {},
+  "tags": []
+}

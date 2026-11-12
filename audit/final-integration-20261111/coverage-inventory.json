@@ -1,0 +1,357 @@
+{
+  "denominator": "44 grouped control areas; status reflects the entire grouped scope, not existence of a function. Source module enumeration has a separate denominator. Connection inventory has its own link-level denominator.",
+  "groups": [
+    {
+      "coverage_id": "COV-01",
+      "area": "Identity and permissions",
+      "requested_controls": "administrator/supervisor/employee/representative; role vs HR identity; read/write/retry/attachment/queue ownership",
+      "evidence": "business.md;android.md;http-contract-result.json",
+      "status": "IMPLEMENTED_NOT_VERIFIED",
+      "limitation": "Focused HTTP boundaries pass; exhaustive role/ownership matrix, native bridge privacy and account-switch races remain unverified."
+    },
+    {
+      "coverage_id": "COV-02",
+      "area": "Authentication lifecycle",
+      "requested_controls": "login/logout; token expiry; stored session invalidation; concurrent account switching; device credential storage",
+      "evidence": "business.md;android.md;http-contract-result.json",
+      "status": "IMPLEMENTED_NOT_VERIFIED",
+      "limitation": "Fixture logout and expiry verified; device switching/process races not exercised."
+    },
+    {
+      "coverage_id": "COV-03",
+      "area": "Biometric assurance",
+      "requested_controls": "local device auth/weak biometric/PIN; server boolean assertions vs remote proof",
+      "evidence": "android.md AND-006;business.md",
+      "status": "IMPLEMENTED_NOT_VERIFIED",
+      "limitation": "Client prompt/boolean persistence exists; no cryptographic device/biometric attestation is proven."
+    },
+    {
+      "coverage_id": "COV-04",
+      "area": "Configuration protection",
+      "requested_controls": "secrets; signing-key continuity; environment validation; permissions",
+      "evidence": "operations.md OPS-004;dependency-inventory.json;android.md",
+      "status": "VERIFIED_FAIL",
+      "limitation": "Root .env/DB local permissions confirmed unsafe; no secret material exported; approved signing identity unestablished."
+    },
+    {
+      "coverage_id": "COV-05",
+      "area": "Attendance policy",
+      "requested_controls": "online/offline punches; server max age; validated config; exact age and five-minute future allowance",
+      "evidence": "business-attendance-direct.log;business-policy-direct.log;business.md",
+      "status": "IMPLEMENTED_NOT_VERIFIED",
+      "limitation": "Eight boundary/replay tests pass; native-to-HTTP-to-payroll full journey not accepted on device. Full suite supplies startup policy evidence separately."
+    },
+    {
+      "coverage_id": "COV-06",
+      "area": "Attendance replay",
+      "requested_controls": "accepted old action replay; changed UUID content; account isolation; rejected queue preservation; admin reconciliation",
+      "evidence": "business.md;android.md",
+      "status": "IMPLEMENTED_NOT_VERIFIED",
+      "limitation": "Server8 tests pass; native rejected records retained; full admin/device recovery UX remains unverified."
+    },
+    {
+      "coverage_id": "COV-07",
+      "area": "Payroll",
+      "requested_controls": "correction authorization; period locks; hours and salary calculations; old/new audit",
+      "evidence": "business.md;madar-v2/server/modules/employees/service.js:595",
+      "status": "IMPLEMENTED_NOT_VERIFIED",
+      "limitation": "Source and suite coverage must be read at individual test boundaries; no live payroll or full historical reconciliation."
+    },
+    {
+      "coverage_id": "COV-08",
+      "area": "Duty state",
+      "requested_controls": "GPS ingestion separate from clock-in/duty transitions; originating session association",
+      "evidence": "gps-independent-result.json;android.md AND-001",
+      "status": "VERIFIED_FAIL",
+      "limitation": "Closed duty reopened by native-format backlog; no originating duty-session identity in points."
+    },
+    {
+      "coverage_id": "COV-09",
+      "area": "Assignments",
+      "requested_controls": "create/update/remove; recipient visibility; reconnect refresh; restart; route reconciliation",
+      "evidence": "operations.md;business.md;madar-v2/server/modules/maintenance/routes.js:410",
+      "status": "IMPLEMENTED_NOT_VERIFIED",
+      "limitation": "Producers/consumers/source polling traced; physical foreground/reconnect acceptance absent."
+    },
+    {
+      "coverage_id": "COV-10",
+      "area": "Machine location",
+      "requested_controls": "proposal durable queue; pending/approved/rejected; proposed vs approved coordinates; null coordinates",
+      "evidence": "business.md;android.md;madar-v2/test/location-approval.test.js:70",
+      "status": "IMPLEMENTED_NOT_VERIFIED",
+      "limitation": "Real HTTP location suite result recorded separately; no complete physical-device route acceptance."
+    },
+    {
+      "coverage_id": "COV-11",
+      "area": "Location dependency",
+      "requested_controls": "dependent visits blocked until review; rejection/resubmit; evidence corrections; supervisor notification",
+      "evidence": "business.md;android.md",
+      "status": "IMPLEMENTED_NOT_VERIFIED",
+      "limitation": "Source queue/gates and tests traced; device evidence retry and notification acceptance absent."
+    },
+    {
+      "coverage_id": "COV-12",
+      "area": "Queue identity",
+      "requested_controls": "owner and duty-session association; stable operation identity; changed payload detection",
+      "evidence": "android.md;business.md;gps-independent-result.json",
+      "status": "VERIFIED_FAIL",
+      "limitation": "Visit UUID supported; GPS identity and session association broken; finance identity absent. Do not generalize visit idempotency to all queues."
+    },
+    {
+      "coverage_id": "COV-13",
+      "area": "Queue authority",
+      "requested_controls": "native vs IndexedDB; migration; native-only records; authoritative recovery after IDB loss",
+      "evidence": "android.md AND-004",
+      "status": "VERIFIED_FAIL",
+      "limitation": "Native-only machine actions omitted from UI/export mirror; visits do merge."
+    },
+    {
+      "coverage_id": "COV-14",
+      "area": "Queue independence",
+      "requested_controls": "explicit dependencies; independent progress; retryable/auth/review states; true server error; retry UI",
+      "evidence": "android.md;madar-v2/android/app/src/main/java/com/madar/rep/app/MadarSyncWorker.java:82",
+      "status": "IMPLEMENTED_NOT_VERIFIED",
+      "limitation": "Retryable tracking/attendance can return early before independent visits; no device concurrency failure injection."
+    },
+    {
+      "coverage_id": "COV-15",
+      "area": "Recovery export/import",
+      "requested_controls": "files; owner metadata; roundtrip; wrong account; native-only work",
+      "evidence": "android.md AND-004 AND-005",
+      "status": "NOT_IMPLEMENTED",
+      "limitation": "JSON export partial; corresponding JSON import not found. Native backup restoration is a separate mechanism."
+    },
+    {
+      "coverage_id": "COV-16",
+      "area": "Pending-work durability",
+      "requested_controls": "upgrade/logout/account switch/process death/reboot; interrupted local photo writes; immutability",
+      "evidence": "android.md AND-007",
+      "status": "BLOCKED_PREREQUISITE",
+      "limitation": "No device; source delete-before-rename gap and missing photo hash binding found. No crash/upgrade acceptance claim."
+    },
+    {
+      "coverage_id": "COV-17",
+      "area": "GPS acknowledgment",
+      "requested_controls": "stable persisted identity; stored/duplicate/rejected per-point results; reused identifier conflict",
+      "evidence": "android.md AND-002;gps-independent-result.json",
+      "status": "VERIFIED_FAIL",
+      "limitation": "IDs echoed without durable server identity/hash; changed ID content accepted."
+    },
+    {
+      "coverage_id": "COV-18",
+      "area": "GPS retention/privacy",
+      "requested_controls": "timestamp policy; future allowance; forever-retained breadcrumbs; rejected reasons; unknown legacy owner; closed sessions",
+      "evidence": "android.md;business-migration-direct.log;operations.md",
+      "status": "IMPLEMENTED_NOT_VERIFIED",
+      "limitation": "Rejected points and rep_id0 retention exist; rejected-GPS UI/export and closed-session correctness incomplete; AND-001 applies."
+    },
+    {
+      "coverage_id": "COV-19",
+      "area": "Visits and review",
+      "requested_controls": "UUID/content idempotency; before/after requirements/order; supervisor approve/reject/reshoot/final state",
+      "evidence": "android.md;business.md",
+      "status": "IMPLEMENTED_NOT_VERIFIED",
+      "limitation": "Three before and optional after represent current contract; device reshoot/response-loss multipart acceptance missing."
+    },
+    {
+      "coverage_id": "COV-20",
+      "area": "Image preservation",
+      "requested_controls": "original byte preservation; derived rotation/compression; EXIF filename mtime ordering",
+      "evidence": "operations.md;business.md;madar-v2/server/modules/maintenance/service.js:4984",
+      "status": "IMPLEMENTED_NOT_VERIFIED",
+      "limitation": "Rotation derivative source verified; no universal archive/export preservation claim. Legacy ordering source only."
+    },
+    {
+      "coverage_id": "COV-21",
+      "area": "File security",
+      "requested_controls": "containment; symlink rejection; upload limits; authenticated thumbnails; attachment authorization",
+      "evidence": "madar-v2/server/modules/storage.js:8;madar-v2/server/modules/upload.js:48;business.md",
+      "status": "IMPLEMENTED_NOT_VERIFIED",
+      "limitation": "Modules and relevant integration tests inventoried; TOCTOU/whole file surface not exhaustively penetration tested."
+    },
+    {
+      "coverage_id": "COV-22",
+      "area": "Maintenance quantities",
+      "requested_controls": "categories; countable vs noncountable; required positive integers; legacy default1/provenance; corrections/audit; multiple reasons",
+      "evidence": "business.md BIZ-002;madar-v2/server/modules/rep/service.js:301",
+      "status": "NOT_IMPLEMENTED",
+      "limitation": "Current reasonIds-only path cannot carry quantities. Inventory material quantities are unrelated."
+    },
+    {
+      "coverage_id": "COV-23",
+      "area": "Maintenance reporting",
+      "requested_controls": "approved business records; analytics totals; consistent units/no double count; PPTX quantities/wording; other exports/attachments",
+      "evidence": "business.md BIZ-002;madar-v2/server/modules/maintenance/analysis.js:23",
+      "status": "NOT_IMPLEMENTED",
+      "limitation": "Existing exports/analysis exist; requested per-reason quantity end-to-end reporting does not."
+    },
+    {
+      "coverage_id": "COV-24",
+      "area": "Business imports",
+      "requested_controls": "stable machine/material codes; ID/relation preservation; no truncate; deactivateMissing semantics",
+      "evidence": "business.md;operations.md;source-module-inventory.json",
+      "status": "IMPLEMENTED_NOT_VERIFIED",
+      "limitation": "V2 upsert source inspected and legacy constraints distinct; all import options/historical data not exhaustively run."
+    },
+    {
+      "coverage_id": "COV-25",
+      "area": "Warehouse",
+      "requested_controls": "main whole units; explicit source choice; offcuts; transactional withdrawal/reversal",
+      "evidence": "business.md;legacy-inventory-direct.tap;madar-v2/server/modules/warehouse/service.js:165",
+      "status": "IMPLEMENTED_NOT_VERIFIED",
+      "limitation": "Legacy pure arithmetic5pass; full V2 stock suite separately reported; no production withdrawal/reversal."
+    },
+    {
+      "coverage_id": "COV-26",
+      "area": "Invoice accounting",
+      "requested_controls": "invoice creation separate cash; paid/remaining/status derived from settlements; sales receipts/purchase payments",
+      "evidence": "business.md;business-replay-independent.log",
+      "status": "VERIFIED_FAIL",
+      "limitation": "Cash separation/transactions present; replay duplicates settlement and audit effects."
+    },
+    {
+      "coverage_id": "COV-27",
+      "area": "Financial retry",
+      "requested_controls": "stable operation IDs; identical/conflicting/concurrent requests; response loss; replay auth; duplicate treasury/invoice/stock/audit prevention",
+      "evidence": "business.md BIZ-001;business-replay-independent.log",
+      "status": "VERIFIED_FAIL",
+      "limitation": "Both partial sales/purchase service retries duplicate money; operationId400. TCP response-drop and concurrent race tests not performed."
+    },
+    {
+      "coverage_id": "COV-28",
+      "area": "Historical financial preservation",
+      "requested_controls": "no silent deletion or merge of prior transactions; schema/history compatibility",
+      "evidence": "business.md;legacy-migration-direct.tap",
+      "status": "IMPLEMENTED_NOT_VERIFIED",
+      "limitation": "Specific migration fixtures pass; no complete production financial reconciliation/export."
+    },
+    {
+      "coverage_id": "COV-29",
+      "area": "Events",
+      "requested_controls": "real producers; persisted events; transport; consumers; transaction boundaries/dual writes",
+      "evidence": "events-result.json;operations.md OPS-002",
+      "status": "VERIFIED_FAIL",
+      "limitation": "Actual SQLite event-write failure yields non-replayable live event after service commit boundary."
+    },
+    {
+      "coverage_id": "COV-30",
+      "area": "Event replay",
+      "requested_controls": "cursor retention; stale cursor; reconnect/missed event; authoritative API reconciliation",
+      "evidence": "events-result.json;operations.md OPS-003",
+      "status": "IMPLEMENTED_NOT_VERIFIED",
+      "limitation": "Silent retained suffix confirmed; foreground polling mitigates, full browser/device recovery unverified."
+    },
+    {
+      "coverage_id": "COV-31",
+      "area": "Delivery channels",
+      "requested_controls": "foreground Android; web EventSource; closed-app delivery separately; optional push; polling limits; diagnostics",
+      "evidence": "android.md;operations.md;n8n.md",
+      "status": "IMPLEMENTED_NOT_VERIFIED",
+      "limitation": "Native EventSource skipped; foreground polling and WorkManager upload exist; no closed-app business alert/push acceptance."
+    },
+    {
+      "coverage_id": "COV-32",
+      "area": "Schema startup",
+      "requested_controls": "additive/repeatable migrations; FK/history/IDs; transaction boundaries; recovery before listen",
+      "evidence": "business-migration-direct.log;business.md;operations.md",
+      "status": "IMPLEMENTED_NOT_VERIFIED",
+      "limitation": "Eleven focused tests pass; full suite reports additional fixtures, not every historical DB."
+    },
+    {
+      "coverage_id": "COV-33",
+      "area": "SQLite operation",
+      "requested_controls": "driver separation; WAL; FK; busy timeout; one fork; maintenance retention",
+      "evidence": "storage-metadata.json;operations.md",
+      "status": "VERIFIED_PASS",
+      "limitation": "Observed DB WAL/integrity/FK snapshot and config/source constraints verified; not long-run load or all runtime connections."
+    },
+    {
+      "coverage_id": "COV-34",
+      "area": "Storage/deletion",
+      "requested_controls": "paths/mounts/permissions; same-volume rename stage; rollback; interrupted stages; listing/backup exclusions",
+      "evidence": "operations.md;business.md",
+      "status": "IMPLEMENTED_NOT_VERIFIED",
+      "limitation": "Source and test fixtures available; broad file permissions defect confirmed, production deletion not attempted."
+    },
+    {
+      "coverage_id": "COV-35",
+      "area": "Backup completeness",
+      "requested_controls": "DB snapshot plus files; consistency/relationships/history; off-device archives; authorized drill",
+      "evidence": "business.md;storage-metadata.json;operations.md OPS-005",
+      "status": "BLOCKED_PREREQUISITE",
+      "limitation": "Three local ZIPs observed by count; no authorized off-device restore evidence."
+    },
+    {
+      "coverage_id": "COV-36",
+      "area": "Restore compatibility",
+      "requested_controls": "supported historical schemas; isolated restored DB migration; failed restore rollback; interruption journal; usable app/files",
+      "evidence": "business.md;madar-v2/server/modules/system/backup.js:242",
+      "status": "IMPLEMENTED_NOT_VERIFIED",
+      "limitation": "Exact-schema guard rejects differing schemas; supported historical scope not established. Existing isolated restore tests only as logged."
+    },
+    {
+      "coverage_id": "COV-37",
+      "area": "Runtime/build",
+      "requested_controls": "Node22+; manifest/lock/install consistency; reproducible scripts; source/generated/APK identities",
+      "evidence": "dependency-inventory.json;build-location.json;apk-correspondence.json",
+      "status": "IMPLEMENTED_NOT_VERIFIED",
+      "limitation": "Existing-dependency isolated web build pass; no clean install, Android rebuild or deterministic/source-bound release provenance."
+    },
+    {
+      "coverage_id": "COV-38",
+      "area": "APK distribution",
+      "requested_controls": "URLs; package/version progression; signing continuity; debuggable state; endpoint selection; API policy; installed upgrade/pending work",
+      "evidence": "apk-identity.json;android.md AND-003;http-contract-result.json",
+      "status": "VERIFIED_FAIL",
+      "limitation": "Debug fallback artifact and mismatched web output; live startup override/download and installed upgrade unverified."
+    },
+    {
+      "coverage_id": "COV-39",
+      "area": "Operations",
+      "requested_controls": "process config; single SQLite instance; health vs CI; sanitized logging; alerting/retention; runbooks",
+      "evidence": "operations.md;n8n.md;live-processes.json",
+      "status": "IMPLEMENTED_NOT_VERIFIED",
+      "limitation": "Live health/process snapshot and source logging/runbooks; loaded server SHA and disaster acceptance missing."
+    },
+    {
+      "coverage_id": "COV-40",
+      "area": "n8n evidence",
+      "requested_controls": "prior exports vs live config; node types/versions; expressions; credentials refs; reachability; schedules/timezones; retries/errors; noOp placeholders",
+      "evidence": "n8n.md;n8n-live-inventory.json;n8n-static-validation.json",
+      "status": "IMPLEMENTED_NOT_VERIFIED",
+      "limitation": "Detailed per-workflow evidence and exact runtime delivery status in n8n.md; activation is never inferred from exports."
+    },
+    {
+      "coverage_id": "COV-41",
+      "area": "n8n alerting",
+      "requested_controls": "execution success vs actual delivery; authorized destination; live activation",
+      "evidence": "n8n.md;n8n-scheduled-execution-summary.json",
+      "status": "BLOCKED_PREREQUISITE",
+      "limitation": "No authorized configured alert destination; no delivery claimed or live activation performed."
+    },
+    {
+      "coverage_id": "COV-42",
+      "area": "Design scope",
+      "requested_controls": "leases/heartbeat locks; test machines; structured part serials; optional push",
+      "evidence": "business.md;operations.md;madar-v2/REP_REALTIME_LOCKING_ARCHITECTURE.md:1",
+      "status": "NOT_APPLICABLE",
+      "limitation": "Design classification table in final README; proposals are not automatically mandatory defects."
+    },
+    {
+      "coverage_id": "COV-43",
+      "area": "Madar Flow platform",
+      "requested_controls": "API auth/workspace ownership; immutable published DAGs; credentials; outbox; worker; scheduler; UI",
+      "evidence": "operations.md;flow-engine-tests.tap;source-module-inventory.json",
+      "status": "IMPLEMENTED_NOT_VERIFIED",
+      "limitation": "14engine/template tests pass; Postgres/Valkey integration and actual deployment blocked/unverified."
+    },
+    {
+      "coverage_id": "COV-44",
+      "area": "Legacy system",
+      "requested_controls": "ERP mixed SQLite stack; inventory/imports/files/watchers/backups/accounting; separate server identity",
+      "evidence": "operations.md;legacy-inventory-direct.tap;legacy-migration-direct.tap",
+      "status": "IMPLEMENTED_NOT_VERIFIED",
+      "limitation": "Eight focused tests; no live legacy process or full legacy acceptance established."
+    }
+  ]
+}

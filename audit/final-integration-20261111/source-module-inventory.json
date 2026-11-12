@@ -1,0 +1,4054 @@
+[
+  {
+    "subsystem": "V2 server",
+    "file": "madar-v2/server/app.js",
+    "lineCount": 177,
+    "sha256": "42800a331d7e7875c331c3e2cbe430ce02ccc88223365e1ca860fd114c66f48f",
+    "routes": [
+      {
+        "method": "GET",
+        "path": "trust proxy fn",
+        "line": 59
+      },
+      {
+        "method": "GET",
+        "path": "/api/health",
+        "line": 86
+      },
+      {
+        "method": "GET",
+        "path": "/download/apk",
+        "line": 90
+      },
+      {
+        "method": "GET",
+        "path": "/download/apk/status",
+        "line": 109
+      }
+    ],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 server",
+    "file": "madar-v2/server/config/env.js",
+    "lineCount": 87,
+    "sha256": "81ea9b101180ec2001a91562e3da39933d980d38d7ca97f657f11f5bbd3541dd",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 server",
+    "file": "madar-v2/server/config/paths.js",
+    "lineCount": 134,
+    "sha256": "e75df445c4188225cbb15b1e8db5efd06a80a7fdd54c079069f4db496679faaf",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 server",
+    "file": "madar-v2/server/config/storage-layout.js",
+    "lineCount": 89,
+    "sha256": "514c1b7d461d00fe38945ed9d659bd478d5028b0944c609e4933ba9bfc6d6c07",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 server",
+    "file": "madar-v2/server/database/connection.js",
+    "lineCount": 37,
+    "sha256": "442de02f69f1f6736fffad68fd727941ff72c23c4dd0a20ec6c45e41f902a134",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 server",
+    "file": "madar-v2/server/database/init.js",
+    "lineCount": 1709,
+    "sha256": "3a45082a26b9a3313fd364d2713e9991f1c0c6e333cd686310f4087be40a9ce8",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 server",
+    "file": "madar-v2/server/database/maintenance.js",
+    "lineCount": 47,
+    "sha256": "6f7a47b2bc2ea3eee721662f9b14c8e204f2a583e40d44184c64d528cddac7e1",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 server",
+    "file": "madar-v2/server/database/schema.sql",
+    "lineCount": 424,
+    "sha256": "3d3c67d91e9da219e4b26371516a5a8e8693ebba4d00cd26387e762d2d70adf4",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 server",
+    "file": "madar-v2/server/index.js",
+    "lineCount": 85,
+    "sha256": "c88b1890e37ed94f1be01cb3e46384f438cc95052ff7f622e512039d4fcc62cd",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 server",
+    "file": "madar-v2/server/middleware/error-handler.js",
+    "lineCount": 29,
+    "sha256": "8253d1d5ce700217690aa89dae458a9ddba6d22ff961695afd161e130cd926d5",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 server",
+    "file": "madar-v2/server/middleware/request-logger.js",
+    "lineCount": 16,
+    "sha256": "2ef4f2b7dc63d65f879f94280286bdb0109ca5adae3fb86aa45a6d7340a2fdd0",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 server",
+    "file": "madar-v2/server/modules/actor.js",
+    "lineCount": 7,
+    "sha256": "17d92361e863c1bae625aa46047f6f2f3bb284d1db411aa340326eb7479069e4",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 server",
+    "file": "madar-v2/server/modules/audit.js",
+    "lineCount": 24,
+    "sha256": "40b38f1902d7c7fd057672f3a9d3adfc8d31494df13257e783d0b6af6d77c749",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 server",
+    "file": "madar-v2/server/modules/auth/authorization.js",
+    "lineCount": 82,
+    "sha256": "10d6b26e0648c957abad6f9985d2bc0bd4674f31adaa5e354bc52d1712ccfcaf",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 server",
+    "file": "madar-v2/server/modules/auth/login-rate-limit.js",
+    "lineCount": 15,
+    "sha256": "eb94dec4c9f7979c974b35322bbd75405f8e2d43d61e0c88388f1234f1d19adc",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 server",
+    "file": "madar-v2/server/modules/auth/routes.js",
+    "lineCount": 81,
+    "sha256": "1edfd8b082af89ac8113c3f3a4008892ade203591cc55f64e4a4264480c72276",
+    "routes": [
+      {
+        "method": "GET",
+        "path": "/status",
+        "line": 29
+      },
+      {
+        "method": "POST",
+        "path": "/setup",
+        "line": 40
+      },
+      {
+        "method": "POST",
+        "path": "/login",
+        "line": 47
+      },
+      {
+        "method": "POST",
+        "path": "/logout",
+        "line": 72
+      }
+    ],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 server",
+    "file": "madar-v2/server/modules/auth/service.js",
+    "lineCount": 394,
+    "sha256": "9bfae79ed73ceeb45306d90b6e2227288cd834d10c0f2e5cb4532ea64c899e50",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 server",
+    "file": "madar-v2/server/modules/auth/users.js",
+    "lineCount": 222,
+    "sha256": "3a647696856d4d1afb554cc272c933b35583692e4a16f9b181260a0dca98fdcf",
+    "routes": [
+      {
+        "method": "GET",
+        "path": "/",
+        "line": 94
+      },
+      {
+        "method": "POST",
+        "path": "/",
+        "line": 100
+      },
+      {
+        "method": "PATCH",
+        "path": "/:id",
+        "line": 198
+      },
+      {
+        "method": "PUT",
+        "path": "/:id",
+        "line": 199
+      },
+      {
+        "method": "DELETE",
+        "path": "/:id",
+        "line": 201
+      }
+    ],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 server",
+    "file": "madar-v2/server/modules/clients/routes.js",
+    "lineCount": 76,
+    "sha256": "7e201415a77f809369b388219aac7ecb4ce7b54c8da34c61aab61462177beb28",
+    "routes": [
+      {
+        "method": "GET",
+        "path": "/",
+        "line": 26
+      },
+      {
+        "method": "POST",
+        "path": "/",
+        "line": 30
+      },
+      {
+        "method": "PUT",
+        "path": "/:id",
+        "line": 34
+      },
+      {
+        "method": "DELETE",
+        "path": "/:id",
+        "line": 38
+      },
+      {
+        "method": "GET",
+        "path": "/:id/logo",
+        "line": 42
+      },
+      {
+        "method": "POST",
+        "path": "/:id/logo",
+        "line": 56
+      },
+      {
+        "method": "GET",
+        "path": "/:id/statement",
+        "line": 60
+      },
+      {
+        "method": "GET",
+        "path": "/:id",
+        "line": 68
+      }
+    ],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 server",
+    "file": "madar-v2/server/modules/clients/service.js",
+    "lineCount": 406,
+    "sha256": "d8979677c180d6bc03de6d5a2022d8aea8cc806cb6db7c1a8708f16b00d30546",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 server",
+    "file": "madar-v2/server/modules/employees/attendance-export.js",
+    "lineCount": 95,
+    "sha256": "5162edc037992e68ab10520e4fbb3fdb7ee544c4cb28307533b59db894f7c613",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 server",
+    "file": "madar-v2/server/modules/employees/attendance-routes.js",
+    "lineCount": 106,
+    "sha256": "d06fb01725ae117068919e0dc6a3c6d253d139178bd8533d0eb3a750a65389ca",
+    "routes": [
+      {
+        "method": "GET",
+        "path": "/pending-overtime",
+        "line": 28
+      },
+      {
+        "method": "GET",
+        "path": "/today",
+        "line": 33
+      },
+      {
+        "method": "POST",
+        "path": "/mark",
+        "line": 44
+      },
+      {
+        "method": "POST",
+        "path": "/clock-out",
+        "line": 56
+      },
+      {
+        "method": "POST",
+        "path": "/cancel",
+        "line": 79
+      },
+      {
+        "method": "POST",
+        "path": "/:id/approve-overtime",
+        "line": 94
+      },
+      {
+        "method": "POST",
+        "path": "/:id/reject-overtime",
+        "line": 100
+      }
+    ],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 server",
+    "file": "madar-v2/server/modules/employees/attendance.js",
+    "lineCount": 583,
+    "sha256": "32aebd814e479864bff027abd2f931d212c4380cc7482d559b0562b4e27edbbd",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 server",
+    "file": "madar-v2/server/modules/employees/routes.js",
+    "lineCount": 110,
+    "sha256": "3156ee558f784c2908ed1eef1a88c273bcdb0b50d13c319ea5fc59b4c2c42638",
+    "routes": [
+      {
+        "method": "GET",
+        "path": "/",
+        "line": 27
+      },
+      {
+        "method": "POST",
+        "path": "/",
+        "line": 42
+      },
+      {
+        "method": "PATCH",
+        "path": "/:id",
+        "line": 45
+      },
+      {
+        "method": "DELETE",
+        "path": "/:id",
+        "line": 48
+      },
+      {
+        "method": "GET",
+        "path": "/attendance",
+        "line": 52
+      },
+      {
+        "method": "GET",
+        "path": "/attendance/monthly",
+        "line": 55
+      },
+      {
+        "method": "POST",
+        "path": "/attendance/monthly",
+        "line": 58
+      },
+      {
+        "method": "POST",
+        "path": "/attendance/mark-all-present",
+        "line": 63
+      },
+      {
+        "method": "GET",
+        "path": "/attendance/export-monthly",
+        "line": 68
+      },
+      {
+        "method": "POST",
+        "path": "/attendance",
+        "line": 77
+      },
+      {
+        "method": "GET",
+        "path": "/payroll",
+        "line": 83
+      },
+      {
+        "method": "POST",
+        "path": "/payroll/finalize",
+        "line": 86
+      },
+      {
+        "method": "POST",
+        "path": "/:id/advances",
+        "line": 89
+      },
+      {
+        "method": "POST",
+        "path": "/:id/payroll-adjustments",
+        "line": 94
+      },
+      {
+        "method": "GET",
+        "path": "/:id/tools",
+        "line": 100
+      },
+      {
+        "method": "POST",
+        "path": "/:id/tools",
+        "line": 103
+      },
+      {
+        "method": "POST",
+        "path": "/tools/:toolId/return",
+        "line": 106
+      }
+    ],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 server",
+    "file": "madar-v2/server/modules/employees/service.js",
+    "lineCount": 711,
+    "sha256": "7c1a169b07ec4b6785637ff425af4ad2c46ff31edf3a601a63c6045d19af6f9e",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 server",
+    "file": "madar-v2/server/modules/employees/staff-routes.js",
+    "lineCount": 34,
+    "sha256": "bf443312b0f66e38b38796d85642a5fcaad4bccdb4129f1933dee0659bea9ade",
+    "routes": [
+      {
+        "method": "GET",
+        "path": "/",
+        "line": 17
+      },
+      {
+        "method": "POST",
+        "path": "/",
+        "line": 22
+      },
+      {
+        "method": "PATCH",
+        "path": "/:id",
+        "line": 28
+      }
+    ],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 server",
+    "file": "madar-v2/server/modules/employees/staff-service.js",
+    "lineCount": 364,
+    "sha256": "99a21919176428911f56b916112c66c828e80d93b3ffe596332289b62dcffd08",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 server",
+    "file": "madar-v2/server/modules/employees/user-sync.js",
+    "lineCount": 84,
+    "sha256": "dab06b9d3c34cf630a565da7a7bab9fe7383da5538e67d9e331e7ce0a707cfbb",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 server",
+    "file": "madar-v2/server/modules/finance/invoices.service.js",
+    "lineCount": 427,
+    "sha256": "ebfd033ee752dbcd1a8b1c100dbb87da4bd94b58ae5f3601c5e1cb0418490837",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 server",
+    "file": "madar-v2/server/modules/finance/routes.js",
+    "lineCount": 33,
+    "sha256": "70cc294358230da2dfe39785ae52078552002295f9970bd86baeefb9224ee7fd",
+    "routes": [
+      {
+        "method": "GET",
+        "path": "/treasury",
+        "line": 9
+      },
+      {
+        "method": "POST",
+        "path": "/treasury/entries",
+        "line": 13
+      },
+      {
+        "method": "GET",
+        "path": "/invoices",
+        "line": 17
+      },
+      {
+        "method": "POST",
+        "path": "/invoices/purchase",
+        "line": 21
+      },
+      {
+        "method": "POST",
+        "path": "/invoices/:id/receipt",
+        "line": 25
+      },
+      {
+        "method": "POST",
+        "path": "/invoices/:id/payment",
+        "line": 29
+      }
+    ],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 server",
+    "file": "madar-v2/server/modules/finance/treasury.service.js",
+    "lineCount": 152,
+    "sha256": "c8ec7c22b1ea0a2e9fef5b6c4be55581dbafd97f2958b1c682a2a9e7fa14876e",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 server",
+    "file": "madar-v2/server/modules/http.js",
+    "lineCount": 80,
+    "sha256": "f40dfa47b12c128e13640948c772ee7d22e526f69322950334ba14d56fb0aee9",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 server",
+    "file": "madar-v2/server/modules/maintenance/analysis.js",
+    "lineCount": 157,
+    "sha256": "06b00edb20bd232272b45a3d1d502c5e56db1792522e3500d19d18990eb95a3b",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 server",
+    "file": "madar-v2/server/modules/maintenance/area-notes.js",
+    "lineCount": 432,
+    "sha256": "68e1dc51e97438338909d9557236a0e369a0ff958fe1a85754e0941a3d955b64",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 server",
+    "file": "madar-v2/server/modules/maintenance/deletion-lock.js",
+    "lineCount": 29,
+    "sha256": "fb4c5bf061c3f8f64941c93f15a624085c436f4880fa7953bc17fc4859710021",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 server",
+    "file": "madar-v2/server/modules/maintenance/export.js",
+    "lineCount": 1159,
+    "sha256": "cf834235be3e77b44f3bff4943b139082a6753ee655a3d7e54c14c12f4961ce6",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 server",
+    "file": "madar-v2/server/modules/maintenance/note-history.js",
+    "lineCount": 38,
+    "sha256": "5252dd07fc83c673f56d78a421d501107d7de07cb054c30459f1b9a88a8d0257",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 server",
+    "file": "madar-v2/server/modules/maintenance/photo-images.js",
+    "lineCount": 18,
+    "sha256": "12f1a05fa0afa1ade5f51f531ebd69dacaa197ce646f34ee0e5cd84e9e1a44e7",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 server",
+    "file": "madar-v2/server/modules/maintenance/routes.js",
+    "lineCount": 708,
+    "sha256": "c63f6ab7e6ff8ecb98b96125f8f8cdcf24a1b28c1dcd8d58c84852e3b30ec976",
+    "routes": [
+      {
+        "method": "GET",
+        "path": "/areas",
+        "line": 133
+      },
+      {
+        "method": "GET",
+        "path": "/area-notes/export.xlsx",
+        "line": 137
+      },
+      {
+        "method": "GET",
+        "path": "/area-notes",
+        "line": 166
+      },
+      {
+        "method": "GET",
+        "path": "/storage-explorer",
+        "line": 171
+      },
+      {
+        "method": "GET",
+        "path": "/machines",
+        "line": 200
+      },
+      {
+        "method": "GET",
+        "path": "/machines/map",
+        "line": 218
+      },
+      {
+        "method": "GET",
+        "path": "/machine-corrections",
+        "line": 227
+      },
+      {
+        "method": "GET",
+        "path": "/machine-corrections/:id/candidates",
+        "line": 232
+      },
+      {
+        "method": "GET",
+        "path": "/machine-corrections/:id/evidence",
+        "line": 237
+      },
+      {
+        "method": "PATCH",
+        "path": "/machine-corrections/:id/review",
+        "line": 248
+      },
+      {
+        "method": "GET",
+        "path": "/representatives",
+        "line": 252
+      },
+      {
+        "method": "POST",
+        "path": "/machines/import/preview",
+        "line": 257
+      },
+      {
+        "method": "POST",
+        "path": "/machines/import",
+        "line": 262
+      },
+      {
+        "method": "POST",
+        "path": "/machines",
+        "line": 266
+      },
+      {
+        "method": "PATCH",
+        "path": "/machines/:id",
+        "line": 270
+      },
+      {
+        "method": "PATCH",
+        "path": "/machines/:id/geofence",
+        "line": 274
+      },
+      {
+        "method": "POST",
+        "path": "/machines/:id/reset-location",
+        "line": 279
+      },
+      {
+        "method": "DELETE",
+        "path": "/machines/:id",
+        "line": 287
+      },
+      {
+        "method": "DELETE",
+        "path": "/machines/:id/maintenance-note",
+        "line": 292
+      },
+      {
+        "method": "PUT",
+        "path": "/machines/:id/maintenance-note",
+        "line": 297
+      },
+      {
+        "method": "PUT",
+        "path": "/areas/notes",
+        "line": 308
+      },
+      {
+        "method": "GET",
+        "path": "/machines/:id/notes-history",
+        "line": 319
+      },
+      {
+        "method": "GET",
+        "path": "/reasons",
+        "line": 327
+      },
+      {
+        "method": "POST",
+        "path": "/reasons",
+        "line": 338
+      },
+      {
+        "method": "PATCH",
+        "path": "/reasons/:id",
+        "line": 342
+      },
+      {
+        "method": "DELETE",
+        "path": "/reasons/:id",
+        "line": 346
+      },
+      {
+        "method": "GET",
+        "path": "/analysis/areas",
+        "line": 351
+      },
+      {
+        "method": "GET",
+        "path": "/analysis/export.xlsx",
+        "line": 355
+      },
+      {
+        "method": "GET",
+        "path": "/orders",
+        "line": 368
+      },
+      {
+        "method": "POST",
+        "path": "/orders",
+        "line": 377
+      },
+      {
+        "method": "POST",
+        "path": "/orders/test-mock",
+        "line": 397
+      },
+      {
+        "method": "PUT",
+        "path": "/orders/:id/representatives",
+        "line": 410
+      },
+      {
+        "method": "DELETE",
+        "path": "/orders/:id",
+        "line": 430
+      },
+      {
+        "method": "POST",
+        "path": "/orders/:id/unarchive",
+        "line": 434
+      },
+      {
+        "method": "POST",
+        "path": "/orders/:id/cards",
+        "line": 438
+      },
+      {
+        "method": "DELETE",
+        "path": "/orders/:id/cards/:cardId",
+        "line": 446
+      },
+      {
+        "method": "DELETE",
+        "path": "/orders/:id/machines/:machineId",
+        "line": 450
+      },
+      {
+        "method": "POST",
+        "path": "/orders/:id/populate-area",
+        "line": 458
+      },
+      {
+        "method": "POST",
+        "path": "/orders/:id/import-server-folder",
+        "line": 463
+      },
+      {
+        "method": "GET",
+        "path": "/orders/:id/trip-progress",
+        "line": 467
+      },
+      {
+        "method": "POST",
+        "path": "/orders/:id/process-folder",
+        "line": 472
+      },
+      {
+        "method": "POST",
+        "path": "/orders/:id/unmatched/:folderId/bind",
+        "line": 487
+      },
+      {
+        "method": "DELETE",
+        "path": "/orders/:id/unmatched/:folderId",
+        "line": 496
+      },
+      {
+        "method": "GET",
+        "path": "/orders/:id/unmatched/:folderId/photos/:filename",
+        "line": 504
+      },
+      {
+        "method": "GET",
+        "path": "/export/pptx/progress",
+        "line": 523
+      },
+      {
+        "method": "GET",
+        "path": "/export/pptx/download/:exportId",
+        "line": 532
+      },
+      {
+        "method": "GET",
+        "path": "/export/pptx",
+        "line": 540
+      },
+      {
+        "method": "POST",
+        "path": "/export/pptx",
+        "line": 544
+      },
+      {
+        "method": "GET",
+        "path": "/orders/:id/export.pptx",
+        "line": 548
+      },
+      {
+        "method": "GET",
+        "path": "/orders/:id/export.docx",
+        "line": 551
+      },
+      {
+        "method": "POST",
+        "path": "/orders/:id/custody-advance",
+        "line": 555
+      },
+      {
+        "method": "POST",
+        "path": "/orders/:id/cards/:cardId/photos/move",
+        "line": 563
+      },
+      {
+        "method": "GET",
+        "path": "/orders/:id/photos/tag-targets",
+        "line": 577
+      },
+      {
+        "method": "POST",
+        "path": "/orders/:id/cards/:cardId/photos/rotate",
+        "line": 582
+      },
+      {
+        "method": "POST",
+        "path": "/photos/rotate",
+        "line": 591
+      },
+      {
+        "method": "POST",
+        "path": "/orders/:id/cards/:cardId/photos/:phase",
+        "line": 602
+      },
+      {
+        "method": "DELETE",
+        "path": "/orders/:id/cards/:cardId/photos/:phase/:filename",
+        "line": 612
+      },
+      {
+        "method": "GET",
+        "path": "/orders/:id/cards/:cardId/photos/:phase/:filename",
+        "line": 622
+      },
+      {
+        "method": "GET",
+        "path": "/orders/:id/cards/:cardId/photos/:phase/:filename/thumbnail",
+        "line": 646
+      },
+      {
+        "method": "PATCH",
+        "path": "/orders/:id/cards/:cardId",
+        "line": 661
+      },
+      {
+        "method": "PATCH",
+        "path": "/orders/:id/status",
+        "line": 674
+      },
+      {
+        "method": "POST",
+        "path": "/orders/:id/archive",
+        "line": 682
+      },
+      {
+        "method": "GET",
+        "path": "/orders/:id",
+        "line": 690
+      }
+    ],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 server",
+    "file": "madar-v2/server/modules/maintenance/service.js",
+    "lineCount": 5187,
+    "sha256": "52a8f341515d525451ca3625286590d972ad3ec1520eb6a3bfeb437cc2dc4a49",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 server",
+    "file": "madar-v2/server/modules/maintenance/sorting.js",
+    "lineCount": 118,
+    "sha256": "b543249f2af60a32ad32d745347c565581d9789f24b228767013926292cfd38f",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 server",
+    "file": "madar-v2/server/modules/maintenance/thumbnails.js",
+    "lineCount": 90,
+    "sha256": "71ac533918b10920fa1fbeddfc8f4adb98a14183c0f7381398b2f62e4fe6227a",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 server",
+    "file": "madar-v2/server/modules/maintenance/trip-folder.js",
+    "lineCount": 436,
+    "sha256": "226923da3af5c9eb6b79de7ed0b30460f989ae8266fb35713fabdaa9b7504ef8",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 server",
+    "file": "madar-v2/server/modules/operations-events.js",
+    "lineCount": 79,
+    "sha256": "3e737f421403629b79f3f0adfd12aca8f06fc9010d9bcbef69f9ef8ce68fad51",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 server",
+    "file": "madar-v2/server/modules/rep/routes.js",
+    "lineCount": 339,
+    "sha256": "8bfa742c5b11bd65e373ca278d224824cc67f0d39b61200a212dae61c7e8c2e3",
+    "routes": [
+      {
+        "method": "POST",
+        "path": "/login",
+        "line": 54
+      },
+      {
+        "method": "GET",
+        "path": "/events",
+        "line": 83
+      },
+      {
+        "method": "GET",
+        "path": "/attendance/today",
+        "line": 124
+      },
+      {
+        "method": "POST",
+        "path": "/attendance/clock-in",
+        "line": 129
+      },
+      {
+        "method": "POST",
+        "path": "/attendance/clock-out",
+        "line": 139
+      },
+      {
+        "method": "POST",
+        "path": "/attendance/sync",
+        "line": 158
+      },
+      {
+        "method": "POST",
+        "path": "/attendance/mock-location",
+        "line": 182
+      },
+      {
+        "method": "GET",
+        "path": "/today-route",
+        "line": 191
+      },
+      {
+        "method": "GET",
+        "path": "/location-confirmations",
+        "line": 201
+      },
+      {
+        "method": "POST",
+        "path": "/machines/:machineId/confirm-location",
+        "line": 206
+      },
+      {
+        "method": "POST",
+        "path": "/machines/:machineId/corrections",
+        "line": 222
+      },
+      {
+        "method": "GET",
+        "path": "/fault-reasons",
+        "line": 243
+      },
+      {
+        "method": "GET",
+        "path": "/map/packs",
+        "line": 248
+      },
+      {
+        "method": "GET",
+        "path": "/map/packs/:packId/manifest",
+        "line": 253
+      },
+      {
+        "method": "GET",
+        "path": "/map/tiles/:packId/:z/:x/:y",
+        "line": 262
+      },
+      {
+        "method": "POST",
+        "path": "/location-ping",
+        "line": 294
+      },
+      {
+        "method": "POST",
+        "path": "/sync-visit",
+        "line": 309
+      }
+    ],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 server",
+    "file": "madar-v2/server/modules/rep/service.js",
+    "lineCount": 1429,
+    "sha256": "e65df3b82bc731feddd3d4f4793b75a9ac5e68859d40e370daeceed16fdb4204",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 server",
+    "file": "madar-v2/server/modules/storage.js",
+    "lineCount": 335,
+    "sha256": "d16ea4bac8b5bb39b2b53d727a4243579456e0501fd3656a40f656a1d55bce02",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 server",
+    "file": "madar-v2/server/modules/supervisor/offline-tiles.js",
+    "lineCount": 250,
+    "sha256": "cca7c73f94d0af73af6f5e724fa3bb0182891d1cbdcf72b2fafcb722e88ff01c",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 server",
+    "file": "madar-v2/server/modules/supervisor/routes.js",
+    "lineCount": 155,
+    "sha256": "5dc91bcf66f521a4b8519f800b5132bf33d3b4cefc6b0ac2bb0de9663394e283",
+    "routes": [
+      {
+        "method": "GET",
+        "path": "/map/status",
+        "line": 27
+      },
+      {
+        "method": "GET",
+        "path": "/map/tiles/:z/:x/:y",
+        "line": 32
+      },
+      {
+        "method": "GET",
+        "path": "/events",
+        "line": 45
+      },
+      {
+        "method": "GET",
+        "path": "/radar",
+        "line": 77
+      },
+      {
+        "method": "GET",
+        "path": "/reps/:id/route",
+        "line": 82
+      },
+      {
+        "method": "GET",
+        "path": "/location-confirmations",
+        "line": 91
+      },
+      {
+        "method": "POST",
+        "path": "/corrections/:id/reject",
+        "line": 96
+      },
+      {
+        "method": "POST",
+        "path": "/corrections/:id/approve",
+        "line": 103
+      },
+      {
+        "method": "GET",
+        "path": "/qa/queue",
+        "line": 112
+      },
+      {
+        "method": "GET",
+        "path": "/visits/:id/photos/:phase",
+        "line": 123
+      },
+      {
+        "method": "GET",
+        "path": "/visits/:id/photos/:phase/:ordinal",
+        "line": 124
+      },
+      {
+        "method": "POST",
+        "path": "/visits/:id/review",
+        "line": 126
+      },
+      {
+        "method": "GET",
+        "path": "/reports/approved-visits.xlsx",
+        "line": 141
+      }
+    ],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 server",
+    "file": "madar-v2/server/modules/supervisor/service.js",
+    "lineCount": 468,
+    "sha256": "efa7e41789519b493065ea0673accc030ac2083c74443b114656c4ed4f40b818",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 server",
+    "file": "madar-v2/server/modules/system/audit-routes.js",
+    "lineCount": 149,
+    "sha256": "01cccbc61677dabb3f761e3d07c2dbe1c8fcd700aa96e443446d37a55b4a2e79",
+    "routes": [
+      {
+        "method": "GET",
+        "path": "/audit-log",
+        "line": 72
+      }
+    ],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 server",
+    "file": "madar-v2/server/modules/system/backup.js",
+    "lineCount": 754,
+    "sha256": "4c24b07e1cfa8ace929b2cf7e9acc580c8a4f316c5d86f980ca301c4c863a4a9",
+    "routes": [
+      {
+        "method": "GET",
+        "path": "/health",
+        "line": 688
+      },
+      {
+        "method": "POST",
+        "path": "/backup",
+        "line": 720
+      },
+      {
+        "method": "GET",
+        "path": "/backups",
+        "line": 725
+      },
+      {
+        "method": "GET",
+        "path": "/backups/:filename/download",
+        "line": 726
+      },
+      {
+        "method": "POST",
+        "path": "/backup/restore",
+        "line": 727
+      },
+      {
+        "method": "GET",
+        "path": "/apk-info",
+        "line": 736
+      }
+    ],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 server",
+    "file": "madar-v2/server/modules/system/health.js",
+    "lineCount": 59,
+    "sha256": "81dc31bc8aa3d2e906abfa46ba94be1d513c85fc0433b2876f240df944a9cde9",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 server",
+    "file": "madar-v2/server/modules/upload.js",
+    "lineCount": 90,
+    "sha256": "a958f29c1dbdb2a6e97922cb3bb857fb00c0bfad9a90ce1f4ad6c0e7bdbb1c30",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 server",
+    "file": "madar-v2/server/modules/visibility.js",
+    "lineCount": 34,
+    "sha256": "ede3c4cd377da2d79d8716d00b44206cfedc1f00b22a2dde845be6ef6f6e56f5",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 server",
+    "file": "madar-v2/server/modules/warehouse/export.js",
+    "lineCount": 30,
+    "sha256": "687703a6d3c45d60912b3d5f2c73dce20152f64bb39a8221959765650e644552",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 server",
+    "file": "madar-v2/server/modules/warehouse/routes.js",
+    "lineCount": 67,
+    "sha256": "87e91eb1e33bbb81c1c991df32071deee7330416818dc335fb93ceae4c5ced11",
+    "routes": [
+      {
+        "method": "GET",
+        "path": "/export.xlsx",
+        "line": 19
+      },
+      {
+        "method": "GET",
+        "path": "/materials",
+        "line": 29
+      },
+      {
+        "method": "POST",
+        "path": "/materials",
+        "line": 34
+      },
+      {
+        "method": "GET",
+        "path": "/movements",
+        "line": 38
+      },
+      {
+        "method": "POST",
+        "path": "/issue",
+        "line": 42
+      },
+      {
+        "method": "GET",
+        "path": "/offcuts",
+        "line": 46
+      },
+      {
+        "method": "POST",
+        "path": "/offcuts",
+        "line": 51
+      },
+      {
+        "method": "POST",
+        "path": "/offcuts/scrap-sales",
+        "line": 55
+      },
+      {
+        "method": "POST",
+        "path": "/stock-counts/start",
+        "line": 59
+      },
+      {
+        "method": "POST",
+        "path": "/stock-counts/:id/reconcile",
+        "line": 63
+      }
+    ],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 server",
+    "file": "madar-v2/server/modules/warehouse/service.js",
+    "lineCount": 460,
+    "sha256": "09e1b054e776d7d3bb2d4f4e35220e480b07f06f35494b0ecbcd03a0ed7aebf5",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 server",
+    "file": "madar-v2/server/modules/warehouse/stock-count.service.js",
+    "lineCount": 252,
+    "sha256": "2a3379af8ad4d73b597579b490a05100ddbdfa7904033e68ad8662492b9ed019",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 server",
+    "file": "madar-v2/server/modules/workshop/routes.js",
+    "lineCount": 87,
+    "sha256": "621ee13da718b2b5a1873d50bc69ca4314c9896e597fc16d29071e0ec1d16621",
+    "routes": [
+      {
+        "method": "GET",
+        "path": "/orders",
+        "line": 28
+      },
+      {
+        "method": "POST",
+        "path": "/orders",
+        "line": 37
+      },
+      {
+        "method": "POST",
+        "path": "/orders/:id/designs",
+        "line": 45
+      },
+      {
+        "method": "POST",
+        "path": "/orders/:id/ready",
+        "line": 54
+      },
+      {
+        "method": "POST",
+        "path": "/orders/:id/deliver",
+        "line": 62
+      },
+      {
+        "method": "GET",
+        "path": "/designs/:fileId/download",
+        "line": 70
+      },
+      {
+        "method": "GET",
+        "path": "/orders/:id",
+        "line": 79
+      }
+    ],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 server",
+    "file": "madar-v2/server/modules/workshop/service.js",
+    "lineCount": 349,
+    "sha256": "0eb3989ca938d229ba06a0c245f499f34f23399b161fa21d87da1f113bfd8b7d",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 client",
+    "file": "madar-v2/client/src/App.jsx",
+    "lineCount": 289,
+    "sha256": "48cf6783438c8dcfc8964b2102269caddf474968a151a719e7ecaca8d21736cd",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 client",
+    "file": "madar-v2/client/src/NativePermissionGate.jsx",
+    "lineCount": 133,
+    "sha256": "d4c35397465afbabe3c180da9933d34195ce5300a94fb17de0de58623275ae07",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 client",
+    "file": "madar-v2/client/src/components/layout/AppShell.jsx",
+    "lineCount": 24,
+    "sha256": "98dcce00c6496d6cf6b41c84e2b4236d1325214deb047075f09e0d4c0af42a25",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 client",
+    "file": "madar-v2/client/src/components/layout/Sidebar.jsx",
+    "lineCount": 63,
+    "sha256": "2f7dd3da6014f702f76a8eb8967e3cb8c058426f1c967133b7d1f4cd0ed3b3a8",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 client",
+    "file": "madar-v2/client/src/components/layout/StatusPills.jsx",
+    "lineCount": 16,
+    "sha256": "52bf3af29870b3f106943bfc5fdf0eba555daffd62a9a90df7c8218434a76bb2",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 client",
+    "file": "madar-v2/client/src/components/layout/Topbar.jsx",
+    "lineCount": 73,
+    "sha256": "47fdd64e0f0996a1f512b130b06959d9d5b1e53094d241ea37428b1a22572a62",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 client",
+    "file": "madar-v2/client/src/components/system/NativePermissionsGate.jsx",
+    "lineCount": 221,
+    "sha256": "5b6b55b95b9daa231959bf8180456f763d3d6c527cd813dfcec9be2212999316",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 client",
+    "file": "madar-v2/client/src/components/ui/Alert.jsx",
+    "lineCount": 6,
+    "sha256": "847ab95370c3b8e36833c99e5f2fcef0aa44534690ace39367d310ae33b4b891",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 client",
+    "file": "madar-v2/client/src/components/ui/Badge.jsx",
+    "lineCount": 6,
+    "sha256": "616a6f917fb4827f75bb90234ed98ee4d9b4dbc2f21b00ddf98ec4f6e217863d",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 client",
+    "file": "madar-v2/client/src/components/ui/Button.jsx",
+    "lineCount": 26,
+    "sha256": "614065975600bf2e4db351bb2d477595add052b7bdbb04849c4386a9af42774f",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 client",
+    "file": "madar-v2/client/src/components/ui/Checkbox.jsx",
+    "lineCount": 19,
+    "sha256": "ac7261c8b8123224e7105910a3964b7218a81cf44c8a11efd7b7441619bd65f6",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 client",
+    "file": "madar-v2/client/src/components/ui/EmployeeCheckboxList.jsx",
+    "lineCount": 36,
+    "sha256": "9500e37893cc4b7528f64d0dee2776bd8e984251010bae84e6ceefebf1292fe2",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 client",
+    "file": "madar-v2/client/src/components/ui/EmptyState.jsx",
+    "lineCount": 14,
+    "sha256": "2f975f331cdb610a589be9ca3c0d1bd8547fe4542e74ef925a9eb453de33815f",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 client",
+    "file": "madar-v2/client/src/components/ui/Field.jsx",
+    "lineCount": 24,
+    "sha256": "e2ee82c846998550bd5bf0901ff641f15b1c7fa98aa28a169de1160a2b248eb8",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 client",
+    "file": "madar-v2/client/src/components/ui/Icon.jsx",
+    "lineCount": 48,
+    "sha256": "a3fda8cfeb0cda22d4f0ab1c383f50676310a7391b2df816b5529535aca5f586",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 client",
+    "file": "madar-v2/client/src/components/ui/LoadingState.jsx",
+    "lineCount": 3,
+    "sha256": "87c3e175360caaddf7ac806f608611703b88f7c87c86f5e17c8c46b38e377c76",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 client",
+    "file": "madar-v2/client/src/components/ui/Modal.jsx",
+    "lineCount": 28,
+    "sha256": "dff289678f5c705cb00fe79551bd56c9e811cd1f3f1c5cc98c8f80cb345ddf47",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 client",
+    "file": "madar-v2/client/src/components/ui/PageHeader.jsx",
+    "lineCount": 12,
+    "sha256": "a1f8d0a2d6e71f2f3d02ecde72292bb7e6c7a5dc81334f31321ee5d2ebb782e5",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 client",
+    "file": "madar-v2/client/src/components/ui/Tabs.jsx",
+    "lineCount": 19,
+    "sha256": "517e5fb53eac7745439a6c394e13cd97ed48bba43b4a6a2249f86572eeaf7ac2",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 client",
+    "file": "madar-v2/client/src/components/ui/Toast.jsx",
+    "lineCount": 17,
+    "sha256": "41dd026ad2c866da22c82a8a540f9390a101736946cb65833c8a943777817ff9",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 client",
+    "file": "madar-v2/client/src/lib/api.js",
+    "lineCount": 139,
+    "sha256": "18417f4c0b5dd67b48d86d76b14b0f8c50b5ede7e3c1741bcdec344484b7dedb",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 client",
+    "file": "madar-v2/client/src/lib/device-permissions.js",
+    "lineCount": 32,
+    "sha256": "322a485f27b84c29583da61375c5c5cf33363486225abe065008135251905a51",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 client",
+    "file": "madar-v2/client/src/lib/format.js",
+    "lineCount": 58,
+    "sha256": "ed8fa1edfabe5bfb6ab273f9711566bd1d7351b5ff75515cfe607be73581f58e",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 client",
+    "file": "madar-v2/client/src/lib/regions.js",
+    "lineCount": 10,
+    "sha256": "bf4ab951de5a2526df93e5cd91e47a6b5a4f5e7f0028b0c82d4d6c418f60f3c4",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 client",
+    "file": "madar-v2/client/src/lib/useApi.js",
+    "lineCount": 28,
+    "sha256": "9d823b0d4e66e4a5b60c002b32f26fb958b74a122031d2c1e42041f675cc5855",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 client",
+    "file": "madar-v2/client/src/lib/useToast.js",
+    "lineCount": 8,
+    "sha256": "22396a4098b645586800d023511eca482accda65dfdc71d1ad9da57c809c5277",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 client",
+    "file": "madar-v2/client/src/main.jsx",
+    "lineCount": 28,
+    "sha256": "211e82dbb33819b29632e0e457735a804cbcf83edee6b7ae82958feed2723fbb",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 client",
+    "file": "madar-v2/client/src/modules/accounting/AccountingPage.jsx",
+    "lineCount": 373,
+    "sha256": "7c3caf6963edcdd7f43b038c8d1054d02a61437460d96944a9acfb472b43cb3b",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 client",
+    "file": "madar-v2/client/src/modules/accounting/MonthlyAttendanceMatrix.jsx",
+    "lineCount": 316,
+    "sha256": "b14791701035b7ef5a218ae040c97d6cfa7f8d82cf6f3b6a40acf847f218016d",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 client",
+    "file": "madar-v2/client/src/modules/archive/ArchivePage.jsx",
+    "lineCount": 98,
+    "sha256": "62615971785f838fc832f8e8009617ad1911e6f50c03ef30e60ea5b3716f12c8",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 client",
+    "file": "madar-v2/client/src/modules/archive/MaintenanceAreaAnalysis.jsx",
+    "lineCount": 99,
+    "sha256": "81420c8945017996f1a8814067b9609e369265f64d5032c92c8df1fdf54b4276",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 client",
+    "file": "madar-v2/client/src/modules/auth/SignInPage.jsx",
+    "lineCount": 221,
+    "sha256": "7a353bd275a2ab4e778d4f98d05108cad4f0c2e7b81eb6f5c957ef5eac444b85",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 client",
+    "file": "madar-v2/client/src/modules/clients/ClientsPage.jsx",
+    "lineCount": 241,
+    "sha256": "e3f519e27033af74210f65127e3327b757fc0ac61eabd1bde4bce55919bb8e36",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 client",
+    "file": "madar-v2/client/src/modules/dashboard/OverviewPage.jsx",
+    "lineCount": 144,
+    "sha256": "483ed3916059a2df4dbfd5a3e1c34d0f98d08f9da76492f48fa45e74aff0fb04",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 client",
+    "file": "madar-v2/client/src/modules/employees/StaffDirectoryPage.jsx",
+    "lineCount": 211,
+    "sha256": "02b667a795c6ac61987b5a62daf84561a9c9c1a53f6fa63cd6502f644c5d69a0",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 client",
+    "file": "madar-v2/client/src/modules/finance/FinancePage.jsx",
+    "lineCount": 157,
+    "sha256": "475b807342570452694ad824485091c33e6d7d90bc48c06651b7e0545ed2ba67",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 client",
+    "file": "madar-v2/client/src/modules/maintenance/AreaMaintenanceDirectory.jsx",
+    "lineCount": 346,
+    "sha256": "413fd0c33055467b40211bb057d88db2e2bd052d6870b267c01702b014fb2ae5",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 client",
+    "file": "madar-v2/client/src/modules/maintenance/MachineCorrectionReview.jsx",
+    "lineCount": 180,
+    "sha256": "249a46feba4f755a62cf8a98bc6f3ffacbed98c6c030d7d431d6e150da095d24",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 client",
+    "file": "madar-v2/client/src/modules/maintenance/MachineDirectoryMap.jsx",
+    "lineCount": 117,
+    "sha256": "eaa0f5fceb9b659927e94b44cb93559034a88cbc8670e950da23c557599598c0",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 client",
+    "file": "madar-v2/client/src/modules/maintenance/MachinesDirectory.jsx",
+    "lineCount": 286,
+    "sha256": "4a1a926aa20f9e16b2bc2cf47ddc6846ef7e227f0b6ae5df31970d8759a07cb7",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 client",
+    "file": "madar-v2/client/src/modules/maintenance/MaintenancePage.jsx",
+    "lineCount": 238,
+    "sha256": "996ef78e700174431fc844084226222ec70948ceaec63799af2536843a43fc0c",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 client",
+    "file": "madar-v2/client/src/modules/maintenance/MaintenancePptxExportModal.jsx",
+    "lineCount": 288,
+    "sha256": "7cb387feb6f948525f78d99c31a80f065e58bf01d2454a3dd7f4fd460abb429f",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 client",
+    "file": "madar-v2/client/src/modules/maintenance/MaintenanceReasonsDirectory.jsx",
+    "lineCount": 118,
+    "sha256": "e96eb069a68e9d0c348c1b6088e7918f098c8ae7e63afcb46868ccc1023c2ad4",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 client",
+    "file": "madar-v2/client/src/modules/maintenance/OrderDetail.jsx",
+    "lineCount": 2334,
+    "sha256": "230e990c975a6ab5c131afb514fd579c1bfe6ca3b466339a8d96331e32c1fec3",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 client",
+    "file": "madar-v2/client/src/modules/maintenance/StorageFileExplorer.jsx",
+    "lineCount": 173,
+    "sha256": "36ee6bd792c3c5939d1256409ff5c415e19436a42e324c251a0e09a2bd269ada",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 client",
+    "file": "madar-v2/client/src/modules/rep/MachineVisitSheet.jsx",
+    "lineCount": 500,
+    "sha256": "2d5b65e2e3ab88103a0e7d25b4e6788edd39edb3fbca4688ebc6d827f95741ad",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 client",
+    "file": "madar-v2/client/src/modules/rep/OfflineMapPanel.jsx",
+    "lineCount": 241,
+    "sha256": "c217efae4c76fb13d4ecd1aa559b49fff5fcdf4a47d346e9417a5347c1d00ffc",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 client",
+    "file": "madar-v2/client/src/modules/rep/OfflineRouteMap.jsx",
+    "lineCount": 174,
+    "sha256": "5d57b620281973bc41f88987880924198adff56959b549bd06010d6fde4029c0",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 client",
+    "file": "madar-v2/client/src/modules/rep/RepApp.jsx",
+    "lineCount": 1801,
+    "sha256": "f91211c9c8acc32aabea2b020afa686528539b7e3ee1fa2ed6cfe415638ec293",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 client",
+    "file": "madar-v2/client/src/modules/rep/gps-adaptive.js",
+    "lineCount": 26,
+    "sha256": "f8bbc929c2712767af143c20a168fea531fb22222c1b7a601ef46dae790bb816",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 client",
+    "file": "madar-v2/client/src/modules/rep/image-processing.js",
+    "lineCount": 123,
+    "sha256": "7fc53530fdc0d6762f0fa217975f500819f283800da3ba36e834b2a6b2555a2e",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 client",
+    "file": "madar-v2/client/src/modules/rep/location-review.js",
+    "lineCount": 38,
+    "sha256": "49ed0828d577827d60fefad126edc19ce96538882e033b1c55b675fc558ba3f9",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 client",
+    "file": "madar-v2/client/src/modules/rep/map-utils.js",
+    "lineCount": 56,
+    "sha256": "bde1544205daaa74d142b233f79d253e89fd9a60e3fb4ebe597d6afc6bb6a99b",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 client",
+    "file": "madar-v2/client/src/modules/rep/native-bridges.js",
+    "lineCount": 505,
+    "sha256": "49d8cbc6667fc1c31c896e95f0993f411d8002e0b039484fbc3a2f92d73de97f",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 client",
+    "file": "madar-v2/client/src/modules/rep/native-session.js",
+    "lineCount": 27,
+    "sha256": "56575e37536f7ec8a516db3532e6a6d6586442eb0ad2e76a30b35298034fea56",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 client",
+    "file": "madar-v2/client/src/modules/rep/offline-store.js",
+    "lineCount": 467,
+    "sha256": "11428aed917b43285db3e752638e0250ef6019fe5b5a8ec112986be57b4fcee2",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 client",
+    "file": "madar-v2/client/src/modules/settings/AuditLogPage.jsx",
+    "lineCount": 151,
+    "sha256": "21ad8bd97cc4b402ff7ccdebd3320d016ee731b2f55d81e6d397f41fd4486605",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 client",
+    "file": "madar-v2/client/src/modules/settings/SettingsPage.jsx",
+    "lineCount": 248,
+    "sha256": "95e3ccd9725fca5477855989b6b769ecc412534e5191500994968092f610ee7b",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 client",
+    "file": "madar-v2/client/src/modules/supervisor/LocationReviews.jsx",
+    "lineCount": 57,
+    "sha256": "63be0dae3d8d4181006944e9f247d066f0f3feb0b70739bd1a543c84c7a8d011",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 client",
+    "file": "madar-v2/client/src/modules/supervisor/SupervisorRadarPage.jsx",
+    "lineCount": 443,
+    "sha256": "06406416d7cbb62271b0c070e46c41a56fc7344a8b364d801c505e9aa0495522",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 client",
+    "file": "madar-v2/client/src/modules/warehouse/WarehousePage.jsx",
+    "lineCount": 273,
+    "sha256": "3e0fe3fd381fa1604156d182ec7f37ab320d2982ffb78bf5bc6272b5863f63fd",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 client",
+    "file": "madar-v2/client/src/modules/workshop/WorkshopOrderDetail.jsx",
+    "lineCount": 101,
+    "sha256": "8d4a45da7f6af29778e414b28d1d8b7587dc6bfe90b644f437c08602d676c8f5",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "V2 client",
+    "file": "madar-v2/client/src/modules/workshop/WorkshopPage.jsx",
+    "lineCount": 168,
+    "sha256": "308cb22b98b601aaf6e978fd6b1cc80de2cf7c7a97ae05a397ba51f848ae8ab7",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Android",
+    "file": "madar-v2/android/app/src/main/java/com/madar/rep/app/MadarSyncScheduler.java",
+    "lineCount": 56,
+    "sha256": "23a927fad16070c5aefe0f56b2c1e5c376c1897c7c0d458b675df527ffc93161",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Android",
+    "file": "madar-v2/android/app/src/main/java/com/madar/rep/app/MadarSyncWorker.java",
+    "lineCount": 548,
+    "sha256": "99d9fc7600299862600d9dcb829f947ecdd3fe25d7c8062b586999b164b314fa",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Android",
+    "file": "madar-v2/android/app/src/main/java/com/madar/rep/app/MainActivity.java",
+    "lineCount": 42,
+    "sha256": "97651f4735e4638003a459b59f9450b5ef2a0cd6c639eedaab0e27b62bfda2e6",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Android",
+    "file": "madar-v2/android/app/src/main/java/com/madar/rep/app/RepAuthStore.java",
+    "lineCount": 59,
+    "sha256": "30ee649e5cb4c721f389d05db4db00b09bc0dddf7551cca85b691482b161c491",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Android",
+    "file": "madar-v2/android/app/src/main/java/com/madar/rep/app/RepBiometricAuth.java",
+    "lineCount": 74,
+    "sha256": "118a3dfb5e6b5013e1489cfc7eb177235d913691c70c2c12fff0adef709e086e",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Android",
+    "file": "madar-v2/android/app/src/main/java/com/madar/rep/app/RepDevicePlugin.java",
+    "lineCount": 139,
+    "sha256": "70d072ff70b88322b61e21aab1c433f284164b1d4470b807cdb222440ab7140f",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Android",
+    "file": "madar-v2/android/app/src/main/java/com/madar/rep/app/RepLocalStore.java",
+    "lineCount": 720,
+    "sha256": "4b7ec7cf4fc693c5cf87a701e362fabbcea028c3aaa0dfb0afe570797f9857ac",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Android",
+    "file": "madar-v2/android/app/src/main/java/com/madar/rep/app/RepLocationPlugin.java",
+    "lineCount": 299,
+    "sha256": "77a5c862f68cc4b96b595db07d79f74eb0b5ed0019641a2803bd5107aec31b7f",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Android",
+    "file": "madar-v2/android/app/src/main/java/com/madar/rep/app/RepLocationService.java",
+    "lineCount": 324,
+    "sha256": "9b6560146bb1e8c686e60f38abd2937d002de08fa1ffddc9262a6d9b2ec30bd1",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Android",
+    "file": "madar-v2/android/app/src/main/java/com/madar/rep/app/RepNativeEnginePlugin.java",
+    "lineCount": 814,
+    "sha256": "d4b0c1800041ea5017f055df49e581297a8c15f63ddef229112d36cc804d45e7",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Android",
+    "file": "madar-v2/android/app/src/main/java/com/madar/rep/app/RepTrackStore.java",
+    "lineCount": 242,
+    "sha256": "91f8be1e9f13d09522a3d6f22558b6178dd8f4dc457423649adc3d3a57e5adce",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "legacy",
+    "file": "system/src/App.jsx",
+    "lineCount": 1555,
+    "sha256": "92416a071670c407a203315c59a7b97d5c19fef3c5b8aa5f42df78eab57185a4",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "legacy",
+    "file": "system/src/accounting.js",
+    "lineCount": 274,
+    "sha256": "3c0479aa954975f2a3a0d72d02cf85e39c5ff339a0687deee96cd261f3e41441",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "legacy",
+    "file": "system/src/area-folder-rename.js",
+    "lineCount": 16,
+    "sha256": "1413a38d85a043c93675da7f097c843988e613d43c082b223016c6626c698128",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "legacy",
+    "file": "system/src/backup-restore.js",
+    "lineCount": 560,
+    "sha256": "de40d0e898a9c561606939c2a6c2e33b58f1cc5b7cf45a1a567b7089877f228e",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "legacy",
+    "file": "system/src/components/DomainTabs.jsx",
+    "lineCount": 8,
+    "sha256": "59f3de8967af47d25c835e31b19c3cd049bac13af189abc4abde0f0bc866256a",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "legacy",
+    "file": "system/src/components/MachineAreaSelector.jsx",
+    "lineCount": 37,
+    "sha256": "a31d83d14591c6ced2e3957cb6df5290da6991596bd3351a6bc0fa18f050fac3",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "legacy",
+    "file": "system/src/components/MachineCode.jsx",
+    "lineCount": 3,
+    "sha256": "96523c3d8254cc180dfa91f1346c5ccdc14fd407f7f961a08f649c50d5ed20ee",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "legacy",
+    "file": "system/src/components/OrderTypeFields.jsx",
+    "lineCount": 32,
+    "sha256": "fa5019281c8dff6a35e563c7ed89fe0213c18b7fb8b4eab64bcbd92967a174c9",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "legacy",
+    "file": "system/src/components/accounting/AccountingPage.jsx",
+    "lineCount": 277,
+    "sha256": "e0cf2d631bb00a96b830efc137942a448b2976ebb45db2383d783ab783da27f6",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "legacy",
+    "file": "system/src/components/accounting/AccountingStaffModulePage.jsx",
+    "lineCount": 18,
+    "sha256": "a9f84f2018b1f5e5fe6ae546b65d56c7c15daa145a3e212f601a467d5556e8fa",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "legacy",
+    "file": "system/src/components/archive/ArchiveAnalysisPage.jsx",
+    "lineCount": 146,
+    "sha256": "ea9aecaf3d3ff93d6bebbbe86d63723f7f3239946b088a040177cbe12831a290",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "legacy",
+    "file": "system/src/components/archive/ArchiveLedgerPage.jsx",
+    "lineCount": 41,
+    "sha256": "06a29cff770510f53598b4d35c626fd03bbf277f92ae42b58565a0821c009b29",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "legacy",
+    "file": "system/src/components/archive/ArchiveModulePage.jsx",
+    "lineCount": 18,
+    "sha256": "876c570d88ba22d492b0d02b6709511e318d818361a315dc96e557ac59027b93",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "legacy",
+    "file": "system/src/components/employees/EmployeesPage.jsx",
+    "lineCount": 335,
+    "sha256": "da06a7273f02a2c9ea377a387fe55c4b8b5f7515423d268a5de30799a2ff6883",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "legacy",
+    "file": "system/src/components/machines/AreaFileExplorerModal.jsx",
+    "lineCount": 78,
+    "sha256": "d93d67b69ec2d7032a80f9b30929454c8142ad1a5d269f19df455f7e86089eca",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "legacy",
+    "file": "system/src/components/machines/MachinesPage.jsx",
+    "lineCount": 128,
+    "sha256": "2b3e39ef00190912e3d22ae2a75d98c242c363e1a46b6a75bd4bd5b17788deb9",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "legacy",
+    "file": "system/src/components/maintenance/MaintenanceModulePage.jsx",
+    "lineCount": 25,
+    "sha256": "e4863dbed97561561b5bfeb37318a8dfdc4cc04b7989bf10d3de7af3858c951e",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "legacy",
+    "file": "system/src/components/manufacturing/ManufacturingPage.jsx",
+    "lineCount": 212,
+    "sha256": "b0d0cc000e6277b0f4bb375f7ad413c4ca5a8254ca4a9ea429f6dc275124c648",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "legacy",
+    "file": "system/src/components/orders/OrderFormModal.jsx",
+    "lineCount": 162,
+    "sha256": "4bcad6560a72edc19b53e551ffc657b23c64efd009353e7cf967f96bc8fd552c",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "legacy",
+    "file": "system/src/components/orders/OrdersPage.jsx",
+    "lineCount": 134,
+    "sha256": "a8b8f87f18ddb0daee1ec8c84085886364423ba607034321f3bde898b7b5c632",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "legacy",
+    "file": "system/src/components/settings/SettingsModulePage.jsx",
+    "lineCount": 18,
+    "sha256": "f73f1c8effd45c9706098779907fc8d32520f3f2876c0f0c1b42afd52aa1818d",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "legacy",
+    "file": "system/src/components/settings/SettingsPage.jsx",
+    "lineCount": 319,
+    "sha256": "7a34e2184b473733248941925e425e486619e4a95a47145ed1719eaf5ea25e54",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "legacy",
+    "file": "system/src/components/users/UsersPage.jsx",
+    "lineCount": 149,
+    "sha256": "7037a5228432aa3752bf2ecf42251f2ce5eca0f5815a5af7ec087e57ec60a191",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "legacy",
+    "file": "system/src/components/warehouse/SecondaryWarehousePage.jsx",
+    "lineCount": 82,
+    "sha256": "6e5b9baf1b4d00e51a62fc96420db9854036dec9f896695f38394b8ae3c6e187",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "legacy",
+    "file": "system/src/components/warehouse/WarehouseModulePage.jsx",
+    "lineCount": 18,
+    "sha256": "ac73e9049276d171536b92de815f1b4cec4d0294822f4eb3bba4317d5bb98bad",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "legacy",
+    "file": "system/src/components/workers/WorkersPage.jsx",
+    "lineCount": 94,
+    "sha256": "c6e5c8d103cfedbabe68750a87e0e90513e0484f0efc93d09fe3b5899c13ef06",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "legacy",
+    "file": "system/src/db.js",
+    "lineCount": 1319,
+    "sha256": "91aac05df56fa46025a5a3fd8b44babf87c021910ee18e341c121a089ffe2ad7",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "legacy",
+    "file": "system/src/filesystem-recovery.js",
+    "lineCount": 306,
+    "sha256": "281ccfa356a529ee042d2487053c491c843c445545ee4bdfa4045e0d6a3145ab",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "legacy",
+    "file": "system/src/historical-ledger-conversion.js",
+    "lineCount": 254,
+    "sha256": "d1c7c7721ed8e6b58d7d8a3916d95a3b5a08f4f605e65f7503c9ff1425ceedea",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "legacy",
+    "file": "system/src/inventory.js",
+    "lineCount": 38,
+    "sha256": "8cebbc200da40278831517d589e8ed39d0c8aa04c509dd850ac3fcb28208c627",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "legacy",
+    "file": "system/src/legacy-user-imports.js",
+    "lineCount": 11,
+    "sha256": "aed023206565d5c47112507656e01b8c2c149dad6d153c5ee6ce440b3c82e4b8",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "legacy",
+    "file": "system/src/login-throttle.js",
+    "lineCount": 54,
+    "sha256": "5ed642a2e536d50fc7472412cd4db20690498847250654fd9c206fdea0dfb94c",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "legacy",
+    "file": "system/src/main.jsx",
+    "lineCount": 8,
+    "sha256": "784666e4d32f386bc06c2705f022448927214caf299c9acad5d950aa6285fc3d",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "legacy",
+    "file": "system/src/models/index.js",
+    "lineCount": 492,
+    "sha256": "05bc7783244e63d726ffccf1c4f57f92bbb2da6f3be6ccd3b0ba234490f99cc4",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "legacy",
+    "file": "system/src/money.js",
+    "lineCount": 26,
+    "sha256": "f6139fa0072b0d7ce70a03fc7805098f9d9d54c59d502ad54cde2935fb4c3d35",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "legacy",
+    "file": "system/src/photo-time.js",
+    "lineCount": 73,
+    "sha256": "65256fe11aeb4d6fb66849f295173be087e996a5bdadf9950f1591cc53f5854e",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "legacy",
+    "file": "system/src/photo-uploads.js",
+    "lineCount": 190,
+    "sha256": "32b17008a636be67fa2a0d92862a2f921e7a2ea56f3ca3a76b92d7e61e11146e",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "legacy",
+    "file": "system/src/routes/manufacturing.js",
+    "lineCount": 435,
+    "sha256": "83aa594a2d888c28429d8776312432d4a0f290a5b61833a4209ff31387242878",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "legacy",
+    "file": "system/src/routes/staff.js",
+    "lineCount": 159,
+    "sha256": "2465fe2d734e0e532546fe1bd22efdc1fbc968a0719214e1465e7dacffb2a636",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "legacy",
+    "file": "system/src/routes/warehouse.js",
+    "lineCount": 116,
+    "sha256": "79d9525db9d394c221a9d86bd9a17d94cf2c0f11f5c2d1af7c0582d39485856f",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "legacy",
+    "file": "system/src/runtime.js",
+    "lineCount": 45,
+    "sha256": "f77cfd344f4c463d5583e3b5bd8332b9260c54d8628bf4ffd275e70bdc38afe9",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "legacy",
+    "file": "system/src/schema-version.js",
+    "lineCount": 48,
+    "sha256": "84e678e4b2219b0f347860f60bc8e2477c3ed5df655eb00cb88cb7966be9c581",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "legacy",
+    "file": "system/src/server.js",
+    "lineCount": 8138,
+    "sha256": "acd5f5b6172d9d246f83a47934d3e62dcab16542b1d903a4c8167a6cf4f530e1",
+    "routes": [
+      {
+        "method": "GET",
+        "path": "*",
+        "line": 7844
+      },
+      {
+        "method": "GET",
+        "path": "/",
+        "line": 7849
+      },
+      {
+        "method": "GET",
+        "path": "*",
+        "line": 7851
+      }
+    ],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "legacy",
+    "file": "system/src/startup-checks.js",
+    "lineCount": 43,
+    "sha256": "5003e2b8b410c7b50f90e4e23597f7d1df51ee811eca6ffede39c29697c3405d",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow",
+    "file": "madar-flow/apps/api/src/app.ts",
+    "lineCount": 126,
+    "sha256": "ddce176764ef2e294effc568ea9281295ad5aaa4ca3b7a4b97aeee66bb2605bc",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow",
+    "file": "madar-flow/apps/api/src/config.ts",
+    "lineCount": 11,
+    "sha256": "5bf37545610c7997be41b5dbf9fcdb81c33b397e543feea3f7e8747fca45ee91",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow",
+    "file": "madar-flow/apps/api/src/deps.ts",
+    "lineCount": 34,
+    "sha256": "f99fe539b70164061977c8292435d312152e29294dab5d7eed151555e4a1df53",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow",
+    "file": "madar-flow/apps/api/src/index.ts",
+    "lineCount": 96,
+    "sha256": "f492cf9ad6556450379963a7040420d10692d9ae7b87f11adf36ea2813899744",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow",
+    "file": "madar-flow/apps/api/src/lib/audit.ts",
+    "lineCount": 33,
+    "sha256": "20fbdf23704355d70f5e8de561cd33e04723e47c1b6d78ce717bff4f7ede995b",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow",
+    "file": "madar-flow/apps/api/src/lib/auth.ts",
+    "lineCount": 84,
+    "sha256": "c7a25a992a9059ff3cf2bd624012e1f8f993f12ce5d42b20d5f03a3e775599da",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow",
+    "file": "madar-flow/apps/api/src/lib/cookies.ts",
+    "lineCount": 23,
+    "sha256": "a83a17ebca8f6e1bf74731a8bf74d7b139cc214af9e218470ad9c8d01c8fe97f",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow",
+    "file": "madar-flow/apps/api/src/lib/db-errors.ts",
+    "lineCount": 17,
+    "sha256": "63448f4985b3140fd6b0baf1a624d7d2fc7c462c62bbebcfb8ffd79b595ee806",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow",
+    "file": "madar-flow/apps/api/src/lib/jwt.ts",
+    "lineCount": 133,
+    "sha256": "0a8c1e595762c2ac2c2a0b50ff65874456c5c4e9738e4d1c534fceb782be6917",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow",
+    "file": "madar-flow/apps/api/src/lib/outbox.ts",
+    "lineCount": 130,
+    "sha256": "9ca68b68cc19da341b55ec070c826c501560dd17b007acb48e429b683a048848",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow",
+    "file": "madar-flow/apps/api/src/lib/password.ts",
+    "lineCount": 20,
+    "sha256": "7be689c39d4e89651fe72cbcd5363af1fc58533cfd4a465fd4c3eff3ceabe619",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow",
+    "file": "madar-flow/apps/api/src/lib/totp.ts",
+    "lineCount": 63,
+    "sha256": "eea998e08f20fda1bcb3ffc647ac975a2d1dc1aa2cb710eb1fcb65303a7d091d",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow",
+    "file": "madar-flow/apps/api/src/lib/validation.ts",
+    "lineCount": 44,
+    "sha256": "22ca0f398314f4d4b58d2b0876a765eed98162909d781d77930177a51300300a",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow",
+    "file": "madar-flow/apps/api/src/modules/audit/routes.ts",
+    "lineCount": 30,
+    "sha256": "08a10c7511f8491be87e609645115466610a0619457bd2a297073f3b9229f16e",
+    "routes": [
+      {
+        "method": "GET",
+        "path": "/:workspaceId/audit",
+        "line": 22
+      }
+    ],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow",
+    "file": "madar-flow/apps/api/src/modules/audit/service.ts",
+    "lineCount": 52,
+    "sha256": "6760bffe2bd0986081256158e01e6e876a8db0281225f5283b0593dbd6dab094",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow",
+    "file": "madar-flow/apps/api/src/modules/auth/routes.ts",
+    "lineCount": 148,
+    "sha256": "3b21cc59d6196d81a7c6ae87ea794f2da33afc7a473dfb2e98a00930c5c0a7ac",
+    "routes": [
+      {
+        "method": "POST",
+        "path": "/register",
+        "line": 60
+      },
+      {
+        "method": "POST",
+        "path": "/login",
+        "line": 72
+      },
+      {
+        "method": "POST",
+        "path": "/mfa/verify",
+        "line": 90
+      },
+      {
+        "method": "GET",
+        "path": "/mfa/status",
+        "line": 101
+      },
+      {
+        "method": "POST",
+        "path": "/mfa/setup",
+        "line": 106
+      },
+      {
+        "method": "POST",
+        "path": "/mfa/enable",
+        "line": 111
+      },
+      {
+        "method": "POST",
+        "path": "/mfa/disable",
+        "line": 117
+      },
+      {
+        "method": "POST",
+        "path": "/mfa/recovery-codes/regenerate",
+        "line": 123
+      },
+      {
+        "method": "POST",
+        "path": "/refresh",
+        "line": 129
+      },
+      {
+        "method": "POST",
+        "path": "/logout",
+        "line": 138
+      },
+      {
+        "method": "GET",
+        "path": "/me",
+        "line": 144
+      }
+    ],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow",
+    "file": "madar-flow/apps/api/src/modules/auth/service.ts",
+    "lineCount": 601,
+    "sha256": "2da233aeab457b5c61000c36272c1d89453848523f6fddf1b12a3a5f2033f26c",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow",
+    "file": "madar-flow/apps/api/src/modules/credentials/routes.ts",
+    "lineCount": 90,
+    "sha256": "ebb8c8f0b6bac670d1824aa6c3a98d00a06ac56d954d97183f75d28cf3b3cc1f",
+    "routes": [
+      {
+        "method": "GET",
+        "path": "/:workspaceId/credentials",
+        "line": 50
+      },
+      {
+        "method": "POST",
+        "path": "/:workspaceId/credentials",
+        "line": 57
+      },
+      {
+        "method": "POST",
+        "path": "/:workspaceId/credentials/:credentialId/revoke",
+        "line": 71
+      },
+      {
+        "method": "POST",
+        "path": "/:workspaceId/credentials/:credentialId/preflight",
+        "line": 84
+      }
+    ],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow",
+    "file": "madar-flow/apps/api/src/modules/credentials/service.ts",
+    "lineCount": 245,
+    "sha256": "9e3da139cdc7e05bc8e682bb0c3addbede75a8ea6cc082e5534efbaac1d49be4",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow",
+    "file": "madar-flow/apps/api/src/modules/executions/routes.ts",
+    "lineCount": 246,
+    "sha256": "d379d6903da3def31d221cc8e91c36d5796181787030c5a2d6fd88fc455f9dab",
+    "routes": [
+      {
+        "method": "POST",
+        "path": "/:workspaceId/workflows/:workflowId/run",
+        "line": 67
+      },
+      {
+        "method": "GET",
+        "path": "/:workspaceId/executions",
+        "line": 83
+      },
+      {
+        "method": "GET",
+        "path": "/:workspaceId/executions/:executionId",
+        "line": 93
+      },
+      {
+        "method": "POST",
+        "path": "/:workspaceId/executions/:executionId/cancel",
+        "line": 105
+      },
+      {
+        "method": "POST",
+        "path": "/:workspaceId/executions/:executionId/retry",
+        "line": 118
+      },
+      {
+        "method": "POST",
+        "path": "/:workspaceId/executions/:executionId/stream-token",
+        "line": 132
+      },
+      {
+        "method": "GET",
+        "path": "/stream",
+        "line": 163
+      }
+    ],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow",
+    "file": "madar-flow/apps/api/src/modules/executions/service.ts",
+    "lineCount": 488,
+    "sha256": "45f0592e4f725913db68d82b7053ea85650fc70800a516320e40c58cd80faaf0",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow",
+    "file": "madar-flow/apps/api/src/modules/health/routes.ts",
+    "lineCount": 54,
+    "sha256": "2f685a3d6aa91b9ccee04dda1731a5bd917d7bd1bc8509e5cabe128c1b888f7e",
+    "routes": [
+      {
+        "method": "GET",
+        "path": "/health",
+        "line": 7
+      },
+      {
+        "method": "GET",
+        "path": "/ready",
+        "line": 14
+      }
+    ],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow",
+    "file": "madar-flow/apps/api/src/modules/webhooks/routes.ts",
+    "lineCount": 74,
+    "sha256": "722ea3af07ea4af54c83cb8f78e1bc45817970027f35c6b7547adeb096990a38",
+    "routes": [
+      {
+        "method": "POST",
+        "path": "/:workspaceId/:path",
+        "line": 71
+      },
+      {
+        "method": "GET",
+        "path": "/:workspaceId/:path",
+        "line": 72
+      },
+      {
+        "method": "PUT",
+        "path": "/:workspaceId/:path",
+        "line": 73
+      }
+    ],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow",
+    "file": "madar-flow/apps/api/src/modules/webhooks/service.ts",
+    "lineCount": 253,
+    "sha256": "46067adb8d8f98089e88eda45f6eb100a45209c0af16fee97b26ca960fea5266",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow",
+    "file": "madar-flow/apps/api/src/modules/workflows/routes.ts",
+    "lineCount": 264,
+    "sha256": "6f32e2ea4cfa3e925aa87d13a5f3717440ed0f74d2ad5052ea758274797d13fa",
+    "routes": [
+      {
+        "method": "GET",
+        "path": "/:workspaceId/workflows",
+        "line": 115
+      },
+      {
+        "method": "GET",
+        "path": "/:workspaceId/workflow-templates",
+        "line": 122
+      },
+      {
+        "method": "POST",
+        "path": "/:workspaceId/workflow-templates/:templateId/instantiate",
+        "line": 128
+      },
+      {
+        "method": "POST",
+        "path": "/:workspaceId/workflows",
+        "line": 143
+      },
+      {
+        "method": "GET",
+        "path": "/:workspaceId/workflows/:workflowId",
+        "line": 157
+      },
+      {
+        "method": "PATCH",
+        "path": "/:workspaceId/workflows/:workflowId",
+        "line": 164
+      },
+      {
+        "method": "PUT",
+        "path": "/:workspaceId/workflows/:workflowId/draft",
+        "line": 179
+      },
+      {
+        "method": "POST",
+        "path": "/:workspaceId/workflows/:workflowId/publish",
+        "line": 203
+      },
+      {
+        "method": "GET",
+        "path": "/:workspaceId/workflows/:workflowId/versions",
+        "line": 219
+      },
+      {
+        "method": "GET",
+        "path": "/:workspaceId/workflows/:workflowId/versions/:versionId",
+        "line": 226
+      },
+      {
+        "method": "POST",
+        "path": "/:workspaceId/workflows/:workflowId/duplicate",
+        "line": 251
+      }
+    ],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow",
+    "file": "madar-flow/apps/api/src/modules/workflows/service.ts",
+    "lineCount": 751,
+    "sha256": "7f4e3538b0ee90fe9fe05db31361e89087735857f3fc729be06466d80551c25f",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow",
+    "file": "madar-flow/apps/api/src/modules/workspaces/routes.ts",
+    "lineCount": 34,
+    "sha256": "e5dcc64301ef295b4ac216fa666eaa4f174a30156617af8ba5ad24d2aa345c38",
+    "routes": [
+      {
+        "method": "GET",
+        "path": "/",
+        "line": 17
+      },
+      {
+        "method": "POST",
+        "path": "/",
+        "line": 22
+      },
+      {
+        "method": "GET",
+        "path": "/:workspaceId",
+        "line": 29
+      }
+    ],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow",
+    "file": "madar-flow/apps/api/src/modules/workspaces/service.ts",
+    "lineCount": 82,
+    "sha256": "b59f4679acdd580912e9f0116aa3e24c299f13c70a334095ee3cb8d5aa4ac963",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow",
+    "file": "madar-flow/apps/scheduler/src/config.ts",
+    "lineCount": 11,
+    "sha256": "5bf37545610c7997be41b5dbf9fcdb81c33b397e543feea3f7e8747fca45ee91",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow",
+    "file": "madar-flow/apps/scheduler/src/index.ts",
+    "lineCount": 202,
+    "sha256": "4ba0403ab08bad440f4e94142d08c16683fce000afd5e20945fca6951a7abbd6",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow",
+    "file": "madar-flow/apps/scheduler/src/schedules.ts",
+    "lineCount": 76,
+    "sha256": "8aad28497232a052ac9bf477890955fb15992c7d31525ed7b7eb93a4cdc413e1",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow",
+    "file": "madar-flow/apps/web/src/App.tsx",
+    "lineCount": 96,
+    "sha256": "9ceb3359ab5557e3c1677db8c91e9f9b39507b7e0961daf677f64b79fdff32be",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow",
+    "file": "madar-flow/apps/web/src/api.ts",
+    "lineCount": 339,
+    "sha256": "50072835ea0806e0dac2176a419824c9fe715303f8dc903b297547690d9c93f6",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow",
+    "file": "madar-flow/apps/web/src/components/ui.tsx",
+    "lineCount": 130,
+    "sha256": "519d810a9fcedebd10571a653b9049f930768640a6de85310ee0445ca7df53b8",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow",
+    "file": "madar-flow/apps/web/src/editor/MadarNodeView.tsx",
+    "lineCount": 137,
+    "sha256": "4e9515c59b204796c6469fd28d46442cb598d2ff8317e32c7e50d48ade5a6992",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow",
+    "file": "madar-flow/apps/web/src/editor/MonacoJsonEditor.tsx",
+    "lineCount": 44,
+    "sha256": "2b7c051dfef9beb0fa6ab063b60a8e3c334c66cf29de214bc4ff9688a22efdf9",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow",
+    "file": "madar-flow/apps/web/src/editor/NodeForm.tsx",
+    "lineCount": 814,
+    "sha256": "3349459b34d3abb991be7151b0a87f6e0e510b5c9d8b0fc6e82f92ec1d7a7629",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow",
+    "file": "madar-flow/apps/web/src/editor/node-catalog.ts",
+    "lineCount": 135,
+    "sha256": "b5c48d69e7a1e144c932fa622fa2a729c9bdb78b24f381edf0fc12971420fb33",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow",
+    "file": "madar-flow/apps/web/src/editor/store.ts",
+    "lineCount": 229,
+    "sha256": "3a146951bc0249fe81300957bdfda4af8e10824dc62d58155533ed147b51f6e6",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow",
+    "file": "madar-flow/apps/web/src/lib/executions.ts",
+    "lineCount": 67,
+    "sha256": "e5981f0f079ee73e74c62a4d26c9b57f143ce518980b25ebe04dd25b23d185d4",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow",
+    "file": "madar-flow/apps/web/src/lib/format.ts",
+    "lineCount": 24,
+    "sha256": "e7faa3510c87e22751b3b15c22f3091dfbe9866cd40b04bf920383898ce4440b",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow",
+    "file": "madar-flow/apps/web/src/main.tsx",
+    "lineCount": 32,
+    "sha256": "4138d3654633759a598258800bd9583572c57d18def451fd48420ade78030d3c",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow",
+    "file": "madar-flow/apps/web/src/pages/AuditPage.tsx",
+    "lineCount": 275,
+    "sha256": "a61cceafbe8b2e439350aeb7523a0cb6953717e42bf18d53613344d2b1cab276",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow",
+    "file": "madar-flow/apps/web/src/pages/AuthPage.tsx",
+    "lineCount": 256,
+    "sha256": "eaf75b4012fc5cdf47a8d722e0aec8fbc99522588912b6e33f8a50469b38a7be",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow",
+    "file": "madar-flow/apps/web/src/pages/CredentialsPage.tsx",
+    "lineCount": 455,
+    "sha256": "2ebe286050dcab25f8f2bdb4df7c308db033aebf6c3b6f8c2d843b7b46f46b01",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow",
+    "file": "madar-flow/apps/web/src/pages/EditorPage.tsx",
+    "lineCount": 1052,
+    "sha256": "4f055d82f0c64118ca0e9cac3947fb6e75d77a176f19ec27e5d17276ab325190",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow",
+    "file": "madar-flow/apps/web/src/pages/ExecutionDetailPage.tsx",
+    "lineCount": 644,
+    "sha256": "f4cf7bb4271bd9097b17198408580d2e93c80fe879477f1f49f52fa548225764",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow",
+    "file": "madar-flow/apps/web/src/pages/ExecutionsPage.tsx",
+    "lineCount": 260,
+    "sha256": "1a6e4f71475b49d3ac0857a569d360c55217d490755eb1f8b73dc5ea97a27741",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow",
+    "file": "madar-flow/apps/web/src/pages/SecurityPage.tsx",
+    "lineCount": 399,
+    "sha256": "f11047e2e64446abc819c6aa7e659414ca7fcf42017db1270045fe3f80771cf0",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow",
+    "file": "madar-flow/apps/web/src/pages/WorkflowsPage.tsx",
+    "lineCount": 394,
+    "sha256": "7aaab247e5701038a0574bc4b61136194db427c43970ec00fb30eb73bd70864b",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow",
+    "file": "madar-flow/apps/web/src/pages/WorkspacesPage.tsx",
+    "lineCount": 109,
+    "sha256": "39f9fba4f73986751d07245ecb560a141a3330d37e739e64d5a72624e28e7fd5",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow",
+    "file": "madar-flow/apps/web/src/session.tsx",
+    "lineCount": 182,
+    "sha256": "8b3629a1e906c07acd27b956a1581ab07399d9bdde810b0b7089aee9df5d9402",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow",
+    "file": "madar-flow/apps/web/vite.config.ts",
+    "lineCount": 16,
+    "sha256": "d1b9b0738d1c0c41b15209fb72d8343e177157879c2d5a8a60c98554cb2c69d8",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow",
+    "file": "madar-flow/apps/worker/src/config.ts",
+    "lineCount": 11,
+    "sha256": "5bf37545610c7997be41b5dbf9fcdb81c33b397e543feea3f7e8747fca45ee91",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow",
+    "file": "madar-flow/apps/worker/src/credentials.ts",
+    "lineCount": 121,
+    "sha256": "872bae2516d71abfd8413276a11ddf95e32512061d77f6ee226d773d76a7c24c",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow",
+    "file": "madar-flow/apps/worker/src/events.ts",
+    "lineCount": 72,
+    "sha256": "29efd7d90720b046d17156904c7749069e3347fb5c52acb38e83fd141307c223",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow",
+    "file": "madar-flow/apps/worker/src/index.ts",
+    "lineCount": 118,
+    "sha256": "7b5e0d99048ecea107bdaef94bb8de465babd7154bcb7671a3caa547d7d0280c",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow",
+    "file": "madar-flow/apps/worker/src/runner.ts",
+    "lineCount": 419,
+    "sha256": "094fb6ca235ab71ca21321cf70fd541a061d2f2b0fe8384a3adfda132ecc0f66",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow libraries",
+    "file": "madar-flow/packages/db/migrations/0001_initial.sql",
+    "lineCount": 210,
+    "sha256": "e1d0da39d5f539d10e9790bd62b0b2f77dfbeb526b2125c63256c3f7c0320d4a",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow libraries",
+    "file": "madar-flow/packages/db/migrations/0002_phase3.sql",
+    "lineCount": 10,
+    "sha256": "a750ba69c22a850537b17c1b6123c0b6e20f72447c49b44e498d7cbe7401825c",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow libraries",
+    "file": "madar-flow/packages/db/migrations/0003_phase4.sql",
+    "lineCount": 25,
+    "sha256": "83316293cd407f94deac93f70a682a7d6501a9a418eded1177d5d63ff120e81e",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow libraries",
+    "file": "madar-flow/packages/db/src/client.ts",
+    "lineCount": 30,
+    "sha256": "bc0ffdaf9fe9a5afb4b933ba8df87d581ad8601067288bb658685a4d00c2ab09",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow libraries",
+    "file": "madar-flow/packages/db/src/env.ts",
+    "lineCount": 6,
+    "sha256": "01ab2260b15d6e6c705b993c8e7da856dcfc0f8a7ac653b0d4c52b7741522546",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow libraries",
+    "file": "madar-flow/packages/db/src/index.ts",
+    "lineCount": 2,
+    "sha256": "f418090382202c0c179ef4d1201b35bcaf9e66293c448e34901ccefbb975f2f8",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow libraries",
+    "file": "madar-flow/packages/db/src/migrate.ts",
+    "lineCount": 75,
+    "sha256": "c866e8b5c9549c2bc80de5ad6e5d35312ebe7a4c7d5a77978a1aa95f09dadc4e",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow libraries",
+    "file": "madar-flow/packages/db/src/schema.ts",
+    "lineCount": 346,
+    "sha256": "1f8effb28226acb8faad56a18562c7daead040340d70c02a73d71c5a20b314c1",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow libraries",
+    "file": "madar-flow/packages/db/src/status.ts",
+    "lineCount": 38,
+    "sha256": "879344da13dd24d6fb66ad907db25f0f6cd3084ae42e2ed221da5b37e52347e4",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow libraries",
+    "file": "madar-flow/packages/engine/src/executor.ts",
+    "lineCount": 366,
+    "sha256": "461cee2569684f3a11ce999249267c4c024093109d102b5b98bd6e19624fee9f",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow libraries",
+    "file": "madar-flow/packages/engine/src/index.ts",
+    "lineCount": 5,
+    "sha256": "0c24b57c961f54a2188c057e340b92ddff962cdb8d8cecdc1152b116f0e0f26e",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow libraries",
+    "file": "madar-flow/packages/engine/src/nodes/helpers.ts",
+    "lineCount": 95,
+    "sha256": "02c7eb77761f01fe9363e67db0c901c00908221bd9624f2eadc0d48c8b003e66",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow libraries",
+    "file": "madar-flow/packages/engine/src/nodes/http.ts",
+    "lineCount": 266,
+    "sha256": "c303d36028b9c29462d2693d28dccc5319de79e708b5fd3effc154f0df1cb5a2",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow libraries",
+    "file": "madar-flow/packages/engine/src/nodes/logic.ts",
+    "lineCount": 174,
+    "sha256": "d94cf892e3c869198c1c7bd586456a9062370a3eb0dde396c614ebb3a4d132c5",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow libraries",
+    "file": "madar-flow/packages/engine/src/nodes/registry.ts",
+    "lineCount": 56,
+    "sha256": "c34e37e25be1f3df0e5f3e3040685592a01ad018b4db7a5101fe47cb0f6261e1",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow libraries",
+    "file": "madar-flow/packages/engine/src/nodes/triggers.ts",
+    "lineCount": 37,
+    "sha256": "fa12db806572b2a798ba7fa127fe65ff8165d698ab3dca6117ccf08a4e372ce4",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow libraries",
+    "file": "madar-flow/packages/engine/src/types.ts",
+    "lineCount": 114,
+    "sha256": "ba2183fe0ca44250ee42e36aa69ab414d0709aa353494b054adb40647a3d23c2",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow libraries",
+    "file": "madar-flow/packages/shared/src/browser.ts",
+    "lineCount": 9,
+    "sha256": "216e64c9c921dec3352fa575ece7376fff85ebf8e8bf8d469224b7a85bb9ee22",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow libraries",
+    "file": "madar-flow/packages/shared/src/credentials.ts",
+    "lineCount": 81,
+    "sha256": "5fbbaa9a12090b6d95dc1f3ca21ae732757bb12c03c699790803176bd26484b1",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow libraries",
+    "file": "madar-flow/packages/shared/src/crypto.ts",
+    "lineCount": 144,
+    "sha256": "e1047f688d539336bb97ed007a82cd54b136858170bf839349ce32124c4cf345",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow libraries",
+    "file": "madar-flow/packages/shared/src/env.ts",
+    "lineCount": 43,
+    "sha256": "96e79fb700d7c069f8713f229e4e3aa16d80d64844b546de5d2e9790406e930c",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow libraries",
+    "file": "madar-flow/packages/shared/src/errors.ts",
+    "lineCount": 85,
+    "sha256": "6fbff97dcf87000ce313364e8347aba5340b2cb767195260a487b0228fbcc36b",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow libraries",
+    "file": "madar-flow/packages/shared/src/expressions.ts",
+    "lineCount": 153,
+    "sha256": "a86a0acf1feb74aff954bacf4bd842a0e0fe9413becc104d965e6226c578ad0d",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow libraries",
+    "file": "madar-flow/packages/shared/src/graph-validation.ts",
+    "lineCount": 173,
+    "sha256": "28f314321c8f1dc8532c28dbb7ecc1bac02fad32428e871de9d85e92bae4c5ea",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow libraries",
+    "file": "madar-flow/packages/shared/src/graph.ts",
+    "lineCount": 30,
+    "sha256": "54b37acdcd1cd4b2451181ff88ec74e05554894b68c4dc483f94a944ec5d55d3",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow libraries",
+    "file": "madar-flow/packages/shared/src/ids.ts",
+    "lineCount": 46,
+    "sha256": "f02ea4c7b8fe7ee73a728e55534d6bde71ed3e45972a698c6b2f876f1f95609d",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow libraries",
+    "file": "madar-flow/packages/shared/src/index.ts",
+    "lineCount": 12,
+    "sha256": "e887c0f021fd585214285c05f0cfd0a5e8ed6210bed52ab4d7405643f606b737",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow libraries",
+    "file": "madar-flow/packages/shared/src/node-contracts.ts",
+    "lineCount": 270,
+    "sha256": "80b106d3dc835f2c8c97f099dc88530434bce9c9070c3cfd4cc5331403a6c270",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow libraries",
+    "file": "madar-flow/packages/shared/src/queue.ts",
+    "lineCount": 71,
+    "sha256": "02114621b633d4cc61808fe4d3b182f9af24635a0cc07723746b4d8480c9cb79",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow libraries",
+    "file": "madar-flow/packages/shared/src/roles.ts",
+    "lineCount": 76,
+    "sha256": "41f4ebaaa10ed247e5e1a26f6ecdf2cfef6736e01b601b63fe1473b0b94a6079",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  },
+  {
+    "subsystem": "Madar Flow libraries",
+    "file": "madar-flow/packages/shared/src/templates.ts",
+    "lineCount": 583,
+    "sha256": "a5e459500c454e867ec25a36fe5c10f75ed7ede606f8204e033615ee0b99caf6",
+    "routes": [],
+    "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "inventoryMethod": "filesystem and literal route extraction; dynamic/generated routes may not be enumerated",
+    "behavioralStatus": "IMPLEMENTED_NOT_VERIFIED",
+    "limitation": "File presence and literal route enumeration are not whole-module behavioral acceptance; see connection inventory and reports for verified subsets."
+  }
+]

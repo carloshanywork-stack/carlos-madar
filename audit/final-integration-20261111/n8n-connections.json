@@ -1,0 +1,115 @@
+[
+  {
+    "connection_id": "N-01",
+    "subsystem": "n8n",
+    "producer": "configured CI schedule/manual entry",
+    "consumer": "local script through Execute Command",
+    "interface": "daily06:00 Africa/Cairo, local shell",
+    "source_evidence": "audit/final-integration-20261111/n8n-scheduled-execution-summary.json:1;madar-v2/n8n/MADAR_V2_ACTIVE_CI_HEALTH.json:28",
+    "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "verification_method": "read-only saved scheduled execution metadata and allowlisted runData summary",
+    "last_verification_time": "2026-11-12T05:47:47.406462+00:00",
+    "status": "VERIFIED_PASS",
+    "failure_or_limitation": "Execution25 scheduled06:00Cairo2026-11-12 ran and returned WARN,7checks0fail1warning; only rep subset3/3, not full release/source/device evidence",
+    "relevant_test_ids": [
+      "n8n-scheduled-execution-25"
+    ],
+    "relevant_finding_ids": [
+      "N8N-003"
+    ]
+  },
+  {
+    "connection_id": "N-02",
+    "subsystem": "n8n",
+    "producer": "biometric pipeline manual trigger",
+    "consumer": "four labelled patch/build/ADB/release nodes",
+    "interface": "n8n noOp chain",
+    "source_evidence": "/home/carlos/.n8n/database.sqlite:workflow_entity[id=6dae5a55-b25b-4d9a-9c8f-de5c275036ea]",
+    "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "verification_method": "read-only metadata/source and installed-node static validation",
+    "last_verification_time": "2026-11-12T05:47:47.406462+00:00",
+    "status": "VERIFIED_FAIL",
+    "failure_or_limitation": "NoOp parameters empty; performs no named patch, build, device test or release verification",
+    "relevant_test_ids": [
+      "n8n-live-metadata"
+    ],
+    "relevant_finding_ids": [
+      "N8N-001"
+    ]
+  },
+  {
+    "connection_id": "N-03",
+    "subsystem": "n8n",
+    "producer": "new manual safe entry",
+    "consumer": "health endpoint and authenticated CI result",
+    "interface": "GET health and GET audit/release-result",
+    "source_evidence": "audit/final-integration-20261111/n8n-executable-verifier.json",
+    "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "verification_method": "actual n8n2.46.7 isolated CLI import/execution with loopback HTTP fixtures and synthetic Header Auth credential",
+    "last_verification_time": "2026-11-12T07:19:10.360112+00:00",
+    "status": "VERIFIED_PASS",
+    "failure_or_limitation": "Synthetic fixture mechanics only: operational1/release2 success; deliberate-failure3 error/exit1; actual MADAR release, external CI and devices not certified",
+    "relevant_test_ids": [
+      "n8n-static-validation",
+      "n8n-code-contract-15",
+      "n8n-runtime-execution-1",
+      "n8n-runtime-execution-2",
+      "n8n-runtime-deliberate-failure-3"
+    ],
+    "relevant_finding_ids": []
+  },
+  {
+    "connection_id": "N-04",
+    "subsystem": "n8n",
+    "producer": "workflow result summary",
+    "consumer": "authorized external alert destination",
+    "interface": "notification delivery",
+    "source_evidence": "madar-v2/n8n/MADAR_V2_ACTIVE_CI_HEALTH.json",
+    "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "verification_method": "read-only metadata/source and installed-node static validation",
+    "last_verification_time": "2026-11-12T05:47:47.406462+00:00",
+    "status": "NOT_IMPLEMENTED",
+    "failure_or_limitation": "No alert destination/node/credential configured; execution success is not delivery",
+    "relevant_test_ids": [],
+    "relevant_finding_ids": [
+      "N8N-004"
+    ]
+  },
+  {
+    "connection_id": "N-05",
+    "subsystem": "n8n",
+    "producer": "repository architecture map",
+    "consumer": "live imported documentary copy",
+    "interface": "workflow JSON import identity",
+    "source_evidence": "madar-v2/n8n/MADAR_V2_FULL_LIFECYCLE_ARCHITECTURE.json;/home/carlos/.n8n/database.sqlite:workflow_entity[id=e65f7b319ba84cb6a2e24071ad0a6b92]",
+    "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "verification_method": "read-only metadata/source and installed-node static validation",
+    "last_verification_time": "2026-11-12T05:47:47.406462+00:00",
+    "status": "VERIFIED_FAIL",
+    "failure_or_limitation": "Live labels stale vs source: invoice cash effects, event replay and whole-unit offcut policy",
+    "relevant_test_ids": [
+      "n8n-live-metadata"
+    ],
+    "relevant_finding_ids": [
+      "N8N-002"
+    ]
+  },
+  {
+    "connection_id": "N-06",
+    "subsystem": "n8n",
+    "producer": "new documentary workflow JSON",
+    "consumer": "n8n2.46.7 supported Sticky Notes",
+    "interface": "inactive importable documentation structure",
+    "source_evidence": "audit/final-integration-20261111/n8n-evidence-map.json",
+    "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "verification_method": "actual inactive isolated n8n2.46.7 import plus installed-node static validation",
+    "last_verification_time": "2026-11-12T07:19:10.360112+00:00",
+    "status": "VERIFIED_PASS",
+    "failure_or_limitation": "Import succeeded with inactive DB record; final documentary status annotations refreshed afterward and statically revalidated, without changing executable workflows",
+    "relevant_test_ids": [
+      "n8n-static-validation",
+      "n8n-runtime-import-map"
+    ],
+    "relevant_finding_ids": []
+  }
+]

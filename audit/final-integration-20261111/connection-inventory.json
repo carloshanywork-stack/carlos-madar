@@ -1,0 +1,741 @@
+{
+  "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+  "timezone": "Africa/Cairo",
+  "generatedAt": "2026-11-12T07:28:18.434713+00:00",
+  "denominator": "40 explicitly enumerated producer-consumer links; pass applies only to stated verification scope, not a module, device or release",
+  "counts": {
+    "VERIFIED_FAIL": 11,
+    "IMPLEMENTED_NOT_VERIFIED": 7,
+    "NOT_IMPLEMENTED": 3,
+    "BLOCKED_PREREQUISITE": 2,
+    "VERIFIED_PASS": 17
+  },
+  "connections": [
+    {
+      "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+      "last_verification_time": "2026-11-11T20:50:43.323024+00:00",
+      "connection_id": "A-01",
+      "subsystem": "Android release",
+      "producer": "source build configuration",
+      "consumer": "distributed APK",
+      "interface": "Gradle / APK",
+      "source_evidence": "madar-v2/android/app/build.gradle:18-69",
+      "verification_method": "artifact aapt/apksigner + SHA256",
+      "status": "VERIFIED_FAIL",
+      "failure_or_limitation": "Debug certificate/debuggable; source correspondence unestablished",
+      "relevant_test_ids": [],
+      "relevant_finding_ids": [
+        "AND-003"
+      ]
+    },
+    {
+      "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+      "last_verification_time": "2026-11-11T20:50:43.323024+00:00",
+      "connection_id": "A-02",
+      "subsystem": "GPS",
+      "producer": "native SQLite breadcrumbs",
+      "consumer": "server tracking service",
+      "interface": "POST /api/rep/location-ping",
+      "source_evidence": "madar-v2/android/app/src/main/java/com/madar/rep/app/MadarSyncWorker.java:395-418; madar-v2/server/modules/rep/service.js:1274-1285",
+      "verification_method": "isolated actual service probe",
+      "status": "VERIFIED_FAIL",
+      "failure_or_limitation": "Late upload reopens duty",
+      "relevant_test_ids": [
+        "gps-repro"
+      ],
+      "relevant_finding_ids": [
+        "AND-001"
+      ]
+    },
+    {
+      "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+      "last_verification_time": "2026-11-11T20:50:43.323024+00:00",
+      "connection_id": "A-03",
+      "subsystem": "GPS",
+      "producer": "native clientPointId",
+      "consumer": "server breadcrumb identity",
+      "interface": "per-point acknowledgement",
+      "source_evidence": "madar-v2/server/modules/rep/service.js:1299-1355",
+      "verification_method": "isolated actual service probe",
+      "status": "VERIFIED_FAIL",
+      "failure_or_limitation": "Reused ID changed content accepted",
+      "relevant_test_ids": [
+        "gps-repro"
+      ],
+      "relevant_finding_ids": [
+        "AND-002"
+      ]
+    },
+    {
+      "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+      "last_verification_time": "2026-11-11T20:50:43.323024+00:00",
+      "connection_id": "A-04",
+      "subsystem": "GPS",
+      "producer": "server per-point results",
+      "consumer": "native queue cleanup",
+      "interface": "accepted/duplicate/rejected points array",
+      "source_evidence": "madar-v2/android/app/src/main/java/com/madar/rep/app/MadarSyncWorker.java:469-499",
+      "verification_method": "source inspection",
+      "status": "IMPLEMENTED_NOT_VERIFIED",
+      "failure_or_limitation": "No device for rejected point preservation and ack cleanup",
+      "relevant_test_ids": [],
+      "relevant_finding_ids": []
+    },
+    {
+      "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+      "last_verification_time": "2026-11-11T20:50:43.323024+00:00",
+      "connection_id": "A-05",
+      "subsystem": "Visits",
+      "producer": "native visit SQLite",
+      "consumer": "server visit ingestion",
+      "interface": "multipart /api/rep/sync-visit",
+      "source_evidence": "madar-v2/android/app/src/main/java/com/madar/rep/app/MadarSyncWorker.java:140-222",
+      "verification_method": "source inspection / packaging assertions",
+      "status": "IMPLEMENTED_NOT_VERIFIED",
+      "failure_or_limitation": "No installed-artifact end-to-end test",
+      "relevant_test_ids": [
+        "android-packaging-direct",
+        "offline-gps-direct"
+      ],
+      "relevant_finding_ids": []
+    },
+    {
+      "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+      "last_verification_time": "2026-11-11T20:50:43.323024+00:00",
+      "connection_id": "A-06",
+      "subsystem": "Review",
+      "producer": "supervisor review",
+      "consumer": "representative route UI",
+      "interface": "rep.visit.reviewed event / route refresh",
+      "source_evidence": "madar-v2/server/modules/supervisor/routes.js:126-130; madar-v2/client/src/modules/rep/RepApp.jsx:794-834",
+      "verification_method": "source inspection",
+      "status": "IMPLEMENTED_NOT_VERIFIED",
+      "failure_or_limitation": "Native uses polling; no reshoot device acceptance",
+      "relevant_test_ids": [],
+      "relevant_finding_ids": []
+    },
+    {
+      "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+      "last_verification_time": "2026-11-11T20:50:43.323024+00:00",
+      "connection_id": "A-07",
+      "subsystem": "Recovery",
+      "producer": "native machine actions",
+      "consumer": "UI/export",
+      "interface": "native bridge / JSON",
+      "source_evidence": "madar-v2/client/src/modules/rep/RepApp.jsx:345-368; madar-v2/client/src/modules/rep/native-bridges.js:432-474",
+      "verification_method": "source inspection",
+      "status": "VERIFIED_FAIL",
+      "failure_or_limitation": "Native-only machine actions not appended/exported",
+      "relevant_test_ids": [],
+      "relevant_finding_ids": [
+        "AND-004"
+      ]
+    },
+    {
+      "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+      "last_verification_time": "2026-11-11T20:50:43.323024+00:00",
+      "connection_id": "A-08",
+      "subsystem": "Recovery",
+      "producer": "exported queue JSON",
+      "consumer": "recovery importer",
+      "interface": "JSON file",
+      "source_evidence": "madar-v2/client/src/modules/rep/native-bridges.js:432-504",
+      "verification_method": "source search",
+      "status": "NOT_IMPLEMENTED",
+      "failure_or_limitation": "No JSON import path found",
+      "relevant_test_ids": [],
+      "relevant_finding_ids": [
+        "AND-005"
+      ]
+    },
+    {
+      "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+      "last_verification_time": "2026-11-11T20:50:43.323024+00:00",
+      "connection_id": "A-09",
+      "subsystem": "Device authentication",
+      "producer": "OS local prompt",
+      "consumer": "server verified flag",
+      "interface": "biometricVerified boolean",
+      "source_evidence": "madar-v2/android/app/src/main/java/com/madar/rep/app/RepBiometricAuth.java:38-71; madar-v2/server/modules/employees/attendance.js:418-463",
+      "verification_method": "source inspection",
+      "status": "IMPLEMENTED_NOT_VERIFIED",
+      "failure_or_limitation": "Client assertion only; actual prompt unverified",
+      "relevant_test_ids": [],
+      "relevant_finding_ids": [
+        "AND-006"
+      ]
+    },
+    {
+      "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+      "last_verification_time": "2026-11-11T20:50:43.323024+00:00",
+      "connection_id": "A-10",
+      "subsystem": "Evidence",
+      "producer": "native photo processing",
+      "consumer": "durable queued files",
+      "interface": "fsync then delete/rename",
+      "source_evidence": "madar-v2/android/app/src/main/java/com/madar/rep/app/RepNativeEnginePlugin.java:654-678",
+      "verification_method": "source inspection",
+      "status": "VERIFIED_FAIL",
+      "failure_or_limitation": "Crash window between delete existing and rename",
+      "relevant_test_ids": [],
+      "relevant_finding_ids": [
+        "AND-007"
+      ]
+    },
+    {
+      "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+      "last_verification_time": "2026-11-11T20:50:43.323024+00:00",
+      "connection_id": "A-11",
+      "subsystem": "Android upgrade",
+      "producer": "downloaded APK",
+      "consumer": "installed app + pending data",
+      "interface": "package install replacement",
+      "source_evidence": "madar-v2/android/app/build.gradle:18-32",
+      "verification_method": "adb devices inventory",
+      "status": "BLOCKED_PREREQUISITE",
+      "failure_or_limitation": "No connected physical device or emulator",
+      "relevant_test_ids": [],
+      "relevant_finding_ids": []
+    },
+    {
+      "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+      "last_verification_time": "2026-11-11T20:50:43.323024+00:00",
+      "connection_id": "A-12",
+      "subsystem": "Artifact correspondence",
+      "producer": "generated Android assets",
+      "consumer": "APK bundled UI",
+      "interface": "assets/public file SHA256",
+      "source_evidence": "madar-v2/android/app/src/main/assets/public",
+      "verification_method": "zip hashes 51 files",
+      "status": "VERIFIED_PASS",
+      "failure_or_limitation": "Source revision remains unproven",
+      "relevant_test_ids": [
+        "android-packaging-direct",
+        "offline-gps-direct"
+      ],
+      "relevant_finding_ids": []
+    },
+    {
+      "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+      "last_verification_time": "2026-11-11T20:50:43.323024+00:00",
+      "connection_id": "A-13",
+      "subsystem": "Artifact correspondence",
+      "producer": "current web build output",
+      "consumer": "APK bundled UI",
+      "interface": "index / hashed bundles",
+      "source_evidence": "madar-v2/client/dist/index.html; madar-v2/public/rep/index.html",
+      "verification_method": "zip file hashes",
+      "status": "VERIFIED_FAIL",
+      "failure_or_limitation": "Current web output differs from APK",
+      "relevant_test_ids": [],
+      "relevant_finding_ids": [
+        "AND-003"
+      ]
+    },
+    {
+      "connection_id": "BIZ-C01",
+      "subsystem": "finance",
+      "producer": "finance client",
+      "consumer": "payment/receipt service",
+      "interface": "POST /api/finance/invoices/:id/payment|receipt",
+      "source_evidence": [
+        "madar-v2/server/modules/finance/routes.js:25",
+        "madar-v2/server/modules/finance/invoices.service.js:290"
+      ],
+      "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+      "verification_method": "source inspection and isolated SQLite service replay probe",
+      "last_verification_time": "2026-11-12T05:45:44.056476+00:00",
+      "status": "VERIFIED_FAIL",
+      "failure_or_limitation": "Sales and purchase each repeat partial settlement: paid2000 vs1000, 2 treasury and audit effects; operationId rejected400. Exact service boundary, no TCP loss injection.",
+      "relevant_test_ids": [
+        "business-replay-probe.mjs"
+      ],
+      "relevant_finding_ids": [
+        "BIZ-001"
+      ]
+    },
+    {
+      "connection_id": "BIZ-C02",
+      "subsystem": "maintenance",
+      "producer": "visit selection",
+      "consumer": "visit storage/analytics/export",
+      "interface": "reasonIds JSON",
+      "source_evidence": [
+        "madar-v2/server/modules/rep/service.js:304",
+        "madar-v2/server/modules/rep/service.js:937"
+      ],
+      "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+      "verification_method": "source inspection; isolated test attempt",
+      "last_verification_time": "2026-11-12T05:45:44.056511+00:00",
+      "status": "NOT_IMPLEMENTED",
+      "failure_or_limitation": "Quantity-bearing contract absent",
+      "relevant_test_ids": [],
+      "relevant_finding_ids": [
+        "BIZ-002"
+      ]
+    },
+    {
+      "connection_id": "BIZ-C03",
+      "subsystem": "attendance",
+      "producer": "offline attendance action",
+      "consumer": "attendance/payroll",
+      "interface": "UUID replay + age policy",
+      "source_evidence": [
+        "madar-v2/test/attendance-offline-sync.test.js:60"
+      ],
+      "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+      "verification_method": "original test direct execution against isolated temporary SQLite",
+      "last_verification_time": "2026-11-12T05:45:44.056517+00:00",
+      "status": "VERIFIED_PASS",
+      "failure_or_limitation": "8/8 attendance boundary/replay tests pass; receiving native client acceptance outside this connection",
+      "relevant_test_ids": [
+        "attendance-offline-sync.test.js"
+      ],
+      "relevant_finding_ids": []
+    },
+    {
+      "connection_id": "BIZ-C04",
+      "subsystem": "location",
+      "producer": "representative proposal",
+      "consumer": "supervisor approval/dependent visit",
+      "interface": "location review HTTP",
+      "source_evidence": [
+        "madar-v2/test/location-approval.test.js:70",
+        "madar-v2/test/location-approval.test.js:194"
+      ],
+      "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+      "verification_method": "full isolated V2 HTTP suite, 118/118 total",
+      "last_verification_time": "2026-11-12T05:45:44.056522+00:00",
+      "status": "VERIFIED_PASS",
+      "failure_or_limitation": "Location approval/restart/dependent visit tests pass; physical APK receiving-client acceptance remains separate",
+      "relevant_test_ids": [
+        "location-approval.test.js"
+      ],
+      "relevant_finding_ids": []
+    },
+    {
+      "connection_id": "BIZ-C05",
+      "subsystem": "backup",
+      "producer": "backup archive",
+      "consumer": "restored database/storage",
+      "interface": "ZIP validation + staged restore",
+      "source_evidence": [
+        "madar-v2/server/modules/system/backup.js:252",
+        "madar-v2/server/modules/system/backup.js:274"
+      ],
+      "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+      "verification_method": "full isolated V2 HTTP suite, 118/118 total",
+      "last_verification_time": "2026-11-12T05:45:44.056527+00:00",
+      "status": "VERIFIED_PASS",
+      "failure_or_limitation": "Current-schema backup/restore and interrupted rollback pass; differing historical schema/off-device drill not verified",
+      "relevant_test_ids": [
+        "phase6-parity.test.js"
+      ],
+      "relevant_finding_ids": []
+    },
+    {
+      "connection_id": "BIZ-C06",
+      "subsystem": "auth",
+      "producer": "login token",
+      "consumer": "API authorization",
+      "interface": "hashed JWT sessions",
+      "source_evidence": [
+        "madar-v2/server/modules/auth/service.js:216",
+        "madar-v2/server/modules/auth/service.js:275"
+      ],
+      "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+      "verification_method": "source inspection; isolated test attempt",
+      "last_verification_time": "2026-11-12T05:45:44.056531+00:00",
+      "status": "IMPLEMENTED_NOT_VERIFIED",
+      "failure_or_limitation": "Source inspection; HTTP tested separately by primary",
+      "relevant_test_ids": [],
+      "relevant_finding_ids": []
+    },
+    {
+      "connection_id": "BIZ-C07",
+      "subsystem": "migrations",
+      "producer": "historical schema",
+      "consumer": "startup migrations",
+      "interface": "SQLite initializeDatabase",
+      "source_evidence": [
+        "madar-v2/test/database-maintenance.test.js:24"
+      ],
+      "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+      "verification_method": "original test direct execution isolated database",
+      "last_verification_time": "2026-11-12T05:48:41.816071+00:00",
+      "status": "VERIFIED_PASS",
+      "failure_or_limitation": "11/11 tests pass; tested fixtures do not prove every historical backup",
+      "relevant_test_ids": [
+        "database-maintenance.test.js"
+      ],
+      "relevant_finding_ids": []
+    },
+    {
+      "connection_id": "O-01",
+      "subsystem": "operations",
+      "producer": "running API",
+      "consumer": "read-only localhost probe",
+      "interface": "GET /api/health",
+      "source_evidence": "madar-v2/server/app.js:86",
+      "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+      "verification_method": "live HTTP",
+      "last_verification_time": "2026-11-12T05:42:30.717980+00:00",
+      "status": "VERIFIED_PASS",
+      "failure_or_limitation": "Health only; no DB readiness or loaded commit claim",
+      "relevant_test_ids": [
+        "live-http"
+      ],
+      "relevant_finding_ids": []
+    },
+    {
+      "connection_id": "O-02",
+      "subsystem": "web release",
+      "producer": "client/dist",
+      "consumer": "running HTTP server",
+      "interface": "GET / and /asset-manifest.json",
+      "source_evidence": "madar-v2/server/app.js:163",
+      "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+      "verification_method": "HTTP SHA256 vs disk",
+      "last_verification_time": "2026-11-12T05:42:30.717980+00:00",
+      "status": "VERIFIED_PASS",
+      "failure_or_limitation": "Index matches disk; complete loaded source SHA and full asset release provenance not established",
+      "relevant_test_ids": [
+        "live-http"
+      ],
+      "relevant_finding_ids": [
+        "OPS-001"
+      ]
+    },
+    {
+      "connection_id": "O-03",
+      "subsystem": "build",
+      "producer": "audited client source copy",
+      "consumer": "isolated generated assets",
+      "interface": "Vite6.4.5 build --configLoader native",
+      "source_evidence": "madar-v2/client/vite.config.js:19",
+      "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+      "verification_method": "isolated build, existing dependencies",
+      "last_verification_time": "2026-11-12T05:42:30.717980+00:00",
+      "status": "VERIFIED_PASS",
+      "failure_or_limitation": "Does not establish signed APK or deployed-source correspondence",
+      "relevant_test_ids": [
+        "web-build"
+      ],
+      "relevant_finding_ids": []
+    },
+    {
+      "connection_id": "O-04",
+      "subsystem": "events",
+      "producer": "business service commit",
+      "consumer": "SQLite events then live fanout",
+      "interface": "publishOperationsEvent",
+      "source_evidence": "madar-v2/server/modules/operations-events.js:39;madar-v2/server/modules/rep/routes.js:129",
+      "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+      "verification_method": "source plus actual SQLite injected event write failure",
+      "last_verification_time": "2026-11-12T05:42:30.717980+00:00",
+      "status": "VERIFIED_FAIL",
+      "failure_or_limitation": "Business commit and event append are separate; persistence failure swallowed, live event cannot replay",
+      "relevant_test_ids": [
+        "EVT-TEST-02"
+      ],
+      "relevant_finding_ids": [
+        "OPS-002"
+      ]
+    },
+    {
+      "connection_id": "O-05",
+      "subsystem": "events",
+      "producer": "retained SQLite event log",
+      "consumer": "SSE receiving clients",
+      "interface": "Last-Event-ID cursor",
+      "source_evidence": "madar-v2/server/modules/operations-events.js:24;madar-v2/server/modules/rep/routes.js:83;madar-v2/client/src/modules/rep/RepApp.jsx:769",
+      "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+      "verification_method": "stale-cursor SQLite probe and source tracing",
+      "last_verification_time": "2026-11-12T05:42:30.717980+00:00",
+      "status": "IMPLEMENTED_NOT_VERIFIED",
+      "failure_or_limitation": "Retained suffix has no stale-cursor reset; foreground periodic APIs mitigate. Full reconnect browser/device acceptance absent.",
+      "relevant_test_ids": [
+        "EVT-TEST-01"
+      ],
+      "relevant_finding_ids": [
+        "OPS-003"
+      ]
+    },
+    {
+      "connection_id": "O-06",
+      "subsystem": "storage",
+      "producer": "production SQLite",
+      "consumer": "read-only integrity inspector",
+      "interface": "PRAGMA integrity_check/foreign_key_check",
+      "source_evidence": "madar-v2/server/database/connection.js:6",
+      "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+      "verification_method": "read-only real database",
+      "last_verification_time": "2026-11-12T05:42:30.717980+00:00",
+      "status": "VERIFIED_PASS",
+      "failure_or_limitation": "Snapshot only; not backup consistency or restore acceptance",
+      "relevant_test_ids": [
+        "storage-metadata"
+      ],
+      "relevant_finding_ids": []
+    },
+    {
+      "connection_id": "O-07",
+      "subsystem": "recovery",
+      "producer": "local ZIP backups",
+      "consumer": "off-device protected storage/restore drill",
+      "interface": "backup transport and restore",
+      "source_evidence": "madar-v2/server/modules/system/backup.js:1",
+      "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+      "verification_method": "source and filesystem metadata",
+      "last_verification_time": "2026-11-12T05:42:30.717980+00:00",
+      "status": "BLOCKED_PREREQUISITE",
+      "failure_or_limitation": "No authorized off-device archive or production restore-drill evidence supplied",
+      "relevant_test_ids": [],
+      "relevant_finding_ids": [
+        "OPS-005"
+      ]
+    },
+    {
+      "connection_id": "O-08",
+      "subsystem": "APK HTTP",
+      "producer": "source-selected APK file",
+      "consumer": "authenticated admin/rep download",
+      "interface": "GET /download/apk",
+      "source_evidence": "madar-v2/server/app.js:90;madar-v2/server/config/paths.js:25",
+      "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+      "verification_method": "actual HTTP fixture temporary DB; distributed file hash",
+      "last_verification_time": "2026-11-12T05:42:30.717980+00:00",
+      "status": "VERIFIED_PASS",
+      "failure_or_limitation": "Source default selects madar-rep.apk; live authenticated download bytes and startup override unverified",
+      "relevant_test_ids": [
+        "HTTP-01",
+        "HTTP-02",
+        "HTTP-03",
+        "HTTP-04"
+      ],
+      "relevant_finding_ids": [
+        "AND-003",
+        "OPS-001"
+      ]
+    },
+    {
+      "connection_id": "O-09",
+      "subsystem": "auth",
+      "producer": "temporary authenticated users",
+      "consumer": "protected API/logout/session expiry",
+      "interface": "Bearer session plus DB sessions",
+      "source_evidence": "madar-v2/server/modules/auth/service.js:212;madar-v2/server/app.js:142",
+      "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+      "verification_method": "isolated real HTTP",
+      "last_verification_time": "2026-11-12T05:42:30.717980+00:00",
+      "status": "VERIFIED_PASS",
+      "failure_or_limitation": "Nine focused HTTP checks; not exhaustive RBAC/device switching",
+      "relevant_test_ids": [
+        "HTTP-05",
+        "HTTP-06",
+        "HTTP-07",
+        "HTTP-08",
+        "HTTP-09"
+      ],
+      "relevant_finding_ids": []
+    },
+    {
+      "connection_id": "O-10",
+      "subsystem": "legacy warehouse",
+      "producer": "whole-unit/offcut inputs",
+      "consumer": "pure stock arithmetic",
+      "interface": "inventory module",
+      "source_evidence": "system/src/inventory.js:1",
+      "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+      "verification_method": "five direct Node behavioral tests",
+      "last_verification_time": "2026-11-12T05:42:30.717980+00:00",
+      "status": "VERIFIED_PASS",
+      "failure_or_limitation": "Pure arithmetic only, not live legacy instance",
+      "relevant_test_ids": [
+        "legacy-inventory-direct"
+      ],
+      "relevant_finding_ids": []
+    },
+    {
+      "connection_id": "O-11",
+      "subsystem": "legacy migration",
+      "producer": "historical fixture schema",
+      "consumer": "migrated SQLite",
+      "interface": "additive migration module",
+      "source_evidence": "system/src/db.js:1",
+      "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+      "verification_method": "three temporary DB tests",
+      "last_verification_time": "2026-11-12T05:42:30.717980+00:00",
+      "status": "VERIFIED_PASS",
+      "failure_or_limitation": "Specific historical fixtures only, not all possible historical schemas",
+      "relevant_test_ids": [
+        "legacy-migration-direct"
+      ],
+      "relevant_finding_ids": []
+    },
+    {
+      "connection_id": "O-12",
+      "subsystem": "Madar Flow engine",
+      "producer": "template DAG and loopback HTTP fixtures",
+      "consumer": "engine result",
+      "interface": "manual/webhook/schedule/HTTP/IF/merge/retry/error",
+      "source_evidence": "madar-flow/packages/engine/src/nodes/registry.ts:20",
+      "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+      "verification_method": "14 engine/template tests",
+      "last_verification_time": "2026-11-12T05:42:30.717980+00:00",
+      "status": "VERIFIED_PASS",
+      "failure_or_limitation": "Not production Postgres/Valkey/worker/scheduler acceptance; no MADAR business transaction integration proven",
+      "relevant_test_ids": [
+        "flow-engine-tests"
+      ],
+      "relevant_finding_ids": []
+    },
+    {
+      "connection_id": "O-13",
+      "subsystem": "Madar Flow platform",
+      "producer": "API transaction/outbox",
+      "consumer": "BullMQ worker and scheduler",
+      "interface": "PostgreSQL/Valkey",
+      "source_evidence": "madar-flow/apps/api/src/lib/outbox.ts:12;madar-flow/apps/worker/src/runner.ts:1;madar-flow/apps/scheduler/src/index.ts:1",
+      "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+      "verification_method": "source inspection",
+      "last_verification_time": "2026-11-12T05:42:30.717980+00:00",
+      "status": "IMPLEMENTED_NOT_VERIFIED",
+      "failure_or_limitation": "Isolated PostgreSQL/Valkey prerequisite unavailable; no live deployment identity established",
+      "relevant_test_ids": [],
+      "relevant_finding_ids": []
+    },
+    {
+      "connection_id": "O-14",
+      "subsystem": "configuration protection",
+      "producer": "root .env/database/backups",
+      "consumer": "host local file access",
+      "interface": "Unix mode bits",
+      "source_evidence": "madar-v2/server/config/env.js:8;madar-v2/server/database/connection.js:12",
+      "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+      "verification_method": "actual stat metadata",
+      "last_verification_time": "2026-11-12T05:42:30.717980+00:00",
+      "status": "VERIFIED_FAIL",
+      "failure_or_limitation": "root .env and DB0666; directories0777; local confidentiality/integrity protections insufficient",
+      "relevant_test_ids": [
+        "storage-metadata"
+      ],
+      "relevant_finding_ids": [
+        "OPS-004"
+      ]
+    },
+    {
+      "connection_id": "N-01",
+      "subsystem": "n8n",
+      "producer": "configured CI schedule/manual entry",
+      "consumer": "local script through Execute Command",
+      "interface": "daily06:00 Africa/Cairo, local shell",
+      "source_evidence": "audit/final-integration-20261111/n8n-scheduled-execution-summary.json:1;madar-v2/n8n/MADAR_V2_ACTIVE_CI_HEALTH.json:28",
+      "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+      "verification_method": "read-only saved scheduled execution metadata and allowlisted runData summary",
+      "last_verification_time": "2026-11-12T05:47:47.406462+00:00",
+      "status": "VERIFIED_PASS",
+      "failure_or_limitation": "Execution25 scheduled06:00Cairo2026-11-12 ran and returned WARN,7checks0fail1warning; only rep subset3/3, not full release/source/device evidence",
+      "relevant_test_ids": [
+        "n8n-scheduled-execution-25"
+      ],
+      "relevant_finding_ids": [
+        "N8N-003"
+      ]
+    },
+    {
+      "connection_id": "N-02",
+      "subsystem": "n8n",
+      "producer": "biometric pipeline manual trigger",
+      "consumer": "four labelled patch/build/ADB/release nodes",
+      "interface": "n8n noOp chain",
+      "source_evidence": "/home/carlos/.n8n/database.sqlite:workflow_entity[id=6dae5a55-b25b-4d9a-9c8f-de5c275036ea]",
+      "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+      "verification_method": "read-only metadata/source and installed-node static validation",
+      "last_verification_time": "2026-11-12T05:47:47.406462+00:00",
+      "status": "VERIFIED_FAIL",
+      "failure_or_limitation": "NoOp parameters empty; performs no named patch, build, device test or release verification",
+      "relevant_test_ids": [
+        "n8n-live-metadata"
+      ],
+      "relevant_finding_ids": [
+        "N8N-001"
+      ]
+    },
+    {
+      "connection_id": "N-03",
+      "subsystem": "n8n",
+      "producer": "new manual safe entry",
+      "consumer": "health endpoint and authenticated CI result",
+      "interface": "GET health and GET audit/release-result",
+      "source_evidence": "audit/final-integration-20261111/n8n-executable-verifier.json",
+      "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+      "verification_method": "actual n8n2.46.7 isolated CLI import/execution with loopback HTTP fixtures and synthetic Header Auth credential",
+      "last_verification_time": "2026-11-12T07:19:10.360112+00:00",
+      "status": "VERIFIED_PASS",
+      "failure_or_limitation": "Synthetic fixture mechanics only: operational1/release2 success; deliberate-failure3 error/exit1; actual MADAR release, external CI and devices not certified",
+      "relevant_test_ids": [
+        "n8n-static-validation",
+        "n8n-code-contract-15",
+        "n8n-runtime-execution-1",
+        "n8n-runtime-execution-2",
+        "n8n-runtime-deliberate-failure-3"
+      ],
+      "relevant_finding_ids": []
+    },
+    {
+      "connection_id": "N-04",
+      "subsystem": "n8n",
+      "producer": "workflow result summary",
+      "consumer": "authorized external alert destination",
+      "interface": "notification delivery",
+      "source_evidence": "madar-v2/n8n/MADAR_V2_ACTIVE_CI_HEALTH.json",
+      "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+      "verification_method": "read-only metadata/source and installed-node static validation",
+      "last_verification_time": "2026-11-12T05:47:47.406462+00:00",
+      "status": "NOT_IMPLEMENTED",
+      "failure_or_limitation": "No alert destination/node/credential configured; execution success is not delivery",
+      "relevant_test_ids": [],
+      "relevant_finding_ids": [
+        "N8N-004"
+      ]
+    },
+    {
+      "connection_id": "N-05",
+      "subsystem": "n8n",
+      "producer": "repository architecture map",
+      "consumer": "live imported documentary copy",
+      "interface": "workflow JSON import identity",
+      "source_evidence": "madar-v2/n8n/MADAR_V2_FULL_LIFECYCLE_ARCHITECTURE.json;/home/carlos/.n8n/database.sqlite:workflow_entity[id=e65f7b319ba84cb6a2e24071ad0a6b92]",
+      "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+      "verification_method": "read-only metadata/source and installed-node static validation",
+      "last_verification_time": "2026-11-12T05:47:47.406462+00:00",
+      "status": "VERIFIED_FAIL",
+      "failure_or_limitation": "Live labels stale vs source: invoice cash effects, event replay and whole-unit offcut policy",
+      "relevant_test_ids": [
+        "n8n-live-metadata"
+      ],
+      "relevant_finding_ids": [
+        "N8N-002"
+      ]
+    },
+    {
+      "connection_id": "N-06",
+      "subsystem": "n8n",
+      "producer": "new documentary workflow JSON",
+      "consumer": "n8n2.46.7 supported Sticky Notes",
+      "interface": "inactive importable documentation structure",
+      "source_evidence": "audit/final-integration-20261111/n8n-evidence-map.json",
+      "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+      "verification_method": "actual inactive isolated n8n2.46.7 import plus installed-node static validation",
+      "last_verification_time": "2026-11-12T07:19:10.360112+00:00",
+      "status": "VERIFIED_PASS",
+      "failure_or_limitation": "Import succeeded with inactive DB record; final documentary status annotations refreshed afterward and statically revalidated, without changing executable workflows",
+      "relevant_test_ids": [
+        "n8n-static-validation",
+        "n8n-runtime-import-map"
+      ],
+      "relevant_finding_ids": []
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+✔ startup upgrades legacy attendance with referenced offline actions without losing history (499.161341ms)
+✔ database initialization sets Cairo and adds account lockout fields (4.211143ms)
+✔ main-stock migration preserves movement IDs and adds fractional-offcut movements and whole-unit triggers (3.307352ms)
+✔ machine notes history migration backfills card and fallback notes additively and is idempotent (2.925721ms)
+✔ maintenance photo rotation migration is additive, preserves records, and is idempotent (1.294446ms)
+✔ physical photo-rotation migration adds only a nullable derivative path and preserves rotation history (1.787462ms)
+✔ attendance GPS migration is additive, preserves existing records, and is idempotent (1.918811ms)
+✔ attendance biometric migration is additive, preserves existing rows, and is idempotent (2.150171ms)
+✔ legacy timezone migration updates Riyadh only and preserves explicit custom zones (1.696798ms)
+✔ account lockout migration preserves user identity and can run repeatedly (2.222885ms)
+✔ weekly maintenance retains every breadcrumb forever and checkpoints SQLite (3.099967ms)
+ℹ tests 11
+ℹ suites 0
+ℹ pass 11
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 539.572209

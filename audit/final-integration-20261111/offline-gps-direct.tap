@@ -1,0 +1,11 @@
+✔ IndexedDB v5 includes every offline queue, map store, and the attendance cache RepApp reads (1.440177ms)
+✔ GPS recovery drains the oldest unsynced samples first without mutating the IndexedDB result (14.117331ms)
+✔ missing IndexedDB stores recover in place and remain readable after a repaired DB version is reopened (18.574439ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 47.642311

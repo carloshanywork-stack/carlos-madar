@@ -1,0 +1,22 @@
+✔ linear workflow resolves JSONata and passes items through (9.40768ms)
+✔ IF splits items to true and false branches and only the taken path runs (4.673139ms)
+✔ merge combines items from both branches (2.190486ms)
+✔ disabled nodes are bypassed transparently (1.154826ms)
+✔ HTTP node retries and succeeds, then exposes the response body (86.911099ms)
+✔ failing node with an error branch continues and marks hasErrors (3.009896ms)
+✔ failing node without error branch fails the execution (2.541688ms)
+✔ canceled signal stops the run and reports canceled status (0.742316ms)
+✔ all five templates pass shared publish validation (43.595611ms)
+✔ WF1 health check: manual → set → HTTP → noop (84.483385ms)
+✔ WF2 webhook alert: HMAC payload, IF branches, HTTP delivery, and error branch (61.072352ms)
+✔ WF3 daily report: schedule metadata and ready/empty IF branches (14.483648ms)
+✔ WF4 two-source sync: fan-out, merge, set, and sink payload (20.637767ms)
+✔ WF5 API monitor: healthy, degraded, and retry-exhausted error branch (24.662307ms)
+ℹ tests 14
+ℹ suites 0
+ℹ pass 14
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 705.733098

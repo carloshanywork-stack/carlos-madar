@@ -1,0 +1,15 @@
+{
+  "capturedAt": "2026-11-12T07:22:24.105814+00:00",
+  "runtimeCompletedAt": "2026-11-12T07:19:10.360112+00:00",
+  "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+  "method": "SHA256 captured after primary runtime; executable workflow bytes unchanged since execution; documentary map before runtime-status annotation refresh",
+  "sha256": {
+    "n8n-evidence-map.json": "48a8cd6482d71a7dc1bb4263d9e5941da9120db1a3530ff4e17653c0dad257cf",
+    "n8n-executable-verifier.json": "599a9351025d50aa718f7fe0dc8468a7d8519d73bfc4372acda5bec555b3624a",
+    "n8n-operational-verifier.json": "b7a2a6e9a7b766e1fa6e964f813a921a71f0c76c123ae81fc57eed60dbdd65c6"
+  },
+  "finalDocumentaryMapSha256": "ef724525b516b6cf3a2378a274f4b272063ef4cf3e6fefdeb5aa24b8b47312ad",
+  "finalDocumentaryMapVerification": "Final inventory/runtime-status StickyNote text refreshed after isolated import; parsed and installed-node statically revalidated; not reimported",
+  "finalStaticVerificationAt": "2026-11-12T07:22:55.438922+00:00",
+  "executableBytesPreserved": true
+}

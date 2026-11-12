@@ -1,0 +1,10 @@
+{"time":"2026-11-12T05:39:07.618Z","method":"GET","path":"/download/apk","status":401,"duration_ms":5.9}
+{"time":"2026-11-12T05:39:07.632Z","method":"GET","path":"/download/apk","status":403,"duration_ms":2.61}
+{"time":"2026-11-12T05:39:07.638Z","method":"GET","path":"/download/apk/status","status":200,"duration_ms":2.88}
+{"time":"2026-11-12T05:39:07.790Z","method":"GET","path":"/download/apk","status":200,"duration_ms":143.13}
+{"time":"2026-11-12T05:39:07.978Z","method":"GET","path":"/api/system/audit","status":403,"duration_ms":2.19}
+{"time":"2026-11-12T05:39:07.983Z","method":"GET","path":"/api/supervisor/radar","status":403,"duration_ms":2.17}
+{"time":"2026-11-12T05:39:07.990Z","method":"POST","path":"/api/auth/logout","status":200,"duration_ms":4.73}
+{"time":"2026-11-12T05:39:07.995Z","method":"GET","path":"/api/rep/today-route","status":401,"duration_ms":2.12}
+{"time":"2026-11-12T05:39:07.999Z","method":"GET","path":"/download/apk/status","status":401,"duration_ms":1.49}
+AUDIT_RESULT {"isolated":true,"checks":[{"id":"HTTP-01","path":"/download/apk","role":"anonymous","status":401,"passed":true},{"id":"HTTP-02","path":"/download/apk","role":"operations","status":403,"passed":true},{"id":"HTTP-03","path":"/download/apk/status","role":"admin","status":200,"passed":true},{"id":"HTTP-04","path":"/download/apk","role":"rep","status":200,"passed":true,"sha256":"de5db6f610da4858ff498bd874518d72ea84eeefb1364ec69250e815c06fea55","selectedArtifact":"/home/carlos/Desktop/MADAR/madar-v2/madar-rep.apk"},{"id":"HTTP-05","path":"/api/system/audit","role":"rep","status":403,"passed":true},{"id":"HTTP-06","path":"/api/supervisor/radar","role":"operations","status":403,"passed":true},{"id":"HTTP-07","path":"/api/auth/logout","role":"rep","status":200,"passed":true},{"id":"HTTP-08","path":"/api/rep/today-route","role":"rep","status":401,"passed":true},{"id":"HTTP-09","path":"/download/apk/status","role":"admin","status":401,"passed":true}],"liveAuthenticatedArtifactDownloadVerified":false}

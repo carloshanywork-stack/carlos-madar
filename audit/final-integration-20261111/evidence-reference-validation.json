@@ -1,0 +1,4 @@
+{
+  "method": "Check referenced file existence and line bounds; semantic verification is in reports/source review",
+  "errors": []
+}

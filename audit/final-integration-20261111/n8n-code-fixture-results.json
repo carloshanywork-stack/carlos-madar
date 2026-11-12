@@ -1,0 +1,136 @@
+{
+  "verifiedAt": "2026-11-12T05:50:31.560Z",
+  "method": "Node VM runs actual exported Code node logic with synthetic inputs; NOT n8n runtime/import verification",
+  "checks": 15,
+  "passed": 15,
+  "failed": 0,
+  "results": [
+    {
+      "id": "synthetic_success",
+      "status": "VERIFIED_PASS",
+      "expectedFailure": false,
+      "observedExecutionFailure": false,
+      "summaryOverall": "VERIFIED_PASS",
+      "fixtureOnly": true,
+      "blockedDeviceRetained": false
+    },
+    {
+      "id": "required_failure",
+      "status": "VERIFIED_PASS",
+      "expectedFailure": true,
+      "observedExecutionFailure": true,
+      "summaryOverall": "VERIFIED_FAIL",
+      "fixtureOnly": true,
+      "blockedDeviceRetained": false
+    },
+    {
+      "id": "wrong_revision",
+      "status": "VERIFIED_PASS",
+      "expectedFailure": true,
+      "observedExecutionFailure": true,
+      "summaryOverall": "VERIFIED_FAIL",
+      "fixtureOnly": true,
+      "blockedDeviceRetained": false
+    },
+    {
+      "id": "stale_result",
+      "status": "VERIFIED_PASS",
+      "expectedFailure": true,
+      "observedExecutionFailure": true,
+      "summaryOverall": "VERIFIED_FAIL",
+      "fixtureOnly": true,
+      "blockedDeviceRetained": false
+    },
+    {
+      "id": "future_result",
+      "status": "VERIFIED_PASS",
+      "expectedFailure": true,
+      "observedExecutionFailure": true,
+      "summaryOverall": "VERIFIED_FAIL",
+      "fixtureOnly": true,
+      "blockedDeviceRetained": false
+    },
+    {
+      "id": "real_fixture_confusion",
+      "status": "VERIFIED_PASS",
+      "expectedFailure": true,
+      "observedExecutionFailure": true,
+      "summaryOverall": "VERIFIED_FAIL",
+      "fixtureOnly": true,
+      "blockedDeviceRetained": false
+    },
+    {
+      "id": "wrong_provenance",
+      "status": "VERIFIED_PASS",
+      "expectedFailure": true,
+      "observedExecutionFailure": true,
+      "summaryOverall": "VERIFIED_FAIL",
+      "fixtureOnly": true,
+      "blockedDeviceRetained": false
+    },
+    {
+      "id": "missing_check",
+      "status": "VERIFIED_PASS",
+      "expectedFailure": true,
+      "observedExecutionFailure": true,
+      "summaryOverall": "VERIFIED_FAIL",
+      "fixtureOnly": true,
+      "blockedDeviceRetained": false
+    },
+    {
+      "id": "duplicate_check",
+      "status": "VERIFIED_PASS",
+      "expectedFailure": true,
+      "observedExecutionFailure": true,
+      "summaryOverall": "VERIFIED_FAIL",
+      "fixtureOnly": true,
+      "blockedDeviceRetained": false
+    },
+    {
+      "id": "unknown_status",
+      "status": "VERIFIED_PASS",
+      "expectedFailure": true,
+      "observedExecutionFailure": true,
+      "summaryOverall": "VERIFIED_FAIL",
+      "fixtureOnly": true,
+      "blockedDeviceRetained": false
+    },
+    {
+      "id": "unauthenticated_runner",
+      "status": "VERIFIED_PASS",
+      "expectedFailure": true,
+      "observedExecutionFailure": true,
+      "summaryOverall": "VERIFIED_FAIL",
+      "fixtureOnly": true,
+      "blockedDeviceRetained": false
+    },
+    {
+      "id": "network_error",
+      "status": "VERIFIED_PASS",
+      "expectedFailure": true,
+      "observedExecutionFailure": true,
+      "summaryOverall": "VERIFIED_FAIL",
+      "fixtureOnly": true,
+      "blockedDeviceRetained": false
+    },
+    {
+      "id": "device_blocked_preserved",
+      "status": "VERIFIED_PASS",
+      "expectedFailure": false,
+      "observedExecutionFailure": false,
+      "summaryOverall": "VERIFIED_PASS",
+      "fixtureOnly": true,
+      "blockedDeviceRetained": true
+    },
+    {
+      "id": "health_failure",
+      "status": "VERIFIED_PASS",
+      "observedExecutionFailure": true
+    },
+    {
+      "id": "health_timeout",
+      "status": "VERIFIED_PASS",
+      "observedExecutionFailure": true
+    }
+  ]
+}

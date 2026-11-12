@@ -1,0 +1,11 @@
+✔ migrates legacy fractional balances into offcuts and backfills invoice cash movements (100.580402ms)
+✔ manufacturing account migration preserves existing custom mapping choices (67.288712ms)
+✔ manufacturing migration moves pending order issues to WIP and recognizes archived work orders (66.260964ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 243.800642

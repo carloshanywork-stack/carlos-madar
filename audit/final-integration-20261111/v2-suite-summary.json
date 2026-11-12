@@ -1,0 +1,17 @@
+{
+  "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+  "command": "bash audit/final-integration-20261111/run-business-suite.sh",
+  "fixtureIsolation": "unique /tmp root and per-test temporary paths, ephemeral loopback services",
+  "testFiles": 25,
+  "results": {
+    "tests": 118,
+    "suites": 0,
+    "pass": 118,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 0,
+    "todo": 0
+  },
+  "durationMs": 173344.805076,
+  "scope": "existing source suite; includes source assertions and mocked client tests, not all release requirements or physical acceptance"
+}

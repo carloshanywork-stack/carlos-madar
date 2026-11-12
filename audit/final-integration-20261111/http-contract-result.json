@@ -1,0 +1,71 @@
+{
+  "isolated": true,
+  "checks": [
+    {
+      "id": "HTTP-01",
+      "path": "/download/apk",
+      "role": "anonymous",
+      "status": 401,
+      "passed": true
+    },
+    {
+      "id": "HTTP-02",
+      "path": "/download/apk",
+      "role": "operations",
+      "status": 403,
+      "passed": true
+    },
+    {
+      "id": "HTTP-03",
+      "path": "/download/apk/status",
+      "role": "admin",
+      "status": 200,
+      "passed": true
+    },
+    {
+      "id": "HTTP-04",
+      "path": "/download/apk",
+      "role": "rep",
+      "status": 200,
+      "passed": true,
+      "sha256": "de5db6f610da4858ff498bd874518d72ea84eeefb1364ec69250e815c06fea55",
+      "selectedArtifact": "/home/carlos/Desktop/MADAR/madar-v2/madar-rep.apk"
+    },
+    {
+      "id": "HTTP-05",
+      "path": "/api/system/audit",
+      "role": "rep",
+      "status": 403,
+      "passed": true
+    },
+    {
+      "id": "HTTP-06",
+      "path": "/api/supervisor/radar",
+      "role": "operations",
+      "status": 403,
+      "passed": true
+    },
+    {
+      "id": "HTTP-07",
+      "path": "/api/auth/logout",
+      "role": "rep",
+      "status": 200,
+      "passed": true
+    },
+    {
+      "id": "HTTP-08",
+      "path": "/api/rep/today-route",
+      "role": "rep",
+      "status": 401,
+      "passed": true
+    },
+    {
+      "id": "HTTP-09",
+      "path": "/download/apk/status",
+      "role": "admin",
+      "status": 401,
+      "passed": true
+    }
+  ],
+  "liveAuthenticatedArtifactDownloadVerified": false
+}

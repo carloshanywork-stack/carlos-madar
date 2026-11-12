@@ -1,0 +1,33 @@
+[
+  {
+    "path": "/api/health",
+    "status": 200,
+    "sha256": "2d9aaf8be482bccc65f234e314a109b7f13c8b1b529a667734de08b15439c50c",
+    "bytes": 36,
+    "body": {
+      "status": "ok",
+      "service": "madar-v2"
+    }
+  },
+  {
+    "path": "/api/rep/map/packs",
+    "status": 401
+  },
+  {
+    "path": "/download/apk",
+    "status": 401
+  },
+  {
+    "path": "/",
+    "status": 200,
+    "sha256": "da19c6cf6c54e43be31995c767909497397f2479fee31ec0ace7133b02373ab1",
+    "bytes": 1429,
+    "matchesDiskIndex": true
+  },
+  {
+    "path": "/asset-manifest.json",
+    "status": 200,
+    "sha256": "e87fb434a27a0fa016f95fff7ed0ca3b04126632f04bbb525cccc4efbf1f4888",
+    "bytes": 14499
+  }
+]

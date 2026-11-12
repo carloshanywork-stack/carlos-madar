@@ -1,0 +1,223 @@
+[
+  {
+    "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "last_verification_time": "2026-11-11T20:50:43.323024+00:00",
+    "connection_id": "A-01",
+    "subsystem": "Android release",
+    "producer": "source build configuration",
+    "consumer": "distributed APK",
+    "interface": "Gradle / APK",
+    "source_evidence": "madar-v2/android/app/build.gradle:18-69",
+    "verification_method": "artifact aapt/apksigner + SHA256",
+    "status": "VERIFIED_FAIL",
+    "failure_or_limitation": "Debug certificate/debuggable; source correspondence unestablished",
+    "relevant_test_ids": [],
+    "relevant_finding_ids": [
+      "AND-003"
+    ]
+  },
+  {
+    "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "last_verification_time": "2026-11-11T20:50:43.323024+00:00",
+    "connection_id": "A-02",
+    "subsystem": "GPS",
+    "producer": "native SQLite breadcrumbs",
+    "consumer": "server tracking service",
+    "interface": "POST /api/rep/location-ping",
+    "source_evidence": "madar-v2/android/app/src/main/java/com/madar/rep/app/MadarSyncWorker.java:395-418; madar-v2/server/modules/rep/service.js:1274-1285",
+    "verification_method": "isolated actual service probe",
+    "status": "VERIFIED_FAIL",
+    "failure_or_limitation": "Late upload reopens duty",
+    "relevant_test_ids": [
+      "gps-repro"
+    ],
+    "relevant_finding_ids": [
+      "AND-001"
+    ]
+  },
+  {
+    "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "last_verification_time": "2026-11-11T20:50:43.323024+00:00",
+    "connection_id": "A-03",
+    "subsystem": "GPS",
+    "producer": "native clientPointId",
+    "consumer": "server breadcrumb identity",
+    "interface": "per-point acknowledgement",
+    "source_evidence": "madar-v2/server/modules/rep/service.js:1299-1355",
+    "verification_method": "isolated actual service probe",
+    "status": "VERIFIED_FAIL",
+    "failure_or_limitation": "Reused ID changed content accepted",
+    "relevant_test_ids": [
+      "gps-repro"
+    ],
+    "relevant_finding_ids": [
+      "AND-002"
+    ]
+  },
+  {
+    "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "last_verification_time": "2026-11-11T20:50:43.323024+00:00",
+    "connection_id": "A-04",
+    "subsystem": "GPS",
+    "producer": "server per-point results",
+    "consumer": "native queue cleanup",
+    "interface": "accepted/duplicate/rejected points array",
+    "source_evidence": "madar-v2/android/app/src/main/java/com/madar/rep/app/MadarSyncWorker.java:469-499",
+    "verification_method": "source inspection",
+    "status": "IMPLEMENTED_NOT_VERIFIED",
+    "failure_or_limitation": "No device for rejected point preservation and ack cleanup",
+    "relevant_test_ids": [],
+    "relevant_finding_ids": []
+  },
+  {
+    "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "last_verification_time": "2026-11-11T20:50:43.323024+00:00",
+    "connection_id": "A-05",
+    "subsystem": "Visits",
+    "producer": "native visit SQLite",
+    "consumer": "server visit ingestion",
+    "interface": "multipart /api/rep/sync-visit",
+    "source_evidence": "madar-v2/android/app/src/main/java/com/madar/rep/app/MadarSyncWorker.java:140-222",
+    "verification_method": "source inspection / packaging assertions",
+    "status": "IMPLEMENTED_NOT_VERIFIED",
+    "failure_or_limitation": "No installed-artifact end-to-end test",
+    "relevant_test_ids": [
+      "android-packaging-direct",
+      "offline-gps-direct"
+    ],
+    "relevant_finding_ids": []
+  },
+  {
+    "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "last_verification_time": "2026-11-11T20:50:43.323024+00:00",
+    "connection_id": "A-06",
+    "subsystem": "Review",
+    "producer": "supervisor review",
+    "consumer": "representative route UI",
+    "interface": "rep.visit.reviewed event / route refresh",
+    "source_evidence": "madar-v2/server/modules/supervisor/routes.js:126-130; madar-v2/client/src/modules/rep/RepApp.jsx:794-834",
+    "verification_method": "source inspection",
+    "status": "IMPLEMENTED_NOT_VERIFIED",
+    "failure_or_limitation": "Native uses polling; no reshoot device acceptance",
+    "relevant_test_ids": [],
+    "relevant_finding_ids": []
+  },
+  {
+    "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "last_verification_time": "2026-11-11T20:50:43.323024+00:00",
+    "connection_id": "A-07",
+    "subsystem": "Recovery",
+    "producer": "native machine actions",
+    "consumer": "UI/export",
+    "interface": "native bridge / JSON",
+    "source_evidence": "madar-v2/client/src/modules/rep/RepApp.jsx:345-368; madar-v2/client/src/modules/rep/native-bridges.js:432-474",
+    "verification_method": "source inspection",
+    "status": "VERIFIED_FAIL",
+    "failure_or_limitation": "Native-only machine actions not appended/exported",
+    "relevant_test_ids": [],
+    "relevant_finding_ids": [
+      "AND-004"
+    ]
+  },
+  {
+    "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "last_verification_time": "2026-11-11T20:50:43.323024+00:00",
+    "connection_id": "A-08",
+    "subsystem": "Recovery",
+    "producer": "exported queue JSON",
+    "consumer": "recovery importer",
+    "interface": "JSON file",
+    "source_evidence": "madar-v2/client/src/modules/rep/native-bridges.js:432-504",
+    "verification_method": "source search",
+    "status": "NOT_IMPLEMENTED",
+    "failure_or_limitation": "No JSON import path found",
+    "relevant_test_ids": [],
+    "relevant_finding_ids": [
+      "AND-005"
+    ]
+  },
+  {
+    "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "last_verification_time": "2026-11-11T20:50:43.323024+00:00",
+    "connection_id": "A-09",
+    "subsystem": "Device authentication",
+    "producer": "OS local prompt",
+    "consumer": "server verified flag",
+    "interface": "biometricVerified boolean",
+    "source_evidence": "madar-v2/android/app/src/main/java/com/madar/rep/app/RepBiometricAuth.java:38-71; madar-v2/server/modules/employees/attendance.js:418-463",
+    "verification_method": "source inspection",
+    "status": "IMPLEMENTED_NOT_VERIFIED",
+    "failure_or_limitation": "Client assertion only; actual prompt unverified",
+    "relevant_test_ids": [],
+    "relevant_finding_ids": [
+      "AND-006"
+    ]
+  },
+  {
+    "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "last_verification_time": "2026-11-11T20:50:43.323024+00:00",
+    "connection_id": "A-10",
+    "subsystem": "Evidence",
+    "producer": "native photo processing",
+    "consumer": "durable queued files",
+    "interface": "fsync then delete/rename",
+    "source_evidence": "madar-v2/android/app/src/main/java/com/madar/rep/app/RepNativeEnginePlugin.java:654-678",
+    "verification_method": "source inspection",
+    "status": "VERIFIED_FAIL",
+    "failure_or_limitation": "Crash window between delete existing and rename",
+    "relevant_test_ids": [],
+    "relevant_finding_ids": [
+      "AND-007"
+    ]
+  },
+  {
+    "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "last_verification_time": "2026-11-11T20:50:43.323024+00:00",
+    "connection_id": "A-11",
+    "subsystem": "Android upgrade",
+    "producer": "downloaded APK",
+    "consumer": "installed app + pending data",
+    "interface": "package install replacement",
+    "source_evidence": "madar-v2/android/app/build.gradle:18-32",
+    "verification_method": "adb devices inventory",
+    "status": "BLOCKED_PREREQUISITE",
+    "failure_or_limitation": "No connected physical device or emulator",
+    "relevant_test_ids": [],
+    "relevant_finding_ids": []
+  },
+  {
+    "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "last_verification_time": "2026-11-11T20:50:43.323024+00:00",
+    "connection_id": "A-12",
+    "subsystem": "Artifact correspondence",
+    "producer": "generated Android assets",
+    "consumer": "APK bundled UI",
+    "interface": "assets/public file SHA256",
+    "source_evidence": "madar-v2/android/app/src/main/assets/public",
+    "verification_method": "zip hashes 51 files",
+    "status": "VERIFIED_PASS",
+    "failure_or_limitation": "Source revision remains unproven",
+    "relevant_test_ids": [
+      "android-packaging-direct",
+      "offline-gps-direct"
+    ],
+    "relevant_finding_ids": []
+  },
+  {
+    "source_revision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+    "last_verification_time": "2026-11-11T20:50:43.323024+00:00",
+    "connection_id": "A-13",
+    "subsystem": "Artifact correspondence",
+    "producer": "current web build output",
+    "consumer": "APK bundled UI",
+    "interface": "index / hashed bundles",
+    "source_evidence": "madar-v2/client/dist/index.html; madar-v2/public/rep/index.html",
+    "verification_method": "zip file hashes",
+    "status": "VERIFIED_FAIL",
+    "failure_or_limitation": "Current web output differs from APK",
+    "relevant_test_ids": [],
+    "relevant_finding_ids": [
+      "AND-003"
+    ]
+  }
+]

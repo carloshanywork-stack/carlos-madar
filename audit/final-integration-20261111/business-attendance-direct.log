@@ -1,0 +1,16 @@
+✔ configured half-hour policy accepts recent offline clock-in and clock-out (12.257093ms)
+✔ exact configured age is accepted but one millisecond older cannot write clock-in (8.372022ms)
+✔ expired clock-out preserves an open attendance record and all payroll effects (4.412674ms)
+✔ arbitrarily old punches in an unfinalized month never create attendance (2.516976ms)
+✔ identical accepted clock-in and clock-out replays remain safe after expiry (8.1986ms)
+✔ expired UUID replay with changed data or a different owner remains a conflict (4.953914ms)
+✔ future allowance includes exactly five minutes and rejects the next millisecond (3.90249ms)
+✔ administrator attendance reconciliation is not restricted by the rep offline window (2.894549ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 8
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 62.820078

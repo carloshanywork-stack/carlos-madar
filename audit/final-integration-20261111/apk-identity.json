@@ -1,0 +1,25 @@
+{
+  "artifact": "madar-v2/madar-rep.apk",
+  "sha256": "de5db6f610da4858ff498bd874518d72ea84eeefb1364ec69250e815c06fea55",
+  "size_bytes": 11214198,
+  "package": "com.madar.rep.app",
+  "versionCode": 2,
+  "versionName": "2.0.0",
+  "minSdk": 24,
+  "targetSdk": 36,
+  "debuggable": true,
+  "signer_dn": "C=US, O=Android, CN=Android Debug",
+  "signer_certificate_sha256": "6b7662b9baf48dc6a00c44911b5bc4e0d2eb7693083b71458c5cf9bd8e5d87d1",
+  "inspection_tools": [
+    "/home/carlos/android-sdk/build-tools/36.0.0/aapt dump badging",
+    "/home/carlos/android-sdk/build-tools/36.0.0/apksigner verify --print-certs",
+    "python zipfile/hashlib"
+  ],
+  "connected_devices": [],
+  "inspection_time_utc": "2026-11-11T20:51:00.898566+00:00",
+  "source_revision_correspondence": "not established",
+  "approved_release_signing_identity": "not established",
+  "embedded_server_urls": [
+    "https://carlos-pc.tail852ef0.ts.net"
+  ]
+}

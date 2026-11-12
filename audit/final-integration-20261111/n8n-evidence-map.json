@@ -1,0 +1,209 @@
+{
+  "name": "MADAR final audit — DOCUMENTATION evidence map",
+  "id": "MadarFinalAuditMap20261111",
+  "active": false,
+  "nodes": [
+    {
+      "id": "000dc016-d8a3-5ee1-8039-39e679db0dd7",
+      "name": "Evidence legend",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "parameters": {
+        "content": "## Documentary evidence map — not executable business integration\nAudit SHA 26a9f6549ece44e0f17c50e453c23a0fc076071a\nFinal report: audit/final-integration-20261111/README.md\nThis map uses conceptual arrows in note text only. No executable connections, triggers, noOp, schedules, credentials or calls exist. Each connection ID/status/evidence comes directly from the named audit inventories; definitive detail and limitations remain in those files. Notes group Android, server business, operations/Flow/legacy and n8n. VERIFIED_PASS applies only to each stated verification scope, never universal release readiness.\nPrevious architecture-map domain boundaries reused; stale labels and conceptual noOp representation replaced. Live workflows preserved.",
+        "width": 850,
+        "height": 650
+      },
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "52bb9405-adfd-559b-9224-ab844b7db12b",
+      "name": "Android and offline 1",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "parameters": {
+        "content": "## Android and offline\n\n### A-01 — VERIFIED_FAIL\nsource build configuration → distributed APK\nInterface: Gradle / APK\nEvidence: madar-v2/android/app/build.gradle:18-69\nLimits: Debug certificate/debuggable; source correspondence unestablished\nTests: ; findings: AND-003\n\n### A-02 — VERIFIED_FAIL\nnative SQLite breadcrumbs → server tracking service\nInterface: POST /api/rep/location-ping\nEvidence: madar-v2/android/app/src/main/java/com/madar/rep/app/MadarSyncWorker.java:395-418; madar-v2/server/modules/rep/service.js:1274-1285\nLimits: Late upload reopens duty\nTests: gps-repro; findings: AND-001\n\n### A-03 — VERIFIED_FAIL\nnative clientPointId → server breadcrumb identity\nInterface: per-point acknowledgement\nEvidence: madar-v2/server/modules/rep/service.js:1299-1355\nLimits: Reused ID changed content accepted\nTests: gps-repro; findings: AND-002\n\n### A-04 — IMPLEMENTED_NOT_VERIFIED\nserver per-point results → native queue cleanup\nInterface: accepted/duplicate/rejected points array\nEvidence: madar-v2/android/app/src/main/java/com/madar/rep/app/MadarSyncWorker.java:469-499\nLimits: No device for rejected point preservation and ack cleanup\nTests: ; findings: ",
+        "width": 850,
+        "height": 950
+      },
+      "position": [
+        900,
+        0
+      ]
+    },
+    {
+      "id": "3e26371b-7556-5fea-be42-9bd281b188c3",
+      "name": "Android and offline 2",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "parameters": {
+        "content": "## Android and offline\n\n### A-05 — IMPLEMENTED_NOT_VERIFIED\nnative visit SQLite → server visit ingestion\nInterface: multipart /api/rep/sync-visit\nEvidence: madar-v2/android/app/src/main/java/com/madar/rep/app/MadarSyncWorker.java:140-222\nLimits: No installed-artifact end-to-end test\nTests: android-packaging-direct, offline-gps-direct; findings: \n\n### A-06 — IMPLEMENTED_NOT_VERIFIED\nsupervisor review → representative route UI\nInterface: rep.visit.reviewed event / route refresh\nEvidence: madar-v2/server/modules/supervisor/routes.js:126-130; madar-v2/client/src/modules/rep/RepApp.jsx:794-834\nLimits: Native uses polling; no reshoot device acceptance\nTests: ; findings: \n\n### A-07 — VERIFIED_FAIL\nnative machine actions → UI/export\nInterface: native bridge / JSON\nEvidence: madar-v2/client/src/modules/rep/RepApp.jsx:345-368; madar-v2/client/src/modules/rep/native-bridges.js:432-474\nLimits: Native-only machine actions not appended/exported\nTests: ; findings: AND-004\n\n### A-08 — NOT_IMPLEMENTED\nexported queue JSON → recovery importer\nInterface: JSON file\nEvidence: madar-v2/client/src/modules/rep/native-bridges.js:432-504\nLimits: No JSON import path found\nTests: ; findings: AND-005",
+        "width": 850,
+        "height": 950
+      },
+      "position": [
+        1800,
+        0
+      ]
+    },
+    {
+      "id": "9bdf885a-ab35-5d1f-b0dd-df6a62f0bbbe",
+      "name": "Android and offline 3",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "parameters": {
+        "content": "## Android and offline\n\n### A-09 — IMPLEMENTED_NOT_VERIFIED\nOS local prompt → server verified flag\nInterface: biometricVerified boolean\nEvidence: madar-v2/android/app/src/main/java/com/madar/rep/app/RepBiometricAuth.java:38-71; madar-v2/server/modules/employees/attendance.js:418-463\nLimits: Client assertion only; actual prompt unverified\nTests: ; findings: AND-006\n\n### A-10 — VERIFIED_FAIL\nnative photo processing → durable queued files\nInterface: fsync then delete/rename\nEvidence: madar-v2/android/app/src/main/java/com/madar/rep/app/RepNativeEnginePlugin.java:654-678\nLimits: Crash window between delete existing and rename\nTests: ; findings: AND-007\n\n### A-11 — BLOCKED_PREREQUISITE\ndownloaded APK → installed app + pending data\nInterface: package install replacement\nEvidence: madar-v2/android/app/build.gradle:18-32\nLimits: No connected physical device or emulator\nTests: ; findings: \n\n### A-12 — VERIFIED_PASS\ngenerated Android assets → APK bundled UI\nInterface: assets/public file SHA256\nEvidence: madar-v2/android/app/src/main/assets/public\nLimits: Source revision remains unproven\nTests: android-packaging-direct, offline-gps-direct; findings: ",
+        "width": 850,
+        "height": 950
+      },
+      "position": [
+        0,
+        1000
+      ]
+    },
+    {
+      "id": "1a577cf0-53ab-52b7-87f4-9ad1cc2e0fb1",
+      "name": "Android and offline 4",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "parameters": {
+        "content": "## Android and offline\n\n### A-13 — VERIFIED_FAIL\ncurrent web build output → APK bundled UI\nInterface: index / hashed bundles\nEvidence: madar-v2/client/dist/index.html; madar-v2/public/rep/index.html\nLimits: Current web output differs from APK\nTests: ; findings: AND-003",
+        "width": 850,
+        "height": 950
+      },
+      "position": [
+        900,
+        1000
+      ]
+    },
+    {
+      "id": "85cba9ff-c5c3-523f-b53d-db6d1667cf70",
+      "name": "Server business 1",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "parameters": {
+        "content": "## Server business\n\n### BIZ-C01 — VERIFIED_FAIL\nfinance client → payment/receipt service\nInterface: POST /api/finance/invoices/:id/payment|receipt\nEvidence: ['madar-v2/server/modules/finance/routes.js:25', 'madar-v2/server/modules/finance/invoices.service.js:290']\nLimits: Sales and purchase each repeat partial settlement: paid2000 vs1000, 2 treasury and audit effects; operationId rejected400. Exact service boundary, no TCP loss injection.\nTests: business-replay-probe.mjs; findings: BIZ-001\n\n### BIZ-C02 — NOT_IMPLEMENTED\nvisit selection → visit storage/analytics/export\nInterface: reasonIds JSON\nEvidence: ['madar-v2/server/modules/rep/service.js:304', 'madar-v2/server/modules/rep/service.js:937']\nLimits: Quantity-bearing contract absent\nTests: ; findings: BIZ-002\n\n### BIZ-C03 — VERIFIED_PASS\noffline attendance action → attendance/payroll\nInterface: UUID replay + age policy\nEvidence: ['madar-v2/test/attendance-offline-sync.test.js:60']\nLimits: 8/8 attendance boundary/replay tests pass; receiving native client acceptance outside this connection\nTests: attendance-offline-sync.test.js; findings: \n\n### BIZ-C04 — VERIFIED_PASS\nrepresentative proposal → supervisor approval/dependent visit\nInterface: location review HTTP\nEvidence: ['madar-v2/test/location-approval.test.js:70', 'madar-v2/test/location-approval.test.js:194']\nLimits: Location approval/restart/dependent visit tests pass; physical APK receiving-client acceptance remains separate\nTests: location-approval.test.js; findings: ",
+        "width": 850,
+        "height": 950
+      },
+      "position": [
+        1800,
+        1000
+      ]
+    },
+    {
+      "id": "1f46356b-3951-5a47-8e0f-d6f8f1e20d39",
+      "name": "Server business 2",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "parameters": {
+        "content": "## Server business\n\n### BIZ-C05 — VERIFIED_PASS\nbackup archive → restored database/storage\nInterface: ZIP validation + staged restore\nEvidence: ['madar-v2/server/modules/system/backup.js:252', 'madar-v2/server/modules/system/backup.js:274']\nLimits: Current-schema backup/restore and interrupted rollback pass; differing historical schema/off-device drill not verified\nTests: phase6-parity.test.js; findings: \n\n### BIZ-C06 — IMPLEMENTED_NOT_VERIFIED\nlogin token → API authorization\nInterface: hashed JWT sessions\nEvidence: ['madar-v2/server/modules/auth/service.js:216', 'madar-v2/server/modules/auth/service.js:275']\nLimits: Source inspection; HTTP tested separately by primary\nTests: ; findings: \n\n### BIZ-C07 — VERIFIED_PASS\nhistorical schema → startup migrations\nInterface: SQLite initializeDatabase\nEvidence: ['madar-v2/test/database-maintenance.test.js:24']\nLimits: 11/11 tests pass; tested fixtures do not prove every historical backup\nTests: database-maintenance.test.js; findings: ",
+        "width": 850,
+        "height": 950
+      },
+      "position": [
+        0,
+        2000
+      ]
+    },
+    {
+      "id": "47e7f5d9-a4c3-5fd4-b052-24694c6de943",
+      "name": "Operations, events, legacy and Flow 1",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "parameters": {
+        "content": "## Operations, events, legacy and Flow\n\n### O-01 — VERIFIED_PASS\nrunning API → read-only localhost probe\nInterface: GET /api/health\nEvidence: madar-v2/server/app.js:86\nLimits: Health only; no DB readiness or loaded commit claim\nTests: live-http; findings: \n\n### O-02 — VERIFIED_PASS\nclient/dist → running HTTP server\nInterface: GET / and /asset-manifest.json\nEvidence: madar-v2/server/app.js:163\nLimits: Index matches disk; complete loaded source SHA and full asset release provenance not established\nTests: live-http; findings: OPS-001\n\n### O-03 — VERIFIED_PASS\naudited client source copy → isolated generated assets\nInterface: Vite6.4.5 build --configLoader native\nEvidence: madar-v2/client/vite.config.js:19\nLimits: Does not establish signed APK or deployed-source correspondence\nTests: web-build; findings: \n\n### O-04 — VERIFIED_FAIL\nbusiness service commit → SQLite events then live fanout\nInterface: publishOperationsEvent\nEvidence: madar-v2/server/modules/operations-events.js:39;madar-v2/server/modules/rep/routes.js:129\nLimits: Business commit and event append are separate; persistence failure swallowed, live event cannot replay\nTests: EVT-TEST-02; findings: OPS-002",
+        "width": 850,
+        "height": 950
+      },
+      "position": [
+        900,
+        2000
+      ]
+    },
+    {
+      "id": "7e735543-4f87-5584-a702-c305b7e18294",
+      "name": "Operations, events, legacy and Flow 2",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "parameters": {
+        "content": "## Operations, events, legacy and Flow\n\n### O-05 — IMPLEMENTED_NOT_VERIFIED\nretained SQLite event log → SSE receiving clients\nInterface: Last-Event-ID cursor\nEvidence: madar-v2/server/modules/operations-events.js:24;madar-v2/server/modules/rep/routes.js:83;madar-v2/client/src/modules/rep/RepApp.jsx:769\nLimits: Retained suffix has no stale-cursor reset; foreground periodic APIs mitigate. Full reconnect browser/device acceptance absent.\nTests: EVT-TEST-01; findings: OPS-003\n\n### O-06 — VERIFIED_PASS\nproduction SQLite → read-only integrity inspector\nInterface: PRAGMA integrity_check/foreign_key_check\nEvidence: madar-v2/server/database/connection.js:6\nLimits: Snapshot only; not backup consistency or restore acceptance\nTests: storage-metadata; findings: \n\n### O-07 — BLOCKED_PREREQUISITE\nlocal ZIP backups → off-device protected storage/restore drill\nInterface: backup transport and restore\nEvidence: madar-v2/server/modules/system/backup.js:1\nLimits: No authorized off-device archive or production restore-drill evidence supplied\nTests: ; findings: OPS-005\n\n### O-08 — VERIFIED_PASS\nsource-selected APK file → authenticated admin/rep download\nInterface: GET /download/apk\nEvidence: madar-v2/server/app.js:90;madar-v2/server/config/paths.js:25\nLimits: Source default selects madar-rep.apk; live authenticated download bytes and startup override unverified\nTests: HTTP-01, HTTP-02, HTTP-03, HTTP-04; findings: AND-003, OPS-001",
+        "width": 850,
+        "height": 950
+      },
+      "position": [
+        1800,
+        2000
+      ]
+    },
+    {
+      "id": "1369d58e-b988-5edb-83ee-181ee9865106",
+      "name": "Operations, events, legacy and Flow 3",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "parameters": {
+        "content": "## Operations, events, legacy and Flow\n\n### O-09 — VERIFIED_PASS\ntemporary authenticated users → protected API/logout/session expiry\nInterface: Bearer session plus DB sessions\nEvidence: madar-v2/server/modules/auth/service.js:212;madar-v2/server/app.js:142\nLimits: Nine focused HTTP checks; not exhaustive RBAC/device switching\nTests: HTTP-05, HTTP-06, HTTP-07, HTTP-08, HTTP-09; findings: \n\n### O-10 — VERIFIED_PASS\nwhole-unit/offcut inputs → pure stock arithmetic\nInterface: inventory module\nEvidence: system/src/inventory.js:1\nLimits: Pure arithmetic only, not live legacy instance\nTests: legacy-inventory-direct; findings: \n\n### O-11 — VERIFIED_PASS\nhistorical fixture schema → migrated SQLite\nInterface: additive migration module\nEvidence: system/src/db.js:1\nLimits: Specific historical fixtures only, not all possible historical schemas\nTests: legacy-migration-direct; findings: \n\n### O-12 — VERIFIED_PASS\ntemplate DAG and loopback HTTP fixtures → engine result\nInterface: manual/webhook/schedule/HTTP/IF/merge/retry/error\nEvidence: madar-flow/packages/engine/src/nodes/registry.ts:20\nLimits: Not production Postgres/Valkey/worker/scheduler acceptance; no MADAR business transaction integration proven\nTests: flow-engine-tests; findings: ",
+        "width": 850,
+        "height": 950
+      },
+      "position": [
+        0,
+        3000
+      ]
+    },
+    {
+      "id": "099f1046-26c8-5984-909e-be1fda136cd7",
+      "name": "Operations, events, legacy and Flow 4",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "parameters": {
+        "content": "## Operations, events, legacy and Flow\n\n### O-13 — IMPLEMENTED_NOT_VERIFIED\nAPI transaction/outbox → BullMQ worker and scheduler\nInterface: PostgreSQL/Valkey\nEvidence: madar-flow/apps/api/src/lib/outbox.ts:12;madar-flow/apps/worker/src/runner.ts:1;madar-flow/apps/scheduler/src/index.ts:1\nLimits: Isolated PostgreSQL/Valkey prerequisite unavailable; no live deployment identity established\nTests: ; findings: \n\n### O-14 — VERIFIED_FAIL\nroot .env/database/backups → host local file access\nInterface: Unix mode bits\nEvidence: madar-v2/server/config/env.js:8;madar-v2/server/database/connection.js:12\nLimits: root .env and DB0666; directories0777; local confidentiality/integrity protections insufficient\nTests: storage-metadata; findings: OPS-004",
+        "width": 850,
+        "height": 950
+      },
+      "position": [
+        900,
+        3000
+      ]
+    },
+    {
+      "id": "a80ebac4-e015-5a9b-9914-66008803dd05",
+      "name": "n8n boundaries 1",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "parameters": {
+        "content": "## n8n boundaries\n\n### N-01 — VERIFIED_PASS\nconfigured CI schedule/manual entry → local script through Execute Command\nInterface: daily06:00 Africa/Cairo, local shell\nEvidence: audit/final-integration-20261111/n8n-scheduled-execution-summary.json:1;madar-v2/n8n/MADAR_V2_ACTIVE_CI_HEALTH.json:28\nLimits: Execution25 scheduled06:00Cairo2026-11-12 ran and returned WARN,7checks0fail1warning; only rep subset3/3, not full release/source/device evidence\nTests: n8n-scheduled-execution-25; findings: N8N-003\n\n### N-02 — VERIFIED_FAIL\nbiometric pipeline manual trigger → four labelled patch/build/ADB/release nodes\nInterface: n8n noOp chain\nEvidence: /home/carlos/.n8n/database.sqlite:workflow_entity[id=6dae5a55-b25b-4d9a-9c8f-de5c275036ea]\nLimits: NoOp parameters empty; performs no named patch, build, device test or release verification\nTests: n8n-live-metadata; findings: N8N-001\n\n### N-03 — VERIFIED_PASS\nnew manual safe entry → health endpoint and authenticated CI result\nInterface: GET health and GET audit/release-result\nEvidence: audit/final-integration-20261111/n8n-executable-verifier.json\nLimits: Synthetic fixture mechanics only: operational1/release2 success; deliberate-failure3 error/exit1; actual MADAR release, external CI and devices not certified\nTests: n8n-static-validation, n8n-code-contract-15, n8n-runtime-execution-1, n8n-runtime-execution-2, n8n-runtime-deliberate-failure-3; findings: \n\n### N-04 — NOT_IMPLEMENTED\nworkflow result summary → authorized external alert destination\nInterface: notification delivery\nEvidence: madar-v2/n8n/MADAR_V2_ACTIVE_CI_HEALTH.json\nLimits: No alert destination/node/credential configured; execution success is not delivery\nTests: ; findings: N8N-004",
+        "width": 850,
+        "height": 950
+      },
+      "position": [
+        1800,
+        3000
+      ]
+    },
+    {
+      "id": "5bc57a0f-9aac-59dd-9b73-f492ce16b79f",
+      "name": "n8n boundaries 2",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "parameters": {
+        "content": "## n8n boundaries\n\n### N-05 — VERIFIED_FAIL\nrepository architecture map → live imported documentary copy\nInterface: workflow JSON import identity\nEvidence: madar-v2/n8n/MADAR_V2_FULL_LIFECYCLE_ARCHITECTURE.json;/home/carlos/.n8n/database.sqlite:workflow_entity[id=e65f7b319ba84cb6a2e24071ad0a6b92]\nLimits: Live labels stale vs source: invoice cash effects, event replay and whole-unit offcut policy\nTests: n8n-live-metadata; findings: N8N-002\n\n### N-06 — VERIFIED_PASS\nnew documentary workflow JSON → n8n2.46.7 supported Sticky Notes\nInterface: inactive importable documentation structure\nEvidence: audit/final-integration-20261111/n8n-evidence-map.json\nLimits: Import succeeded with inactive DB record; final documentary status annotations refreshed afterward and statically revalidated, without changing executable workflows\nTests: n8n-static-validation, n8n-runtime-import-map; findings: ",
+        "width": 850,
+        "height": 950
+      },
+      "position": [
+        0,
+        4000
+      ]
+    }
+  ],
+  "connections": {},
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Africa/Cairo"
+  },
+  "pinData": {},
+  "tags": []
+}

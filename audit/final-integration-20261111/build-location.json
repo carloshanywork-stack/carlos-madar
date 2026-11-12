@@ -1,0 +1,15 @@
+{
+  "isolatedSource": "/tmp/madar-audit-build-r1kv67zu/client",
+  "output": "/tmp/madar-audit-build-r1kv67zu/client/audit-dist",
+  "configLoader": "native",
+  "dependencies": "existing read-only shared resolution; no install",
+  "envFiles": "not copied",
+  "result": "VERIFIED_PASS",
+  "viteVersion": "6.4.5",
+  "nodeVersion": "24.22.2",
+  "sourceRevision": "26a9f6549ece44e0f17c50e453c23a0fc076071a",
+  "deliveredArchive": "isolated-web-build.zip",
+  "archiveSha256": "e9065d76e678d9ec8e375c007939b9ff5866f42ef59f68e8ecb4af378e87d2df",
+  "doesNotProveDistributedCorrespondence": true,
+  "initialAttempt": "Failed fixture dependency resolution because isolated parent node_modules link was missing; corrected isolation layout. Sandbox stream restrictions required escalation."
+}

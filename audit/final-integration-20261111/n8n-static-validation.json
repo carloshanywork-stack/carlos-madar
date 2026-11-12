@@ -1,0 +1,41 @@
+{
+  "checkedAt": "2026-11-12T07:32:01.680Z",
+  "results": [
+    {
+      "file": "n8n-evidence-map.json",
+      "status": "VERIFIED_PASS",
+      "jsonParsed": true,
+      "nodeTypesAndVersionsCheckedAgainstInstalled": "n8n 2.46.7 / n8n-nodes-base",
+      "nodes": 13,
+      "connections": 0,
+      "expressionAndCodeSyntax": "valid",
+      "references": "valid",
+      "inactive": true,
+      "embeddedSecretScan": "no embedded secrets matched; manual review completed"
+    },
+    {
+      "file": "n8n-executable-verifier.json",
+      "status": "VERIFIED_PASS",
+      "jsonParsed": true,
+      "nodeTypesAndVersionsCheckedAgainstInstalled": "n8n 2.46.7 / n8n-nodes-base",
+      "nodes": 7,
+      "connections": 5,
+      "expressionAndCodeSyntax": "valid",
+      "references": "valid",
+      "inactive": true,
+      "embeddedSecretScan": "no embedded secrets matched; manual review completed"
+    },
+    {
+      "file": "n8n-operational-verifier.json",
+      "status": "VERIFIED_PASS",
+      "jsonParsed": true,
+      "nodeTypesAndVersionsCheckedAgainstInstalled": "n8n 2.46.7 / n8n-nodes-base",
+      "nodes": 5,
+      "connections": 3,
+      "expressionAndCodeSyntax": "valid",
+      "references": "valid",
+      "inactive": true,
+      "embeddedSecretScan": "no embedded secrets matched; manual review completed"
+    }
+  ]
+}
