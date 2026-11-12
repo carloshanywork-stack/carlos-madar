@@ -9,6 +9,9 @@ const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 export default defineConfig(({ mode }) => {
   const capacitorBuild = mode === 'capacitor';
   const projectEnv = loadEnv(mode, projectRoot, ['VITE_', 'MADAR_REP_']);
+  // `loadEnv` surfaces a server-only NODE_ENV as VITE_USER_NODE_ENV even when
+  // it is excluded by the prefix allowlist; do not let that trigger Vite's warning.
+  delete process.env.VITE_USER_NODE_ENV;
   const releaseBuild = process.env.MADAR_ANDROID_BUILD_TYPE === 'release';
   const liveReloadBuild = capacitorBuild && !releaseBuild && process.env.MADAR_REP_LIVE_RELOAD === 'true';
   const standaloneBuild = capacitorBuild && !liveReloadBuild;
@@ -28,6 +31,9 @@ export default defineConfig(({ mode }) => {
   }
   return {
     plugins: [react()],
+    // The project root .env is loaded explicitly above with an allowlist.
+    // Avoid Vite also reading server-only NODE_ENV from that file.
+    envFile: false,
     base: capacitorBuild ? './' : '/',
     define: {
       __MADAR_BUILD_VERSION__: JSON.stringify(new Date().toISOString()),
