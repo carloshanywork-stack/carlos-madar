@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import bcrypt from 'bcryptjs';
 import { env } from '../config/env.js';
@@ -1941,6 +1942,54 @@ export function migrateTestMockPurgeRecovery(database) {
   })();
 }
 
+export function migrateOrderArchiveMonths(database) {
+  return database.transaction(() => {
+    const version = '20261113-explicit-order-archive-months';
+    if (database.prepare('SELECT 1 FROM schema_migrations WHERE version = ?').get(version)) return;
+    for (const table of ['maintenance_orders', 'workshop_orders']) {
+      if (!database.prepare(`PRAGMA table_info(${table})`).all().some((column) => column.name === 'archive_month')) {
+        database.exec(`ALTER TABLE ${table} ADD COLUMN archive_month TEXT
+          CHECK (archive_month IS NULL OR (length(archive_month) = 7
+            AND archive_month GLOB '[1-9][0-9][0-9][0-9]-[0-1][0-9]'
+            AND substr(archive_month, 6, 2) BETWEEN '01' AND '12'))`);
+      }
+      database.exec(`CREATE INDEX IF NOT EXISTS idx_${table}_archive_month ON ${table}(archive_month, status) WHERE deleted_at IS NULL`);
+    }
+    // Existing records deliberately remain NULL until the owner selects their business month.
+    database.prepare('INSERT INTO schema_migrations (version) VALUES (?)').run(version);
+  }).immediate();
+}
+
+export function migrateMaintenanceCardPhotoReviews(database) {
+  return database.transaction(() => {
+    const version = '20261113-manual-card-photo-review';
+    if (database.prepare('SELECT 1 FROM schema_migrations WHERE version = ?').get(version)) return;
+    database.exec(`CREATE TABLE IF NOT EXISTS maintenance_card_photo_reviews (
+      card_id INTEGER PRIMARY KEY REFERENCES maintenance_cards(id) ON DELETE CASCADE,
+      status TEXT NOT NULL CHECK (status IN ('pending', 'approved', 'reshoot', 'superseded', 'empty')),
+      revision INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0), content_hash TEXT,
+      submitted_by INTEGER REFERENCES users(id), submitted_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      reviewed_by INTEGER REFERENCES users(id), reviewed_at TEXT, review_note TEXT,
+      provenance TEXT NOT NULL DEFAULT 'upload'
+    ); CREATE INDEX IF NOT EXISTS idx_card_photo_review_status ON maintenance_card_photo_reviews(status, submitted_at);`);
+    const cards = database.prepare(`SELECT card.* FROM maintenance_cards card
+      JOIN maintenance_orders order_record ON order_record.id = card.order_id
+      WHERE card.deleted_at IS NULL AND card.status != 'excluded' AND order_record.deleted_at IS NULL
+        AND order_record.status != 'archived'
+        AND NOT EXISTS (SELECT 1 FROM rep_visits visit WHERE visit.card_id = card.id AND visit.status = 'completed')`).all();
+    const photos = (value) => { try { const p = JSON.parse(value); return Array.isArray(p) ? p : []; } catch { return []; } };
+    for (const card of cards) {
+      const lists = [photos(card.before_photos_json), photos(card.after_photos_json)];
+      if (!lists.some((list) => list.length)) continue;
+      const hash = createHash('sha256').update(JSON.stringify(lists)).digest('hex');
+      database.prepare(`INSERT OR IGNORE INTO maintenance_card_photo_reviews
+        (card_id, status, content_hash, submitted_at, provenance) VALUES (?, ?, ?, ?, 'legacy_card_status')`)
+        .run(card.id, card.status === 'completed' ? 'approved' : 'pending', hash, card.updated_at || card.created_at);
+    }
+    database.prepare('INSERT INTO schema_migrations (version) VALUES (?)').run(version);
+  }).immediate();
+}
+
 export function initializeDatabase({ database = db, initialAdminPassword = env.initialAdminPassword } = {}) {
   const schema = readFileSync(schemaPath, 'utf8');
   let adminCreated = false;
@@ -2003,6 +2052,8 @@ export function initializeDatabase({ database = db, initialAdminPassword = env.i
     migrateMachineMaintenanceNotes(database);
     migrateMachineNotesHistory(database);
     migrateMaintenanceUnmatchedFolderDuplicates(database);
+    migrateOrderArchiveMonths(database);
+    migrateMaintenanceCardPhotoReviews(database);
 
     const hasUsers = database.prepare('SELECT 1 FROM users LIMIT 1').get();
 

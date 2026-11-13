@@ -464,6 +464,7 @@ export default function MaintenanceOrderDetail() {
       await api.post(`/api/maintenance/orders/${id}/archive`, {
         actualExpensesCents,
         warrantyPeriodMonths: Number(form.get('warrantyPeriodMonths')),
+        archiveMonth: String(form.get('archiveMonth') || ''),
       });
       setArchiveOpen(false);
       await reload();
@@ -1742,6 +1743,7 @@ export default function MaintenanceOrderDetail() {
           <div className="madar-form-stack">
             <Alert tone="info">العهدة المسجلة: {formatMoney(order.petty_cash_disbursed_cents)}. لا يمكن أن يتجاوز المصروف الفعلي هذا المبلغ.</Alert>
             <Input label="المصروف الفعلي (جنيه)" name="actualExpenses" type="text" inputMode="decimal" required defaultValue="0.00" hint="أدخل المبلغ حتى منزلتين عشريتين." />
+            <Input label="شهر الأرشيف *" name="archiveMonth" type="month" required defaultValue={order.archive_month || ''} />
             <Select label="فترة الضمان *" name="warrantyPeriodMonths" required defaultValue="3"><option value="3">3 أشهر</option><option value="6">6 أشهر</option></Select>
           </div>
           {expenseError && <div className="madar-form-error"><Alert tone="error">{expenseError}</Alert></div>}

@@ -1,4 +1,5 @@
 import { maintenanceLineText } from './line-text.js';
+import { archiveMonth } from '../archive-period.js';
 import PptxGenJS from 'pptxgenjs';
 import {
   AlignmentType,
@@ -348,11 +349,12 @@ function addClientLogo(slide, pptx, logo, client, x, y, width, height) {
 
 function maintenanceReportPeriod(entries) {
   const months = [...new Set(entries
-    .map(({ order }) => String(order.archived_at || order.created_at || '').match(/^(\d{4})-(\d{2})/)?.slice(1).join('-'))
+    .map(({ order }) => order.archive_month || 'unassigned')
     .filter(Boolean))].sort();
   if (!months.length) return null;
 
   const formatMonth = (month) => {
+    if (month === 'unassigned') return 'غير محدد الشهر';
     const date = new Date(`${month}-01T00:00:00.000Z`);
     const label = new Intl.DateTimeFormat('ar-EG', { month: 'long', timeZone: 'UTC' }).format(date);
     return `${label} ${month.slice(0, 4)}`;
@@ -668,7 +670,8 @@ export async function buildMaintenancePptx(orderId, database, { showReasonFooter
 
 export async function buildMaintenancePptxExport(input, database = defaultDatabase) {
   const body = requireObject(input);
-  allowOnlyKeys(body, ['orderIds', 'reasonId', 'area', 'groupBy', 'showReasonFooter', 'exportId', 'useFixedLogoOnCover']);
+  allowOnlyKeys(body, ['orderIds', 'reasonId', 'area', 'groupBy', 'showReasonFooter', 'exportId', 'useFixedLogoOnCover', 'archiveMonth']);
+  const selectedMonth = archiveMonth(body.archiveMonth, { filter: true });
   if (!Array.isArray(body.orderIds)) throw new HttpError(400, 'orderIds must be an array of maintenance order IDs.');
   if (body.orderIds.length > MAX_PPTX_EXPORT_ORDERS) throw new HttpError(400, TOO_MANY_PPTX_ORDERS_MESSAGE);
   const requestedOrderIds = integerIdArray(body.orderIds, 'orderIds');
@@ -683,7 +686,10 @@ export async function buildMaintenancePptxExport(input, database = defaultDataba
   optionalBoolean(body.showReasonFooter, 'showReasonFooter');
   const useFixedLogoOnCover = optionalBoolean(body.useFixedLogoOnCover, 'useFixedLogoOnCover');
 
-  const orders = requestedOrderIds.map((orderId) => getMaintenanceOrder(orderId, database));
+  const orders = requestedOrderIds.map((orderId) => getMaintenanceOrder(orderId, database))
+    .filter((order) => !selectedMonth || (order.status === 'archived'
+      && (selectedMonth === 'unassigned' ? !order.archive_month : order.archive_month === selectedMonth)));
+  if (!orders.length) throw new HttpError(400, 'لا توجد أوامر صيانة مؤرشفة ضمن الشهر المحدد.');
   let reasonName = null;
   if (reasonId !== null) {
     reasonName = database.prepare('SELECT name FROM maintenance_reasons WHERE id = ?').get(reasonId)?.name;
@@ -991,6 +997,7 @@ export async function buildMaintenanceDocx(orderId, database) {
     rtlParagraph(`العميل: ${order.client.name}`),
     rtlParagraph(`رقم الأمر: ${order.order_code}    ·    المنطقة: ${order.area || 'غير محددة'}`),
     rtlParagraph(`التاريخ: ${String(order.created_at ?? '').slice(0, 10) || '—'}`),
+    rtlParagraph(`شهر الأرشيف: ${order.archive_month || 'غير محدد الشهر'}`),
     rtlParagraph(`الفنيون: ${order.technicians.map((technician) => technician.name).join('، ') || 'غير معيّنين'}`),
     rtlParagraph(`إحصائية الزيارة: ${completedCards.length} ماكينة مكتملة الفحص  ·  ${missingCards.length} ماكينة غير مشمولة / ناقصة  ·  ${unmatchedFolders.length} مجلدات تحتاج مراجعة`),
     ...(order.notes ? [rtlParagraph(`ملاحظات الزيارة: ${order.notes}`)] : []),
@@ -1101,7 +1108,7 @@ export async function exportMaintenancePptx(req, res, database = defaultDatabase
       return cleaned ? cleaned.split(',').map((id) => id.trim()) : [];
     });
   }
-  for (const key of ['reasonId', 'area', 'groupBy', 'showReasonFooter', 'exportId', 'useFixedLogoOnCover', 'mode']) {
+  for (const key of ['reasonId', 'area', 'groupBy', 'showReasonFooter', 'exportId', 'useFixedLogoOnCover', 'mode', 'archiveMonth']) {
     if (query[key] !== undefined) input[key] = query[key];
   }
   if (input.orderIds === undefined) input.orderIds = [];

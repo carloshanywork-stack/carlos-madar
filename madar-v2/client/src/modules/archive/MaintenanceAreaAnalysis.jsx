@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { api } from '../../lib/api.js';
 import { useApi } from '../../lib/useApi.js';
 import Alert from '../../components/ui/Alert.jsx';
@@ -8,19 +8,21 @@ import EmptyState from '../../components/ui/EmptyState.jsx';
 import { Input, Select } from '../../components/ui/Field.jsx';
 import LoadingState from '../../components/ui/LoadingState.jsx';
 
-function queryString(from, to, reasonId) {
+function queryString(from, to, reasonId, month) {
   const query = new URLSearchParams();
   if (from) query.set('from', from);
   if (to) query.set('to', to);
   if (reasonId) query.set('reasonId', reasonId);
+  if (month) query.set('month', month);
   return query.toString();
 }
 
-export default function MaintenanceAreaAnalysis() {
+export default function MaintenanceAreaAnalysis({ month = '' }) {
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [reasonId, setReasonId] = useState('');
-  const search = queryString(from, to, reasonId);
+  useEffect(() => { setFrom(''); setTo(''); }, [month]);
+  const search = queryString(month ? '' : from, month ? '' : to, reasonId, month);
   const path = `/api/maintenance/analysis/areas${search ? `?${search}` : ''}`;
   const { data: areas, loading, error } = useApi(path);
   const { data: reasons } = useApi('/api/maintenance/reasons');
@@ -32,7 +34,7 @@ export default function MaintenanceAreaAnalysis() {
   }), { total: 0, completed: 0, missing: 0 }), [areas]);
 
   function downloadMaintenanceExcel() {
-    const query = queryString(from, to, reasonId);
+    const query = queryString(month ? '' : from, month ? '' : to, reasonId, month);
     window.location.href = `/api/maintenance/analysis/export.xlsx${query ? `?${query}` : ''}`;
   }
 
@@ -49,8 +51,8 @@ export default function MaintenanceAreaAnalysis() {
       </div>
 
       <div className="madar-analysis-filters">
-        <Input label="من تاريخ الخدمة" type="date" value={from} onChange={(event) => setFrom(event.target.value)} />
-        <Input label="إلى تاريخ الخدمة" type="date" value={to} onChange={(event) => setTo(event.target.value)} />
+        <Input label="من تاريخ الخدمة" type="date" disabled={Boolean(month)} value={from} onChange={(event) => setFrom(event.target.value)} />
+        <Input label="إلى تاريخ الخدمة" type="date" disabled={Boolean(month)} value={to} onChange={(event) => setTo(event.target.value)} />
         <Select label="سبب العطل" value={reasonId} onChange={(event) => setReasonId(event.target.value)}>
           <option value="">كل الأسباب</option>
           {(reasons ?? []).map((reason) => <option key={reason.id} value={reason.id}>{reason.name}</option>)}

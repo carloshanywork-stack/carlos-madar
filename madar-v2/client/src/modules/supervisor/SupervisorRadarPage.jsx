@@ -291,8 +291,10 @@ export default function SupervisorRadarPage() {
     setBusyVisit(visit.id);
     setError('');
     try {
-      const result = await api.post(`/api/supervisor/visits/${visit.id}/review`, {
+      const reviewPath = visit.source === 'office' ? `/api/supervisor/card-photos/${visit.cardId}/review` : `/api/supervisor/visits/${visit.id}/review`;
+      const result = await api.post(reviewPath, {
         action,
+        ...(visit.source === 'office' ? { revision: visit.revision } : {}),
         note: action === 'reshoot' ? reviewNote.trim() : reviewNote.trim() || undefined,
       });
       setVisits((current) => current.filter((item) => item.id !== visit.id));
@@ -321,9 +323,13 @@ export default function SupervisorRadarPage() {
     setBulkBusy(true);
     setError('');
     try {
-      const result = await api.post('/api/supervisor/visits/approve-all', { visitIds });
+      const selected = visits.filter((visit) => visitIds.includes(Number(visit.id)));
+      const repVisitIds = selected.filter((visit) => visit.source !== 'office').map((visit) => Number(visit.id));
+      const cardReviews = selected.filter((visit) => visit.source === 'office').map((visit) => ({ cardId: visit.cardId, revision: visit.revision }));
+      const result = await api.post('/api/supervisor/visits/approve-all', { visitIds: repVisitIds, cardReviews });
       if (!result?.success || !Array.isArray(result.visitIds)
-          || result.visitIds.some((id) => !visitIds.includes(Number(id)))) {
+          || result.visitIds.some((id) => !repVisitIds.includes(Number(id)))
+          || (result.cardIds ?? []).some((id) => !cardReviews.some((item) => item.cardId === Number(id)))) {
         throw new Error('استجابة الاعتماد لا تطابق الزيارات التي اخترتها. حدّث القائمة للتحقق من الحالة.');
       }
       const approvedCount = Number(result.approvedCount) || 0;
@@ -466,13 +472,13 @@ export default function SupervisorRadarPage() {
                   <div className="qa-visit-selection"><label><input type="checkbox" checked={selectedBulkIds.has(Number(visit.id))} onChange={(event) => setSelectedBulkIds((current) => { const next = new Set(current); if (event.target.checked) next.add(Number(visit.id)); else next.delete(Number(visit.id)); return next; })} /> ضمن الاعتماد الجماعي</label><span className="qa-pending-badge">بانتظار الاعتماد</span></div>
                 </div>
                 <div className="qa-photo-pair">
-                  {beforePhotos.map((photo, index) => <button key={`before-${index}`} type="button" onClick={() => setSelectedVisit({ ...visit, zoomPhoto: 'before', zoomPhotoIndex: index })} aria-label={`تكبير صورة قبل الصيانة ${index + 1}`}><img src={photo.url} alt={`قبل الصيانة ${visit.machineCode} ${index + 1}`} /><span>قبل الصيانة · {index + 1} ↗</span></button>)}
+                  {beforePhotos.map((photo, index) => <button key={`before-${index}`} type="button" onClick={() => setSelectedVisit({ ...visit, zoomPhoto: 'before', zoomPhotoIndex: index })} aria-label={`تكبير صورة قبل الصيانة ${index + 1}`}><img src={photo.thumbnailUrl || photo.url} loading="lazy" decoding="async" alt={`قبل الصيانة ${visit.machineCode} ${index + 1}`} /><span>قبل الصيانة · {index + 1} ↗</span></button>)}
                   {afterPhotos.length
-                    ? afterPhotos.map((photo, index) => <button key={`after-${index}`} type="button" onClick={() => setSelectedVisit({ ...visit, zoomPhoto: 'after', zoomPhotoIndex: index })} aria-label={`تكبير صورة بعد الصيانة ${index + 1}`}><img src={photo.url} alt={`بعد الصيانة ${visit.machineCode} ${index + 1}`} /><span>بعد الصيانة · {index + 1} ↗</span></button>)
+                    ? afterPhotos.map((photo, index) => <button key={`after-${index}`} type="button" onClick={() => setSelectedVisit({ ...visit, zoomPhoto: 'after', zoomPhotoIndex: index })} aria-label={`تكبير صورة بعد الصيانة ${index + 1}`}><img src={photo.thumbnailUrl || photo.url} loading="lazy" decoding="async" alt={`بعد الصيانة ${visit.machineCode} ${index + 1}`} /><span>بعد الصيانة · {index + 1} ↗</span></button>)
                     : <div className="qa-photo-missing" role="note"><strong>لا توجد صور بعد الصيانة</strong><small>توثيق هذه المرحلة اختياري للمندوب.</small></div>}
                 </div>
                 <div className="qa-visit-meta">
-                  <span>المندوب <b>{visit.repName}</b></span>
+                  <span>{visit.source === 'office' ? 'رفع من السيستم بواسطة' : 'المندوب'} <b>{visit.repName}</b></span>
                   <span>حالة الماكينة <b>{visit.machineCondition === 'faulty' ? 'عطلانة' : visit.machineCondition === 'preventive_maintenance' ? 'صيانة وقائية' : 'تعمل'}</b></span>
                   <span>المدة بين الصورتين <b>{formatDuration(visit.siteDurationSeconds)}</b></span>
                   <span>الرفع <b>{formatTime(visit.capturedAt)}</b></span>

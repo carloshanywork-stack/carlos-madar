@@ -1,4 +1,6 @@
 import { Router } from 'express';
+import { setOrderArchiveMonth } from '../archive-period.js';
+import { requireAdmin } from '../auth/authorization.js';
 import { safeOriginalName, asyncHandler } from '../http.js';
 import { resolveStorageFile } from '../storage.js';
 import { memoryUpload } from '../upload.js';
@@ -27,11 +29,16 @@ const designUpload = memoryUpload({
 
 router.get('/orders', (req, res, next) => {
   try {
-    const orders = listWorkshopOrders(req.query.status);
+    const orders = listWorkshopOrders(req.query.status, undefined, { month: req.query.month });
     res.json(roleAware(orders, req));
   } catch (error) {
     next(error);
   }
+});
+
+router.patch('/orders/:id/archive-month', requireAdmin, (req, res, next) => {
+  try { res.json(setOrderArchiveMonth('workshop', req.params.id, req.body, requestActorId(req))); }
+  catch (error) { next(error); }
 });
 
 router.post('/orders', requireWorkshopMutationAccess, (req, res, next) => {

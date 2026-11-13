@@ -179,7 +179,7 @@ export function getRepTodayRoute(rep, database = db) {
   const { start: dayStart, end: dayEnd } = getBusinessDayRange(database);
   const cards = database.prepare(`
     SELECT order_record.id AS order_id, order_record.order_code, order_record.status AS order_status,
-      card.id AS card_id, card.before_photos_json, card.after_photos_json,
+      card.id AS card_id, card.status AS card_status, card.before_photos_json, card.after_photos_json,
       machine.id AS machine_id, machine.code AS machine_code,
       machine.name_ar AS machine_name_ar, machine.area AS region_name,
       machine.area_name, machine.latitude, machine.longitude, machine.is_location_locked,
@@ -217,11 +217,8 @@ export function getRepTodayRoute(rep, database = db) {
   for (const visit of visitReviews) {
     if (!reviewByCard.has(Number(visit.card_id))) reviewByCard.set(Number(visit.card_id), visit);
   }
-  const uploadedToday = new Set(database.prepare(`
-    SELECT DISTINCT entity_id FROM audit_log
-    WHERE action = 'photo_upload' AND entity_type = 'maintenance_card'
-      AND datetime(created_at) >= datetime(?) AND datetime(created_at) < datetime(?)
-  `).all(dayStart, dayEnd).map((row) => Number(row.entity_id)));
+  const manualReviews = new Map(database.prepare(`SELECT card_id, status, review_note FROM maintenance_card_photo_reviews
+    WHERE status IN ('pending', 'approved', 'reshoot', 'empty')`).all().map((row) => [Number(row.card_id), row]));
   const correctionPendingMachineIds = new Set(database.prepare(`
     SELECT DISTINCT machine_id FROM machine_correction_requests WHERE status = 'pending'
   `).all().map((row) => Number(row.machine_id)));
@@ -243,20 +240,21 @@ export function getRepTodayRoute(rep, database = db) {
     const groupKey = regionKey(regionName) || regionKey('المنطقة العامة');
     const beforePhotos = parsePhotoList(row.before_photos_json);
     const afterPhotos = parsePhotoList(row.after_photos_json);
-    const latestVisit = reviewByCard.get(Number(row.card_id));
+    const manualReview = manualReviews.get(Number(row.card_id));
+    const latestVisit = manualReview ? null : reviewByCard.get(Number(row.card_id));
     const correctionPending = correctionPendingMachineIds.has(Number(row.machine_id));
     const activeWork = activeWorkByCard.get(Number(row.card_id));
     // Only the representative who owns the work can see it while it is claimed
     // or after submission. The server still checks the lease on every write.
     if (activeWork && Number(activeWork.rep_user_id) !== Number(rep.id)) continue;
     if (latestVisit && Number(latestVisit.rep_user_id) !== Number(rep.id)) continue;
-    const isCompleted = latestVisit
-      ? latestVisit.review_status === 'approved'
-      // Legacy card photo uploads have no visit/review record; keep those complete only when both phases exist.
-      // New visits use the supervisor-approved review above, where After photos are optional.
-      : uploadedToday.has(Number(row.card_id)) && beforePhotos.length > 0 && afterPhotos.length > 0;
-    const isSubmitted = Boolean(latestVisit && latestVisit.review_status !== 'reshoot');
-    const workStatus = isSubmitted || isCompleted ? 'done' : activeWork ? 'in_progress' : 'available';
+    const isCompleted = row.order_status === 'archived' || (manualReview
+      ? manualReview.status === 'approved' : latestVisit ? latestVisit.review_status === 'approved' : row.card_status === 'completed');
+    const reviewStatus = manualReview?.status === 'empty' ? null : manualReview?.status ?? latestVisit?.review_status ?? null;
+    const needsReshoot = reviewStatus === 'reshoot';
+    const isSubmitted = isCompleted || reviewStatus === 'pending'
+      || (!needsReshoot && (row.order_status === 'review' || (!latestVisit && !manualReview && (beforePhotos.length > 0 || afterPhotos.length > 0))));
+    const workStatus = isCompleted ? 'done' : isSubmitted ? 'pending_review' : activeWork ? 'in_progress' : 'available';
     if (!regionsByKey.has(groupKey)) regionsByKey.set(groupKey, { regionName, machines: [] });
     regionsByKey.get(groupKey).machines.push({
       machineCode: row.machine_code,
@@ -271,8 +269,8 @@ export function getRepTodayRoute(rep, database = db) {
       isSubmitted,
       workStatus,
       workOwnerId: workStatus === 'in_progress' ? Number(activeWork.rep_user_id) : null,
-      reviewStatus: latestVisit?.review_status ?? null,
-      reviewNote: latestVisit?.review_status === 'reshoot' ? latestVisit.review_note : null,
+      reviewStatus: reviewStatus ?? (isSubmitted && !isCompleted ? 'pending' : null),
+      reviewNote: needsReshoot ? (manualReview?.review_note ?? latestVisit?.review_note) : null,
       correctionPending,
       locationConfirmation: latestLocationByCard.get(Number(row.card_id)) ?? null,
       approvedLocation: row.is_location_locked === 1 && row.latitude !== null && row.longitude !== null
@@ -287,7 +285,7 @@ export function getRepTodayRoute(rep, database = db) {
     });
     totalMachines += 1;
     if (isCompleted) completed += 1;
-    if (latestVisit?.review_status === 'pending') pendingReview += 1;
+    if (isSubmitted && !isCompleted) pendingReview += 1;
   }
 
   const regions = [...regionsByKey.values()]
@@ -1071,6 +1069,17 @@ function createVisitReservation(rep, visit, payloadHash, card, stagingPath, fina
       if (existing.status === 'receiving') return { row: existing, kind: 'processing' };
     }
 
+    card = findRepVisitCard(rep, visit, database);
+    const manualReview = database.prepare('SELECT status FROM maintenance_card_photo_reviews WHERE card_id = ?').get(card.card_id);
+    if (['pending', 'approved'].includes(manualReview?.status)) {
+      throw new HttpError(409, 'This machine has system-uploaded photos pending review or already approved. Keep your local visit and refresh the route.');
+    }
+    const lastReview = database.prepare(`SELECT review.status FROM rep_visits visit JOIN rep_visit_reviews review ON review.visit_id = visit.id
+      WHERE visit.card_id = ? AND visit.status = 'completed' ORDER BY visit.id DESC LIMIT 1`).get(card.card_id);
+    if ((card.card_status === 'completed' || card.order_status === 'review')
+        && lastReview?.status !== 'reshoot' && manualReview?.status !== 'reshoot') {
+      throw new HttpError(409, 'This machine is completed or waiting for approval. Refresh the route.');
+    }
     const activeWork = database.prepare(`
       SELECT rep_user_id FROM rep_machine_work_leases
       WHERE card_id = ? AND expires_at_ms > ?
@@ -1085,7 +1094,7 @@ function createVisitReservation(rep, visit, payloadHash, card, stagingPath, fina
         AND review.status IN ('pending', 'approved')
       LIMIT 1
     `).get(card.card_id);
-    if (submitted) throw new HttpError(409, 'This machine was already submitted. Refresh the route.');
+    if (submitted && !['reshoot', 'empty'].includes(manualReview?.status)) throw new HttpError(409, 'This machine was already submitted. Refresh the route.');
 
     if (existing) {
       persistRepVisitLines(visit, existing.id, database);
@@ -1157,6 +1166,7 @@ function recordReceivedVisit(rep, visit, visitId, photoRows, database) {
         reviewed_by = NULL, reviewed_at = NULL
     `).run(visitId);
     database.prepare('DELETE FROM rep_machine_work_leases WHERE card_id = ?').run(visit.cardId);
+    database.prepare("UPDATE maintenance_card_photo_reviews SET status = 'superseded' WHERE card_id = ? AND status IN ('reshoot', 'empty')").run(visit.cardId);
     recordAudit({
       database,
       actorId: rep.id,

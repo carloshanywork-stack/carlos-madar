@@ -300,6 +300,15 @@ test('Phase 2 client, maintenance, and workshop flows remain isolated and transa
   assert.equal(legacyPhotoDownload.response.status, 200);
   assert.deepEqual(legacyPhotoDownload.body, jpegBytes);
 
+  // This legacy-path fixture changes a stored reference, not image bytes. Review the current snapshot before archive.
+  const { reconcileCardPhotoReviewPaths } = await import('../server/modules/maintenance/photo-review.js');
+  reconcileCardPhotoReviewPaths(card.id, db);
+  const photoQueue = await request('/api/supervisor/qa/queue');
+  const cardReviews = photoQueue.body.visits.filter((visit) => visit.source === 'office' && visit.orderId === maintenanceOrder.id)
+    .map((visit) => ({ cardId: visit.cardId, revision: visit.revision }));
+  assert.ok(cardReviews.length);
+  assert.equal((await request('/api/supervisor/visits/approve-all', jsonOptions('POST', { visitIds: [], cardReviews }))).response.status, 200);
+
   const movedToReview = await request(
     `/api/maintenance/orders/${maintenanceOrder.id}/status`,
     jsonOptions('PATCH', {}),

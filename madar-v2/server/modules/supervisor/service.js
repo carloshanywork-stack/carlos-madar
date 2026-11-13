@@ -3,6 +3,7 @@ import { db as defaultDatabase } from '../../database/connection.js';
 import { HttpError, allowOnlyKeys, optionalText, positiveId, requireObject, requireText } from '../http.js';
 import { resolveStorageFile } from '../storage.js';
 import { recordAudit } from '../audit.js';
+import { getPendingCardPhotoReviews, reviewCardPhotos } from '../maintenance/photo-review.js';
 
 const DEFAULT_TIME_ZONE = 'Africa/Cairo';
 const MAX_SPEED_METERS_PER_SECOND = 200 / 3.6;
@@ -312,7 +313,7 @@ export function getPendingVisitReviews(database = defaultDatabase) {
     if (!photosByVisit.has(Number(photo.visit_id))) photosByVisit.set(Number(photo.visit_id), { before: [], after: [] });
     photosByVisit.get(Number(photo.visit_id))[photo.phase].push(photo);
   }
-  return visits.map((visit) => {
+  const representativeReviews = visits.map((visit) => {
     const beforeMs = visit.before_captured_at ? new Date(visit.before_captured_at).valueOf() : NaN;
     const afterMs = visit.after_captured_at ? new Date(visit.after_captured_at).valueOf() : NaN;
     const storedPhotos = photosByVisit.get(Number(visit.id)) ?? { before: [], after: [] };
@@ -343,6 +344,8 @@ export function getPendingVisitReviews(database = defaultDatabase) {
       createdAt: visit.created_at,
     };
   });
+  return [...representativeReviews, ...getPendingCardPhotoReviews(database)]
+    .sort((left, right) => String(left.capturedAt).localeCompare(String(right.capturedAt)) || left.id - right.id);
 }
 
 export async function getSupervisorVisitPhoto(visitIdInput, phase, ordinalInput = null, database = defaultDatabase) {
@@ -550,11 +553,17 @@ export function reviewRepVisit(visitIdInput, input, actorId, database = defaultD
 
 export function approveRepVisitsTogether(input, actorId, database = defaultDatabase) {
   const body = requireObject(input);
-  allowOnlyKeys(body, ['visitIds']);
-  if (!Array.isArray(body.visitIds) || body.visitIds.length < 1 || body.visitIds.length > 100) {
-    throw new HttpError(400, 'visitIds must contain between 1 and 100 visits.');
+  allowOnlyKeys(body, ['visitIds', 'cardReviews']);
+  const rawVisits = body.visitIds ?? [], rawCards = body.cardReviews ?? [];
+  if (!Array.isArray(rawVisits) || !Array.isArray(rawCards) || rawVisits.length + rawCards.length < 1 || rawVisits.length + rawCards.length > 100) {
+    throw new HttpError(400, 'Select between 1 and 100 photo reviews.');
   }
-  const visitIds = body.visitIds.map((value, index) => positiveId(value, `visitIds[${index}]`));
+  const visitIds = rawVisits.map((value, index) => positiveId(value, `visitIds[${index}]`));
+  const cardReviews = rawCards.map((value) => {
+    const item = requireObject(value); allowOnlyKeys(item, ['cardId', 'revision']);
+    return { cardId: positiveId(item.cardId, 'cardId'), revision: positiveId(item.revision, 'revision') };
+  });
+  if (new Set(cardReviews.map((item) => item.cardId)).size !== cardReviews.length) throw new HttpError(400, 'Card photo reviews must not contain duplicates.');
   if (new Set(visitIds).size !== visitIds.length) throw new HttpError(400, 'visitIds must not contain duplicates.');
   const actor = positiveId(actorId, 'actorId');
   return database.transaction(() => {
@@ -563,20 +572,23 @@ export function approveRepVisitsTogether(input, actorId, database = defaultDatab
     const rows = database.prepare(`
       SELECT visit.id, visit.card_id, visit.rep_user_id, review.status
       FROM rep_visits visit JOIN rep_visit_reviews review ON review.visit_id = visit.id
-      WHERE visit.id IN (${visitIds.map(() => '?').join(',')}) AND visit.status = 'completed'
+      WHERE visit.id IN (${visitIds.map(() => '?').join(',') || 'NULL'}) AND visit.status = 'completed'
     `).all(...visitIds);
     if (rows.length !== visitIds.length) throw new HttpError(404, 'One or more visits were not found.');
     if (rows.some((row) => !['pending', 'approved'].includes(row.status))) {
       throw new HttpError(409, 'A visit needs reshooting or has another review state; no visits were approved.');
     }
-    if (new Set(rows.map((row) => Number(row.card_id))).size !== rows.length) {
+    if (new Set([...rows.map((row) => Number(row.card_id)), ...cardReviews.map((item) => item.cardId)]).size !== rows.length + cardReviews.length) {
       throw new HttpError(409, 'Select only one visit per machine card in a bulk approval.');
     }
     const newlyApproved = rows.filter((row) => row.status === 'pending')
       .map((row) => reviewRepVisit(row.id, { action: 'approve' }, actor, database));
-    return { success: true, status: 'approved', approvedCount: newlyApproved.length,
-      alreadyApprovedCount: rows.length - newlyApproved.length,
-      visitIds, newlyApproved, idempotent: newlyApproved.length === 0 };
+    const officeResults = cardReviews.map((item) => reviewCardPhotos(item.cardId, { action: 'approve', revision: item.revision }, actor, database));
+    const newlyApprovedCards = officeResults.filter((result) => !result.idempotent);
+    return { success: true, status: 'approved', approvedCount: newlyApproved.length + newlyApprovedCards.length,
+      alreadyApprovedCount: rows.length - newlyApproved.length + officeResults.filter((result) => result.idempotent).length,
+      visitIds, cardIds: cardReviews.map((item) => item.cardId), newlyApproved, newlyApprovedCards,
+      idempotent: newlyApproved.length + newlyApprovedCards.length === 0 };
   }).immediate();
 }
 

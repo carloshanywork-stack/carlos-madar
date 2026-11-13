@@ -780,7 +780,7 @@ test('maintenance card photos can be moved or deleted without losing files on DB
     filename: afterPhoto.path.split('/').at(-1),
   }));
   assert.equal(fullPhaseMove.response.status, 400);
-  assert.equal(db.prepare('SELECT status FROM maintenance_cards WHERE id = ?').get(card.id).status, 'completed');
+  assert.equal(db.prepare('SELECT status FROM maintenance_cards WHERE id = ?').get(card.id).status, 'pending');
 
   const moved = await request(`/api/maintenance/orders/${orderResponse.body.id}/cards/${card.id}/photos/move`, json('POST', {
     fromPhase: 'before',
@@ -788,7 +788,7 @@ test('maintenance card photos can be moved or deleted without losing files on DB
     filename: movedFilename,
   }));
   assert.equal(moved.response.status, 200, JSON.stringify(moved.body));
-  assert.equal(moved.body.status, 'completed');
+  assert.equal(moved.body.status, 'pending');
   assert.equal(moved.body.path, movedStoredPath);
   assert.equal(existsSync(join(storageRoot, ...movedPhoto.path.split('/'))), false, 'the old phase path should no longer exist');
   assert.equal(existsSync(join(storageRoot, ...movedStoredPath.split('/'))), true, 'moving a photo should relocate its file');
@@ -805,7 +805,7 @@ test('maintenance card photos can be moved or deleted without losing files on DB
   });
   assert.equal(deletedMovedPhoto.response.status, 200, JSON.stringify(deletedMovedPhoto.body));
   assert.equal(existsSync(join(storageRoot, ...movedStoredPath.split('/'))), false, 'deleting a photo should remove its stored file');
-  assert.equal(db.prepare('SELECT status FROM maintenance_cards WHERE id = ?').get(card.id).status, 'completed');
+  assert.equal(db.prepare('SELECT status FROM maintenance_cards WHERE id = ?').get(card.id).status, 'pending');
 
   const afterFilename = afterPhoto.path.split('/').at(-1);
   const deletedLastAfterPhoto = await request(`/api/maintenance/orders/${orderResponse.body.id}/cards/${card.id}/photos/after/${encodeURIComponent(afterFilename)}`, {
@@ -857,7 +857,7 @@ test('maintenance card photos can be moved or deleted without losing files on DB
   `).get(card.id);
   assert.equal(moveAudit.action, 'photo_move');
   assert.equal(JSON.parse(moveAudit.old_values_json).fromPhase, 'before');
-  assert.equal(JSON.parse(moveAudit.new_values_json).status, 'completed');
+  assert.equal(JSON.parse(moveAudit.new_values_json).status, 'pending');
   const deleteAudit = db.prepare(`
     SELECT action, old_values_json FROM audit_log
     WHERE entity_type = 'maintenance_card' AND entity_id = ? AND action = 'photo_delete'

@@ -1,5 +1,6 @@
 import { db } from '../../database/connection.js';
 import { Router } from 'express';
+import { setOrderArchiveMonth } from '../archive-period.js';
 import { readFile } from 'node:fs/promises';
 import { extname } from 'node:path';
 import { allowOnlyKeys, asyncHandler, HttpError, requireObject, requireText } from '../http.js';
@@ -389,7 +390,7 @@ router.get('/analysis/export.xlsx', (req, res, next) => {
 router.get('/orders', (req, res, next) => {
   try {
     res.set(NO_CACHE_HEADERS);
-    res.json(listMaintenanceOrders(req.query.status));
+    res.json(listMaintenanceOrders(req.query.status, undefined, { month: req.query.month }));
   } catch (error) {
     next(error);
   }
@@ -710,6 +711,11 @@ router.post('/orders/:id/archive', (req, res, next) => {
   } catch (error) {
     next(error);
   }
+});
+
+router.patch('/orders/:id/archive-month', requireRole('admin'), (req, res, next) => {
+  try { res.json(setOrderArchiveMonth('maintenance', req.params.id, req.body, requestActorId(req))); }
+  catch (error) { next(error); }
 });
 
 router.get('/orders/:id', (req, res, next) => {

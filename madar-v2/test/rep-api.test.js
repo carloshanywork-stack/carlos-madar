@@ -280,7 +280,7 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   const adminTransition = await fetch(`${baseUrl}/download/apk/debug-transition`, { headers: { cookie: adminCookie } });
   assert.equal(adminTransition.status, 200);
   assert.match(adminTransition.headers.get('content-type'), /application\/vnd\.android\.package-archive/);
-  assert.match(adminTransition.headers.get('content-disposition'), /madar-rep-debug-transition-2\.0\.6\.apk/);
+  assert.equal(adminTransition.headers.get('content-disposition'), 'attachment; filename="madar-rep-debug-transition.apk"');
   assert.equal(Buffer.from(await adminTransition.arrayBuffer()).toString(), 'synthetic-transition-apk');
 
   const createRep = await request('/api/users', jsonOptions('POST', {
@@ -333,6 +333,9 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   const completedCardId = addMachineCard('1433', 'التجمع', ['before-1433.jpg'], ['after-1433.jpg']);
   const missingAfterCardId = addMachineCard('1434', 'التجمع', ['before-1434.jpg'], []);
   const yesterdayCardId = addMachineCard('1435', 'التجمع', ['before-1435.jpg'], ['after-1435.jpg']);
+  db.prepare("UPDATE maintenance_cards SET status = 'completed' WHERE id = ?").run(completedCardId);
+  db.prepare(`INSERT INTO maintenance_card_photo_reviews (card_id, status, revision, review_note)
+    VALUES (?, 'reshoot', 1, 'تحتاج صوراً جديدة')`).run(missingAfterCardId);
   const otherRegionCardId = addMachineCard('2400', 'الرياض', ['before-2400.jpg'], ['after-2400.jpg']);
   const duplicateOrderId = Number(db.prepare(`
     INSERT INTO maintenance_orders (order_code, client_id, area, status)
@@ -610,7 +613,7 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
 
   const route = await request('/api/rep/today-route?username=rep-nour', {}, login.cookie);
   assert.equal(route.response.status, 200);
-  assert.deepEqual(route.body.summary, { totalMachines: 3, completed: 1, pending: 2, pendingReview: 0, progress: 33 });
+  assert.deepEqual(route.body.summary, { totalMachines: 3, completed: 1, pending: 2, pendingReview: 1, progress: 33 });
   assert.equal(route.body.regions.length, 1);
   assert.equal(route.body.regions[0].regionName, 'التجمع');
   assert.deepEqual(route.body.regions[0].machines.map((machine) => machine.machineCode), ['1433', '1434', '1435']);

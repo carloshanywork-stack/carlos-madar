@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { extname } from 'node:path';
 import { db } from '../../database/connection.js';
+import { archiveMonth, addArchiveMonthFilter } from '../archive-period.js';
 import { recordAudit } from '../audit.js';
 import { insertSalesInvoiceForWorkshopOrder } from '../finance/invoices.service.js';
 import {
@@ -64,23 +65,26 @@ function assertActiveTechnicians(technicianIds, database) {
   }
 }
 
-export function listWorkshopOrders(status, database = db) {
+export function listWorkshopOrders(status, database = db, filters = {}) {
   if (!WORKSHOP_STATUSES.includes(status)) {
     throw new HttpError(400, `status is required and must be one of: ${WORKSHOP_STATUSES.join(', ')}.`);
   }
+  const conditions = ['order_record.status = ?', 'order_record.deleted_at IS NULL'];
+  const parameters = [status];
+  addArchiveMonthFilter(conditions, parameters, filters.month);
   return database.prepare(`
     SELECT order_record.id, order_record.order_code, order_record.client_id,
       client.code AS client_code, client.name AS client_name,
       order_record.product_name, order_record.description, order_record.machine_type,
       order_record.status, order_record.target_delivery_date, order_record.sale_price_cents,
-      order_record.delivered_at, order_record.created_at, order_record.updated_at,
+      order_record.delivered_at, order_record.archive_month, order_record.created_at, order_record.updated_at,
       (SELECT COUNT(*) FROM workshop_order_technicians assigned WHERE assigned.order_id = order_record.id) AS technician_count,
       (SELECT COUNT(*) FROM workshop_design_files design WHERE design.order_id = order_record.id) AS design_file_count
     FROM workshop_orders AS order_record
     JOIN clients AS client ON client.id = order_record.client_id
-    WHERE order_record.status = ? AND order_record.deleted_at IS NULL
+    WHERE ${conditions.join(' AND ')}
     ORDER BY order_record.created_at DESC, order_record.id DESC
-  `).all(status);
+  `).all(...parameters);
 }
 
 export function createWorkshopOrder(input, actorId = null, database = db) {
@@ -323,7 +327,8 @@ export function transitionWorkshopToReady(orderId, input, actorId = null, databa
 export function transitionWorkshopToDelivered(orderId, input = {}, actorId = null, database = db) {
   const id = positiveId(orderId, 'orderId');
   const body = requireObject(input ?? {});
-  allowOnlyKeys(body, []);
+  allowOnlyKeys(body, ['archiveMonth']);
+  const selectedMonth = archiveMonth(body.archiveMonth);
   const invoice = database.transaction(() => {
     const order = findWorkshopOrder(id, database);
     if (order.status !== 'ready') throw new HttpError(409, 'Only ready workshop orders can be delivered and archived.');
@@ -331,17 +336,17 @@ export function transitionWorkshopToDelivered(orderId, input = {}, actorId = nul
     database.prepare(`
       UPDATE workshop_orders
       SET status = 'delivered_archived', sales_invoice_id = ?,
-        delivered_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+        delivered_at = CURRENT_TIMESTAMP, archive_month = ?, updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
-    `).run(salesInvoice.id, id);
+    `).run(salesInvoice.id, selectedMonth, id);
     recordAudit({
       database,
       actorId,
       action: 'delivered_archive',
       entityType: 'workshop_order',
       entityId: id,
-      oldValues: { status: order.status, delivered_at: order.delivered_at, sales_invoice_id: order.sales_invoice_id },
-      newValues: { status: 'delivered_archived', sales_invoice_id: salesInvoice.id, invoice_code: salesInvoice.code },
+      oldValues: { status: order.status, delivered_at: order.delivered_at, archive_month: order.archive_month, sales_invoice_id: order.sales_invoice_id },
+      newValues: { status: 'delivered_archived', archive_month: selectedMonth, sales_invoice_id: salesInvoice.id, invoice_code: salesInvoice.code },
     });
     return salesInvoice;
   }).immediate();

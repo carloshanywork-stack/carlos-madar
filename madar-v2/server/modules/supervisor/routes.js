@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { readFile } from 'node:fs/promises';
 import { asyncHandler, HttpError } from '../http.js';
 import { requestActorId } from '../actor.js';
+import { reviewCardPhotos } from '../maintenance/photo-review.js';
 import { getOfflineMapStatus, readOfflineMapTile } from './offline-tiles.js';
 import { getOperationsReplayCursor, getOperationsEventsAfter, publishOperationsEvent, subscribeOperationsEvents } from '../operations-events.js';
 import { approveRepMachineLocationCorrection, rejectRepMachineLocationCorrection, listLocationConfirmations } from '../rep/service.js';
@@ -141,11 +142,22 @@ router.post('/visits/:id/review', (req, res, next) => {
   }
 });
 
+router.post('/card-photos/:id/review', (req, res, next) => {
+  try {
+    const result = reviewCardPhotos(req.params.id, req.body, requestActorId(req));
+    if (!result.idempotent) publishOperationsEvent('maintenance.changed', { cardId: result.cardId, status: result.status, recipientUserIds: result.recipientUserIds });
+    res.set({ 'Cache-Control': 'private, no-store' }).json(result);
+  } catch (error) { next(error); }
+});
+
 router.post('/visits/approve-all', (req, res, next) => {
   try {
     const result = approveRepVisitsTogether(req.body, requestActorId(req));
     for (const visit of result.newlyApproved) publishOperationsEvent('rep.visit.reviewed', {
       userId: visit.repUserId, visitId: visit.visitId, status: visit.status,
+    });
+    for (const card of result.newlyApprovedCards) publishOperationsEvent('maintenance.changed', {
+      cardId: card.cardId, status: card.status, recipientUserIds: card.recipientUserIds,
     });
     res.set({ 'Cache-Control': 'private, no-store' });
     res.json(result);

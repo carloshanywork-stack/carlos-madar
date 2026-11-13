@@ -440,7 +440,7 @@ test('V2 parity operations cover imports, area maintenance, HR, exports, users, 
   assert.equal(bound.body.machineCode, 'PARITY-04');
   assert.equal(bound.body.order.unmatched_folders.length, 0);
   const boundCard = bound.body.order.cards.find((item) => item.machine_id === remainingMachine.body.id);
-  assert.equal(boundCard.status, 'completed');
+  assert.equal(boundCard.status, 'pending', 'folder photos require supervisor approval');
   assert.equal(boundCard.before_photos.length, 102);
   assert.equal(boundCard.after_photos.length, 1);
   assert.match(boundCard.before_photos[0], /\/PARITY-04\/Before\//);
@@ -479,7 +479,7 @@ test('V2 parity operations cover imports, area maintenance, HR, exports, users, 
   assert.ok(remappedSourceCard.before_photos.includes('Areas/Cairo/PARITY-05 - Unlabeled Pump/Before/before.png'));
   assert.ok(!remappedSourceCard.before_photos.includes(directSourcePath));
   const areaBoundCard = areaBound.body.order.cards.find((item) => item.machine_id === areaMachine.body.id);
-  assert.equal(areaBoundCard.status, 'completed');
+  assert.equal(areaBoundCard.status, 'pending', 'system-imported photos enter the same review policy');
   assert.deepEqual(readFileSync(join(storageRoot, ...areaBoundCard.before_photos[0].split('/'))), sourcePhoto);
 
   const clientLinkedMachine = await request('/api/maintenance/machines', json('POST', {
@@ -621,6 +621,13 @@ test('V2 parity operations cover imports, area maintenance, HR, exports, users, 
   assert.equal(noCompletedPptx.response.status, 404);
   assert.equal(noCompletedPptx.body.error, 'لا توجد بطاقات صيانة تحتوي على صور للأوامر والفلاتر المحددة.');
 
+  const systemPhotoQueue = await request('/api/supervisor/qa/queue');
+  const cardReviews = systemPhotoQueue.body.visits.filter((visit) => visit.source === 'office'
+    && visit.orderId === order.body.id && visit.beforePhotos.length && visit.afterPhotos.length)
+    .map((visit) => ({ cardId: visit.cardId, revision: visit.revision }));
+  assert.ok(cardReviews.length, 'completed report fixtures require actual supervisor approval');
+  const photoApproval = await request('/api/supervisor/visits/approve-all', json('POST', { visitIds: [], cardReviews }));
+  assert.equal(photoApproval.response.status, 200, JSON.stringify(photoApproval.body));
   const pptx = await request(`/api/maintenance/orders/${order.body.id}/export.pptx`);
   assert.equal(pptx.response.status, 200);
   assert.match(pptx.response.headers.get('content-type'), /presentationml\.presentation/);
@@ -879,7 +886,7 @@ test('asynchronous maintenance PPTX exports return 202 and expose the completed 
       SET status = 'completed', before_photos_json = ?, after_photos_json = '[]' WHERE id = ?`)
       .run(JSON.stringify([photo.path]), card.id);
     db.prepare(`UPDATE maintenance_orders
-      SET status = 'archived', archived_at = '2031-04-07 12:00:00', updated_at = '2031-04-07 12:00:00'
+      SET status = 'archived', archive_month = '2031-04', archived_at = '2031-04-07 12:00:00', updated_at = '2031-04-07 12:00:00'
       WHERE id = ?`).run(orderId);
 
     const exportId = 'phase6-async-pptx-export';
@@ -986,7 +993,7 @@ test('maintenance reasons support audited soft deactivation and area analysis ex
   const analysisPhoto = await writePptxPhotoFixture('Maintenance/Export Fixtures/analysis-photo.jpg', '#1f77b4');
   db.prepare("UPDATE maintenance_cards SET before_photos_json = ? WHERE id = ?")
     .run(JSON.stringify([analysisPhoto.path]), completedCard.id);
-  db.prepare("UPDATE maintenance_orders SET status = 'archived', archived_at = '2026-02-14 12:00:00' WHERE id = ?").run(order.body.id);
+  db.prepare("UPDATE maintenance_orders SET status = 'archived', archive_month = '2026-02', archived_at = '2026-02-14 12:00:00' WHERE id = ?").run(order.body.id);
   db.prepare("UPDATE maintenance_cards SET status = 'completed' WHERE id = ?").run(completedCard.id);
 
   const additionalExportOrderIds = [];
@@ -1077,7 +1084,7 @@ test('maintenance reasons support audited soft deactivation and area analysis ex
   assert.equal(workbookResponse.body.subarray(0, 2).toString(), 'PK');
   const workbook = XLSX.read(workbookResponse.body, { type: 'buffer' });
   const rows = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1, defval: '' });
-  assert.deepEqual(rows[0], ['المنطقة / Area', 'كود الماكينة', 'اسم الماكينة', 'رقم أمر الخدمة', 'سبب العطل', 'الملاحظات الفنية', 'تاريخ الخدمة', 'الفنيون المكلفون', 'الحالة']);
+  assert.deepEqual(rows[0], ['المنطقة / Area', 'كود الماكينة', 'اسم الماكينة', 'رقم أمر الخدمة', 'سبب العطل', 'الملاحظات الفنية', 'تاريخ الخدمة', 'الفنيون المكلفون', 'الحالة', 'شهر الأرشيف']);
   assert.equal(rows.length, 2);
   assert.equal(rows[1][0], 'مدينة التحليل');
   assert.equal(rows[1][1], 'ANALYSIS-01');
@@ -1437,7 +1444,7 @@ test('maintenance PPTX and Excel exports sort Arabic areas and machine codes nat
   db.prepare("UPDATE maintenance_cards SET status = 'completed', before_photos_json = ? WHERE order_id = ?")
     .run(JSON.stringify([sortingPhoto.path]), order.body.id);
   db.prepare(`UPDATE maintenance_orders
-    SET status = 'archived', archived_at = '2031-04-05 12:00:00', updated_at = '2031-04-05 12:00:00'
+    SET status = 'archived', archive_month = '2031-04', archived_at = '2031-04-05 12:00:00', updated_at = '2031-04-05 12:00:00'
     WHERE id = ?`).run(order.body.id);
 
   const listing = await request('/api/maintenance/area-notes');
@@ -1517,7 +1524,7 @@ test('maintenance PPTX and Excel exports sort Arabic areas and machine codes nat
   db.prepare("UPDATE maintenance_cards SET status = 'completed', before_photos_json = ? WHERE id = ?")
     .run(JSON.stringify([sortingPhoto.path]), mayCard.id);
   db.prepare(`UPDATE maintenance_orders
-    SET status = 'archived', archived_at = '2031-05-02 12:00:00', updated_at = '2031-05-02 12:00:00'
+    SET status = 'archived', archive_month = '2031-05', archived_at = '2031-05-02 12:00:00', updated_at = '2031-05-02 12:00:00'
     WHERE id = ?`).run(mayOrder.body.id);
   const multiMonthPptx = await request('/api/maintenance/export/pptx', json('POST', {
     orderIds: [order.body.id, mayOrder.body.id],
@@ -1557,7 +1564,7 @@ test('maintenance PowerPoint export exposes live machine progress and a final co
     SET status = 'completed', before_photos_json = ?, after_photos_json = ? WHERE order_id = ?`)
     .run(JSON.stringify([progressPhoto.path]), JSON.stringify([progressPhoto.path]), order.body.id);
   db.prepare(`UPDATE maintenance_orders
-    SET status = 'archived', archived_at = '2031-04-06 12:00:00', updated_at = '2031-04-06 12:00:00'
+    SET status = 'archived', archive_month = '2031-04', archived_at = '2031-04-06 12:00:00', updated_at = '2031-04-06 12:00:00'
     WHERE id = ?`).run(order.body.id);
 
   const exportId = 'phase6-progress-557-machine-export';

@@ -12,6 +12,7 @@ import Icon from '../../components/ui/Icon.jsx';
 import LoadingState from '../../components/ui/LoadingState.jsx';
 import PageHeader from '../../components/ui/PageHeader.jsx';
 import Toast from '../../components/ui/Toast.jsx';
+import { Input } from '../../components/ui/Field.jsx';
 
 export default function WorkshopOrderDetail({ canMutate = false, canViewFinance = false }) {
   const { id } = useParams();
@@ -19,6 +20,7 @@ export default function WorkshopOrderDetail({ canMutate = false, canViewFinance 
   const { data: order, loading, error, reload } = useApi(`/api/workshop/orders/${id}`);
   const [saving, setSaving] = useState(false);
   const [dragging, setDragging] = useState(false);
+  const [deliveryMonth, setDeliveryMonth] = useState('');
   const { notice, showToast, clearToast } = useToast();
 
   const uploadDesign = useCallback(async (files) => {
@@ -46,14 +48,15 @@ export default function WorkshopOrderDetail({ canMutate = false, canViewFinance 
   }
 
   async function deliver() {
-    if (!window.confirm(`تأكيد تسليم ${order.order_code}؟ سيتم إنشاء فاتورة بيع وتحصيلها نقداً.`)) return;
+    if (!deliveryMonth) { showToast('اختر شهر الأرشيف قبل التسليم.', 'error'); return; }
+    if (!window.confirm(`تأكيد تسليم ${order.order_code} وأرشفته في شهر ${deliveryMonth} وإصدار فاتورة البيع؟`)) return;
     setSaving(true);
     try {
-      const result = await api.post(`/api/workshop/orders/${id}/deliver`, {});
+      const result = await api.post(`/api/workshop/orders/${id}/deliver`, { archiveMonth: deliveryMonth });
       await reload();
       showToast(canViewFinance && result.invoice
-        ? `تم التسليم وتسجيل التحصيل النقدي. رقم الفاتورة ${result.invoice.code}.`
-        : 'تم التسليم وتسجيل قيمة البيع نقداً في الخزينة.');
+        ? `تم التسليم والأرشفة. رقم الفاتورة ${result.invoice.code}؛ يُسجّل التحصيل من المالية.`
+        : 'تم التسليم والأرشفة وإصدار فاتورة البيع.');
     } catch (caught) { showToast(errorMessage(caught), 'error'); }
     finally { setSaving(false); }
   }
@@ -76,7 +79,7 @@ export default function WorkshopOrderDetail({ canMutate = false, canViewFinance 
         </div>
         <div className="madar-inline-wrap">
           {canMutate && order.status === 'in_production' && <Button icon="check" disabled={saving} onClick={markReady}>جاهز للتسليم</Button>}
-          {canMutate && order.status === 'ready' && <Button icon="arrow" disabled={saving} onClick={deliver}>تسليم وتحصيل نقدي</Button>}
+          {canMutate && order.status === 'ready' && <><Input label="شهر الأرشيف" type="month" required value={deliveryMonth} onChange={(event) => setDeliveryMonth(event.target.value)} /><Button icon="arrow" disabled={saving} onClick={deliver}>تسليم وأرشفة</Button></>}
         </div>
       </section>
       {canViewFinance && order.salesInvoice && <div className="madar-alert madar-alert-success madar-section"><Icon name="file" size={15} /> فاتورة البيع <strong className="madar-code">{order.salesInvoice.code}</strong> · {formatMoney(order.salesInvoice.total_cents)} · <Badge status={order.salesInvoice.payment_status} /></div>}

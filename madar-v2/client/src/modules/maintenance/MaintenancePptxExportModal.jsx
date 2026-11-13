@@ -30,11 +30,12 @@ export default function MaintenancePptxExportModal({
   open,
   onClose,
   currentOrder = null,
+  archiveMonthFilter = '',
   defaultScope = currentOrder ? 'current' : 'archive',
 }) {
   const { data: inProgressOrders, loading: inProgressLoading } = useApi('/api/maintenance/orders?status=in_progress', { enabled: open });
   const { data: reviewOrders, loading: reviewLoading } = useApi('/api/maintenance/orders?status=review', { enabled: open });
-  const { data: archivedOrders, loading: archivedLoading } = useApi('/api/maintenance/orders?status=archived', { enabled: open });
+  const { data: archivedOrders, loading: archivedLoading } = useApi(`/api/maintenance/orders?status=archived${archiveMonthFilter ? `&month=${encodeURIComponent(archiveMonthFilter)}` : ''}`, { enabled: open });
   const { data: reasons, loading: reasonsLoading, error: reasonsError } = useApi('/api/maintenance/reasons?includeInactive=true', { enabled: open });
   const [scope, setScope] = useState(defaultScope);
   const [selectedOrderIds, setSelectedOrderIds] = useState([]);
@@ -149,7 +150,8 @@ export default function MaintenancePptxExportModal({
       }
       orderIds = [currentOrder.id];
     } else if (scope === 'archive') {
-      orderIds = [];
+      orderIds = (archivedOrders ?? []).map((order) => order.id);
+      if (!orderIds.length) { setError('لا توجد أوامر مؤرشفة ضمن الشهر المحدد للتصدير.'); return; }
     } else {
       orderIds = selectedOrderIds;
       if (!orderIds.length) {
@@ -165,6 +167,7 @@ export default function MaintenancePptxExportModal({
     try {
       const result = await api.post('/api/maintenance/export/pptx', {
         orderIds,
+        ...(scope === 'archive' && archiveMonthFilter ? { archiveMonth: archiveMonthFilter } : {}),
         reasonId: reasonId ? Number(reasonId) : null,
         area: area || null,
         groupBy,

@@ -2,6 +2,7 @@ import * as XLSX from 'xlsx';
 import { db as defaultDb } from '../../database/connection.js';
 import { HttpError, isoDate, positiveId } from '../http.js';
 import { compareMachineCodes, compareMaintenanceAreas } from './sorting.js';
+import { archiveMonth, addArchiveMonthFilter } from '../archive-period.js';
 
 const SERVICE_DATE = "COALESCE(order_record.archived_at, order_record.created_at)";
 const EXPORT_HEADERS = [
@@ -23,10 +24,11 @@ function normalizeFilters(filters = {}) {
   const reasonId = filters.reasonId === undefined || filters.reasonId === ''
     ? null
     : positiveId(filters.reasonId, 'reasonId');
-  return { from, to, reasonId };
+  return { from, to, reasonId, month: archiveMonth(filters.month, { filter: true }) };
 }
 
 function addFilters(conditions, parameters, filters, dateExpression) {
+  addArchiveMonthFilter(conditions, parameters, filters.month);
   if (filters.from) {
     conditions.push(`date(${dateExpression}) >= ?`);
     parameters.push(filters.from);
@@ -99,6 +101,7 @@ export function getMaintenanceAreaAnalysis(input = {}, database = defaultDb) {
 export function getMaintenanceAnalysisRecords(input = {}, database = defaultDb) {
   const filters = normalizeFilters(input);
   const conditions = ['order_record.deleted_at IS NULL', 'card.deleted_at IS NULL'];
+  if (filters.month) conditions.push("order_record.status = 'archived'");
   const parameters = [];
   addFilters(conditions, parameters, filters, SERVICE_DATE);
 
@@ -107,6 +110,7 @@ export function getMaintenanceAnalysisRecords(input = {}, database = defaultDb) 
       machine.code AS machine_code,
       machine.name_ar AS machine_name,
       order_record.order_code,
+      order_record.archive_month,
       reason.name AS reason_name,
       card.id AS card_id,
       card.status AS card_status,
@@ -187,6 +191,7 @@ export function buildMaintenanceAnalysisWorkbook(input = {}, database = defaultD
     record.service_date,
     record.technicians,
     ({ in_progress: 'قيد التنفيذ', review: 'بانتظار المراجعة', archived: 'مؤرشف' })[record.status] ?? record.status,
+    record.archive_month ?? 'غير محدد الشهر',
   ]);
   const headers = [
     'المنطقة / Area',
@@ -198,11 +203,12 @@ export function buildMaintenanceAnalysisWorkbook(input = {}, database = defaultD
     'تاريخ الخدمة',
     'الفنيون المكلفون',
     'الحالة',
+    'شهر الأرشيف',
   ];
   const worksheet = XLSX.utils.aoa_to_sheet([headers, ...rows]);
   worksheet['!cols'] = [
     { wch: 24 }, { wch: 20 }, { wch: 32 }, { wch: 22 }, { wch: 32 },
-    { wch: 42 }, { wch: 22 }, { wch: 30 }, { wch: 20 },
+    { wch: 42 }, { wch: 22 }, { wch: 30 }, { wch: 20 }, { wch: 22 },
   ];
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, worksheet, 'تحليل الصيانة');

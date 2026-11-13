@@ -314,7 +314,7 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
   const [pendingAttendanceActions, setPendingAttendanceActions] = useState([]);
   const [pendingGpsQueue, setPendingGpsQueue] = useState({ pending: [], rejected: [] });
   const [query, setQuery] = useState('');
-  const [routeFilter, setRouteFilter] = useState('all');
+  const [routeFilter, setRouteFilter] = useState('remaining');
   const [selectedMachine, setSelectedMachine] = useState(null);
   const [networkOnline, setNetworkOnline] = useState(navigator.onLine);
   const [serverState, setServerState] = useState('checking');
@@ -1446,7 +1446,7 @@ let canDrainVisits = true;
                     ...machine,
                     isCompleted: result.status === 'approved',
                     isSubmitted: result.status !== 'reshoot_requested',
-                    workStatus: result.status === 'reshoot_requested' ? 'available' : 'done',
+                    workStatus: result.status === 'reshoot_requested' ? 'available' : result.status === 'approved' ? 'done' : 'pending_review',
                     reviewStatus: result.status === 'approved' ? 'approved' : result.status === 'reshoot_requested' ? 'reshoot' : 'pending',
                     canVisit: result.status === 'reshoot_requested',
                   }
@@ -2087,7 +2087,7 @@ try {
         </div>
 
         <div className="rep-route-filters" role="group" aria-label="تصفية مسار اليوم">
-          {[['all', 'الكل'], ['remaining', 'المتبقية'], ['sent', 'تم الإرسال'], ['completed', 'المكتملة']].map(([value, label]) => (
+          {[['remaining', 'المتبقية'], ['sent', 'قيد الاعتماد'], ['completed', 'المعتمدة'], ['all', 'الكل']].map(([value, label]) => (
             <button key={value} type="button" className={routeFilter === value ? 'active' : ''}
               aria-pressed={routeFilter === value} onClick={() => setRouteFilter(value)}>
               {label}<b>{routeFilterCounts[value]}</b>

@@ -5,6 +5,8 @@ import sharp from 'sharp';
 import * as XLSX from 'xlsx';
 import { applyPhotoRotation } from './photo-images.js';
 import { db } from '../../database/connection.js';
+import { archiveMonth, addArchiveMonthFilter } from '../archive-period.js';
+import { queueCardPhotoReview, reconcileCardPhotoReviewPaths } from './photo-review.js';
 import { recordAudit } from '../audit.js';
 import { assertCashAvailable, insertTreasuryEntry } from '../finance/treasury.service.js';
 import {
@@ -183,7 +185,7 @@ function findMaintenanceOrder(orderId, database = db) {
     SELECT order_record.id, order_record.order_code, order_record.client_id,
       order_record.status, order_record.notes, order_record.area, order_record.warranty_period_months,
       order_record.petty_cash_disbursed_cents, order_record.actual_expenses_cents,
-      order_record.petty_cash_refund_cents, order_record.archived_at,
+      order_record.petty_cash_refund_cents, order_record.archived_at, order_record.archive_month,
       order_record.archived_by, order_record.created_by, order_record.created_at,
       order_record.updated_at, order_record.deleted_at,
       client.code AS client_code, client.storage_code AS client_storage_code, client.name AS client_name
@@ -836,6 +838,7 @@ function remapMachineCorrectionHistory(machineId, pathMappings, database) {
         || nextAfter.some((path, index) => path !== after[index])) {
       database.prepare('UPDATE maintenance_cards SET before_photos_json = ?, after_photos_json = ? WHERE id = ?')
         .run(JSON.stringify(nextBefore), JSON.stringify(nextAfter), card.id);
+      reconcileCardPhotoReviewPaths(card.id, database);
     }
   }
   const visits = database.prepare(`SELECT id, final_path, before_path, after_path
@@ -1554,16 +1557,19 @@ export function deactivateMaintenanceReason(reasonId, actorId = null, database =
   return { ...reason, active: 0 };
 }
 
-export function listMaintenanceOrders(status, database = db) {
+export function listMaintenanceOrders(status, database = db, filters = {}) {
   if (!MAINTENANCE_STATUSES.includes(status)) {
     throw new HttpError(400, `status is required and must be one of: ${MAINTENANCE_STATUSES.join(', ')}.`);
   }
+  const conditions = ['order_record.status = ?', 'order_record.deleted_at IS NULL'];
+  const parameters = [status];
+  addArchiveMonthFilter(conditions, parameters, filters.month);
   const orders = database.prepare(`
     SELECT order_record.id, order_record.order_code, order_record.client_id,
       client.code AS client_code, client.name AS client_name,
       order_record.status, order_record.notes, order_record.area, order_record.warranty_period_months,
       order_record.petty_cash_disbursed_cents, order_record.actual_expenses_cents,
-      order_record.petty_cash_refund_cents, order_record.archived_at,
+      order_record.petty_cash_refund_cents, order_record.archived_at, order_record.archive_month,
       order_record.created_at, order_record.updated_at,
       (
         SELECT GROUP_CONCAT(DISTINCT m.area)
@@ -1582,9 +1588,9 @@ export function listMaintenanceOrders(status, database = db) {
          WHERE assigned.order_id = order_record.id) AS representative_names
     FROM maintenance_orders AS order_record
     JOIN clients AS client ON client.id = order_record.client_id
-    WHERE order_record.status = ? AND order_record.deleted_at IS NULL
+    WHERE ${conditions.join(' AND ')}
     ORDER BY order_record.created_at DESC, order_record.id DESC
-  `).all(status);
+  `).all(...parameters);
 
   return orders.map((row) => {
     const { card_areas: cardAreas, ...order } = row;
@@ -3680,6 +3686,7 @@ function remapOrderCardSourcePaths(database, orderId, oldPrefix, newPrefix) {
         UPDATE maintenance_cards SET before_photos_json = ?, after_photos_json = ?, updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
       `).run(JSON.stringify(before.paths), JSON.stringify(after.paths), card.id);
+      reconcileCardPhotoReviewPaths(card.id, database);
     }
   }
 }
@@ -3971,11 +3978,15 @@ async function processMaintenanceTripFolderUnlocked(orderId, { folderPath, file 
           const after = parsePhotoJson(existing?.after_photos_json ?? '[]');
           for (const photo of plan.before) before.push(writtenPaths.get(photo));
           for (const photo of plan.after) after.push(writtenPaths.get(photo));
-          const status = existing?.status === 'excluded' ? 'excluded' : before.length && after.length ? 'completed' : (existing?.status ?? 'pending');
-          if (existing) updateCard.run(JSON.stringify(before), JSON.stringify(after), status, existing.id);
+          const status = existing?.status === 'excluded' ? 'excluded' : 'pending';
+          if (existing) {
+            updateCard.run(JSON.stringify(before), JSON.stringify(after), status, existing.id);
+            queueCardPhotoReview(existing.id, actorId, database);
+          }
           else {
             const cardId = Number(insertCard.run(id, machineId, status).lastInsertRowid);
             updateCard.run(JSON.stringify(before), JSON.stringify(after), status, cardId);
+            queueCardPhotoReview(cardId, actorId, database);
             cardsCreated += 1;
           }
           deployMachine.run(order.client_id, machineId, plan.machine.area);
@@ -4119,7 +4130,7 @@ async function bindUnmatchedMaintenanceFolderUnlocked(orderId, folderId, input, 
       if (before.length > MAX_CARD_PHOTOS || after.length > MAX_CARD_PHOTOS) {
         throw new HttpError(400, `A maintenance card may contain at most ${MAX_CARD_PHOTOS} photos in each phase.`);
       }
-      const status = existing?.status === 'excluded' ? 'excluded' : before.length && after.length ? 'completed' : (existing?.status ?? 'pending');
+      const status = existing?.status === 'excluded' ? 'excluded' : 'pending';
       let cardId = existing?.id;
       if (existing) {
         database.prepare(`UPDATE maintenance_cards SET before_photos_json = ?, after_photos_json = ?, status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
@@ -4128,6 +4139,7 @@ async function bindUnmatchedMaintenanceFolderUnlocked(orderId, folderId, input, 
         cardId = Number(database.prepare(`INSERT INTO maintenance_cards (order_id, machine_id, before_photos_json, after_photos_json, status) VALUES (?, ?, ?, ?, ?)`)
           .run(id, machineId, JSON.stringify(before), JSON.stringify(after), status).lastInsertRowid);
       }
+      queueCardPhotoReview(cardId, actorId, database);
       database.prepare(`
         INSERT INTO client_machines (client_id, machine_id, site_area)
         VALUES (?, ?, ?)
@@ -4537,6 +4549,7 @@ async function importMaintenanceServerFolderUnlocked(orderId, input, actorId = n
           else attachedAfter += 1;
         }
         cardUpdate.run(JSON.stringify(before), JSON.stringify(after), cardId);
+        queueCardPhotoReview(cardId, actorId, database);
       }
       recordAudit({ database, actorId, action: 'import_server_folder', entityType: 'maintenance_order', entityId: id,
         newValues: { folder_path: folderPath, attached_before: attachedBefore, attached_after: attachedAfter, cards_created: cardsCreated, skipped } });
@@ -4756,6 +4769,9 @@ async function updateMaintenanceCardUnlocked(orderId, cardId, input, actorId = n
       SET before_photos_json = ?, after_photos_json = ?, notes = ?, reason_id = ?, reason_ids_json = ?, updated_at = CURRENT_TIMESTAMP
       WHERE id = ? AND order_id = ? AND deleted_at IS NULL
     `).run(JSON.stringify(beforePhotos), JSON.stringify(afterPhotos), notes, reasonId, reasonIdsJson, targetCardId, id);
+    if (JSON.stringify(beforePhotos) !== card.before_photos_json || JSON.stringify(afterPhotos) !== card.after_photos_json) {
+      queueCardPhotoReview(targetCardId, actorId, database);
+    }
     const selectedSet = new Set(selectedReasonIds.map(Number));
     for (const existingLine of existingLines) {
       if (!selectedSet.has(Number(existingLine.reason_id))) {
@@ -4891,6 +4907,7 @@ async function uploadMaintenancePhotoUnlocked(orderId, cardId, phase, file, acto
       const result = database.prepare(`UPDATE maintenance_cards SET ${column} = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND deleted_at IS NULL`)
         .run(JSON.stringify(nextPaths), targetCardId);
       if (result.changes !== 1) throw new HttpError(404, 'Active inspection card was not found on this order.');
+      queueCardPhotoReview(targetCardId, actorId, database);
       recordAudit({
         database,
         actorId,
@@ -4956,13 +4973,14 @@ export async function deleteCardPhoto(orderId, cardId, phase, filename, actorId 
       const [removedStoredPath] = targetList.splice(targetIndex, 1);
       const nextStatus = card.status === 'excluded'
         ? 'excluded'
-        : beforePaths.length > 0 && afterPaths.length > 0 ? 'completed' : 'pending';
+        : 'pending';
       const update = database.prepare(`
         UPDATE maintenance_cards
         SET before_photos_json = ?, after_photos_json = ?, status = ?, updated_at = CURRENT_TIMESTAMP
         WHERE id = ? AND order_id = ? AND deleted_at IS NULL
       `).run(JSON.stringify(beforePaths), JSON.stringify(afterPaths), nextStatus, targetCardId, id);
       if (update.changes !== 1) throw new HttpError(404, 'Active inspection card was not found.');
+      queueCardPhotoReview(targetCardId, actorId, database);
       const previousRotation = database.prepare(`
         SELECT angle, rotated_path FROM maintenance_card_photo_rotations
         WHERE card_id = ? AND phase = ? AND filename = ?
@@ -5070,7 +5088,7 @@ export async function moveCardPhoto(orderId, cardId, input, actorId = null, data
     destinationList.push(movedStoredPath);
     const nextStatus = card.status === 'excluded'
       ? 'excluded'
-      : beforePaths.length > 0 && afterPaths.length > 0 ? 'completed' : 'pending';
+      : 'pending';
     const sourceAbsolutePath = await resolveStorageFile(sourceStoredPath);
     const destinationAbsoluteDirectory = await ensureStorageDirectory(...pathSegments.slice(0, -1));
     const destinationAbsolutePath = join(destinationAbsoluteDirectory, pathSegments.at(-1));
@@ -5113,6 +5131,7 @@ export async function moveCardPhoto(orderId, cardId, input, actorId = null, data
           WHERE id = ? AND order_id = ? AND deleted_at IS NULL
         `).run(JSON.stringify(beforePaths), JSON.stringify(afterPaths), nextStatus, targetCardId, id);
         if (result.changes !== 1) throw new HttpError(404, 'Active inspection card was not found.');
+        queueCardPhotoReview(targetCardId, actorId, database);
         if (rotation) {
           database.prepare(`
             UPDATE maintenance_card_photo_rotations
@@ -5203,10 +5222,10 @@ export async function retagMaintenancePhoto(orderId, cardId, input, actorId = nu
     targetList.push(destinationStoredPath);
     const sourceNextStatus = sourceCard.status === 'excluded'
       ? 'excluded'
-      : sourceBefore.length && sourceAfter.length ? 'completed' : 'pending';
+      : 'pending';
     const targetNextStatus = targetCard.status === 'excluded'
       ? 'excluded'
-      : targetBefore.length && targetAfter.length ? 'completed' : 'pending';
+      : 'pending';
     const rotation = database.prepare(`
       SELECT angle, rotated_path FROM maintenance_card_photo_rotations
       WHERE card_id = ? AND phase = ? AND filename = ?
@@ -5248,6 +5267,8 @@ export async function retagMaintenancePhoto(orderId, cardId, input, actorId = nu
           WHERE id = ? AND order_id = ? AND deleted_at IS NULL
         `).run(JSON.stringify(targetBefore), JSON.stringify(targetAfter), targetNextStatus, targetCardId, targetOrderId);
         if (targetUpdate.changes !== 1) throw new HttpError(404, 'Target inspection card was not found.');
+        queueCardPhotoReview(sourceCardId, actorId, database);
+        queueCardPhotoReview(targetCardId, actorId, database);
         if (rotation) {
           database.prepare(`
             UPDATE maintenance_card_photo_rotations
@@ -5535,7 +5556,8 @@ export function transitionMaintenanceToReview(orderId, actorId = null, database 
 export function archiveMaintenanceOrder(orderId, input, actorId = null, database = db) {
   const id = positiveId(orderId, 'orderId');
   const body = requireObject(input);
-  allowOnlyKeys(body, ['warrantyPeriodMonths', 'actualExpensesCents']);
+  allowOnlyKeys(body, ['warrantyPeriodMonths', 'actualExpensesCents', 'archiveMonth']);
+  const requestedMonth = archiveMonth(body.archiveMonth);
   if (![3, 6].includes(body.warrantyPeriodMonths)) {
     throw new HttpError(400, 'warrantyPeriodMonths must be 3 or 6.');
   }
@@ -5544,6 +5566,14 @@ export function archiveMaintenanceOrder(orderId, input, actorId = null, database
   const refundCents = database.transaction(() => {
     const order = findMaintenanceOrder(id, database);
     if (order.status !== 'review') throw new HttpError(409, 'Only maintenance orders in review can be archived.');
+    const pendingPhotos = database.prepare(`SELECT 1 FROM maintenance_cards card
+      WHERE card.order_id = ? AND card.deleted_at IS NULL AND card.status != 'excluded'
+        AND (EXISTS (SELECT 1 FROM maintenance_card_photo_reviews review WHERE review.card_id = card.id AND review.status = 'pending')
+          OR EXISTS (SELECT 1 FROM rep_visits visit LEFT JOIN rep_visit_reviews review ON review.visit_id = visit.id
+            WHERE visit.card_id = card.id AND (visit.status = 'receiving' OR (visit.status = 'completed' AND review.status = 'pending'))))
+      LIMIT 1`).get(id);
+    if (pendingPhotos) throw new HttpError(409, 'يجب إنهاء رفع الصور واعتماد الصور المعلقة من رادار المشرف قبل أرشفة الأمر.');
+    const selectedMonth = body.archiveMonth === undefined ? order.archive_month : requestedMonth;
     const refundCents = order.petty_cash_disbursed_cents - actualExpensesCents;
     if (refundCents < 0) {
       throw new HttpError(400, 'actualExpensesCents cannot exceed the petty cash disbursed to this order.');
@@ -5553,16 +5583,17 @@ export function archiveMaintenanceOrder(orderId, input, actorId = null, database
     const oldValues = {
       status: order.status,
       warranty_period_months: order.warranty_period_months,
+      archive_month: order.archive_month,
       actual_expenses_cents: order.actual_expenses_cents,
       petty_cash_refund_cents: order.petty_cash_refund_cents,
     };
     database.prepare(`
       UPDATE maintenance_orders
       SET status = 'archived', warranty_period_months = ?, actual_expenses_cents = ?,
-        petty_cash_refund_cents = ?, archived_at = CURRENT_TIMESTAMP, archived_by = ?,
+        petty_cash_refund_cents = ?, archived_at = CURRENT_TIMESTAMP, archived_by = ?, archive_month = ?,
         updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
-    `).run(body.warrantyPeriodMonths, actualExpensesCents, refundCents, actorId, id);
+    `).run(body.warrantyPeriodMonths, actualExpensesCents, refundCents, actorId, selectedMonth, id);
     let treasuryEntryId = null;
     if (refundAdjustmentCents !== 0) {
       const isAdditionalRefund = refundAdjustmentCents > 0;
@@ -5589,6 +5620,7 @@ export function archiveMaintenanceOrder(orderId, input, actorId = null, database
       newValues: {
         status: 'archived',
         warranty_period_months: body.warrantyPeriodMonths,
+        archive_month: selectedMonth,
         actual_expenses_cents: actualExpensesCents,
         petty_cash_refund_cents: refundCents,
         treasury_entry_id: treasuryEntryId,
