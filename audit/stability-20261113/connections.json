@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "sourceRevision": "0b1d45b5e81fd8f451a47b470b9bff79330b0781",
-  "verifiedAt": "2026-11-13T20:51:48.045385+00:00",
+  "sourceRevision": "16d5cc92294d7fd4f5bfe7298666fe4d25f29782",
+  "verifiedAt": "2026-11-13T21:04:39.565904+00:00",
   "coverageDenominator": {
     "curatedSystemBoundaries": 43,
     "mountedApiAndDownloadRouteDefinitions": 193,
@@ -30,12 +30,12 @@
           "file": "madar-v2/server/app.js",
           "line": 88,
           "anchor": "app.get('/api/health'",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/server/app.js#L88"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/server/app.js#L88"
         }
       ],
-      "sourceRevision": "0b1d45b5e81fd8f451a47b470b9bff79330b0781",
+      "sourceRevision": "16d5cc92294d7fd4f5bfe7298666fe4d25f29782",
       "verificationMethod": "live read-only HTTP (reachability/auth boundary only); source inspection; device or live business acceptance not executed",
-      "lastVerificationTime": "2026-11-13T20:51:48.045385+00:00",
+      "lastVerificationTime": "2026-11-13T21:04:39.565904+00:00",
       "status": "VERIFIED_PASS",
       "failureOrLimitation": "Reachability and service identity only; does not prove a business transaction or every handset.",
       "relevantTests": [],
@@ -56,19 +56,19 @@
           "file": "madar-v2/server/app.js",
           "line": 190,
           "anchor": "express.static(clientDistPath",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/server/app.js#L190"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/server/app.js#L190"
         },
         {
           "file": "madar-v2/client/src/modules/rep/RepApp.jsx",
           "line": 1,
           "anchor": "['sent', 'تم الإرسال']",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/client/src/modules/rep/RepApp.jsx#L1",
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/client/src/modules/rep/RepApp.jsx#L1",
           "anchorChanged": true
         }
       ],
-      "sourceRevision": "0b1d45b5e81fd8f451a47b470b9bff79330b0781",
+      "sourceRevision": "16d5cc92294d7fd4f5bfe7298666fe4d25f29782",
       "verificationMethod": "live read-only HTTP (reachability/auth boundary only); source inspection; device or live business acceptance not executed",
-      "lastVerificationTime": "2026-11-13T20:51:48.045385+00:00",
+      "lastVerificationTime": "2026-11-13T21:04:39.565904+00:00",
       "status": "VERIFIED_PASS",
       "failureOrLimitation": "",
       "relevantTests": [],
@@ -89,19 +89,19 @@
           "file": "madar-v2/scripts/build-android.js",
           "line": 124,
           "anchor": "const manifest =",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/scripts/build-android.js#L124"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/scripts/build-android.js#L124"
         },
         {
           "file": "madar-v2/android/version.properties",
           "line": 1,
           "anchor": "versionCode=9",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/android/version.properties#L1",
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/android/version.properties#L1",
           "anchorChanged": true
         }
       ],
-      "sourceRevision": "0b1d45b5e81fd8f451a47b470b9bff79330b0781",
+      "sourceRevision": "16d5cc92294d7fd4f5bfe7298666fe4d25f29782",
       "verificationMethod": "source inspection; device or live business acceptance not executed",
-      "lastVerificationTime": "2026-11-13T20:51:48.045385+00:00",
+      "lastVerificationTime": "2026-11-13T21:04:39.565904+00:00",
       "status": "IMPLEMENTED_NOT_VERIFIED",
       "failureOrLimitation": "Previous artifact checks are historical; no new build or physical-device installation is claimed.",
       "relevantTests": [],
@@ -119,18 +119,18 @@
           "file": "madar-v2/server/config/paths.js",
           "line": 25,
           "anchor": "export const repApkPath",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/server/config/paths.js#L25"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/server/config/paths.js#L25"
         },
         {
           "file": "madar-v2/server/app.js",
           "line": 92,
           "anchor": "app.get('/download/apk'",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/server/app.js#L92"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/server/app.js#L92"
         }
       ],
-      "sourceRevision": "0b1d45b5e81fd8f451a47b470b9bff79330b0781",
+      "sourceRevision": "16d5cc92294d7fd4f5bfe7298666fe4d25f29782",
       "verificationMethod": "live read-only HTTP (reachability/auth boundary only); source inspection; device or live business acceptance not executed",
-      "lastVerificationTime": "2026-11-13T20:51:48.045385+00:00",
+      "lastVerificationTime": "2026-11-13T21:04:39.565904+00:00",
       "status": "IMPLEMENTED_NOT_VERIFIED",
       "failureOrLimitation": "Published files and runtime path selection verified; unauthenticated requests return 401. No authenticated production download session available.",
       "relevantTests": [],
@@ -150,18 +150,18 @@
           "file": "madar-v2/server/modules/auth/service.js",
           "line": 212,
           "anchor": "export function createSession",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/server/modules/auth/service.js#L212"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/server/modules/auth/service.js#L212"
         },
         {
           "file": "madar-v2/server/modules/auth/service.js",
           "line": 261,
           "anchor": "export function verifyToken",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/server/modules/auth/service.js#L261"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/server/modules/auth/service.js#L261"
         }
       ],
-      "sourceRevision": "0b1d45b5e81fd8f451a47b470b9bff79330b0781",
+      "sourceRevision": "16d5cc92294d7fd4f5bfe7298666fe4d25f29782",
       "verificationMethod": "isolated integration/unit tests plus source",
-      "lastVerificationTime": "2026-11-13T20:51:48.045385+00:00",
+      "lastVerificationTime": "2026-11-13T21:04:39.565904+00:00",
       "status": "VERIFIED_PASS",
       "failureOrLimitation": "",
       "relevantTests": [
@@ -182,18 +182,18 @@
           "file": "madar-v2/server/app.js",
           "line": 164,
           "anchor": "app.use('/api', requireAuthentication)",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/server/app.js#L164"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/server/app.js#L164"
         },
         {
           "file": "madar-v2/server/modules/auth/authorization.js",
           "line": 7,
           "anchor": "export",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/server/modules/auth/authorization.js#L7"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/server/modules/auth/authorization.js#L7"
         }
       ],
-      "sourceRevision": "0b1d45b5e81fd8f451a47b470b9bff79330b0781",
+      "sourceRevision": "16d5cc92294d7fd4f5bfe7298666fe4d25f29782",
       "verificationMethod": "live read-only HTTP (reachability/auth boundary only); isolated integration/unit tests plus source",
-      "lastVerificationTime": "2026-11-13T20:51:48.045385+00:00",
+      "lastVerificationTime": "2026-11-13T21:04:39.565904+00:00",
       "status": "VERIFIED_PASS",
       "failureOrLimitation": "Isolated HTTP tests; live calls only prove anonymous requests are rejected.",
       "relevantTests": [
@@ -220,18 +220,18 @@
           "file": "madar-v2/server/modules/rep/service.js",
           "line": 169,
           "anchor": "export function getRepTodayRoute",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/server/modules/rep/service.js#L169"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/server/modules/rep/service.js#L169"
         },
         {
           "file": "madar-v2/client/src/modules/rep/route-folders.js",
           "line": 4,
           "anchor": "export function groupRouteMachinesByRegion",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/client/src/modules/rep/route-folders.js#L4"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/client/src/modules/rep/route-folders.js#L4"
         }
       ],
-      "sourceRevision": "0b1d45b5e81fd8f451a47b470b9bff79330b0781",
+      "sourceRevision": "16d5cc92294d7fd4f5bfe7298666fe4d25f29782",
       "verificationMethod": "isolated integration/unit tests plus source",
-      "lastVerificationTime": "2026-11-13T20:51:48.045385+00:00",
+      "lastVerificationTime": "2026-11-13T21:04:39.565904+00:00",
       "status": "VERIFIED_PASS",
       "failureOrLimitation": "",
       "relevantTests": [
@@ -252,18 +252,18 @@
           "file": "madar-v2/server/modules/rep/service.js",
           "line": 313,
           "anchor": "export function claimRepMachineWork",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/server/modules/rep/service.js#L313"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/server/modules/rep/service.js#L313"
         },
         {
           "file": "madar-v2/server/modules/rep/service.js",
           "line": 249,
           "anchor": "if (activeWork && Number(activeWork.rep_user_id) !== Number(rep.id)) continue;",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/server/modules/rep/service.js#L249"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/server/modules/rep/service.js#L249"
         }
       ],
-      "sourceRevision": "0b1d45b5e81fd8f451a47b470b9bff79330b0781",
+      "sourceRevision": "16d5cc92294d7fd4f5bfe7298666fe4d25f29782",
       "verificationMethod": "isolated integration/unit tests plus source",
-      "lastVerificationTime": "2026-11-13T20:51:48.045385+00:00",
+      "lastVerificationTime": "2026-11-13T21:04:39.565904+00:00",
       "status": "VERIFIED_PASS",
       "failureOrLimitation": "Other online rep loses the card after authoritative route refresh; offline cached screens cannot receive instant updates; lease expiry/release restores eligibility.",
       "relevantTests": [
@@ -283,18 +283,18 @@
           "file": "madar-v2/server/modules/rep/service.js",
           "line": 710,
           "anchor": "export function confirmRepMachineLocation",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/server/modules/rep/service.js#L710"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/server/modules/rep/service.js#L710"
         },
         {
           "file": "madar-v2/client/src/modules/rep/RepApp.jsx",
           "line": 1752,
           "anchor": "confirmSelectedMachineLocation",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/client/src/modules/rep/RepApp.jsx#L1752"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/client/src/modules/rep/RepApp.jsx#L1752"
         }
       ],
-      "sourceRevision": "0b1d45b5e81fd8f451a47b470b9bff79330b0781",
+      "sourceRevision": "16d5cc92294d7fd4f5bfe7298666fe4d25f29782",
       "verificationMethod": "isolated integration/unit tests plus source",
-      "lastVerificationTime": "2026-11-13T20:51:48.045385+00:00",
+      "lastVerificationTime": "2026-11-13T21:04:39.565904+00:00",
       "status": "VERIFIED_PASS",
       "failureOrLimitation": "First location path and subsequent correction path are separate; no universal autoapproval claim.",
       "relevantTests": [
@@ -315,18 +315,18 @@
           "file": "madar-v2/server/modules/rep/service.js",
           "line": 940,
           "anchor": "export async function submitRepMachineCorrection",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/server/modules/rep/service.js#L940"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/server/modules/rep/service.js#L940"
         },
         {
           "file": "madar-v2/server/modules/supervisor/routes.js",
           "line": 107,
           "anchor": "router.post('/corrections/:id/approve'",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/server/modules/supervisor/routes.js#L107"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/server/modules/supervisor/routes.js#L107"
         }
       ],
-      "sourceRevision": "0b1d45b5e81fd8f451a47b470b9bff79330b0781",
+      "sourceRevision": "16d5cc92294d7fd4f5bfe7298666fe4d25f29782",
       "verificationMethod": "isolated integration/unit tests plus source",
-      "lastVerificationTime": "2026-11-13T20:51:48.045385+00:00",
+      "lastVerificationTime": "2026-11-13T21:04:39.565904+00:00",
       "status": "VERIFIED_PASS",
       "failureOrLimitation": "",
       "relevantTests": [
@@ -347,18 +347,18 @@
           "file": "madar-v2/client/src/modules/rep/OfflineMapPanel.jsx",
           "line": 70,
           "anchor": "export default function OfflineMapPanel",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/client/src/modules/rep/OfflineMapPanel.jsx#L70"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/client/src/modules/rep/OfflineMapPanel.jsx#L70"
         },
         {
           "file": "madar-v2/client/src/modules/rep/map-utils.js",
           "line": 12,
           "anchor": "export function googleMapsNavigationUrl",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/client/src/modules/rep/map-utils.js#L12"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/client/src/modules/rep/map-utils.js#L12"
         }
       ],
-      "sourceRevision": "0b1d45b5e81fd8f451a47b470b9bff79330b0781",
+      "sourceRevision": "16d5cc92294d7fd4f5bfe7298666fe4d25f29782",
       "verificationMethod": "source inspection; device or live business acceptance not executed",
-      "lastVerificationTime": "2026-11-13T20:51:48.045385+00:00",
+      "lastVerificationTime": "2026-11-13T21:04:39.565904+00:00",
       "status": "IMPLEMENTED_NOT_VERIFIED",
       "failureOrLimitation": "Projection and URL helpers tested; external map key, offline package availability and phone navigation not accepted on a device.",
       "relevantTests": [
@@ -378,24 +378,24 @@
           "file": "madar-v2/android/app/src/main/java/com/madar/rep/app/RepCameraSequenceActivity.java",
           "line": 49,
           "anchor": "class RepCameraSequenceActivity",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/android/app/src/main/java/com/madar/rep/app/RepCameraSequenceActivity.java#L49"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/android/app/src/main/java/com/madar/rep/app/RepCameraSequenceActivity.java#L49"
         },
         {
           "file": "madar-v2/android/app/src/main/java/com/madar/rep/app/RepPhotoArchive.java",
           "line": 19,
           "anchor": "class RepPhotoArchive",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/android/app/src/main/java/com/madar/rep/app/RepPhotoArchive.java#L19"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/android/app/src/main/java/com/madar/rep/app/RepPhotoArchive.java#L19"
         },
         {
           "file": "madar-v2/client/src/modules/rep/native-bridges.js",
           "line": 56,
           "anchor": "export async function captureNativeCameraPhotos",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/client/src/modules/rep/native-bridges.js#L56"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/client/src/modules/rep/native-bridges.js#L56"
         }
       ],
-      "sourceRevision": "0b1d45b5e81fd8f451a47b470b9bff79330b0781",
+      "sourceRevision": "16d5cc92294d7fd4f5bfe7298666fe4d25f29782",
       "verificationMethod": "source inspection; device or live business acceptance not executed",
-      "lastVerificationTime": "2026-11-13T20:51:48.045385+00:00",
+      "lastVerificationTime": "2026-11-13T21:04:39.565904+00:00",
       "status": "BLOCKED_PREREQUISITE",
       "failureOrLimitation": "No physical device connected. Source, packaging and server watermark tests cannot prove OEM camera / GPS / SAF behavior.",
       "relevantTests": [
@@ -416,24 +416,24 @@
           "file": "madar-v2/android/app/src/main/java/com/madar/rep/app/RepLocalStore.java",
           "line": 19,
           "anchor": "class RepLocalStore",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/android/app/src/main/java/com/madar/rep/app/RepLocalStore.java#L19"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/android/app/src/main/java/com/madar/rep/app/RepLocalStore.java#L19"
         },
         {
           "file": "madar-v2/android/app/src/main/java/com/madar/rep/app/MadarSyncWorker.java",
           "line": 40,
           "anchor": "class MadarSyncWorker",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/android/app/src/main/java/com/madar/rep/app/MadarSyncWorker.java#L40"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/android/app/src/main/java/com/madar/rep/app/MadarSyncWorker.java#L40"
         },
         {
           "file": "madar-v2/client/src/modules/rep/native-bridges.js",
           "line": 94,
           "anchor": "export async function enqueueNativeMachineAction",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/client/src/modules/rep/native-bridges.js#L94"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/client/src/modules/rep/native-bridges.js#L94"
         }
       ],
-      "sourceRevision": "0b1d45b5e81fd8f451a47b470b9bff79330b0781",
+      "sourceRevision": "16d5cc92294d7fd4f5bfe7298666fe4d25f29782",
       "verificationMethod": "source inspection; device or live business acceptance not executed",
-      "lastVerificationTime": "2026-11-13T20:51:48.045385+00:00",
+      "lastVerificationTime": "2026-11-13T21:04:39.565904+00:00",
       "status": "BLOCKED_PREREQUISITE",
       "failureOrLimitation": "Server contracts and JS recovery tested. Native process death/reboot/upgrade and real background upload not executed here.",
       "relevantTests": [
@@ -454,18 +454,18 @@
           "file": "madar-v2/android/app/src/main/java/com/madar/rep/app/RepRecoveryValidator.java",
           "line": 15,
           "anchor": "class RepRecoveryValidator",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/android/app/src/main/java/com/madar/rep/app/RepRecoveryValidator.java#L15"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/android/app/src/main/java/com/madar/rep/app/RepRecoveryValidator.java#L15"
         },
         {
           "file": "madar-v2/android/app/src/main/java/com/madar/rep/app/RepRecoveryImporter.java",
           "line": 11,
           "anchor": "class RepRecoveryImporter",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/android/app/src/main/java/com/madar/rep/app/RepRecoveryImporter.java#L11"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/android/app/src/main/java/com/madar/rep/app/RepRecoveryImporter.java#L11"
         }
       ],
-      "sourceRevision": "0b1d45b5e81fd8f451a47b470b9bff79330b0781",
+      "sourceRevision": "16d5cc92294d7fd4f5bfe7298666fe4d25f29782",
       "verificationMethod": "source inspection; device or live business acceptance not executed",
-      "lastVerificationTime": "2026-11-13T20:51:48.045385+00:00",
+      "lastVerificationTime": "2026-11-13T21:04:39.565904+00:00",
       "status": "BLOCKED_PREREQUISITE",
       "failureOrLimitation": "JS recovery package tests passed; complete physical-phone export/reinstall/import drill unverified.",
       "relevantTests": [
@@ -485,18 +485,18 @@
           "file": "madar-v2/android/app/src/main/java/com/madar/rep/app/RepLocationService.java",
           "line": 27,
           "anchor": "class RepLocationService",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/android/app/src/main/java/com/madar/rep/app/RepLocationService.java#L27"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/android/app/src/main/java/com/madar/rep/app/RepLocationService.java#L27"
         },
         {
           "file": "madar-v2/android/app/src/main/java/com/madar/rep/app/RepTrackStore.java",
           "line": 16,
           "anchor": "class RepTrackStore",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/android/app/src/main/java/com/madar/rep/app/RepTrackStore.java#L16"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/android/app/src/main/java/com/madar/rep/app/RepTrackStore.java#L16"
         }
       ],
-      "sourceRevision": "0b1d45b5e81fd8f451a47b470b9bff79330b0781",
+      "sourceRevision": "16d5cc92294d7fd4f5bfe7298666fe4d25f29782",
       "verificationMethod": "source inspection; device or live business acceptance not executed",
-      "lastVerificationTime": "2026-11-13T20:51:48.045385+00:00",
+      "lastVerificationTime": "2026-11-13T21:04:39.565904+00:00",
       "status": "BLOCKED_PREREQUISITE",
       "failureOrLimitation": "Actual GPS enabled detection, OEM background policy and battery behavior require a phone.",
       "relevantTests": [
@@ -517,18 +517,18 @@
           "file": "madar-v2/server/modules/rep/service.js",
           "line": 1585,
           "anchor": "export function syncRepLocationPing",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/server/modules/rep/service.js#L1585"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/server/modules/rep/service.js#L1585"
         },
         {
           "file": "madar-v2/server/modules/rep/tracking-ledger.js",
           "line": 3,
           "anchor": "export",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/server/modules/rep/tracking-ledger.js#L3"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/server/modules/rep/tracking-ledger.js#L3"
         }
       ],
-      "sourceRevision": "0b1d45b5e81fd8f451a47b470b9bff79330b0781",
+      "sourceRevision": "16d5cc92294d7fd4f5bfe7298666fe4d25f29782",
       "verificationMethod": "isolated integration/unit tests plus source",
-      "lastVerificationTime": "2026-11-13T20:51:48.045385+00:00",
+      "lastVerificationTime": "2026-11-13T21:04:39.565904+00:00",
       "status": "VERIFIED_PASS",
       "failureOrLimitation": "Server isolated integration. Phone acknowledgment cleanup remains device acceptance, not a server test claim.",
       "relevantTests": [
@@ -549,18 +549,18 @@
           "file": "madar-v2/server/modules/rep/service.js",
           "line": 1254,
           "anchor": "export async function syncRepVisit",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/server/modules/rep/service.js#L1254"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/server/modules/rep/service.js#L1254"
         },
         {
           "file": "madar-v2/server/modules/rep/routes.js",
           "line": 370,
           "anchor": "router.post('/sync-visit'",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/server/modules/rep/routes.js#L370"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/server/modules/rep/routes.js#L370"
         }
       ],
-      "sourceRevision": "0b1d45b5e81fd8f451a47b470b9bff79330b0781",
+      "sourceRevision": "16d5cc92294d7fd4f5bfe7298666fe4d25f29782",
       "verificationMethod": "isolated integration/unit tests plus source",
-      "lastVerificationTime": "2026-11-13T20:51:48.045385+00:00",
+      "lastVerificationTime": "2026-11-13T21:04:39.565904+00:00",
       "status": "VERIFIED_PASS",
       "failureOrLimitation": "",
       "relevantTests": [
@@ -581,18 +581,18 @@
           "file": "madar-v2/server/modules/supervisor/service.js",
           "line": 376,
           "anchor": "export function reviewRepVisit",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/server/modules/supervisor/service.js#L376"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/server/modules/supervisor/service.js#L376"
         },
         {
           "file": "madar-v2/server/modules/supervisor/service.js",
           "line": 554,
           "anchor": "export function approveRepVisitsTogether",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/server/modules/supervisor/service.js#L554"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/server/modules/supervisor/service.js#L554"
         }
       ],
-      "sourceRevision": "0b1d45b5e81fd8f451a47b470b9bff79330b0781",
+      "sourceRevision": "16d5cc92294d7fd4f5bfe7298666fe4d25f29782",
       "verificationMethod": "isolated integration/unit tests plus source",
-      "lastVerificationTime": "2026-11-13T20:51:48.045385+00:00",
+      "lastVerificationTime": "2026-11-13T21:04:39.565904+00:00",
       "status": "VERIFIED_PASS",
       "failureOrLimitation": "",
       "relevantTests": [
@@ -613,18 +613,18 @@
           "file": "madar-v2/client/src/modules/rep/RepApp.jsx",
           "line": 983,
           "anchor": "event.type === 'rep.visit.reviewed'",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/client/src/modules/rep/RepApp.jsx#L983"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/client/src/modules/rep/RepApp.jsx#L983"
         },
         {
           "file": "madar-v2/client/src/modules/rep/RepApp.jsx",
           "line": 1577,
           "anchor": "routeFilter === 'sent'",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/client/src/modules/rep/RepApp.jsx#L1577"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/client/src/modules/rep/RepApp.jsx#L1577"
         }
       ],
-      "sourceRevision": "0b1d45b5e81fd8f451a47b470b9bff79330b0781",
+      "sourceRevision": "16d5cc92294d7fd4f5bfe7298666fe4d25f29782",
       "verificationMethod": "source inspection; device or live business acceptance not executed",
-      "lastVerificationTime": "2026-11-13T20:51:48.045385+00:00",
+      "lastVerificationTime": "2026-11-13T21:04:39.565904+00:00",
       "status": "IMPLEMENTED_NOT_VERIFIED",
       "failureOrLimitation": "Server statuses verified; installed APK final visual reconciliation not exercised on a physical phone.",
       "relevantTests": [
@@ -644,18 +644,18 @@
           "file": "madar-v2/server/modules/supervisor/service.js",
           "line": 111,
           "anchor": "export function getSupervisorRadar",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/server/modules/supervisor/service.js#L111"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/server/modules/supervisor/service.js#L111"
         },
         {
           "file": "madar-v2/server/modules/supervisor/service.js",
           "line": 194,
           "anchor": "export function getSupervisorRepRoute",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/server/modules/supervisor/service.js#L194"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/server/modules/supervisor/service.js#L194"
         }
       ],
-      "sourceRevision": "0b1d45b5e81fd8f451a47b470b9bff79330b0781",
+      "sourceRevision": "16d5cc92294d7fd4f5bfe7298666fe4d25f29782",
       "verificationMethod": "isolated integration/unit tests plus source",
-      "lastVerificationTime": "2026-11-13T20:51:48.045385+00:00",
+      "lastVerificationTime": "2026-11-13T21:04:39.565904+00:00",
       "status": "VERIFIED_PASS",
       "failureOrLimitation": "Isolated API assertions; displayed instantaneous/average speed depends on valid point timestamps and samples, not vehicle telemetry calibration.",
       "relevantTests": [
@@ -675,18 +675,18 @@
           "file": "madar-v2/server/modules/employees/attendance.js",
           "line": 73,
           "anchor": "export",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/server/modules/employees/attendance.js#L73"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/server/modules/employees/attendance.js#L73"
         },
         {
           "file": "madar-v2/client/src/modules/rep/RepApp.jsx",
           "line": 851,
           "anchor": "api.post('/api/rep/attendance/sync'",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/client/src/modules/rep/RepApp.jsx#L851"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/client/src/modules/rep/RepApp.jsx#L851"
         }
       ],
-      "sourceRevision": "0b1d45b5e81fd8f451a47b470b9bff79330b0781",
+      "sourceRevision": "16d5cc92294d7fd4f5bfe7298666fe4d25f29782",
       "verificationMethod": "isolated integration/unit tests plus source",
-      "lastVerificationTime": "2026-11-13T20:51:48.045385+00:00",
+      "lastVerificationTime": "2026-11-13T21:04:39.565904+00:00",
       "status": "VERIFIED_PASS",
       "failureOrLimitation": "",
       "relevantTests": [
@@ -708,18 +708,18 @@
           "file": "madar-v2/android/app/src/main/java/com/madar/rep/app/RepBiometricAuth.java",
           "line": 13,
           "anchor": "class RepBiometricAuth",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/android/app/src/main/java/com/madar/rep/app/RepBiometricAuth.java#L13"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/android/app/src/main/java/com/madar/rep/app/RepBiometricAuth.java#L13"
         },
         {
           "file": "madar-v2/client/src/modules/rep/native-bridges.js",
           "line": 82,
           "anchor": "export async function authenticateNativeAttendance",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/client/src/modules/rep/native-bridges.js#L82"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/client/src/modules/rep/native-bridges.js#L82"
         }
       ],
-      "sourceRevision": "0b1d45b5e81fd8f451a47b470b9bff79330b0781",
+      "sourceRevision": "16d5cc92294d7fd4f5bfe7298666fe4d25f29782",
       "verificationMethod": "source inspection; device or live business acceptance not executed",
-      "lastVerificationTime": "2026-11-13T20:51:48.045385+00:00",
+      "lastVerificationTime": "2026-11-13T21:04:39.565904+00:00",
       "status": "BLOCKED_PREREQUISITE",
       "failureOrLimitation": "Phone assurance is a client assertion; no independent server hardware attestation or physical biometric acceptance established.",
       "relevantTests": [
@@ -739,18 +739,18 @@
           "file": "madar-v2/server/modules/employees/staff-service.js",
           "line": 126,
           "anchor": "export",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/server/modules/employees/staff-service.js#L126"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/server/modules/employees/staff-service.js#L126"
         },
         {
           "file": "madar-v2/server/modules/employees/service.js",
           "line": 654,
           "anchor": "export function finalizePayroll",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/server/modules/employees/service.js#L654"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/server/modules/employees/service.js#L654"
         }
       ],
-      "sourceRevision": "0b1d45b5e81fd8f451a47b470b9bff79330b0781",
+      "sourceRevision": "16d5cc92294d7fd4f5bfe7298666fe4d25f29782",
       "verificationMethod": "isolated integration/unit tests plus source",
-      "lastVerificationTime": "2026-11-13T20:51:48.045385+00:00",
+      "lastVerificationTime": "2026-11-13T21:04:39.565904+00:00",
       "status": "VERIFIED_PASS",
       "failureOrLimitation": "",
       "relevantTests": [
@@ -772,18 +772,18 @@
           "file": "madar-v2/server/modules/employees/service.js",
           "line": 275,
           "anchor": "export function issueEmployeeTool",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/server/modules/employees/service.js#L275"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/server/modules/employees/service.js#L275"
         },
         {
           "file": "madar-v2/server/modules/employees/service.js",
           "line": 599,
           "anchor": "export function createEmployeeAdvance",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/server/modules/employees/service.js#L599"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/server/modules/employees/service.js#L599"
         }
       ],
-      "sourceRevision": "0b1d45b5e81fd8f451a47b470b9bff79330b0781",
+      "sourceRevision": "16d5cc92294d7fd4f5bfe7298666fe4d25f29782",
       "verificationMethod": "isolated integration/unit tests plus source",
-      "lastVerificationTime": "2026-11-13T20:51:48.045385+00:00",
+      "lastVerificationTime": "2026-11-13T21:04:39.565904+00:00",
       "status": "VERIFIED_PASS",
       "failureOrLimitation": "",
       "relevantTests": [
@@ -804,18 +804,18 @@
           "file": "madar-v2/server/modules/clients/service.js",
           "line": 52,
           "anchor": "export",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/server/modules/clients/service.js#L52"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/server/modules/clients/service.js#L52"
         },
         {
           "file": "madar-v2/server/modules/maintenance/routes.js",
           "line": 418,
           "anchor": "router.put('/orders/:id/representatives'",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/server/modules/maintenance/routes.js#L418"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/server/modules/maintenance/routes.js#L418"
         }
       ],
-      "sourceRevision": "0b1d45b5e81fd8f451a47b470b9bff79330b0781",
+      "sourceRevision": "16d5cc92294d7fd4f5bfe7298666fe4d25f29782",
       "verificationMethod": "isolated integration/unit tests plus source",
-      "lastVerificationTime": "2026-11-13T20:51:48.045385+00:00",
+      "lastVerificationTime": "2026-11-13T21:04:39.565904+00:00",
       "status": "VERIFIED_PASS",
       "failureOrLimitation": "",
       "relevantTests": [
@@ -837,18 +837,18 @@
           "file": "madar-v2/server/modules/maintenance/analysis.js",
           "line": 46,
           "anchor": "export function getMaintenanceAreaAnalysis",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/server/modules/maintenance/analysis.js#L46"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/server/modules/maintenance/analysis.js#L46"
         },
         {
           "file": "madar-v2/server/modules/maintenance/export.js",
           "line": 660,
           "anchor": "export async function buildMaintenancePptx",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/server/modules/maintenance/export.js#L660"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/server/modules/maintenance/export.js#L660"
         }
       ],
-      "sourceRevision": "0b1d45b5e81fd8f451a47b470b9bff79330b0781",
+      "sourceRevision": "16d5cc92294d7fd4f5bfe7298666fe4d25f29782",
       "verificationMethod": "isolated integration/unit tests plus source",
-      "lastVerificationTime": "2026-11-13T20:51:48.045385+00:00",
+      "lastVerificationTime": "2026-11-13T21:04:39.565904+00:00",
       "status": "VERIFIED_PASS",
       "failureOrLimitation": "Exact quantity examples and export assertions, not every historical customer record.",
       "relevantTests": [
@@ -868,24 +868,24 @@
           "file": "madar-v2/server/modules/maintenance/photo-images.js",
           "line": 8,
           "anchor": "export async function applyPhotoRotation",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/server/modules/maintenance/photo-images.js#L8"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/server/modules/maintenance/photo-images.js#L8"
         },
         {
           "file": "madar-v2/server/modules/maintenance/thumbnails.js",
           "line": 46,
           "anchor": "export async function getMaintenanceThumbnail",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/server/modules/maintenance/thumbnails.js#L46"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/server/modules/maintenance/thumbnails.js#L46"
         },
         {
           "file": "madar-v2/server/modules/storage.js",
           "line": 60,
           "anchor": "export",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/server/modules/storage.js#L60"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/server/modules/storage.js#L60"
         }
       ],
-      "sourceRevision": "0b1d45b5e81fd8f451a47b470b9bff79330b0781",
+      "sourceRevision": "16d5cc92294d7fd4f5bfe7298666fe4d25f29782",
       "verificationMethod": "isolated integration/unit tests plus source",
-      "lastVerificationTime": "2026-11-13T20:51:48.045385+00:00",
+      "lastVerificationTime": "2026-11-13T21:04:39.565904+00:00",
       "status": "VERIFIED_PASS",
       "failureOrLimitation": "",
       "relevantTests": [
@@ -907,18 +907,18 @@
           "file": "madar-v2/server/modules/maintenance/trip-folder.js",
           "line": 407,
           "anchor": "export async function classifyMachinePhotos",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/server/modules/maintenance/trip-folder.js#L407"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/server/modules/maintenance/trip-folder.js#L407"
         },
         {
           "file": "madar-v2/server/modules/maintenance/routes.js",
           "line": 266,
           "anchor": "router.post('/machines/import'",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/server/modules/maintenance/routes.js#L266"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/server/modules/maintenance/routes.js#L266"
         }
       ],
-      "sourceRevision": "0b1d45b5e81fd8f451a47b470b9bff79330b0781",
+      "sourceRevision": "16d5cc92294d7fd4f5bfe7298666fe4d25f29782",
       "verificationMethod": "isolated integration/unit tests plus source",
-      "lastVerificationTime": "2026-11-13T20:51:48.045385+00:00",
+      "lastVerificationTime": "2026-11-13T21:04:39.565904+00:00",
       "status": "VERIFIED_PASS",
       "failureOrLimitation": "",
       "relevantTests": [
@@ -939,18 +939,18 @@
           "file": "madar-v2/server/modules/maintenance/routes.js",
           "line": 438,
           "anchor": "router.delete('/orders/:id'",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/server/modules/maintenance/routes.js#L438"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/server/modules/maintenance/routes.js#L438"
         },
         {
           "file": "madar-v2/server/modules/maintenance/routes.js",
           "line": 442,
           "anchor": "router.delete('/orders/:id/test-mock'",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/server/modules/maintenance/routes.js#L442"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/server/modules/maintenance/routes.js#L442"
         }
       ],
-      "sourceRevision": "0b1d45b5e81fd8f451a47b470b9bff79330b0781",
+      "sourceRevision": "16d5cc92294d7fd4f5bfe7298666fe4d25f29782",
       "verificationMethod": "isolated integration/unit tests plus source",
-      "lastVerificationTime": "2026-11-13T20:51:48.045385+00:00",
+      "lastVerificationTime": "2026-11-13T21:04:39.565904+00:00",
       "status": "VERIFIED_PASS",
       "failureOrLimitation": "",
       "relevantTests": [
@@ -970,12 +970,12 @@
           "file": "madar-v2/server/modules/warehouse/service.js",
           "line": 165,
           "anchor": "export function issueMaterial",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/server/modules/warehouse/service.js#L165"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/server/modules/warehouse/service.js#L165"
         }
       ],
-      "sourceRevision": "0b1d45b5e81fd8f451a47b470b9bff79330b0781",
+      "sourceRevision": "16d5cc92294d7fd4f5bfe7298666fe4d25f29782",
       "verificationMethod": "isolated integration/unit tests plus source",
-      "lastVerificationTime": "2026-11-13T20:51:48.045385+00:00",
+      "lastVerificationTime": "2026-11-13T21:04:39.565904+00:00",
       "status": "VERIFIED_PASS",
       "failureOrLimitation": "",
       "relevantTests": [
@@ -996,18 +996,18 @@
           "file": "madar-v2/server/modules/workshop/service.js",
           "line": 285,
           "anchor": "export function transitionWorkshopToReady",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/server/modules/workshop/service.js#L285"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/server/modules/workshop/service.js#L285"
         },
         {
           "file": "madar-v2/server/modules/workshop/service.js",
           "line": 327,
           "anchor": "export function transitionWorkshopToDelivered",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/server/modules/workshop/service.js#L327"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/server/modules/workshop/service.js#L327"
         }
       ],
-      "sourceRevision": "0b1d45b5e81fd8f451a47b470b9bff79330b0781",
+      "sourceRevision": "16d5cc92294d7fd4f5bfe7298666fe4d25f29782",
       "verificationMethod": "isolated integration/unit tests plus source",
-      "lastVerificationTime": "2026-11-13T20:51:48.045385+00:00",
+      "lastVerificationTime": "2026-11-13T21:04:39.565904+00:00",
       "status": "VERIFIED_PASS",
       "failureOrLimitation": "",
       "relevantTests": [
@@ -1029,18 +1029,18 @@
           "file": "madar-v2/server/modules/finance/invoices.service.js",
           "line": 174,
           "anchor": "export function createPurchaseInvoice",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/server/modules/finance/invoices.service.js#L174"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/server/modules/finance/invoices.service.js#L174"
         },
         {
           "file": "madar-v2/server/modules/finance/invoices.service.js",
           "line": 328,
           "anchor": "export function recordPurchasePayment",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/server/modules/finance/invoices.service.js#L328"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/server/modules/finance/invoices.service.js#L328"
         }
       ],
-      "sourceRevision": "0b1d45b5e81fd8f451a47b470b9bff79330b0781",
+      "sourceRevision": "16d5cc92294d7fd4f5bfe7298666fe4d25f29782",
       "verificationMethod": "isolated integration/unit tests plus source",
-      "lastVerificationTime": "2026-11-13T20:51:48.045385+00:00",
+      "lastVerificationTime": "2026-11-13T21:04:39.565904+00:00",
       "status": "VERIFIED_PASS",
       "failureOrLimitation": "Integer cents and isolated retries/concurrency tested; no bank/payment-provider integration claimed.",
       "relevantTests": [
@@ -1060,18 +1060,18 @@
           "file": "madar-v2/server/modules/finance/invoices.service.js",
           "line": 411,
           "anchor": "export function recordSalesReceipt",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/server/modules/finance/invoices.service.js#L411"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/server/modules/finance/invoices.service.js#L411"
         },
         {
           "file": "madar-v2/server/modules/finance/invoices.service.js",
           "line": 328,
           "anchor": "export function recordPurchasePayment",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/server/modules/finance/invoices.service.js#L328"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/server/modules/finance/invoices.service.js#L328"
         }
       ],
-      "sourceRevision": "0b1d45b5e81fd8f451a47b470b9bff79330b0781",
+      "sourceRevision": "16d5cc92294d7fd4f5bfe7298666fe4d25f29782",
       "verificationMethod": "isolated integration/unit tests plus source",
-      "lastVerificationTime": "2026-11-13T20:51:48.045385+00:00",
+      "lastVerificationTime": "2026-11-13T21:04:39.565904+00:00",
       "status": "VERIFIED_PASS",
       "failureOrLimitation": "",
       "relevantTests": [
@@ -1091,24 +1091,24 @@
           "file": "madar-v2/server/modules/operations-events.js",
           "line": 124,
           "anchor": "export function publishOperationsEvent",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/server/modules/operations-events.js#L124"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/server/modules/operations-events.js#L124"
         },
         {
           "file": "madar-v2/server/modules/operations-events.js",
           "line": 43,
           "anchor": "export function getOperationsReplayCursor",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/server/modules/operations-events.js#L43"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/server/modules/operations-events.js#L43"
         },
         {
           "file": "madar-v2/server/modules/rep/routes.js",
           "line": 87,
           "anchor": "router.get('/events'",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/server/modules/rep/routes.js#L87"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/server/modules/rep/routes.js#L87"
         }
       ],
-      "sourceRevision": "0b1d45b5e81fd8f451a47b470b9bff79330b0781",
+      "sourceRevision": "16d5cc92294d7fd4f5bfe7298666fe4d25f29782",
       "verificationMethod": "isolated integration/unit tests plus source",
-      "lastVerificationTime": "2026-11-13T20:51:48.045385+00:00",
+      "lastVerificationTime": "2026-11-13T21:04:39.565904+00:00",
       "status": "VERIFIED_PASS",
       "failureOrLimitation": "Single-process deployment. Client API reconciliation remains authoritative; not an unbounded broker.",
       "relevantTests": [
@@ -1130,18 +1130,18 @@
           "file": "madar-v2/server/modules/notifications/service.js",
           "line": 58,
           "anchor": "export function materializeNotificationsForEvent",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/server/modules/notifications/service.js#L58"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/server/modules/notifications/service.js#L58"
         },
         {
           "file": "madar-v2/client/src/components/notifications/NotificationBell.jsx",
           "line": 120,
           "anchor": "api.get('/api/notifications'",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/client/src/components/notifications/NotificationBell.jsx#L120"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/client/src/components/notifications/NotificationBell.jsx#L120"
         }
       ],
-      "sourceRevision": "0b1d45b5e81fd8f451a47b470b9bff79330b0781",
+      "sourceRevision": "16d5cc92294d7fd4f5bfe7298666fe4d25f29782",
       "verificationMethod": "isolated integration/unit tests plus source",
-      "lastVerificationTime": "2026-11-13T20:51:48.045385+00:00",
+      "lastVerificationTime": "2026-11-13T21:04:39.565904+00:00",
       "status": "VERIFIED_PASS",
       "failureOrLimitation": "Foreground/live-browser or open-app synchronization; no closed-app push delivery claim.",
       "relevantTests": [
@@ -1162,12 +1162,12 @@
           "file": "madar-v2/client/src/modules/rep/native-bridges.js",
           "line": 23,
           "anchor": "subscribeNativeOperations",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/client/src/modules/rep/native-bridges.js#L23"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/client/src/modules/rep/native-bridges.js#L23"
         }
       ],
-      "sourceRevision": "0b1d45b5e81fd8f451a47b470b9bff79330b0781",
+      "sourceRevision": "16d5cc92294d7fd4f5bfe7298666fe4d25f29782",
       "verificationMethod": "source inspection; device or live business acceptance not executed",
-      "lastVerificationTime": "2026-11-13T20:51:48.045385+00:00",
+      "lastVerificationTime": "2026-11-13T21:04:39.565904+00:00",
       "status": "NOT_IMPLEMENTED",
       "failureOrLimitation": "Optional capability / product decision, not a mandatory defect. No alert destination configured in this n8n delivery.",
       "relevantTests": [],
@@ -1185,18 +1185,18 @@
           "file": "madar-v2/server/database/connection.js",
           "line": 7,
           "anchor": "export",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/server/database/connection.js#L7"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/server/database/connection.js#L7"
         },
         {
           "file": "madar-v2/server/database/init.js",
           "line": 92,
           "anchor": "schema_migrations",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/server/database/init.js#L92"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/server/database/init.js#L92"
         }
       ],
-      "sourceRevision": "0b1d45b5e81fd8f451a47b470b9bff79330b0781",
+      "sourceRevision": "16d5cc92294d7fd4f5bfe7298666fe4d25f29782",
       "verificationMethod": "isolated integration/unit tests plus source",
-      "lastVerificationTime": "2026-11-13T20:51:48.045385+00:00",
+      "lastVerificationTime": "2026-11-13T21:04:39.565904+00:00",
       "status": "VERIFIED_PASS",
       "failureOrLimitation": "Live integrity/foreign-key checks separately captured; no multi-instance SQLite scaling.",
       "relevantTests": [
@@ -1218,24 +1218,24 @@
           "file": "madar-v2/server/modules/system/backup.js",
           "line": 653,
           "anchor": "export async function createSystemBackup",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/server/modules/system/backup.js#L653"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/server/modules/system/backup.js#L653"
         },
         {
           "file": "madar-v2/server/modules/system/backup.js",
           "line": 265,
           "anchor": "export async function prepareRestorableSnapshot",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/server/modules/system/backup.js#L265"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/server/modules/system/backup.js#L265"
         },
         {
           "file": "madar-v2/server/modules/system/backup.js",
           "line": 488,
           "anchor": "export async function recoverInterruptedRestore",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/server/modules/system/backup.js#L488"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/server/modules/system/backup.js#L488"
         }
       ],
-      "sourceRevision": "0b1d45b5e81fd8f451a47b470b9bff79330b0781",
+      "sourceRevision": "16d5cc92294d7fd4f5bfe7298666fe4d25f29782",
       "verificationMethod": "isolated integration/unit tests plus source",
-      "lastVerificationTime": "2026-11-13T20:51:48.045385+00:00",
+      "lastVerificationTime": "2026-11-13T21:04:39.565904+00:00",
       "status": "VERIFIED_PASS",
       "failureOrLimitation": "See restore-drill.json for actual existing ZIP extraction/migration evidence; no production restore or off-device recovery claim.",
       "relevantTests": [
@@ -1256,12 +1256,12 @@
           "file": "madar-v2/server/config/paths.js",
           "line": 21,
           "anchor": "export const backupRoot",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/server/config/paths.js#L21"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/server/config/paths.js#L21"
         }
       ],
-      "sourceRevision": "0b1d45b5e81fd8f451a47b470b9bff79330b0781",
+      "sourceRevision": "16d5cc92294d7fd4f5bfe7298666fe4d25f29782",
       "verificationMethod": "source inspection; device or live business acceptance not executed",
-      "lastVerificationTime": "2026-11-13T20:51:48.045385+00:00",
+      "lastVerificationTime": "2026-11-13T21:04:39.565904+00:00",
       "status": "BLOCKED_PREREQUISITE",
       "failureOrLimitation": "No authorized fresh off-device restore drill evidence supplied.",
       "relevantTests": [],
@@ -1279,12 +1279,12 @@
           "file": "madar-v2/server/app.js",
           "line": 88,
           "anchor": "app.get('/api/health'",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/server/app.js#L88"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/server/app.js#L88"
         }
       ],
-      "sourceRevision": "0b1d45b5e81fd8f451a47b470b9bff79330b0781",
+      "sourceRevision": "16d5cc92294d7fd4f5bfe7298666fe4d25f29782",
       "verificationMethod": "live read-only HTTP (reachability/auth boundary only); source inspection; device or live business acceptance not executed",
-      "lastVerificationTime": "2026-11-13T20:51:48.045385+00:00",
+      "lastVerificationTime": "2026-11-13T21:04:39.565904+00:00",
       "status": "VERIFIED_PASS",
       "failureOrLimitation": "Workflow runtime evidence captured separately. Not inserted into business transactions.",
       "relevantTests": [],
@@ -1306,12 +1306,12 @@
           "file": "madar-v2/scripts/n8n-system-check.mjs",
           "line": 65,
           "anchor": "attemptCheck('MADAR V2 API health'",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/scripts/n8n-system-check.mjs#L65"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/scripts/n8n-system-check.mjs#L65"
         }
       ],
-      "sourceRevision": "0b1d45b5e81fd8f451a47b470b9bff79330b0781",
+      "sourceRevision": "16d5cc92294d7fd4f5bfe7298666fe4d25f29782",
       "verificationMethod": "source inspection; device or live business acceptance not executed",
-      "lastVerificationTime": "2026-11-13T20:51:48.045385+00:00",
+      "lastVerificationTime": "2026-11-13T21:04:39.565904+00:00",
       "status": "IMPLEMENTED_NOT_VERIFIED",
       "failureOrLimitation": "Existing 06:00 Cairo success predates this audit. Do not equate it with complete current business verification.",
       "relevantTests": [],
@@ -1329,12 +1329,12 @@
           "file": "madar-v2/scripts/migrate-from-v1.js",
           "line": 2,
           "anchor": "import",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-v2/scripts/migrate-from-v1.js#L2"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-v2/scripts/migrate-from-v1.js#L2"
         }
       ],
-      "sourceRevision": "0b1d45b5e81fd8f451a47b470b9bff79330b0781",
+      "sourceRevision": "16d5cc92294d7fd4f5bfe7298666fe4d25f29782",
       "verificationMethod": "source inspection; device or live business acceptance not executed",
-      "lastVerificationTime": "2026-11-13T20:51:48.045385+00:00",
+      "lastVerificationTime": "2026-11-13T21:04:39.565904+00:00",
       "status": "NOT_APPLICABLE",
       "failureOrLimitation": "No automatic live synchronization between legacy and V2 established.",
       "relevantTests": [
@@ -1354,12 +1354,12 @@
           "file": "madar-flow/README.md",
           "line": 1,
           "anchor": "#",
-          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/0b1d45b5e81fd8f451a47b470b9bff79330b0781/madar-flow/README.md#L1"
+          "url": "https://github.com/carloshanywork-stack/carlos-madar/blob/16d5cc92294d7fd4f5bfe7298666fe4d25f29782/madar-flow/README.md#L1"
         }
       ],
-      "sourceRevision": "0b1d45b5e81fd8f451a47b470b9bff79330b0781",
+      "sourceRevision": "16d5cc92294d7fd4f5bfe7298666fe4d25f29782",
       "verificationMethod": "source inspection; device or live business acceptance not executed",
-      "lastVerificationTime": "2026-11-13T20:51:48.045385+00:00",
+      "lastVerificationTime": "2026-11-13T21:04:39.565904+00:00",
       "status": "NOT_APPLICABLE",
       "failureOrLimitation": "Do not treat its canvas, routes or graph engine as n8n or proof of MADAR V2 business integration.",
       "relevantTests": [],

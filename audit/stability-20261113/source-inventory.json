@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "sourceRevision": "0b1d45b5e81fd8f451a47b470b9bff79330b0781",
-  "verifiedAt": "2026-11-13T20:46:33.929Z",
+  "sourceRevision": "16d5cc92294d7fd4f5bfe7298666fe4d25f29782",
+  "verifiedAt": "2026-11-13T21:04:39.471Z",
   "method": "Babel AST: mounted Express routers, client HTTP call sites, native string contracts, event names and test declarations. Static matches do not prove runtime behavior; dynamic calls and externally consumed routes can remain unmatched.",
   "repositoryMap": {
     "production": "madar-v2",
@@ -12,7 +12,7 @@
     "mountedApiAndDownloadRouteDefinitions": 196,
     "clientHttpCallSites": 133,
     "nativePathLiterals": 8,
-    "testDeclarations": 183,
+    "testDeclarations": 184,
     "eventEntries": 87
   },
   "routes": [
@@ -5016,27 +5016,27 @@
     {
       "name": "old backup is migrated in an isolated copy with IDs/history intact and original unchanged",
       "file": "madar-v2/test/backup-compatibility.test.js",
-      "line": 17
+      "line": 21
     },
     {
       "name": "newer migrations and corrupt snapshots are rejected without changing current data",
       "file": "madar-v2/test/backup-compatibility.test.js",
-      "line": 35
+      "line": 39
     },
     {
       "name": "a supported legacy data-import marker restores onto fresh V2 without rerunning the import",
       "file": "madar-v2/test/backup-compatibility.test.js",
-      "line": 45
+      "line": 49
     },
     {
       "name": "schema compatibility ignores column order/SQL formatting but preserves CHECK constraints",
       "file": "madar-v2/test/backup-compatibility.test.js",
-      "line": 54
+      "line": 58
     },
     {
       "name": "historical column order and nullable machine metadata restore through actual authenticated HTTP with files",
       "file": "madar-v2/test/backup-compatibility.test.js",
-      "line": 65
+      "line": 69
     },
     {
       "name": "startup upgrades legacy attendance with referenced offline actions without losing history",
@@ -5157,6 +5157,11 @@
       "name": "an unpushed local commit is preserved and never deployed as the remote revision",
       "file": "madar-v2/test/deployment.test.js",
       "line": 39
+    },
+    {
+      "name": "a zero-test successful command is rejected rather than recorded as a verified release",
+      "file": "madar-v2/test/deployment.test.js",
+      "line": 46
     },
     {
       "name": "adaptive GPS reduces polling only after three stationary minutes",

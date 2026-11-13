@@ -9,7 +9,7 @@ original=cfgNode['parameters']['jsCode'];prefix='const config = ';split=original
 config=json.loads(original[len(prefix):split]);probes={p['id']:p for p in config['probes']}
 class Fixture(http.server.BaseHTTPRequestHandler):
  def do_GET(self):
-  id=self.path.removeprefix('/probe/');p=probes.get(id);state['requests'].append({'id':id,'deliberateFailure':state['fail']})
+  id='rep-bundle' if self.path=='/assets/fixture.js' else self.path.removeprefix('/probe/');p=probes.get(id);state['requests'].append({'id':id,'deliberateFailure':state['fail']})
   if not p:body=b'not found';code=404;content='text/plain'
   else:
    code=p['expectedStatus'];content='application/json';r=p['rule']
@@ -17,7 +17,7 @@ class Fixture(http.server.BaseHTTPRequestHandler):
    elif r=='madar':body=json.dumps({'status':'ok','service':'madar-v2','synthetic':True,'sourceDirty':False,'sourceTrees':config['expectedSourceTrees']}).encode()
    elif r=='n8n':body=b'{"status":"ok"}'
    elif r=='auth':body=b'{"error":"Authentication required."}'
-   elif r=='html':body=b'<!doctype html><html><body>synthetic fixture</body></html>';content='text/html'
+   elif r=='html':body=b'<!doctype html><html><body>synthetic fixture<script type="module" src="/assets/fixture.js"></script></body></html>';content='text/html'
    else:body='/* synthetic fixture */ تم الإرسال'.encode();content='application/javascript; charset=utf-8'
   self.send_response(code);self.send_header('Content-Type',content);self.send_header('Content-Length',str(len(body)));self.end_headers();self.wfile.write(body)
  def log_message(self,*args):pass

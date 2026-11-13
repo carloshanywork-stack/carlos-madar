@@ -55,3 +55,7 @@ The first controlled deployment loaded clean source `ef08c21df89a93c66109a875283
 [Automatic backup cleanup](/mnt/madar-storage/madar-release-archives/stability-20261113-1794603133277/backup-retention.json)
 
 The deployment gate now preserves its last test log privately, requires a nonzero passing test count, and refuses an exit-zero command that ran no tests. The exact final test totals are recorded in the deployment receipt and private `v2-deploy-gate.log`, rather than inferred from prior test discovery.
+
+Final captured deployment gate: **184/184 tests passed, 0 failed, 0 skipped**. The JUnit file is derived from the retained actual gate output, with exactly 184 named passing cases; no synthetic test cases were added. The corrected n8n verifier passed 19/19 real read-only probes. Its synthetic fixture now exercises discovery of the JavaScript URL from HTML instead of bypassing that branch; HTTP 503 still produces exactly one failed check and a failed execution. SMTP absence remains a visible blocked prerequisite.
+
+Fast operational monitoring returned six checks, zero failures, one warning: Netdata's `system_post_update_reboot_status`, corroborated by `/var/run/reboot-required`. A whole-host reboot was not performed; arrange a maintenance window. No dependency installation or system upgrade was performed by this work.

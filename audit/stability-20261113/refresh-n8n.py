@@ -33,10 +33,14 @@ for n in w['nodes']:
   js=n['parameters']['jsCode'];js=js.replace("parsed?.service==='madar-v2'", "parsed?.service==='madar-v2'&&parsed?.sourceDirty===false&&Object.entries(state.config.expectedSourceTrees).every(([path,hash])=>parsed?.sourceTrees?.[path]===hash)")
   js=js.replace("if(p.rule==='sent-label')ok=ok&&String(body).includes('تم الإرسال');", "if(p.rule==='javascript')ok=ok&&/javascript/i.test(String(r.headers?.['content-type']||''))&&!String(body).toLowerCase().includes('<!doctype html');\nif(p.rule==='plain404')ok=ok&&!String(body).toLowerCase().includes('<!doctype html');")
   if n['name']=='Assert | web':
-   js=js.replace('const result=', "if(!state.config.fixtureOnly){const asset=String(body).match(/src=\"(\\/assets\\/[^\" ]+\\.js)\"/);ok=ok&&Boolean(asset);if(asset)state.config.probes[3].url=state.config.probes[2].url.replace(/\\/$/,'')+asset[1];}\nconst result=")
+   js=js.replace('const result=', r"""const asset=String(body).match(/src=["'](\/assets\/[^"']+\.js)["']/);
+ok=ok&&Boolean(asset);
+if(asset)state.config.probes[3].url=state.config.probes[2].url.split('/').slice(0,3).join('/')+asset[1];
+const result=""")
   n['parameters']['jsCode']=js
  if n['type'].endswith('.stickyNote'):
   n['parameters']['content']=f'# Refreshed stability evidence\nSource `{rev}`\nReport: audit/stability-20261113/README.md\nManual read-only checks; inactive. Source tree hashes must match the running process. {counts["passed"]}/{counts["tests"]} isolated V2 tests passed. No device acceptance or external alert delivery is claimed.\nDocumentation notes are conceptual connections, not executable business transactions.'
+[n for n in w['nodes'] if n['type'].endswith('.httpRequest')][3]['parameters']['url']="={{ $('Assert | web').first().json.config.probes[3].url }}"
 http=copy.deepcopy(next(n for n in w['nodes'] if n['type'].endswith('.httpRequest')));http.update(id=str(uuid.uuid4()),name='GET | missing-asset',position=[4500,100]);http['parameters']['url']="={{ $('Assert | notifications-auth-boundary').first().json.config.probes[18].url }}"
 assertion=copy.deepcopy(next(n for n in w['nodes'] if n['name']=='Assert | notifications-auth-boundary'));assertion.update(id=str(uuid.uuid4()),name='Assert | missing-asset',position=[4750,100]);assertion['parameters']['jsCode']=assertion['parameters']['jsCode'].replace("$('Assert | attendance-auth-boundary')","$('Assert | notifications-auth-boundary')").replace('probes[17]','probes[18]')
 w['nodes'] += [http,assertion]

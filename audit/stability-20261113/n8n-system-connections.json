@@ -3,7 +3,7 @@
   "name": "MADAR — Actual System Connections — Evidence Map 2026-11-13",
   "nodes": [
     {
-      "id": "cb492d56-3976-438f-99bc-3ffb7b3c1183",
+      "id": "bee0ad1e-c650-4361-982c-ecef5f4687b0",
       "name": "Runtime / network",
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
@@ -19,7 +19,7 @@
       ]
     },
     {
-      "id": "b6b62bdc-8ddb-4050-93c8-8866e51da0ff",
+      "id": "34c16c9e-171a-45f7-a3b1-9a4494565647",
       "name": "Authentication",
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
@@ -35,7 +35,7 @@
       ]
     },
     {
-      "id": "8ff8dc7b-b4dc-47c7-a73c-32ab82ee3630",
+      "id": "46b7082d-6510-4e2a-a524-c013491e7d79",
       "name": "Representative / location",
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
@@ -51,7 +51,7 @@
       ]
     },
     {
-      "id": "4f07f2f2-aa9b-495d-aba1-7398806fd713",
+      "id": "73ebfdbe-8699-4018-83db-7225c0391238",
       "name": "Android / durable queues",
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
@@ -67,7 +67,7 @@
       ]
     },
     {
-      "id": "6f84719a-9e39-4f03-8b67-184d37876778",
+      "id": "e4d05036-e895-4abd-ac5f-2ba9e480d957",
       "name": "Visits / supervisor",
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
@@ -83,7 +83,7 @@
       ]
     },
     {
-      "id": "c4268a6c-b9e6-4396-aecb-d1e4f092eca7",
+      "id": "18711388-66ec-4949-a9ac-8730c9cbbd9a",
       "name": "Attendance / HR",
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
@@ -99,7 +99,7 @@
       ]
     },
     {
-      "id": "d347bbb8-45a2-4fe9-9862-d30701df3d19",
+      "id": "f3c9d69a-48e0-45c9-a30b-d7582f6bc166",
       "name": "Maintenance / reporting",
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
@@ -115,7 +115,7 @@
       ]
     },
     {
-      "id": "8d1147fc-9c16-4ee7-b1aa-ff43dd6d6790",
+      "id": "c4749ba2-72d4-46f1-b3f4-60966e3d133e",
       "name": "Workshop / stock / finance",
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
@@ -131,7 +131,7 @@
       ]
     },
     {
-      "id": "0d07104b-a6f6-4fa0-998a-4d975741dc53",
+      "id": "bd29dae8-d932-4f1b-80cc-d01a2cafae14",
       "name": "Events / notification",
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
@@ -147,7 +147,7 @@
       ]
     },
     {
-      "id": "cf4c77d9-bdad-4579-9ac2-8fd658695a13",
+      "id": "7dfe9e5c-a633-4095-9859-6af4898518cd",
       "name": "Persistence / recovery",
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
@@ -163,7 +163,7 @@
       ]
     },
     {
-      "id": "a8c3cf23-aa71-4322-bcb5-a37bd7b6fb6c",
+      "id": "b7e456f2-50d6-4b93-a481-97baca2a0c60",
       "name": "n8n / separate projects",
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
@@ -179,12 +179,12 @@
       ]
     },
     {
-      "id": "d429ec5f-2a7f-467b-a849-a2e3d5267278",
+      "id": "71f73b75-7364-4b3c-bba3-bb3d4b7ad0aa",
       "name": "Evidence limits",
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "parameters": {
-        "content": "# Documentary architecture only\nRevision `0b1d45b5e81fd8f451a47b470b9bff79330b0781`\nReport: audit/stability-20261113/README.md\nThese conceptual producer/interface/consumer connections do not execute business integration. VERIFIED_PASS applies only to named evidence. NoOp placeholders are not functional checks. Reused earlier workflow identity; no live activation.",
+        "content": "# Documentary architecture only\nRevision `16d5cc92294d7fd4f5bfe7298666fe4d25f29782`\nReport: audit/stability-20261113/README.md\nThese conceptual producer/interface/consumer connections do not execute business integration. VERIFIED_PASS applies only to named evidence. NoOp placeholders are not functional checks. Reused earlier workflow identity; no live activation.",
         "width": 950,
         "height": 450
       },
