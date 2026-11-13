@@ -5,7 +5,7 @@ import { readFile } from 'node:fs/promises';
 import sharp from 'sharp';
 import { db } from '../../database/connection.js';
 import { recordAudit } from '../audit.js';
-import { publishOperationsEvent } from '../operations-events.js';
+import { publishOperationsEvent, enqueueOperationsEvent } from '../operations-events.js';
 import { allowOnlyKeys, HttpError, optionalText, positiveId, requireObject, requireText } from '../http.js';
 import { compressFieldImage } from '../upload.js';
 import { withMachineStorageLock } from '../maintenance/deletion-lock.js';
@@ -349,6 +349,9 @@ export function claimRepMachineWork(rep, cardIdValue, input, database = db) {
     const recipients = database.prepare(`
       SELECT user_id FROM maintenance_order_reps WHERE order_id = ?
     `).all(card.workOrderId).map((row) => Number(row.user_id));
+    if (!(previous && Number(previous.rep_user_id) === Number(rep.id) && previous.visit_uuid === visitUuid && previous.expires_at_ms > now)) {
+      enqueueOperationsEvent('rep.machine.work-started', {userId: rep.id, cardId, recipientUserIds: recipients}, database);
+    }
     return { success: true, status: 'in_progress', cardId, visitUuid,
       expiresAt: new Date(now + 30 * 60 * 1000).toISOString(),
       recipientUserIds: recipients,
@@ -374,6 +377,7 @@ export function releaseRepMachineWork(rep, cardIdValue, input, database = db) {
       WHERE card.id = ?
     `).all(cardId).map((row) => Number(row.user_id));
     database.prepare('DELETE FROM rep_machine_work_leases WHERE card_id = ?').run(cardId);
+    enqueueOperationsEvent('rep.machine.work-ended', {userId: rep.id, cardId, recipientUserIds: recipients}, database);
     return { success: true, released: true, recipientUserIds: recipients };
   }).immediate();
 }
@@ -1240,6 +1244,8 @@ function recordReceivedVisit(rep, visit, visitId, photoRows, database) {
         review_status: 'pending',
       },
     });
+    const recipientUserIds = database.prepare('SELECT user_id FROM maintenance_order_reps WHERE order_id=?').all(receivedVisit.order_id).map(row => Number(row.user_id));
+    enqueueOperationsEvent('rep.visit.submitted', {userId: rep.id, visitUuid: visit.visitUuid, status: 'pending_review', recipientUserIds}, database);
     return findVisit(visit.visitUuid, database);
   }).immediate();
 }

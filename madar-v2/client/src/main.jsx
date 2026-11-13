@@ -2,9 +2,12 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { Capacitor } from '@capacitor/core';
 import App from './App.jsx';
+import { installChunkRecovery } from './lib/chunk-recovery.js';
 import './styles/tokens.css';
 import './styles/base.css';
 import './styles/auth.css';
+
+installChunkRecovery(window);
 
 createRoot(document.getElementById('root')).render(
   <React.StrictMode>

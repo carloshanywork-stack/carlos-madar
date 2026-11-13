@@ -52,7 +52,7 @@ function dispatch(event) {
   for (const listener of subscribers) {try {listener(event);} catch {subscribers.delete(listener);}}
   return event;
 }
-function persistPublication(database, publication) {
+function persistPublication(database, publication, { strictNotifications = false } = {}) {
   database.prepare(`INSERT OR IGNORE INTO operations_events(event_type,payload_json,occurred_at,publication_key) VALUES (?,?,?,?)`)
     .run(publication.type,JSON.stringify(publication.details),publication.occurredAt,publication.key);
   const row=database.prepare('SELECT event_id,event_type,payload_json,occurred_at FROM operations_events WHERE publication_key=?').get(publication.key);
@@ -60,6 +60,7 @@ function persistPublication(database, publication) {
   try {
     materializeNotificationsForEvent(event, database);
   } catch (error) {
+    if (strictNotifications) throw error;
     // The durable event remains the source of truth; never block fan-out because
     // an inbox row could not be written.
     console.error('Notification inbox persistence failed:', error.message);
@@ -70,12 +71,41 @@ function outboxPath(database) {
   if(!database.name || database.name===':memory:')throw new Error('No durable database directory available for the event outbox');
   return join(dirname(resolve(database.name)),'operations-outbox');
 }
+/** Enqueue inside the business transaction; a rollback also removes its publication intent. */
+export function enqueueOperationsEvent(type, details = {}, database = db) {
+  if (!database.inTransaction) throw new Error('Business event enqueue requires an active transaction.');
+  if (typeof type !== 'string' || !type.trim()) throw new TypeError('An event type is required.');
+  database.prepare(`INSERT INTO operations_event_outbox(publication_key,event_type,payload_json,occurred_at)
+    VALUES (?,?,?,?)`).run(randomUUID(), type, JSON.stringify(details), new Date().toISOString());
+}
+
+function flushTransactionalEvents(database) {
+  if (database.inTransaction) return 0; // Never dispatch uncommitted changes.
+  let delivered = 0;
+  const rows = database.prepare('SELECT * FROM operations_event_outbox ORDER BY occurred_at LIMIT 1000').all();
+  for (const row of rows) {
+    // A coalesced reconciliation intent receives a fresh publication identity each delivery.
+    const publication = {key: row.publication_key === 'maintenance.reconcile' ? randomUUID() : row.publication_key,
+      type: row.event_type, details: JSON.parse(row.payload_json), occurredAt: row.occurred_at};
+    const event = database.transaction(() => {
+      const persisted = persistPublication(database, publication, { strictNotifications: true });
+      database.prepare('DELETE FROM operations_event_outbox WHERE publication_key=?').run(row.publication_key);
+      return persisted;
+    }).immediate();
+    dispatch(event); delivered++;
+  }
+  if (delivered) database.prepare(`DELETE FROM operations_events WHERE event_id < (SELECT event_id FROM operations_events ORDER BY event_id DESC LIMIT 1 OFFSET ?)`).run(MAX_REPLAY_EVENTS-1);
+  return delivered;
+}
 export function flushPendingOperationsEvents(database=db) {
   if(!database.open)return {delivered:0};
+  let transactionalDelivered;
+  try { transactionalDelivered=flushTransactionalEvents(database); }
+  catch(error) { console.error('Transactional event delivery pending:', error.message); return {delivered:0,error:error.message}; }
   let root;let files;
   try {root=outboxPath(database);files=readdirSync(root).filter(name=>/^\d+-[0-9a-f-]+\.json$/.test(name)).sort().slice(0,200);}
-  catch(error) {if(error.code==='ENOENT')return {delivered:0};return {delivered:0,error:error.message};}
-  let delivered=0;
+  catch(error) {if(error.code==='ENOENT')return {delivered:transactionalDelivered};return {delivered:transactionalDelivered,error:error.message};}
+  let delivered=transactionalDelivered;
   for(const name of files) {
     try {
       const file=join(root,name);const publication=JSON.parse(readFileSync(file,'utf8'));

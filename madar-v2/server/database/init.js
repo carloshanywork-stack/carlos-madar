@@ -1,3 +1,4 @@
+import { migrateTransactionalEventOutbox } from './event-outbox.js';
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
@@ -2054,6 +2055,7 @@ export function initializeDatabase({ database = db, initialAdminPassword = env.i
     migrateMaintenanceUnmatchedFolderDuplicates(database);
     migrateOrderArchiveMonths(database);
     migrateMaintenanceCardPhotoReviews(database);
+    migrateTransactionalEventOutbox(database);
 
     const hasUsers = database.prepare('SELECT 1 FROM users LIMIT 1').get();
 

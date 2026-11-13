@@ -1,0 +1,114 @@
+{
+  "id": "MadarEmailAlert20261113",
+  "name": "MADAR email alert — SMTP setup required",
+  "active": false,
+  "nodes": [
+    {
+      "id": "0bd41890-7899-412b-b0e4-a3cc5f00519b",
+      "name": "Manual delivery test",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "parameters": {},
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "1d989ef7-bf2e-4eba-a5cb-9e2b38ff85e2",
+      "name": "Monitoring workflow failed",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "parameters": {},
+      "position": [
+        0,
+        200
+      ]
+    },
+    {
+      "id": "9eb93f61-e9b9-4a73-981a-c6df1cc9950f",
+      "name": "Declared email configuration",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "jsCode": "// Set the verified sender address here; select an existing SMTP credential on Send email.\nconst fromEmail = '';\nif (!fromEmail) throw new Error('BLOCKED_PREREQUISITE: configure an authorized SMTP sender and select SMTP credentials on Send email.');\nreturn [{json:{from:fromEmail,to:'carloshany.work@gmail.com',subject:'MADAR monitoring alert / delivery test',text:'A MADAR monitoring execution failed, or an administrator requested a delivery test. Open the authorized n8n monitoring workflow to inspect its result. No customer data or credentials are included in this email.'}}];"
+      },
+      "position": [
+        300,
+        100
+      ]
+    },
+    {
+      "id": "f7426c28-cf61-46eb-aabd-730be531eadd",
+      "name": "Send email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "parameters": {
+        "fromEmail": "={{ $json.from }}",
+        "toEmail": "={{ $json.to }}",
+        "subject": "={{ $json.subject }}",
+        "emailFormat": "text",
+        "text": "={{ $json.text }}",
+        "options": {}
+      },
+      "position": [
+        600,
+        100
+      ]
+    },
+    {
+      "id": "369acd29-1657-4910-a219-0c0e7f14aa65",
+      "name": "Unconfigured delivery boundary",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "parameters": {
+        "content": "# Optional email delivery — NOT OPERATIONAL\nAuthorized recipient configured. SMTP sender/credential missing. Keep inactive. Select a real SMTP credential in the Send email node and set fromEmail in Declared email configuration. Run Manual delivery test and confirm receipt independently. Only then link this as the monitoring error workflow. No alert delivery or activation has been verified. No automatic retry: response-loss after SMTP acceptance can duplicate mail.",
+        "width": 780,
+        "height": 350
+      },
+      "position": [
+        0,
+        -400
+      ]
+    }
+  ],
+  "connections": {
+    "Manual delivery test": {
+      "main": [
+        [
+          {
+            "node": "Declared email configuration",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Monitoring workflow failed": {
+      "main": [
+        [
+          {
+            "node": "Declared email configuration",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Declared email configuration": {
+      "main": [
+        [
+          {
+            "node": "Send email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Africa/Cairo"
+  }
+}

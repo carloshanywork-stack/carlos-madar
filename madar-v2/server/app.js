@@ -1,3 +1,4 @@
+import { runtimeIdentity } from './config/runtime-identity.js';
 import cors from 'cors';
 import express from 'express';
 import { existsSync, statSync } from 'node:fs';
@@ -85,7 +86,7 @@ app.use(express.json({ limit: '1mb' }));
 app.use(requestLogger);
 
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', service: 'madar-v2' });
+  res.json({ status: 'ok', service: 'madar-v2', ...runtimeIdentity });
 });
 
 app.get('/download/apk', requireAuthentication, (req, res, next) => {
@@ -197,6 +198,12 @@ if (existsSync(join(clientDistPath, 'index.html'))) {
       res.status(404).type('text/plain').send('Not found');
       return;
     }
+    // A missing build asset must never masquerade as a successful SPA response.
+    if (req.path.startsWith('/assets/') || /\.[a-z0-9]{1,12}$/i.test(req.path)) {
+      res.status(404).type('text/plain').send('Asset not found');
+      return;
+    }
+    res.set('Cache-Control', 'no-cache');
     res.sendFile(join(clientDistPath, 'index.html'), (error) => {
       if (error && !res.headersSent) next(error);
     });

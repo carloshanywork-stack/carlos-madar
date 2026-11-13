@@ -1,3 +1,4 @@
+import { backupByteLimit, verifyBackupArchive, retainLatestBackup } from './backup-retention.js';
 import { ZipArchive } from 'archiver';
 import { closeSync, createWriteStream, existsSync, openSync, readSync } from 'node:fs';
 import { cp, lstat, mkdir, mkdtemp, open, readdir, readFile, readlink, realpath, rename, rm, stat } from 'node:fs/promises';
@@ -17,7 +18,7 @@ import { asyncHandler, HttpError } from '../http.js';
 import { withMaintenanceOrderStorageLock } from '../maintenance/deletion-lock.js';
 import { getStorageHealth } from './health.js';
 
-const MAX_ARCHIVE_BYTES = 10 * 1024 * 1024 * 1024;
+const MAX_ARCHIVE_BYTES = backupByteLimit();
 const MAX_ENTRIES = 250_000;
 const SQLITE_HEADER = Buffer.from('SQLite format 3\0', 'binary');
 const router = Router();
@@ -68,7 +69,8 @@ export function startSystemBackupScheduler({ database = db, createBackup = creat
         try {
           const backup = await createBackup(database);
           backupSchedulerState.lastRunAt = new Date().toISOString();
-          backupSchedulerState.lastError = null;
+          backupSchedulerState.lastError = backup.retention?.error ?? null;
+          if (backup.retention?.error) logger.error?.("Backup verified but old archive cleanup failed:", backup.retention.error);
           logger.info?.(`Scheduled MADAR V2 backup created: ${backup.filename}`);
         } catch (error) {
           backupSchedulerState.lastError = error.message;
@@ -178,7 +180,7 @@ function validateEntryName(rawName, isDirectory) {
   throw new HttpError(400, 'Backup contains an unexpected file.');
 }
 
-async function extractBackupArchive(archivePath, stageRoot) {
+export async function extractBackupArchive(archivePath, stageRoot) {
   const zip = await openZip(archivePath);
   const seen = new Set();
   let entryCount = 0;
@@ -213,7 +215,7 @@ async function extractBackupArchive(archivePath, stageRoot) {
         if (parts[0] === 'storage') sawStorage = true;
         if (entry.fileName === 'data/madar-v2.sqlite') sawDatabase = true;
         if (entry.uncompressedSize > MAX_ARCHIVE_BYTES || (totalBytes += entry.uncompressedSize) > MAX_ARCHIVE_BYTES) {
-          throw new HttpError(413, 'Backup expands beyond the allowed 10 GB limit.');
+          throw new HttpError(413, 'Backup expands beyond MADAR_V2_BACKUP_MAX_GB.');
         }
         const target = resolve(stageRoot, ...parts);
         if (!inside(stageRoot, target)) throw new HttpError(400, 'Backup path escapes its staging directory.');
@@ -332,7 +334,9 @@ async function replaceDatabaseFromSnapshot(snapshotPath, actorId, restoreTimesta
         const quoted = table.replaceAll('"', '""');
         const columns = db.prepare(`PRAGMA main.table_info("${quoted}")`).all().map((column) => column.name);
         const fields = columns.map((column) => `"${column.replaceAll('"', '""')}"`).join(', ');
-        db.exec(`INSERT INTO main."${quoted}" (${fields}) SELECT ${fields} FROM restored_snapshot."${quoted}"`);
+        // Domain-copy triggers can already enqueue a coalesced reconciliation intent.
+        const conflict = table === 'operations_event_outbox' ? ' OR IGNORE' : '';
+        db.exec(`INSERT${conflict} INTO main."${quoted}" (${fields}) SELECT ${fields} FROM restored_snapshot."${quoted}"`);
       }
       const hasSequence = db.prepare(`SELECT 1 FROM main.sqlite_master WHERE type = 'table' AND name = 'sqlite_sequence'`).get();
       if (hasSequence) {
@@ -612,6 +616,7 @@ async function restoreBackupFile(uploadedPath, actorId) {
     await ensureRealDirectory(storageParent);
     const stageRoot = await mkdtemp(join(storageParent, '.madar-v2-restore-'));
     try {
+      await verifyBackupArchive(uploadedPath);
       const { databaseFile, storageDirectory } = await extractBackupArchive(uploadedPath, stageRoot);
       const migratedPath = await prepareRestorableSnapshot(databaseFile, { stageDirectory: stageRoot });
       validateSnapshot(migratedPath);
@@ -655,10 +660,11 @@ export async function createSystemBackup(database = db) {
     const stamp = createdAt.toISOString().replaceAll(':', '-').replaceAll('.', '-');
     const filename = `madar-v2-backup-${stamp}.zip`;
     const outputPath = join(backupRoot, filename);
+    const temporaryOutput = outputPath + ".partial";
     const snapshotPath = join(backupRoot, `.snapshot-${randomUUID()}.sqlite`);
     try {
       await database.backup(snapshotPath);
-      const output = createWriteStream(outputPath, { flags: 'wx', mode: 0o600 });
+      const output = createWriteStream(temporaryOutput, { flags: 'wx', mode: 0o600 });
       const archive = new ZipArchive({ zlib: { level: 6 } });
       const done = new Promise((resolveDone, rejectDone) => {
         output.on('close', resolveDone);
@@ -674,10 +680,20 @@ export async function createSystemBackup(database = db) {
       archive.append(JSON.stringify({ format: 'madar-v2-backup', version: 1, createdAt: createdAt.toISOString() }, null, 2), { name: 'madar-v2-backup.json' });
       await archive.finalize();
       await done;
+      const verification = await verifyBackupArchive(temporaryOutput);
+      const handle = await open(temporaryOutput, 'r');
+      try { await handle.sync(); } finally { await handle.close(); }
+      await rename(temporaryOutput, outputPath);
+      await syncDirectory(backupRoot);
+      // The last good archive survives every creation/verification failure.
+      let removedBackups = 0; let retentionError = null;
+      try { removedBackups = await retainLatestBackup(backupRoot, filename); }
+      catch (error) { retentionError = error.message; }
       const metadata = await stat(outputPath);
-      return { filename, sizeBytes: metadata.size, createdAt: createdAt.toISOString(), databaseHealth: health.status };
+      return { filename, sizeBytes: metadata.size, createdAt: createdAt.toISOString(), databaseHealth: health.status,
+        verification, retention: { keep: 1, removedBackups, error: retentionError } };
     } catch (error) {
-      await rm(outputPath, { force: true });
+      await rm(temporaryOutput, { force: true });
       throw error;
     } finally {
       await rm(snapshotPath, { force: true });
@@ -752,9 +768,12 @@ router.get('/health', asyncHandler(async (req, res) => {
   const health = {
     status,
     uptimeSeconds: Math.floor(process.uptime()),
+    events: db.prepare('SELECT COUNT(*) AS pendingPublications, MIN(occurred_at) AS oldestPendingAt FROM operations_event_outbox').get(),
     database,
     storage,
     backups: {
+      retentionCount: 1,
+      maxRestoreBytes: MAX_ARCHIVE_BYTES,
       lastScheduledAt: backupSchedulerState.lastRunAt,
       lastError: backupSchedulerState.lastError,
       nextScheduledAt: backupSchedulerState.nextRunAt,

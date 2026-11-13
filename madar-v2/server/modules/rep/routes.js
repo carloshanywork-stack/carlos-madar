@@ -236,13 +236,6 @@ router.get('/today-route', (req, res, next) => {
 router.post('/machines/:cardId/start-work', (req, res, next) => {
   try {
     const result = claimRepMachineWork(req.user, req.params.cardId, req.body);
-    if (!result.idempotent) {
-      publishOperationsEvent('rep.machine.work-started', {
-        userId: req.user.id,
-        cardId: result.cardId,
-        recipientUserIds: result.recipientUserIds,
-      });
-    }
     res.set({ 'Cache-Control': 'private, no-store' });
     res.json(result);
   } catch (error) { next(error); }
@@ -251,11 +244,6 @@ router.post('/machines/:cardId/start-work', (req, res, next) => {
 router.post('/machines/:cardId/stop-work', (req, res, next) => {
   try {
     const result = releaseRepMachineWork(req.user, req.params.cardId, req.body);
-    if (result.released) publishOperationsEvent('rep.machine.work-ended', {
-      userId: req.user.id,
-      cardId: Number(req.params.cardId),
-      recipientUserIds: result.recipientUserIds,
-    });
     res.set({ 'Cache-Control': 'private, no-store' });
     res.json(result);
   } catch (error) { next(error); }
@@ -395,17 +383,6 @@ router.post('/sync-visit', syncVisitUpload.any(), asyncHandler(async (req, res) 
       beforePhotos: files.filter((file) => file.fieldname === 'beforePhoto'),
       afterPhotos: files.filter((file) => file.fieldname === 'afterPhoto'),
     });
-    if (result.status !== 'processing' && !result.idempotent) {
-      const recipientUserIds = db.prepare(`
-        SELECT user_id FROM maintenance_order_reps WHERE order_id = ?
-      `).all(result.workOrderId).map((row) => Number(row.user_id));
-      publishOperationsEvent('rep.visit.submitted', {
-        userId: req.user.id,
-        visitUuid: result.visitUuid,
-        status: result.status,
-        recipientUserIds,
-      });
-    }
     res.set({ 'Cache-Control': 'private, no-store', Pragma: 'no-cache' });
     res.status(result.status === 'processing' ? 202 : 200).json(result);
   } finally {

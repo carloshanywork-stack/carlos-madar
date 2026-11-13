@@ -13,7 +13,7 @@ LOG_FILE="$LOG_DIR/auto-pull.log"
 mkdir -p "$LOG_DIR"
 
 # Never run two deploys at once.
-exec 9>/tmp/madar-autodeploy.lock
+exec 9>"$LOG_DIR/.autodeploy.lock"
 flock -n 9 || exit 0
 
 log() { printf '%s %s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$*" >>"$LOG_FILE"; }
@@ -60,14 +60,19 @@ fi
 
 LOCAL="$(git rev-parse HEAD)"
 REMOTE="$(git rev-parse "$REMOTE_REF")"
-[ "$LOCAL" = "$REMOTE" ] && exit 0
+DEPLOYED="$(cat "$STATE_DIR/deployed-revision" 2>/dev/null || true)"
+[ "$LOCAL" = "$REMOTE" ] && [ "$DEPLOYED" = "$REMOTE" ] && exit 0
 
 if [ -n "$(git status --porcelain)" ]; then
   log_throttled dirty-tree "local uncommitted changes present; refusing to update"
   exit 0
 fi
 
-CHANGED="$(git diff --name-only "$LOCAL" "$REMOTE")"
+if [ -n "$DEPLOYED" ] && git cat-file -e "$DEPLOYED^{commit}" 2>/dev/null; then
+  CHANGED="$(git diff --name-only "$DEPLOYED" "$REMOTE")"
+else
+  CHANGED="$(git ls-tree -r --name-only "$REMOTE")"
+fi
 
 # Run a deploy step without dumping its whole output into the log.
 # Success -> one summary line. Failure -> summary plus the tail of the output.
@@ -86,6 +91,10 @@ run_step() {
   return 1
 }
 
+if ! git merge-base --is-ancestor "$LOCAL" "$REMOTE"; then
+  log_throttled diverged "local main is ahead of or diverged from origin; refusing an unpushed deployment"
+  exit 0
+fi
 MERGE_OUT="$(mktemp)"
 if git merge --ff-only --quiet "$REMOTE" >"$MERGE_OUT" 2>&1; then
   rm -f "$MERGE_OUT"
@@ -103,12 +112,27 @@ if printf '%s\n' "$CHANGED" | grep -qx 'madar-v2/package-lock.json'; then
     || { log "backend deps not updated; not restarting"; exit 0; }
 fi
 
+# All tests create their own temporary databases/storage; never pass production paths.
+if ! run_step "$PROJECT_DIR" "V2 regression gate" env -u MADAR_V2_DATABASE_PATH -u MADAR_V2_STORAGE_ROOT -u MADAR_V2_DATA_DIR -u MADAR_V2_BACKUP_ROOT NODE_ENV=test npm test; then
+  log "tests failed; deployed receipt unchanged; not restarting"
+  exit 1
+fi
+
+CANDIDATE=""; PREVIOUS_DIST=""
 if printf '%s\n' "$CHANGED" | grep -qE '^madar-v2/client/(package-lock\.json|src/|index\.html|vite\.config\.js)'; then
-  log "client changed; installing and building"
-  if run_step "$PROJECT_DIR/client" "client npm ci" npm ci --prefer-offline --no-audit --no-fund \
-     && run_step "$PROJECT_DIR/client" "client build" npm run build -- --outDir dist-next --emptyOutDir; then
-    rm -rf "$PROJECT_DIR/client/dist"
+  log "client changed; checking dependencies and building"
+  if [ ! -d "$PROJECT_DIR/client/node_modules" ] || printf '%s\n' "$CHANGED" | grep -qx 'madar-v2/client/package-lock.json'; then
+    run_step "$PROJECT_DIR/client" "client npm ci" npm ci --prefer-offline --no-audit --no-fund || exit 1
+  fi
+  if run_step "$PROJECT_DIR/client" "client build" npm run build -- --outDir dist-next --emptyOutDir; then
+    PREVIOUS_DIST="$PROJECT_DIR/client/dist-previous"
+    if [ -e "$PREVIOUS_DIST" ]; then
+      log "previous dist recovery directory exists; refusing to overwrite it"
+      exit 1
+    fi
+    if [ -d "$PROJECT_DIR/client/dist" ]; then mv "$PROJECT_DIR/client/dist" "$PREVIOUS_DIST"; fi
     mv "$PROJECT_DIR/client/dist-next" "$PROJECT_DIR/client/dist"
+    CANDIDATE=1
   else
     log "client build failed; keeping the previous dist"
     rm -rf "$PROJECT_DIR/client/dist-next"
@@ -116,8 +140,18 @@ if printf '%s\n' "$CHANGED" | grep -qE '^madar-v2/client/(package-lock\.json|src
   fi
 fi
 
-if run_step "$PROJECT_DIR" "PM2 restart" pm2 restart madar-v2 --update-env; then
-  log "madar-v2 now running commit $(git rev-parse --short HEAD)"
+if run_step "$PROJECT_DIR" "PM2 restart" pm2 restart madar-v2 --update-env \
+   && run_step "$PROJECT_DIR" "post-deploy revision/asset health" node scripts/verify-deployment.mjs "$REMOTE"; then
+  printf '%s\n' "$REMOTE" > "$STATE_DIR/deployed-revision.tmp"
+  mv "$STATE_DIR/deployed-revision.tmp" "$STATE_DIR/deployed-revision"
+  [ -z "$PREVIOUS_DIST" ] || rm -rf "$PREVIOUS_DIST"
+  log "verified deployment $REMOTE"
 else
-  log "PM2 restart failed; new commit is on disk but not loaded"
+  if [ -n "$CANDIDATE" ] && [ -d "$PREVIOUS_DIST" ]; then
+    rm -rf "$PROJECT_DIR/client/dist"
+    mv "$PREVIOUS_DIST" "$PROJECT_DIR/client/dist"
+    log "previous web assets restored; backend recovery requires operator review (no database rollback)"
+  fi
+  log "ALERT: deployment FAILED; receipt unchanged, do not infer deployed revision from Git HEAD"
+  exit 1
 fi

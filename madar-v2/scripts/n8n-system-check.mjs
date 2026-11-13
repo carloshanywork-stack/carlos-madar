@@ -14,6 +14,10 @@ import { getStorageHealth } from '../server/modules/system/health.js';
 const apiBaseUrl = (process.env.MADAR_V2_BASE_URL ?? 'http://127.0.0.1:3000').replace(/\/+$/, '');
 const n8nBaseUrl = (process.env.MADAR_N8N_BASE_URL ?? 'http://127.0.0.1:5678').replace(/\/+$/, '');
 const netdataBaseUrl = (process.env.MADAR_NETDATA_BASE_URL ?? 'http://127.0.0.1:19999').replace(/\/+$/, '');
+const checkMode = process.env.MADAR_CHECK_MODE ?? 'operational';
+if (!['operational','release'].includes(checkMode)) throw new Error('MADAR_CHECK_MODE must be operational or release.');
+const revisionRead = spawnSync('git', ['rev-parse','HEAD'], {cwd:projectRoot,encoding:'utf8',timeout:2000});
+const expectedRevision = revisionRead.status === 0 ? revisionRead.stdout.trim() : null;
 const checks = [];
 
 function addCheck(name, status, details) {
@@ -63,7 +67,8 @@ await attemptCheck('MADAR V2 API health', async () => {
   if (!response.ok || body.status !== 'ok' || body.service !== 'madar-v2') {
     throw new Error(`Expected MADAR V2 health HTTP 200; received HTTP ${response.status}.`);
   }
-  return { details: { httpStatus: response.status, durationMs, service: body.service } };
+  if (!expectedRevision || body.sourceRevision !== expectedRevision || body.sourceDirty !== false) throw new Error('Running service does not match the clean checked-out source revision.');
+  return { details: { httpStatus: response.status, durationMs, service: body.service, sourceRevision:body.sourceRevision } };
 });
 
 await attemptCheck('Representative API authentication boundary', async () => {
@@ -169,7 +174,7 @@ await attemptCheck('Configured storage capacity', async () => {
   };
 });
 
-await attemptCheck('Rep API integration tests', async () => {
+if (checkMode === 'release') await attemptCheck('Rep API integration tests', async () => {
   const testRun = spawnSync(process.execPath, ['--test', 'test/rep-api.test.js'], {
     cwd: projectRoot,
     encoding: 'utf8',
@@ -196,7 +201,12 @@ const failedCount = checks.filter((check) => check.status === 'FAIL').length;
 const warningCount = checks.filter((check) => check.status === 'WARN').length;
 const overall = failedCount ? 'FAIL' : warningCount ? 'WARN' : 'PASS';
 const report = {
-  schemaVersion: 1,
+  schemaVersion: 2,
+  sourceRevision: expectedRevision,
+  checkMode,
+  releaseAcceptance: 'NOT_ESTABLISHED',
+  physicalDevice: 'BLOCKED_PREREQUISITE',
+  alertDelivery: 'UNCONFIGURED_NO_AUTHORIZED_DESTINATION',
   system: 'MADAR V2',
   checkedAt: new Date().toISOString(),
   overall,
@@ -205,3 +215,4 @@ const report = {
 };
 
 console.log(JSON.stringify(report));
+process.exitCode = failedCount ? 1 : 0;
