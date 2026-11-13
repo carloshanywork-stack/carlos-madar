@@ -55,7 +55,7 @@ function activeUserIds(ids, database) {
  * Dismissed rows are preserved by the unique (user_id, event_id) constraint, so
  * replaying an outbox event can never resurrect a dismissed notification.
  */
-export function materializeNotificationsForEvent(event, database = db, { adminIds } = {}) {
+export function materializeNotificationsForEvent(event, database = db, { adminIds, readAt = null } = {}) {
   if (!event || !Number.isSafeInteger(Number(event.id)) || Number(event.id) < 1) return 0;
   const notice = operationNotification(event);
   if (!notice) return 0;
@@ -69,25 +69,25 @@ export function materializeNotificationsForEvent(event, database = db, { adminId
 
   const insert = database.prepare(`
     INSERT OR IGNORE INTO user_notifications
-      (user_id, event_id, event_type, message, href, occurred_at)
-    VALUES (?, ?, ?, ?, ?, ?)
+      (user_id, event_id, event_type, message, href, occurred_at, read_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
   `);
   const occurredAt = typeof event.occurredAt === 'string' && Number.isFinite(Date.parse(event.occurredAt))
     ? event.occurredAt
     : nowIso();
   let inserted = 0;
   for (const userId of recipients) {
-    const result = insert.run(userId, Number(event.id), event.type, notice.text, notice.href, occurredAt);
+    const result = insert.run(userId, Number(event.id), event.type, notice.text, notice.href, occurredAt, readAt);
     inserted += Number(result.changes) || 0;
   }
   return inserted;
 }
 
-/** One-time migration helper: materialize the most recent mapped events. */
-export function backfillNotificationsFromEvents(database = db, { limit = 500 } = {}) {
+/** One-time migration helper: materialize a bounded, already-seen backlog. */
+export function backfillNotificationsFromEvents(database = db, { limit = 100, markRead = true } = {}) {
   const admins = activeAdminIds(database);
   const requested = Number(limit);
-  const boundedLimit = Number.isSafeInteger(requested) && requested > 0 ? Math.min(requested, 10_000) : 500;
+  const boundedLimit = Number.isSafeInteger(requested) && requested > 0 ? Math.min(requested, 10_000) : 100;
   const rows = database.prepare(`
     SELECT event_id, event_type, payload_json, occurred_at
     FROM (
@@ -112,7 +112,12 @@ export function backfillNotificationsFromEvents(database = db, { limit = 500 } =
       type: row.event_type,
       occurredAt: row.occurred_at,
     };
-    inserted += materializeNotificationsForEvent(event, database, { adminIds: admins });
+    inserted += materializeNotificationsForEvent(event, database, {
+      adminIds: admins,
+      // The old notification strip already surfaced these events, so the
+      // backlog opens as read instead of a large first-run unread badge.
+      readAt: markRead ? row.occurred_at : null,
+    });
   }
   return inserted;
 }

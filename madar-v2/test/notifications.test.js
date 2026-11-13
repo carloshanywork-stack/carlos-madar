@@ -102,6 +102,7 @@ async function readSseFrame(response, expectedType) {
 
 const state = {
   adminCookie: '',
+  adminId: 0,
   salesCookie: '',
   sales2Cookie: '',
   repCookie: '',
@@ -122,6 +123,7 @@ test('the inbox exposes unread counts and newest-first notifications per recipie
   }));
   assert.equal(setup.response.status, 201);
   state.adminCookie = setup.cookie;
+  state.adminId = Number(setup.body.user.id);
 
   async function createUser(username, fullName, role, password) {
     const created = await request('/api/users', jsonOptions('POST', { username, full_name: fullName, role, password }), state.adminCookie);
@@ -270,4 +272,25 @@ test('reconnect replays the missed event and the inbox includes it', async () =>
   assert.equal(adminInbox.notifications[0].eventId, published.id, 'the replayed event is at the top of the inbox');
   assert.equal(adminInbox.notifications[0].read, false);
   assert.equal(adminInbox.unreadCount, 1);
+});
+
+test('the migration backlog is bounded and opens as already read', async () => {
+  const occurredAt = new Date().toISOString();
+  const insert = db.prepare('INSERT INTO operations_events(event_type, payload_json, occurred_at) VALUES (?, ?, ?)');
+  const older = Number(insert.run('rep.machine.location-requested', JSON.stringify({ repName: 'أ' }), occurredAt).lastInsertRowid);
+  const newer = Number(insert.run('rep.machine.location-requested', JSON.stringify({ repName: 'ب' }), occurredAt).lastInsertRowid);
+
+  const before = await inbox(state.adminCookie);
+  const inserted = backfillNotificationsFromEvents(db, { limit: 1, markRead: true });
+  assert.equal(inserted, 1, 'only the newest event inside the bound is materialized');
+
+  const newerRow = db.prepare('SELECT read_at FROM user_notifications WHERE user_id = ? AND event_id = ?')
+    .get(state.adminId, newer);
+  assert.ok(newerRow?.read_at, 'backfilled history is marked read');
+  const olderRow = db.prepare('SELECT id FROM user_notifications WHERE user_id = ? AND event_id = ?')
+    .get(state.adminId, older);
+  assert.equal(olderRow, undefined, 'events outside the bound are not materialized');
+
+  const after = await inbox(state.adminCookie);
+  assert.equal(after.unreadCount, before.unreadCount, 'backfilled history does not add unread items');
 });

@@ -676,10 +676,10 @@ export function migrateUserNotifications(database) {
         ON user_notifications(user_id, read_at, dismissed_at);
     `);
     // Preserve the recent notifications the old strip could still show by
-    // materializing a bounded backlog once, with per-user state starting
-    // unread/undismissed. Older history stays in the durable event log instead
-    // of flooding the bell on the first deploy.
-    backfillNotificationsFromEvents(database);
+    // materializing a bounded backlog once. The backlog opens as read so the
+    // first deploy does not show a large badge for already-seen events, and
+    // older history stays in the durable event log.
+    backfillNotificationsFromEvents(database, { limit: 100, markRead: true });
     database.prepare('INSERT INTO schema_migrations (version) VALUES (?)')
       .run(userNotificationsMigration);
   });
