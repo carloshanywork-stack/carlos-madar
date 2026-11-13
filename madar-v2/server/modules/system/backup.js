@@ -1,3 +1,5 @@
+import { schemaFingerprint } from '../../database/schema-compatibility.js';
+import { legacyDataImportVersion } from '../../database/data-import-version.js';
 import { backupByteLimit, verifyBackupArchive, retainLatestBackup } from './backup-retention.js';
 import { ZipArchive } from 'archiver';
 import { closeSync, createWriteStream, existsSync, openSync, readSync } from 'node:fs';
@@ -236,10 +238,7 @@ export async function extractBackupArchive(archivePath, stageRoot) {
   return { databaseFile: join(stageRoot, 'data', 'madar-v2.sqlite'), storageDirectory: join(stageRoot, 'storage') };
 }
 
-function schemaFingerprint(database) {
-  return database.prepare(`SELECT type, name, sql FROM sqlite_master
-    WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name`).all();
-}
+
 
 function validateSnapshot(snapshotPath) {
   const header = readFileSyncHeader(snapshotPath);
@@ -277,6 +276,7 @@ export async function prepareRestorableSnapshot(snapshotPath, { database = db, s
       throw new HttpError(409, 'Backup format is not a supported MADAR V2 database.');
     }
     const known = new Set(database.prepare('SELECT version FROM schema_migrations').all().map((row) => row.version));
+    known.add(legacyDataImportVersion);
     if (source.prepare('SELECT version FROM schema_migrations').all().some((row) => !known.has(row.version))) {
       throw new HttpError(409, 'Backup contains a newer or unsupported migration. Upgrade MADAR before restoring it.');
     }
@@ -324,8 +324,8 @@ async function replaceDatabaseFromSnapshot(snapshotPath, actorId, restoreTimesta
     const tables = db.prepare(`SELECT name FROM main.sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name`).all().map((row) => row.name);
     const snapshotTables = db.prepare(`SELECT name FROM restored_snapshot.sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name`).all().map((row) => row.name);
     if (JSON.stringify(tables) !== JSON.stringify(snapshotTables)) throw new HttpError(409, 'Backup tables do not match the live schema.');
-    const schema = db.prepare(`SELECT type, name, sql FROM main.sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name`).all();
-    const snapshotSchema = db.prepare(`SELECT type, name, sql FROM restored_snapshot.sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name`).all();
+    const schema = schemaFingerprint(db);
+    const snapshotSchema = schemaFingerprint(db, 'restored_snapshot');
     if (JSON.stringify(schema) !== JSON.stringify(snapshotSchema)) throw new HttpError(409, 'Backup schema changed during validation.');
     db.transaction(() => {
       db.exec('PRAGMA defer_foreign_keys = ON');

@@ -9,8 +9,7 @@ tests=ET.parse(out/'v2-tests.junit.xml');cases=tests.findall('.//testcase');coun
 if counts['failed'] or not counts['tests']:raise RuntimeError('Passing real test evidence required')
 w=json.loads((old/'n8n-live-verifier.json').read_text());node=next(n for n in w['nodes'] if n['name']=='Configuration and dated evidence');code=node['parameters']['jsCode'];split=code.index(';\nif');cfg=json.loads(code[len('const config = '):split]);previousRevision=cfg['sourceRevision']
 cfg.update(sourceRevision=rev,snapshotAt=now,expectedSourceTrees=trees,testResults={'sourceRevision':rev,'fullSuite':counts,'adaptedRepContract':None,'adaptation':'None: original suite passed without modifying assertions.'})
-manifest=json.loads((root/'madar-v2/client/dist/asset-manifest.json').read_text());bundle=next(v['file'] for k,v in manifest.items() if k.endswith('/RepApp.jsx'))
-cfg['probes'][3].update(url='https://carlos-pc.tail852ef0.ts.net/'+bundle,rule='javascript')
+cfg['probes'][3].update(name='Current web entry JavaScript from actual HTML',url='https://carlos-pc.tail852ef0.ts.net/assets/not-configured.js',rule='javascript')
 cfg['probes'].append({'id':'missing-asset','name':'Missing build asset rejects SPA fallback','url':'http://127.0.0.1:3000/assets/madar-deliberately-missing.js','expectedStatus':404,'rule':'plain404'})
 # Retain the previously curated coverage inventory, but re-anchor every surviving source reference.
 inv=json.loads((old/'connections.json').read_text());inv.update(sourceRevision=rev,verifiedAt=now,findings=[])
@@ -33,6 +32,8 @@ for n in w['nodes']:
  if n['name'].startswith('Assert | '):
   js=n['parameters']['jsCode'];js=js.replace("parsed?.service==='madar-v2'", "parsed?.service==='madar-v2'&&parsed?.sourceDirty===false&&Object.entries(state.config.expectedSourceTrees).every(([path,hash])=>parsed?.sourceTrees?.[path]===hash)")
   js=js.replace("if(p.rule==='sent-label')ok=ok&&String(body).includes('تم الإرسال');", "if(p.rule==='javascript')ok=ok&&/javascript/i.test(String(r.headers?.['content-type']||''))&&!String(body).toLowerCase().includes('<!doctype html');\nif(p.rule==='plain404')ok=ok&&!String(body).toLowerCase().includes('<!doctype html');")
+  if n['name']=='Assert | web':
+   js=js.replace('const result=', "if(!state.config.fixtureOnly){const asset=String(body).match(/src=\"(\\/assets\\/[^\" ]+\\.js)\"/);ok=ok&&Boolean(asset);if(asset)state.config.probes[3].url=state.config.probes[2].url.replace(/\\/$/,'')+asset[1];}\nconst result=")
   n['parameters']['jsCode']=js
  if n['type'].endswith('.stickyNote'):
   n['parameters']['content']=f'# Refreshed stability evidence\nSource `{rev}`\nReport: audit/stability-20261113/README.md\nManual read-only checks; inactive. Source tree hashes must match the running process. {counts["passed"]}/{counts["tests"]} isolated V2 tests passed. No device acceptance or external alert delivery is claimed.\nDocumentation notes are conceptual connections, not executable business transactions.'

@@ -1,3 +1,4 @@
+import { legacyDataImportVersion } from '../server/database/data-import-version.js';
 import Database from 'better-sqlite3';
 import { isAbsolute, resolve, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -5,7 +6,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const sourcePath = resolve(root, '../system/data/madar.sqlite');
 const targetPath = resolve(root, 'data/madar-v2.sqlite');
-const migrationVersion = 'migrate-from-v1-data-v1';
+const migrationVersion = legacyDataImportVersion;
 
 const validUserRoles = new Set(['admin', 'sales', 'operations', 'purchasing']);
 const validDepartments = new Set(['Maintenance', 'Workshop', 'Warehouse', 'Finance', 'Administration']);

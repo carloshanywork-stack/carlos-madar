@@ -1,3 +1,4 @@
+import { migrateMachineTimestampMetadata } from './schema-compatibility.js';
 import { migrateTransactionalEventOutbox } from './event-outbox.js';
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -2056,6 +2057,7 @@ export function initializeDatabase({ database = db, initialAdminPassword = env.i
     migrateOrderArchiveMonths(database);
     migrateMaintenanceCardPhotoReviews(database);
     migrateTransactionalEventOutbox(database);
+    migrateMachineTimestampMetadata(database);
 
     const hasUsers = database.prepare('SELECT 1 FROM users LIMIT 1').get();
 

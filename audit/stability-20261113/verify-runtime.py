@@ -35,10 +35,13 @@ with tempfile.TemporaryDirectory(prefix='madar-connections-n8n-') as tmp:
  fixturePath=pathlib.Path(tmp)/'fixture.json';fixturePath.write_text(json.dumps(fixture,ensure_ascii=False))
  if run('import-map',['import:workflow','--input='+str(out/'n8n-system-connections.json'),'--activeState=false'])!=0:raise RuntimeError('Map import failed')
  if run('import-live',['import:workflow','--input='+str(out/'n8n-live-verifier.json'),'--activeState=false'])!=0:raise RuntimeError('Verifier import failed')
+ if run('import-email',['import:workflow','--input='+str(out/'n8n-email-alert.json'),'--activeState=false'])!=0:raise RuntimeError('Email definition import failed')
  if run('import-fixture',['import:workflow','--input='+str(fixturePath),'--activeState=false'])!=0:raise RuntimeError('Fixture import failed')
  success=run('fixture-success',['execute','--id='+fixture['id'],'--rawOutput'])
  state['fail']=True;failure=run('fixture-deliberate-failure',['execute','--id='+fixture['id'],'--rawOutput']);state['fail']=False
  live=run('actual-read-only-live-targets',['execute','--id='+workflow['id'],'--rawOutput'])
+ emailBlocked=run('email-prerequisite-blocked',['execute','--id=MadarEmailAlert20261113','--rawOutput'])
+ emailPrerequisiteBlocked=emailBlocked!=0 and 'BLOCKED_PREREQUISITE' in (out/'runtime-email-prerequisite-blocked.log').read_text()
  d=sqlite3.connect('file:'+tmp+'/audit.sqlite?mode=ro',uri=True)
  executions=[{'id':r[0],'workflowId':r[1],'status':r[2],'startedAt':r[3],'stoppedAt':r[4]} for r in d.execute('SELECT id,workflowId,status,startedAt,stoppedAt FROM execution_entity ORDER BY id')]
  # Retain only output summaries from the serialized n8n execution object, never HTTP bodies.
@@ -55,7 +58,7 @@ with tempfile.TemporaryDirectory(prefix='madar-connections-n8n-') as tmp:
  deliberate=next((s['summary'] for s in summaries if s['executionId']==executions[1]['id']),{})
  failedChecks=[c for c in deliberate.get('liveChecks',[]) if c['status']=='VERIFIED_FAIL']
  expectedFailure=success==0 and failure!=0 and 'REQUIRED_LIVE_CHECK_FAILED' in failureLog and len(failedChecks)==1 and failedChecks[0]['id']=='local-api' and failedChecks[0]['actualStatus']==503 and any(r['id']=='local-api' and r['deliberateFailure'] for r in state['requests'])
- result={'verifiedAt':datetime.datetime.now(datetime.timezone.utc).isoformat(),'sourceRevision':config['sourceRevision'],'runtime':'n8n 2.46.7','isolation':'Disposable /tmp N8N_USER_FOLDER and SQLite, independent runner ports; all production-target checks are read-only GET. No production business writes, workflow activation or credentials used.','steps':records,'executions':executions,'summaries':summaries,'fixtureRequests':state['requests'],'fixtureSuccess':success==0,'deliberateFailureVisible':expectedFailure,'actualReadOnlyLiveTargets':live==0,'artifactSha256':{f:hashlib.sha256((out/f).read_bytes()).hexdigest() for f in ['n8n-system-connections.json','n8n-live-verifier.json']}}
+ result={'emailPrerequisiteBlocked':emailPrerequisiteBlocked,'alertDelivery':'BLOCKED_PREREQUISITE_NO_SMTP','verifiedAt':datetime.datetime.now(datetime.timezone.utc).isoformat(),'sourceRevision':config['sourceRevision'],'runtime':'n8n 2.46.7','isolation':'Disposable /tmp N8N_USER_FOLDER and SQLite, independent runner ports; all production-target checks are read-only GET. No production business writes, workflow activation or credentials used.','steps':records,'executions':executions,'summaries':summaries,'fixtureRequests':state['requests'],'fixtureSuccess':success==0,'deliberateFailureVisible':expectedFailure,'actualReadOnlyLiveTargets':live==0,'artifactSha256':{f:hashlib.sha256((out/f).read_bytes()).hexdigest() for f in ['n8n-system-connections.json','n8n-live-verifier.json']}}
  (out/'n8n-runtime-results.json').write_text(json.dumps(result,ensure_ascii=False,indent=2)+'\n')
  print(json.dumps({k:result[k] for k in ['fixtureSuccess','deliberateFailureVisible','actualReadOnlyLiveTargets','executions']},ensure_ascii=False))
- if success!=0 or not expectedFailure or live!=0:raise SystemExit(1)
+ if success!=0 or not expectedFailure or live!=0 or not emailPrerequisiteBlocked:raise SystemExit(1)

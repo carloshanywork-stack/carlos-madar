@@ -26,3 +26,11 @@ Authorized alert recipient: `carloshany.work@gmail.com`. No SMTP configuration, 
 ## Remaining acceptance
 
 Physical-device camera/GPS/SAF/background/offline/upgrade tests remain unverified. A full extraction/migration drill on the same host is distinct from off-device disaster recovery. Existing placeholder biometric/noOp workflow is not functional automation; it is not activated or counted as a passing verifier. Review remaining legacy semantic publication sites before claiming universal transactional notification delivery.
+
+## Historical restore defect found during the real drill
+
+The first full-archive drill reached database migration and correctly failed closed: `migrate-from-v1-data-v1` was treated as an unknown future schema migration on a fresh installation. It is the existing data-provenance marker written by `scripts/migrate-from-v1.js`, now explicitly shared/recognized without rerunning that import.
+
+A second database-only investigation found raw SQL-text comparison rejected supported historical ADD COLUMN layouts (column order and SQL formatting). The compatibility fingerprint now compares normalized, order-independent column definitions and preserves CHECK/UNIQUE/FK/default/type semantics plus indexes/triggers. It still rejects unknown migrations and changed constraints. One explicitly supported legacy exception is machines.updated_at: its recorded migration fills NULL technical update metadata from the existing created_at; it does not change financial or duty history. Both restore validation and the attached-snapshot copy use the same compatibility rules.
+
+Focused acceptance actually restored a historical-layout ZIP through the authenticated HTTP endpoint into temporary DB/storage, preserved evidence and IDs, checked integrity/FKs, and invalidated the previous session. A deliberately different CHECK constraint remains incompatible. The real full ZIP drill is repeated after these fixes; see its final outcome rather than treating the first failure as a pass.
