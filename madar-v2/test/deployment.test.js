@@ -10,12 +10,12 @@ function fixture(name){
  run('git',['config','user.email','fixture@example.invalid'],repo);run('git',['config','user.name','Isolated fixture'],repo);
  mkdirSync(join(repo,'madar-v2/scripts'),{recursive:true});mkdirSync(join(repo,'madar-v2/client/src'),{recursive:true});
  cpSync(new URL('../scripts/auto-pull.sh',import.meta.url),join(repo,'madar-v2/scripts/auto-pull.sh'));
- writeFileSync(join(repo,'.gitignore'),'madar-v2/logs/\nmadar-v2/client/dist*/\n');writeFileSync(join(repo,'madar-v2/client/src/app.js'),'fixture');
+ writeFileSync(join(repo,'.gitignore'),readFileSync(new URL('../.gitignore',import.meta.url),'utf8').split('\n').filter(Boolean).map(line=>'madar-v2/'+line).join('\n')+'\n');writeFileSync(join(repo,'madar-v2/client/src/app.js'),'fixture');
  run('git',['add','.'],repo);run('git',['commit','-qm','fixture'],repo);run('git',['remote','add','origin',remote],repo);run('git',['push','-qu','origin','main'],repo);
  const callLog=join(base,'calls');
  writeFileSync(join(bin,'npm'),'#!/bin/sh\necho "npm $*" >> "$CALL_LOG"\n[ "$1" != test ] || [ "${FAIL_TESTS:-0}" != 1 ] || exit 1\nif [ "$1" = run ]; then mkdir -p dist-next; echo candidate > dist-next/index.html; fi\n',{mode:0o755});
  writeFileSync(join(bin,'pm2'),'#!/bin/sh\necho "pm2 $*" >> "$CALL_LOG"\n',{mode:0o755});
- writeFileSync(join(bin,'node'),'#!/bin/sh\necho "node $*" >> "$CALL_LOG"\n[ "${FAIL_HEALTH:-0}" != 1 ]\n',{mode:0o755});
+ writeFileSync(join(bin,'node'),'#!/bin/sh\necho "node $*" >> "$CALL_LOG"\n[ -z "$(git status --porcelain)" ] || exit 1\n[ "${FAIL_HEALTH:-0}" != 1 ]\n',{mode:0o755});
  const env={...process.env,PATH:bin+':'+process.env.PATH,CALL_LOG:callLog};
  return {repo,base,callLog,env,run(extra={}){return spawnSync('bash',['madar-v2/scripts/auto-pull.sh'],{cwd:repo,env:{...env,...extra},timeout:20000});}};
 }

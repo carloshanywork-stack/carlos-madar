@@ -8,6 +8,10 @@ const root=mkdtempSync(join(tmpdir(),'madar-backup-compat-'));
 process.env.MADAR_V2_DATABASE_PATH=join(root,'current.sqlite');
 process.env.MADAR_V2_STORAGE_ROOT=join(root,'storage');
 process.env.NODE_ENV='test';
+process.env.STORAGE_MOUNT_PATH='';
+process.env.MADAR_V2_BACKUP_MOUNT_PATH='';
+process.env.MADAR_V2_DATA_DIR=join(root,'runtime-data');
+process.env.MADAR_V2_BACKUP_ROOT=join(root,'backups');
 const [{db},{initializeDatabase},{prepareRestorableSnapshot}]=await Promise.all([
  import('../server/database/connection.js'),import('../server/database/init.js'),import('../server/modules/system/backup.js'),
 ]);

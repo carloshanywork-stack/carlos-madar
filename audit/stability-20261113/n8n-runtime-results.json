@@ -1,0 +1,681 @@
+{
+  "emailPrerequisiteBlocked": true,
+  "alertDelivery": "BLOCKED_PREREQUISITE_NO_SMTP",
+  "verifiedAt": "2026-11-13T20:53:07.879386+00:00",
+  "sourceRevision": "0b1d45b5e81fd8f451a47b470b9bff79330b0781",
+  "runtime": "n8n 2.46.7",
+  "isolation": "Disposable /tmp N8N_USER_FOLDER and SQLite, independent runner ports; all production-target checks are read-only GET. No production business writes, workflow activation or credentials used.",
+  "steps": [
+    {
+      "step": "import-map",
+      "exitCode": 0,
+      "log": "runtime-import-map.log"
+    },
+    {
+      "step": "import-live",
+      "exitCode": 0,
+      "log": "runtime-import-live.log"
+    },
+    {
+      "step": "import-email",
+      "exitCode": 0,
+      "log": "runtime-import-email.log"
+    },
+    {
+      "step": "import-fixture",
+      "exitCode": 0,
+      "log": "runtime-import-fixture.log"
+    },
+    {
+      "step": "fixture-success",
+      "exitCode": 0,
+      "log": "runtime-fixture-success.log"
+    },
+    {
+      "step": "fixture-deliberate-failure",
+      "exitCode": 1,
+      "log": "runtime-fixture-deliberate-failure.log"
+    },
+    {
+      "step": "email-prerequisite-blocked",
+      "exitCode": 1,
+      "log": "runtime-email-prerequisite-blocked.log"
+    }
+  ],
+  "executions": [
+    {
+      "id": 1,
+      "workflowId": "MadarConnectionsFixture20261113",
+      "status": "success",
+      "startedAt": "2026-11-13 20:52:42.885",
+      "stoppedAt": "2026-11-13 20:52:46.104"
+    },
+    {
+      "id": 2,
+      "workflowId": "MadarConnectionsFixture20261113",
+      "status": "error",
+      "startedAt": "2026-11-13 20:52:53.668",
+      "stoppedAt": "2026-11-13 20:52:56.956"
+    },
+    {
+      "id": 3,
+      "workflowId": "MadarEmailAlert20261113",
+      "status": "error",
+      "startedAt": "2026-11-13 20:53:04.912",
+      "stoppedAt": "2026-11-13 20:53:06.961"
+    }
+  ],
+  "summaries": [
+    {
+      "executionId": 1,
+      "summary": {
+        "sourceRevision": "0b1d45b5e81fd8f451a47b470b9bff79330b0781",
+        "verifiedAt": "2026-11-13T20:52:46.087Z",
+        "fixtureOnly": true,
+        "liveOperationalStatus": "PASS",
+        "overall": "VERIFIED_WITH_GAPS",
+        "releaseAcceptance": "NOT_ESTABLISHED",
+        "allConnectionsProven": false,
+        "sourceSnapshotAt": "2026-11-13T20:51:48.045385+00:00",
+        "sourceCoverage": {
+          "curatedSystemBoundaries": 43,
+          "mountedApiAndDownloadRouteDefinitions": 193,
+          "clientHttpCallSites": 133,
+          "nativePathLiterals": 8,
+          "testDeclarations": 163,
+          "eventEntries": 89
+        },
+        "sourceStatusCounts": {
+          "VERIFIED_PASS": 29,
+          "IMPLEMENTED_NOT_VERIFIED": 5,
+          "BLOCKED_PREREQUISITE": 6,
+          "NOT_IMPLEMENTED": 1,
+          "NOT_APPLICABLE": 2
+        },
+        "liveChecks": [
+          {
+            "id": "local-api",
+            "status": "VERIFIED_PASS",
+            "verificationMethod": "actual read-only HTTP GET",
+            "expectedStatus": 200,
+            "actualStatus": 200,
+            "verifiedAt": "2026-11-13T20:52:45.175Z",
+            "limitation": "Health identity only; not business readiness"
+          },
+          {
+            "id": "public-api",
+            "status": "VERIFIED_PASS",
+            "verificationMethod": "actual read-only HTTP GET",
+            "expectedStatus": 200,
+            "actualStatus": 200,
+            "verifiedAt": "2026-11-13T20:52:45.224Z",
+            "limitation": "Health identity only; not business readiness"
+          },
+          {
+            "id": "web",
+            "status": "VERIFIED_PASS",
+            "verificationMethod": "actual read-only HTTP GET",
+            "expectedStatus": 200,
+            "actualStatus": 200,
+            "verifiedAt": "2026-11-13T20:52:45.269Z",
+            "limitation": null
+          },
+          {
+            "id": "rep-bundle",
+            "status": "VERIFIED_PASS",
+            "verificationMethod": "actual read-only HTTP GET",
+            "expectedStatus": 200,
+            "actualStatus": 200,
+            "verifiedAt": "2026-11-13T20:52:45.314Z",
+            "limitation": null
+          },
+          {
+            "id": "n8n",
+            "status": "VERIFIED_PASS",
+            "verificationMethod": "actual read-only HTTP GET",
+            "expectedStatus": 200,
+            "actualStatus": 200,
+            "verifiedAt": "2026-11-13T20:52:45.398Z",
+            "limitation": null
+          },
+          {
+            "id": "rep-auth-boundary",
+            "status": "VERIFIED_PASS",
+            "verificationMethod": "actual read-only HTTP GET",
+            "expectedStatus": 401,
+            "actualStatus": 401,
+            "verifiedAt": "2026-11-13T20:52:45.432Z",
+            "limitation": "Anonymous denial only; authenticated business function not exercised"
+          },
+          {
+            "id": "supervisor-auth-boundary",
+            "status": "VERIFIED_PASS",
+            "verificationMethod": "actual read-only HTTP GET",
+            "expectedStatus": 401,
+            "actualStatus": 401,
+            "verifiedAt": "2026-11-13T20:52:45.469Z",
+            "limitation": "Anonymous denial only; authenticated business function not exercised"
+          },
+          {
+            "id": "finance-auth-boundary",
+            "status": "VERIFIED_PASS",
+            "verificationMethod": "actual read-only HTTP GET",
+            "expectedStatus": 401,
+            "actualStatus": 401,
+            "verifiedAt": "2026-11-13T20:52:45.508Z",
+            "limitation": "Anonymous denial only; authenticated business function not exercised"
+          },
+          {
+            "id": "apk-auth-boundary",
+            "status": "VERIFIED_PASS",
+            "verificationMethod": "actual read-only HTTP GET",
+            "expectedStatus": 401,
+            "actualStatus": 401,
+            "verifiedAt": "2026-11-13T20:52:45.547Z",
+            "limitation": "Anonymous denial only; authenticated business function not exercised"
+          },
+          {
+            "id": "system-auth-boundary",
+            "status": "VERIFIED_PASS",
+            "verificationMethod": "actual read-only HTTP GET",
+            "expectedStatus": 401,
+            "actualStatus": 401,
+            "verifiedAt": "2026-11-13T20:52:45.586Z",
+            "limitation": "Anonymous denial only; authenticated business function not exercised"
+          },
+          {
+            "id": "maintenance-auth-boundary",
+            "status": "VERIFIED_PASS",
+            "verificationMethod": "actual read-only HTTP GET",
+            "expectedStatus": 401,
+            "actualStatus": 401,
+            "verifiedAt": "2026-11-13T20:52:45.624Z",
+            "limitation": "Anonymous denial only; authenticated business function not exercised"
+          },
+          {
+            "id": "warehouse-auth-boundary",
+            "status": "VERIFIED_PASS",
+            "verificationMethod": "actual read-only HTTP GET",
+            "expectedStatus": 401,
+            "actualStatus": 401,
+            "verifiedAt": "2026-11-13T20:52:45.663Z",
+            "limitation": "Anonymous denial only; authenticated business function not exercised"
+          },
+          {
+            "id": "workshop-auth-boundary",
+            "status": "VERIFIED_PASS",
+            "verificationMethod": "actual read-only HTTP GET",
+            "expectedStatus": 401,
+            "actualStatus": 401,
+            "verifiedAt": "2026-11-13T20:52:45.710Z",
+            "limitation": "Anonymous denial only; authenticated business function not exercised"
+          },
+          {
+            "id": "clients-auth-boundary",
+            "status": "VERIFIED_PASS",
+            "verificationMethod": "actual read-only HTTP GET",
+            "expectedStatus": 401,
+            "actualStatus": 401,
+            "verifiedAt": "2026-11-13T20:52:45.759Z",
+            "limitation": "Anonymous denial only; authenticated business function not exercised"
+          },
+          {
+            "id": "employees-auth-boundary",
+            "status": "VERIFIED_PASS",
+            "verificationMethod": "actual read-only HTTP GET",
+            "expectedStatus": 401,
+            "actualStatus": 401,
+            "verifiedAt": "2026-11-13T20:52:45.828Z",
+            "limitation": "Anonymous denial only; authenticated business function not exercised"
+          },
+          {
+            "id": "staff-auth-boundary",
+            "status": "VERIFIED_PASS",
+            "verificationMethod": "actual read-only HTTP GET",
+            "expectedStatus": 401,
+            "actualStatus": 401,
+            "verifiedAt": "2026-11-13T20:52:45.881Z",
+            "limitation": "Anonymous denial only; authenticated business function not exercised"
+          },
+          {
+            "id": "attendance-auth-boundary",
+            "status": "VERIFIED_PASS",
+            "verificationMethod": "actual read-only HTTP GET",
+            "expectedStatus": 401,
+            "actualStatus": 401,
+            "verifiedAt": "2026-11-13T20:52:45.933Z",
+            "limitation": "Anonymous denial only; authenticated business function not exercised"
+          },
+          {
+            "id": "notifications-auth-boundary",
+            "status": "VERIFIED_PASS",
+            "verificationMethod": "actual read-only HTTP GET",
+            "expectedStatus": 401,
+            "actualStatus": 401,
+            "verifiedAt": "2026-11-13T20:52:46.006Z",
+            "limitation": "Anonymous denial only; authenticated business function not exercised"
+          },
+          {
+            "id": "missing-asset",
+            "status": "VERIFIED_PASS",
+            "verificationMethod": "actual read-only HTTP GET",
+            "expectedStatus": 404,
+            "actualStatus": 404,
+            "verifiedAt": "2026-11-13T20:52:46.059Z",
+            "limitation": null
+          }
+        ],
+        "originalTestSuite": {
+          "tests": 182,
+          "passed": 182,
+          "failed": 0,
+          "skipped": 0
+        },
+        "adaptedContract": null,
+        "blockedOrUnverifiedConnectionIds": [
+          "APK-01",
+          "APK-02",
+          "MAP-01",
+          "CAM-01",
+          "QUEUE-01",
+          "RECOVERY-01",
+          "GPS-01",
+          "VISIT-03",
+          "ATT-02",
+          "BACKUP-02",
+          "N8N-02"
+        ],
+        "physicalDevice": "BLOCKED_PREREQUISITE",
+        "authenticatedBusinessChecks": "BLOCKED_PREREQUISITE_NO_N8N_CREDENTIALS",
+        "alerts": "NOT_CONFIGURED",
+        "meaning": "Actual read-only HTTP reachability and anonymous auth boundaries. Business evidence is an explicitly dated source/test snapshot. It is not a live business transaction, port scanner, APK installer, CI runner or phone acceptance test."
+      }
+    },
+    {
+      "executionId": 2,
+      "summary": {
+        "sourceRevision": "0b1d45b5e81fd8f451a47b470b9bff79330b0781",
+        "verifiedAt": "2026-11-13T20:52:56.898Z",
+        "fixtureOnly": true,
+        "liveOperationalStatus": "FAILED",
+        "overall": "FAILED",
+        "releaseAcceptance": "NOT_ESTABLISHED",
+        "allConnectionsProven": false,
+        "sourceSnapshotAt": "2026-11-13T20:51:48.045385+00:00",
+        "sourceCoverage": {
+          "curatedSystemBoundaries": 43,
+          "mountedApiAndDownloadRouteDefinitions": 193,
+          "clientHttpCallSites": 133,
+          "nativePathLiterals": 8,
+          "testDeclarations": 163,
+          "eventEntries": 89
+        },
+        "sourceStatusCounts": {
+          "VERIFIED_PASS": 29,
+          "IMPLEMENTED_NOT_VERIFIED": 5,
+          "BLOCKED_PREREQUISITE": 6,
+          "NOT_IMPLEMENTED": 1,
+          "NOT_APPLICABLE": 2
+        },
+        "liveChecks": [
+          {
+            "id": "local-api",
+            "status": "VERIFIED_FAIL",
+            "verificationMethod": "actual read-only HTTP GET",
+            "expectedStatus": 200,
+            "actualStatus": 503,
+            "verifiedAt": "2026-11-13T20:52:56.113Z",
+            "limitation": "Health identity only; not business readiness"
+          },
+          {
+            "id": "public-api",
+            "status": "VERIFIED_PASS",
+            "verificationMethod": "actual read-only HTTP GET",
+            "expectedStatus": 200,
+            "actualStatus": 200,
+            "verifiedAt": "2026-11-13T20:52:56.162Z",
+            "limitation": "Health identity only; not business readiness"
+          },
+          {
+            "id": "web",
+            "status": "VERIFIED_PASS",
+            "verificationMethod": "actual read-only HTTP GET",
+            "expectedStatus": 200,
+            "actualStatus": 200,
+            "verifiedAt": "2026-11-13T20:52:56.206Z",
+            "limitation": null
+          },
+          {
+            "id": "rep-bundle",
+            "status": "VERIFIED_PASS",
+            "verificationMethod": "actual read-only HTTP GET",
+            "expectedStatus": 200,
+            "actualStatus": 200,
+            "verifiedAt": "2026-11-13T20:52:56.250Z",
+            "limitation": null
+          },
+          {
+            "id": "n8n",
+            "status": "VERIFIED_PASS",
+            "verificationMethod": "actual read-only HTTP GET",
+            "expectedStatus": 200,
+            "actualStatus": 200,
+            "verifiedAt": "2026-11-13T20:52:56.296Z",
+            "limitation": null
+          },
+          {
+            "id": "rep-auth-boundary",
+            "status": "VERIFIED_PASS",
+            "verificationMethod": "actual read-only HTTP GET",
+            "expectedStatus": 401,
+            "actualStatus": 401,
+            "verifiedAt": "2026-11-13T20:52:56.340Z",
+            "limitation": "Anonymous denial only; authenticated business function not exercised"
+          },
+          {
+            "id": "supervisor-auth-boundary",
+            "status": "VERIFIED_PASS",
+            "verificationMethod": "actual read-only HTTP GET",
+            "expectedStatus": 401,
+            "actualStatus": 401,
+            "verifiedAt": "2026-11-13T20:52:56.388Z",
+            "limitation": "Anonymous denial only; authenticated business function not exercised"
+          },
+          {
+            "id": "finance-auth-boundary",
+            "status": "VERIFIED_PASS",
+            "verificationMethod": "actual read-only HTTP GET",
+            "expectedStatus": 401,
+            "actualStatus": 401,
+            "verifiedAt": "2026-11-13T20:52:56.424Z",
+            "limitation": "Anonymous denial only; authenticated business function not exercised"
+          },
+          {
+            "id": "apk-auth-boundary",
+            "status": "VERIFIED_PASS",
+            "verificationMethod": "actual read-only HTTP GET",
+            "expectedStatus": 401,
+            "actualStatus": 401,
+            "verifiedAt": "2026-11-13T20:52:56.470Z",
+            "limitation": "Anonymous denial only; authenticated business function not exercised"
+          },
+          {
+            "id": "system-auth-boundary",
+            "status": "VERIFIED_PASS",
+            "verificationMethod": "actual read-only HTTP GET",
+            "expectedStatus": 401,
+            "actualStatus": 401,
+            "verifiedAt": "2026-11-13T20:52:56.521Z",
+            "limitation": "Anonymous denial only; authenticated business function not exercised"
+          },
+          {
+            "id": "maintenance-auth-boundary",
+            "status": "VERIFIED_PASS",
+            "verificationMethod": "actual read-only HTTP GET",
+            "expectedStatus": 401,
+            "actualStatus": 401,
+            "verifiedAt": "2026-11-13T20:52:56.556Z",
+            "limitation": "Anonymous denial only; authenticated business function not exercised"
+          },
+          {
+            "id": "warehouse-auth-boundary",
+            "status": "VERIFIED_PASS",
+            "verificationMethod": "actual read-only HTTP GET",
+            "expectedStatus": 401,
+            "actualStatus": 401,
+            "verifiedAt": "2026-11-13T20:52:56.593Z",
+            "limitation": "Anonymous denial only; authenticated business function not exercised"
+          },
+          {
+            "id": "workshop-auth-boundary",
+            "status": "VERIFIED_PASS",
+            "verificationMethod": "actual read-only HTTP GET",
+            "expectedStatus": 401,
+            "actualStatus": 401,
+            "verifiedAt": "2026-11-13T20:52:56.633Z",
+            "limitation": "Anonymous denial only; authenticated business function not exercised"
+          },
+          {
+            "id": "clients-auth-boundary",
+            "status": "VERIFIED_PASS",
+            "verificationMethod": "actual read-only HTTP GET",
+            "expectedStatus": 401,
+            "actualStatus": 401,
+            "verifiedAt": "2026-11-13T20:52:56.671Z",
+            "limitation": "Anonymous denial only; authenticated business function not exercised"
+          },
+          {
+            "id": "employees-auth-boundary",
+            "status": "VERIFIED_PASS",
+            "verificationMethod": "actual read-only HTTP GET",
+            "expectedStatus": 401,
+            "actualStatus": 401,
+            "verifiedAt": "2026-11-13T20:52:56.708Z",
+            "limitation": "Anonymous denial only; authenticated business function not exercised"
+          },
+          {
+            "id": "staff-auth-boundary",
+            "status": "VERIFIED_PASS",
+            "verificationMethod": "actual read-only HTTP GET",
+            "expectedStatus": 401,
+            "actualStatus": 401,
+            "verifiedAt": "2026-11-13T20:52:56.747Z",
+            "limitation": "Anonymous denial only; authenticated business function not exercised"
+          },
+          {
+            "id": "attendance-auth-boundary",
+            "status": "VERIFIED_PASS",
+            "verificationMethod": "actual read-only HTTP GET",
+            "expectedStatus": 401,
+            "actualStatus": 401,
+            "verifiedAt": "2026-11-13T20:52:56.788Z",
+            "limitation": "Anonymous denial only; authenticated business function not exercised"
+          },
+          {
+            "id": "notifications-auth-boundary",
+            "status": "VERIFIED_PASS",
+            "verificationMethod": "actual read-only HTTP GET",
+            "expectedStatus": 401,
+            "actualStatus": 401,
+            "verifiedAt": "2026-11-13T20:52:56.831Z",
+            "limitation": "Anonymous denial only; authenticated business function not exercised"
+          },
+          {
+            "id": "missing-asset",
+            "status": "VERIFIED_PASS",
+            "verificationMethod": "actual read-only HTTP GET",
+            "expectedStatus": 404,
+            "actualStatus": 404,
+            "verifiedAt": "2026-11-13T20:52:56.875Z",
+            "limitation": null
+          }
+        ],
+        "originalTestSuite": {
+          "tests": 182,
+          "passed": 182,
+          "failed": 0,
+          "skipped": 0
+        },
+        "adaptedContract": null,
+        "blockedOrUnverifiedConnectionIds": [
+          "APK-01",
+          "APK-02",
+          "MAP-01",
+          "CAM-01",
+          "QUEUE-01",
+          "RECOVERY-01",
+          "GPS-01",
+          "VISIT-03",
+          "ATT-02",
+          "BACKUP-02",
+          "N8N-02"
+        ],
+        "physicalDevice": "BLOCKED_PREREQUISITE",
+        "authenticatedBusinessChecks": "BLOCKED_PREREQUISITE_NO_N8N_CREDENTIALS",
+        "alerts": "NOT_CONFIGURED",
+        "meaning": "Actual read-only HTTP reachability and anonymous auth boundaries. Business evidence is an explicitly dated source/test snapshot. It is not a live business transaction, port scanner, APK installer, CI runner or phone acceptance test."
+      }
+    }
+  ],
+  "fixtureRequests": [
+    {
+      "id": "local-api",
+      "deliberateFailure": false
+    },
+    {
+      "id": "public-api",
+      "deliberateFailure": false
+    },
+    {
+      "id": "web",
+      "deliberateFailure": false
+    },
+    {
+      "id": "rep-bundle",
+      "deliberateFailure": false
+    },
+    {
+      "id": "n8n",
+      "deliberateFailure": false
+    },
+    {
+      "id": "rep-auth-boundary",
+      "deliberateFailure": false
+    },
+    {
+      "id": "supervisor-auth-boundary",
+      "deliberateFailure": false
+    },
+    {
+      "id": "finance-auth-boundary",
+      "deliberateFailure": false
+    },
+    {
+      "id": "apk-auth-boundary",
+      "deliberateFailure": false
+    },
+    {
+      "id": "system-auth-boundary",
+      "deliberateFailure": false
+    },
+    {
+      "id": "maintenance-auth-boundary",
+      "deliberateFailure": false
+    },
+    {
+      "id": "warehouse-auth-boundary",
+      "deliberateFailure": false
+    },
+    {
+      "id": "workshop-auth-boundary",
+      "deliberateFailure": false
+    },
+    {
+      "id": "clients-auth-boundary",
+      "deliberateFailure": false
+    },
+    {
+      "id": "employees-auth-boundary",
+      "deliberateFailure": false
+    },
+    {
+      "id": "staff-auth-boundary",
+      "deliberateFailure": false
+    },
+    {
+      "id": "attendance-auth-boundary",
+      "deliberateFailure": false
+    },
+    {
+      "id": "notifications-auth-boundary",
+      "deliberateFailure": false
+    },
+    {
+      "id": "missing-asset",
+      "deliberateFailure": false
+    },
+    {
+      "id": "local-api",
+      "deliberateFailure": true
+    },
+    {
+      "id": "public-api",
+      "deliberateFailure": true
+    },
+    {
+      "id": "web",
+      "deliberateFailure": true
+    },
+    {
+      "id": "rep-bundle",
+      "deliberateFailure": true
+    },
+    {
+      "id": "n8n",
+      "deliberateFailure": true
+    },
+    {
+      "id": "rep-auth-boundary",
+      "deliberateFailure": true
+    },
+    {
+      "id": "supervisor-auth-boundary",
+      "deliberateFailure": true
+    },
+    {
+      "id": "finance-auth-boundary",
+      "deliberateFailure": true
+    },
+    {
+      "id": "apk-auth-boundary",
+      "deliberateFailure": true
+    },
+    {
+      "id": "system-auth-boundary",
+      "deliberateFailure": true
+    },
+    {
+      "id": "maintenance-auth-boundary",
+      "deliberateFailure": true
+    },
+    {
+      "id": "warehouse-auth-boundary",
+      "deliberateFailure": true
+    },
+    {
+      "id": "workshop-auth-boundary",
+      "deliberateFailure": true
+    },
+    {
+      "id": "clients-auth-boundary",
+      "deliberateFailure": true
+    },
+    {
+      "id": "employees-auth-boundary",
+      "deliberateFailure": true
+    },
+    {
+      "id": "staff-auth-boundary",
+      "deliberateFailure": true
+    },
+    {
+      "id": "attendance-auth-boundary",
+      "deliberateFailure": true
+    },
+    {
+      "id": "notifications-auth-boundary",
+      "deliberateFailure": true
+    },
+    {
+      "id": "missing-asset",
+      "deliberateFailure": true
+    }
+  ],
+  "fixtureSuccess": true,
+  "deliberateFailureVisible": true,
+  "actualReadOnlyLiveTargets": "NOT_PERFORMED",
+  "artifactSha256": {
+    "n8n-system-connections.json": "1711db6362e63391b83400c2cd66a8868b776123a9a2475a1e5cacc9df3163d7",
+    "n8n-live-verifier.json": "ba8b8da7ffadde096cd6dc7e968c6889dd292876e4b9075ee4a3e91602663b0e"
+  }
+}

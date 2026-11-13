@@ -1,0 +1,205 @@
+{
+  "id": "MadarConnections20261113",
+  "name": "MADAR — Actual System Connections — Evidence Map 2026-11-13",
+  "nodes": [
+    {
+      "id": "cb492d56-3976-438f-99bc-3ffb7b3c1183",
+      "name": "Runtime / network",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "parameters": {
+        "content": "## Runtime / network\n\n**NET-01 — VERIFIED_PASS**\nBrowser / APK HTTPS client → HTTPS :443 → existing Tailscale ingress → /api/health → Express API :3000\nmadar-v2/server/app.js:88\nReachability and service identity only; does not prove a business transaction or every handset.\n\n**WEB-01 — VERIFIED_PASS**\nReact build → GET /, /rep/, /assets/RepApp-*.js → Served web / representative UI\nmadar-v2/server/app.js:190, madar-v2/client/src/modules/rep/RepApp.jsx:1\n\n\n**APK-01 — IMPLEMENTED_NOT_VERIFIED**\nPreviously distributed 2.0.8 APK (unchanged by this server/web stability update) → Existing com.madar.rep.app 2.0.8 (10), not rebuilt in this change → Published release / transition APK\nmadar-v2/scripts/build-android.js:124, madar-v2/android/version.properties:1\nPrevious artifact checks are historical; no new build or physical-device installation is claimed.\n\n**APK-02 — IMPLEMENTED_NOT_VERIFIED**\nAuthenticated download endpoint → GET /download/apk; /download/apk/debug-transition → Release APK / Debug transition\nmadar-v2/server/config/paths.js:25, madar-v2/server/app.js:92\nPublished files and runtime path selection verified; unauthenticated requests return 401. No authenticated production download session available.\n\n",
+        "width": 950,
+        "height": 650,
+        "color": 5
+      },
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "b6b62bdc-8ddb-4050-93c8-8866e51da0ff",
+      "name": "Authentication",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "parameters": {
+        "content": "## Authentication\n\n**AUTH-01 — VERIFIED_PASS**\nWeb / representative login → POST /api/auth/login; /api/rep/login → sessions → requireAuthentication → Session DB and role middleware\nmadar-v2/server/modules/auth/service.js:212, madar-v2/server/modules/auth/service.js:261\n\n\n**AUTH-02 — VERIFIED_PASS**\nAdmin / supervisor / finance / rep requests → Per-route role checks and account ownership → Authorized API modules\nmadar-v2/server/app.js:164, madar-v2/server/modules/auth/authorization.js:7\nIsolated HTTP tests; live calls only prove anonymous requests are rejected.\n\n",
+        "width": 950,
+        "height": 650,
+        "color": 5
+      },
+      "position": [
+        1050,
+        0
+      ]
+    },
+    {
+      "id": "8ff8dc7b-b4dc-47c7-a73c-32ab82ee3630",
+      "name": "Representative / location",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "parameters": {
+        "content": "## Representative / location\n\n**REP-01 — VERIFIED_PASS**\nAssigned maintenance order → GET /api/rep/today-route → local cache → grouped cards → Representative route / alphabetic region folders\nmadar-v2/server/modules/rep/service.js:169, madar-v2/client/src/modules/rep/route-folders.js:4\n\n\n**REP-02 — VERIFIED_PASS**\nRepresentative starts machine work → POST start-work / stop-work → rep_machine_work_leases → Lease / other representative route visibility\nmadar-v2/server/modules/rep/service.js:313, madar-v2/server/modules/rep/service.js:249\nOther online rep loses the card after authoritative route refresh; offline cached screens cannot receive instant updates; lease expiry/release restores eligibility.\n\n**LOC-01 — VERIFIED_PASS**\nFirst GPS confirmation on unlocated machine → POST /api/rep/machines/:id/confirm-location → SQLite → route → Locked approved coordinates and dependent visit\nmadar-v2/server/modules/rep/service.js:710, madar-v2/client/src/modules/rep/RepApp.jsx:1752\nFirst location path and subsequent correction path are separate; no universal autoapproval claim.\n\n**LOC-02 — VERIFIED_PASS**\nCorrection request plus evidence → Multipart corrections → pending request → review event → Supervisor approve / reject → route reconciliation\nmadar-v2/server/modules/rep/service.js:940, madar-v2/server/modules/supervisor/routes.js:107\n\n\n**MAP-01 — IMPLEMENTED_NOT_VERIFIED**\nAssigned coordinates / representative GPS → map packs, /api/rep/map/google, Google Maps navigation URL → Local MBTiles / Google view / directions\nmadar-v2/client/src/modules/rep/OfflineMapPanel.jsx:70, madar-v2/client/src/modules/rep/map-utils.js:12\nProjection and URL helpers tested; external map key, offline package availability and phone navigation not accepted on a device.\n\n",
+        "width": 950,
+        "height": 883,
+        "color": 5
+      },
+      "position": [
+        2100,
+        0
+      ]
+    },
+    {
+      "id": "4f07f2f2-aa9b-495d-aba1-7398806fd713",
+      "name": "Android / durable queues",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "parameters": {
+        "content": "## Android / durable queues\n\n**CAM-01 — BLOCKED_PREREQUISITE**\nNative consecutive camera capture → Capacitor bridge → RepCameraSequenceActivity → RepPhotoArchive → Before / After evidence, watermark and local archive\nmadar-v2/android/app/src/main/java/com/madar/rep/app/RepCameraSequenceActivity.java:49, madar-v2/android/app/src/main/java/com/madar/rep/app/RepPhotoArchive.java:19, madar-v2/client/src/modules/rep/native-bridges.js:56\nNo physical device connected. Source, packaging and server watermark tests cannot prove OEM camera / GPS / SAF behavior.\n\n**QUEUE-01 — BLOCKED_PREREQUISITE**\nSaved visit / machine action / attendance → RepLocalStore → MadarSyncWorker; account-scoped stable operation identities → SQLite → WorkManager → HTTP upload\nmadar-v2/android/app/src/main/java/com/madar/rep/app/RepLocalStore.java:19, madar-v2/android/app/src/main/java/com/madar/rep/app/MadarSyncWorker.java:40, madar-v2/client/src/modules/rep/native-bridges.js:94\nServer contracts and JS recovery tested. Native process death/reboot/upgrade and real background upload not executed here.\n\n**RECOVERY-01 — BLOCKED_PREREQUISITE**\nPending native visits / files / ownership → RepRecoveryValidator / RepRecoveryImporter → same-owner queue → Recovery export / validated import\nmadar-v2/android/app/src/main/java/com/madar/rep/app/RepRecoveryValidator.java:15, madar-v2/android/app/src/main/java/com/madar/rep/app/RepRecoveryImporter.java:11\nJS recovery package tests passed; complete physical-phone export/reinstall/import drill unverified.\n\n**GPS-01 — BLOCKED_PREREQUISITE**\nNative location provider / foreground service → RepLocationService → RepTrackStore → Durable local GPS identity ledger\nmadar-v2/android/app/src/main/java/com/madar/rep/app/RepLocationService.java:27, madar-v2/android/app/src/main/java/com/madar/rep/app/RepTrackStore.java:16\nActual GPS enabled detection, OEM background policy and battery behavior require a phone.\n\n",
+        "width": 950,
+        "height": 964,
+        "color": 5
+      },
+      "position": [
+        0,
+        2100
+      ]
+    },
+    {
+      "id": "6f84719a-9e39-4f03-8b67-184d37876778",
+      "name": "Visits / supervisor",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "parameters": {
+        "content": "## Visits / supervisor\n\n**GPS-02 — VERIFIED_PASS**\nOffline points after duty closes → POST /api/rep/location-ping → stored/duplicate/rejected; session preserved → Server point ledger / per-point receipt\nmadar-v2/server/modules/rep/service.js:1585, madar-v2/server/modules/rep/tracking-ledger.js:3\nServer isolated integration. Phone acknowledgment cleanup remains device acceptance, not a server test claim.\n\n**VISIT-01 — VERIFIED_PASS**\nMultipart visit with stable UUID / payload → POST /api/rep/sync-visit; staged writes; rep_visits/reviews/lines → Durable files + completed ingestion + pending review\nmadar-v2/server/modules/rep/service.js:1254, madar-v2/server/modules/rep/routes.js:370\n\n\n**VISIT-02 — VERIFIED_PASS**\nSupervisor QA / bulk approval / reshoot → POST /api/supervisor/visits/:id/review; /visits/approve-all → Approved card or reshoot request + event\nmadar-v2/server/modules/supervisor/service.js:376, madar-v2/server/modules/supervisor/service.js:554\n\n\n**VISIT-03 — IMPLEMENTED_NOT_VERIFIED**\nReview / submission event → SSE or native realtime → refreshData → route filters → APK sent tab / remaining card / reshoot reconciliation\nmadar-v2/client/src/modules/rep/RepApp.jsx:983, madar-v2/client/src/modules/rep/RepApp.jsx:1577\nServer statuses verified; installed APK final visual reconciliation not exercised on a physical phone.\n\n**RADAR-01 — VERIFIED_PASS**\nGPS points / duty sessions / visits → GET /api/supervisor/radar; /reps/:id/route → Supervisor all-rep radar and per-rep route\nmadar-v2/server/modules/supervisor/service.js:111, madar-v2/server/modules/supervisor/service.js:194\nIsolated API assertions; displayed instantaneous/average speed depends on valid point timestamps and samples, not vehicle telemetry calibration.\n\n",
+        "width": 950,
+        "height": 874,
+        "color": 5
+      },
+      "position": [
+        1050,
+        2100
+      ]
+    },
+    {
+      "id": "c4268a6c-b9e6-4396-aecb-d1e4f092eca7",
+      "name": "Attendance / HR",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "parameters": {
+        "content": "## Attendance / HR\n\n**ATT-01 — VERIFIED_PASS**\nOffline attendance action → POST /api/rep/attendance/sync → action ledger → attendance → Age-window validation / replay / review and attendance\nmadar-v2/server/modules/employees/attendance.js:73, madar-v2/client/src/modules/rep/RepApp.jsx:851\n\n\n**ATT-02 — BLOCKED_PREREQUISITE**\nDevice credential / biometric client result → RepBiometricAuth → attendance bridge → server request → Attendance client assurance assertion\nmadar-v2/android/app/src/main/java/com/madar/rep/app/RepBiometricAuth.java:13, madar-v2/client/src/modules/rep/native-bridges.js:82\nPhone assurance is a client assertion; no independent server hardware attestation or physical biometric acceptance established.\n\n**HR-01 — VERIFIED_PASS**\nLinked login / employee master and attendance → staff sync → attendance → payroll finalization transaction → Payroll preview / finalized treasury expense\nmadar-v2/server/modules/employees/staff-service.js:126, madar-v2/server/modules/employees/service.js:654\n\n\n**HR-02 — VERIFIED_PASS**\nEmployee tools / advances / maintenance custody → employee tools and custody APIs → durable records → Custody / finance history / audit\nmadar-v2/server/modules/employees/service.js:275, madar-v2/server/modules/employees/service.js:599\n\n\n",
+        "width": 950,
+        "height": 650,
+        "color": 5
+      },
+      "position": [
+        2100,
+        2100
+      ]
+    },
+    {
+      "id": "d347bbb8-45a2-4fe9-9862-d30701df3d19",
+      "name": "Maintenance / reporting",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "parameters": {
+        "content": "## Maintenance / reporting\n\n**MAINT-01 — VERIFIED_PASS**\nClient and machine business identities → clients → machines → maintenance_order_reps → assigned route → Orders / cards / representative assignments\nmadar-v2/server/modules/clients/service.js:52, madar-v2/server/modules/maintenance/routes.js:418\n\n\n**MAINT-02 — VERIFIED_PASS**\nCountable reasons with explicit quantities → typed catalog → line snapshots / provenance → approved business exports → Card/visit lines → analytics → PPTX / DOCX / XLSX\nmadar-v2/server/modules/maintenance/analysis.js:46, madar-v2/server/modules/maintenance/export.js:660\nExact quantity examples and export assertions, not every historical customer record.\n\n**MAINT-03 — VERIFIED_PASS**\nOriginal uploaded images → storage containment → photo-images/thumbnails → exports → Derived rotation / thumbnails / export buffers\nmadar-v2/server/modules/maintenance/photo-images.js:8, madar-v2/server/modules/maintenance/thumbnails.js:46, madar-v2/server/modules/storage.js:60\n\n\n**MAINT-04 — VERIFIED_PASS**\nFolder / spreadsheet import → trip-folder matching / EXIF ordering / import routes → Non-destructive matched machine and photo records\nmadar-v2/server/modules/maintenance/trip-folder.js:407, madar-v2/server/modules/maintenance/routes.js:266\n\n\n**MAINT-05 — VERIFIED_PASS**\nOrder deletion / training fixture deletion → delete routes → locks → stage rename → rollback/startup recovery → Staged file removal / DB transaction / recovery\nmadar-v2/server/modules/maintenance/routes.js:438, madar-v2/server/modules/maintenance/routes.js:442\n\n\n",
+        "width": 950,
+        "height": 782,
+        "color": 5
+      },
+      "position": [
+        0,
+        4200
+      ]
+    },
+    {
+      "id": "8d1147fc-9c16-4ee7-b1aa-ff43dd6d6790",
+      "name": "Workshop / stock / finance",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "parameters": {
+        "content": "## Workshop / stock / finance\n\n**STOCK-01 — VERIFIED_PASS**\nWhole main-warehouse material issue → issueMaterial transaction and explicit rounded issue choice → Stock movements / sub-warehouse reusable offcut\nmadar-v2/server/modules/warehouse/service.js:165\n\n\n**WORKSHOP-01 — VERIFIED_PASS**\nWorkshop order + material issue → production → ready → delivered_archived → Ready offcuts / delivered sales invoice\nmadar-v2/server/modules/workshop/service.js:285, madar-v2/server/modules/workshop/service.js:327\n\n\n**FIN-01 — VERIFIED_PASS**\nPurchase invoice → createPurchaseInvoice → recordPurchasePayment → Stock receipt + unpaid liability; separate payment\nmadar-v2/server/modules/finance/invoices.service.js:174, madar-v2/server/modules/finance/invoices.service.js:328\nInteger cents and isolated retries/concurrency tested; no bank/payment-provider integration claimed.\n\n**FIN-02 — VERIFIED_PASS**\nSales receipt / purchase payment stable operation ID → Identical replay returns committed result; changed payload conflicts → Settlement + treasury + invoice balance + audit\nmadar-v2/server/modules/finance/invoices.service.js:411, madar-v2/server/modules/finance/invoices.service.js:328\n\n\n",
+        "width": 950,
+        "height": 650,
+        "color": 5
+      },
+      "position": [
+        1050,
+        4200
+      ]
+    },
+    {
+      "id": "0d07104b-a6f6-4fa0-998a-4d975741dc53",
+      "name": "Events / notification",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "parameters": {
+        "content": "## Events / notification\n\n**EVENT-01 — VERIFIED_PASS**\nBusiness producers → publishOperationsEvent → operations_events/outbox → rep/supervisor SSE → Persisted outbox/event log and bounded SSE replay\nmadar-v2/server/modules/operations-events.js:124, madar-v2/server/modules/operations-events.js:43, madar-v2/server/modules/rep/routes.js:87\nSingle-process deployment. Client API reconciliation remains authoritative; not an unbounded broker.\n\n**EVENT-02 — VERIFIED_PASS**\nPersisted business event → materializeNotificationsForEvent → /api/notifications → bell → User-owned inbox / bell / read and dismiss\nmadar-v2/server/modules/notifications/service.js:58, madar-v2/client/src/components/notifications/NotificationBell.jsx:120\nForeground/live-browser or open-app synchronization; no closed-app push delivery claim.\n\n**PUSH-01 — NOT_IMPLEMENTED**\nClosed application → No implemented FCM/APNs registration or delivery path found → External push delivery\nmadar-v2/client/src/modules/rep/native-bridges.js:23\nOptional capability / product decision, not a mandatory defect. No alert destination configured in this n8n delivery.\n\n",
+        "width": 950,
+        "height": 650,
+        "color": 5
+      },
+      "position": [
+        2100,
+        4200
+      ]
+    },
+    {
+      "id": "cf4c77d9-bdad-4579-9ac2-8fd658695a13",
+      "name": "Persistence / recovery",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "parameters": {
+        "content": "## Persistence / recovery\n\n**DB-01 — VERIFIED_PASS**\nAPI services / additive initialization → migrations → transactions / foreign keys → local DB → Single local SQLite WAL database\nmadar-v2/server/database/connection.js:7, madar-v2/server/database/init.js:92\nLive integrity/foreign-key checks separately captured; no multi-instance SQLite scaling.\n\n**BACKUP-01 — VERIFIED_PASS**\nSQLite snapshot + configured files → createSystemBackup / prepareRestorableSnapshot / interrupted restore journal → Backup ZIP → isolated migration → restored state / rollback\nmadar-v2/server/modules/system/backup.js:653, madar-v2/server/modules/system/backup.js:265, madar-v2/server/modules/system/backup.js:488\nSee restore-drill.json for actual existing ZIP extraction/migration evidence; no production restore or off-device recovery claim.\n\n**BACKUP-02 — BLOCKED_PREREQUISITE**\nMounted local backups → External storage on same host does not itself prove off-device backup → Off-device disaster recovery / physical restore drill\nmadar-v2/server/config/paths.js:21\nNo authorized fresh off-device restore drill evidence supplied.\n\n",
+        "width": 950,
+        "height": 650,
+        "color": 5
+      },
+      "position": [
+        0,
+        6300
+      ]
+    },
+    {
+      "id": "a8c3cf23-aa71-4322-bcb5-a37bd7b6fb6c",
+      "name": "n8n / separate projects",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "parameters": {
+        "content": "## n8n / separate projects\n\n**N8N-01 — VERIFIED_PASS**\nManual n8n verifier → HTTP Request nodes with timeout and bounded safe retry → Actual read-only API / web / auth-boundary probes\nmadar-v2/server/app.js:88\nWorkflow runtime evidence captured separately. Not inserted into business transactions.\n\n**N8N-02 — IMPLEMENTED_NOT_VERIFIED**\nExisting scheduled CI health workflow → Existing Execute Command workflow (not modified) → Local check script / execution metadata\nmadar-v2/scripts/n8n-system-check.mjs:65\nExisting 06:00 Cairo success predates this audit. Do not equate it with complete current business verification.\n\n**LEGACY-01 — NOT_APPLICABLE**\nLegacy system/ data → migrate-from-v1; separate codebase, not a live second V2 service → One-time migration into V2\nmadar-v2/scripts/migrate-from-v1.js:2\nNo automatic live synchronization between legacy and V2 established.\n\n**FLOW-01 — NOT_APPLICABLE**\nmadar-flow project → Separate project; no demonstrated production integration to V2 or n8n → Separate workflow editor/runtime\nmadar-flow/README.md:1\nDo not treat its canvas, routes or graph engine as n8n or proof of MADAR V2 business integration.\n\n",
+        "width": 950,
+        "height": 650,
+        "color": 5
+      },
+      "position": [
+        1050,
+        6300
+      ]
+    },
+    {
+      "id": "d429ec5f-2a7f-467b-a849-a2e3d5267278",
+      "name": "Evidence limits",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "parameters": {
+        "content": "# Documentary architecture only\nRevision `0b1d45b5e81fd8f451a47b470b9bff79330b0781`\nReport: audit/stability-20261113/README.md\nThese conceptual producer/interface/consumer connections do not execute business integration. VERIFIED_PASS applies only to named evidence. NoOp placeholders are not functional checks. Reused earlier workflow identity; no live activation.",
+        "width": 950,
+        "height": 450
+      },
+      "position": [
+        -1050,
+        0
+      ]
+    }
+  ],
+  "connections": {},
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Africa/Cairo"
+  },
+  "versionId": "6271e50a-7fc1-4426-8700-37458bcea889",
+  "tags": []
+}

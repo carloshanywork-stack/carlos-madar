@@ -1,0 +1,41 @@
+{
+  "verifiedAt": "2026-11-13T20:51:51.794Z",
+  "reports": [
+    {
+      "file": "n8n-system-connections.json",
+      "jsonParsed": true,
+      "n8nVersion": "2.46.7",
+      "installedNodeTypesAndVersions": "PASS",
+      "codeAndExpressionSyntax": "PASS",
+      "referencesAndConnections": "PASS",
+      "secretScan": "PASS_NO_EMBEDDED_CREDENTIALS",
+      "inactive": true,
+      "nodes": 12,
+      "realHttpRequests": 0
+    },
+    {
+      "file": "n8n-live-verifier.json",
+      "jsonParsed": true,
+      "n8nVersion": "2.46.7",
+      "installedNodeTypesAndVersions": "PASS",
+      "codeAndExpressionSyntax": "PASS",
+      "referencesAndConnections": "PASS",
+      "secretScan": "PASS_NO_EMBEDDED_CREDENTIALS",
+      "inactive": true,
+      "nodes": 54,
+      "realHttpRequests": 19
+    },
+    {
+      "file": "n8n-email-alert.json",
+      "jsonParsed": true,
+      "n8nVersion": "2.46.7",
+      "installedNodeTypesAndVersions": "PASS",
+      "codeAndExpressionSyntax": "PASS",
+      "referencesAndConnections": "PASS",
+      "secretScan": "PASS_NO_EMBEDDED_CREDENTIALS",
+      "inactive": true,
+      "nodes": 5,
+      "realHttpRequests": 0
+    }
+  ]
+}

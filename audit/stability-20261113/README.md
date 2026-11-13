@@ -13,7 +13,7 @@ Baseline: clean `main`/`origin/main`, `34412aefabd5c139de35b643398359f1155ee4c4`
 
 ## Verification and operations
 
-See TEST_PLAN.md and the collected result files. Full V2 suite passed 179/179 before the final additional deploy-ahead fixture; focused crash/HTTP/backup tests passed 5/5 and deployment fixtures passed 4/4. Final deployment gate results are recorded separately. Builds use an isolated output first. A child process exits immediately after commit in the response-loss fixture; its durable intent is then recovered without duplication.
+See TEST_PLAN.md and the collected result files. Full V2 suite passed 182/182; the subsequent historical HTTP restore fixture also passed in the focused 5/5 compatibility run. Crash/HTTP/backup tests passed 5/5 and deployment fixtures passed 4/4. Final deployment gate results are recorded separately. Builds use an isolated output first. A child process exits immediately after commit in the response-loss fixture; its durable intent is then recovered without duplication.
 
 Actual recent full ZIP restore-drill outcome, cleanup and deployment identities will be recorded in sibling JSON evidence. No production restore, physical phone installation or off-device recovery is implied. The distributed 2.0.8 (10) APK and signing identities are preserved; these stability changes primarily affect server/web and do not replace an APK.
 
@@ -34,3 +34,8 @@ The first full-archive drill reached database migration and correctly failed clo
 A second database-only investigation found raw SQL-text comparison rejected supported historical ADD COLUMN layouts (column order and SQL formatting). The compatibility fingerprint now compares normalized, order-independent column definitions and preserves CHECK/UNIQUE/FK/default/type semantics plus indexes/triggers. It still rejects unknown migrations and changed constraints. One explicitly supported legacy exception is machines.updated_at: its recorded migration fills NULL technical update metadata from the existing created_at; it does not change financial or duty history. Both restore validation and the attached-snapshot copy use the same compatibility rules.
 
 Focused acceptance actually restored a historical-layout ZIP through the authenticated HTTP endpoint into temporary DB/storage, preserved evidence and IDs, checked integrity/FKs, and invalidated the previous session. A deliberately different CHECK constraint remains incompatible. The real full ZIP drill is repeated after these fixes; see its final outcome rather than treating the first failure as a pass.
+
+
+The restore HTTP fixture explicitly isolates database, storage, DATA_DIR (upload staging/journal), BACKUP_ROOT and mount settings. Its first setup used the default application DATA_DIR for transient upload/journal files while DB/customer storage remained isolated; it completed and cleaned those transient files. This setup was corrected and rerun successfully with every mutable path beneath its temporary directory.
+
+n8n isolated acceptance: all three definitions imported into disposable n8n 2.46.7. Synthetic read-only checks succeeded; a deliberate HTTP 503 caused a visible failed check and failed execution. The optional email workflow failed explicitly at its missing sender/SMTP prerequisite, before any send. Actual production GET checks and live import are recorded in the protected deployment receipt after publication; external mail delivery is not claimed.
