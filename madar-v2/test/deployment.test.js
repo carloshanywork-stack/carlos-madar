@@ -13,7 +13,7 @@ function fixture(name){
  writeFileSync(join(repo,'.gitignore'),readFileSync(new URL('../.gitignore',import.meta.url),'utf8').split('\n').filter(Boolean).map(line=>'madar-v2/'+line).join('\n')+'\n');writeFileSync(join(repo,'madar-v2/client/src/app.js'),'fixture');
  run('git',['add','.'],repo);run('git',['commit','-qm','fixture'],repo);run('git',['remote','add','origin',remote],repo);run('git',['push','-qu','origin','main'],repo);
  const callLog=join(base,'calls');
- writeFileSync(join(bin,'npm'),'#!/bin/sh\necho "npm $*" >> "$CALL_LOG"\n[ "$1" != test ] || [ "${FAIL_TESTS:-0}" != 1 ] || exit 1\nif [ "$1" = run ]; then mkdir -p dist-next; echo candidate > dist-next/index.html; fi\n',{mode:0o755});
+ writeFileSync(join(bin,'npm'),'#!/bin/sh\necho "npm $*" >> "$CALL_LOG"\n[ "$1" != test ] || [ "${FAIL_TESTS:-0}" != 1 ] || exit 1\nif [ "$1" = test ] && [ "${EMPTY_TESTS:-0}" != 1 ]; then echo "# tests 1"; echo "# pass 1"; echo "# fail 0"; fi\nif [ "$1" = run ]; then mkdir -p dist-next; echo candidate > dist-next/index.html; fi\n',{mode:0o755});
  writeFileSync(join(bin,'pm2'),'#!/bin/sh\necho "pm2 $*" >> "$CALL_LOG"\n',{mode:0o755});
  writeFileSync(join(bin,'node'),'#!/bin/sh\necho "node $*" >> "$CALL_LOG"\n[ -z "$(git status --porcelain)" ] || exit 1\n[ "${FAIL_HEALTH:-0}" != 1 ]\n',{mode:0o755});
  const env={...process.env,PATH:bin+':'+process.env.PATH,CALL_LOG:callLog};
@@ -41,4 +41,10 @@ test('an unpushed local commit is preserved and never deployed as the remote rev
  run('git',['add','.'],f.repo);run('git',['commit','-qm','local-only'],f.repo);
  assert.equal(f.run().status,0);assert.equal(existsSync(f.callLog),false);
  assert.equal(readFileSync(join(f.repo,'madar-v2/client/src/app.js'),'utf8'),'local committed work');
+});
+
+test('a zero-test successful command is rejected rather than recorded as a verified release',()=>{
+ const f=fixture('zero-tests');assert.equal(f.run({EMPTY_TESTS:'1'}).status,1);
+ assert.doesNotMatch(readFileSync(f.callLog,'utf8'),/pm2/);
+ assert.equal(existsSync(join(f.repo,'madar-v2/logs/.auto-pull/deployed-revision')),false);
 });

@@ -2,6 +2,7 @@
 # MADAR V2 pull-based auto-deploy.
 # Runs from cron/PM2 watcher; safe to execute repeatedly.
 set -uo pipefail
+umask 077
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null)" || exit 0
@@ -81,10 +82,24 @@ run_step() {
   shift 2
   out="$(mktemp)"
   if ( cd "$dir" && "$@" ) >"$out" 2>&1; then
+    if [ "$label" = "V2 regression gate" ]; then
+      cp "$out" "$STATE_DIR/last-tests.log"
+      local tests passed failed
+      tests="$(awk '($1=="#" || $1=="ℹ") && $2=="tests" {n=$3} END {print n+0}' "$out")"
+      passed="$(awk '($1=="#" || $1=="ℹ") && $2=="pass" {n=$3} END {print n+0}' "$out")"
+      failed="$(awk '($1=="#" || $1=="ℹ") && $2=="fail" {n=$3} END {print n+0}' "$out")"
+      if [ "$tests" -le 0 ] || [ "$passed" -ne "$tests" ] || [ "$failed" -ne 0 ]; then
+        log "V2 regression gate: FAILED (missing or inconsistent test totals)"
+        rm -f "$out"
+        return 1
+      fi
+      log "V2 regression totals: $passed/$tests passed, $failed failed"
+    fi
     log "$label: ok"
     rm -f "$out"
     return 0
   fi
+  [ "$label" != "V2 regression gate" ] || cp "$out" "$STATE_DIR/last-tests.log"
   log "$label: FAILED (last 40 lines below)"
   tail -n 40 "$out" | sed 's/^/  /' >>"$LOG_FILE"
   rm -f "$out"

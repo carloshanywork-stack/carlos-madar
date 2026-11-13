@@ -39,3 +39,19 @@ Focused acceptance actually restored a historical-layout ZIP through the authent
 The restore HTTP fixture explicitly isolates database, storage, DATA_DIR (upload staging/journal), BACKUP_ROOT and mount settings. Its first setup used the default application DATA_DIR for transient upload/journal files while DB/customer storage remained isolated; it completed and cleaned those transient files. This setup was corrected and rerun successfully with every mutable path beneath its temporary directory.
 
 n8n isolated acceptance: all three definitions imported into disposable n8n 2.46.7. Synthetic read-only checks succeeded; a deliberate HTTP 503 caused a visible failed check and failed execution. The optional email workflow failed explicitly at its missing sender/SMTP prerequisite, before any send. Actual production GET checks and live import are recorded in the protected deployment receipt after publication; external mail delivery is not claimed.
+
+## Verified operational results
+
+The real 2026-11-13 full ZIP passed its repeated drill: 11,547 entries, 20,381,820,220 uncompressed bytes, CRC/size verification, isolated extraction, isolated/repeated database migrations, preserved checked domain-table counts, `integrity_check=ok`, zero foreign-key violations. The original archive remained unchanged. Exactly one older automatic full ZIP was then removed; one verified automatic archive remains. Manual recovery/release snapshots were preserved. This freed approximately 20 GB; no production restore occurred.
+
+Existing n8n map/verifier definitions were updated under their existing IDs and left inactive. All nine unrelated live workflow definitions were hash-checked unchanged. The email definition is importable but deliberately blocked without SMTP; no live workflow was activated.
+
+The first controlled deployment loaded clean source `ef08c21df89a93c66109a875283a28b0987fa66e` and passed actual revision/asset checks. Final deployment receipts, restore/retention evidence, operational results and subsequent n8n live GET execution evidence are kept outside the source checkout to avoid editing the running release:
+
+[Protected deployment receipt](/mnt/madar-storage/madar-release-archives/stability-20261113-1794603133277/deployment.json)
+
+[Actual full ZIP restore drill](/mnt/madar-storage/madar-release-archives/stability-20261113-1794603133277/restore-drill.json)
+
+[Automatic backup cleanup](/mnt/madar-storage/madar-release-archives/stability-20261113-1794603133277/backup-retention.json)
+
+The deployment gate now preserves its last test log privately, requires a nonzero passing test count, and refuses an exit-zero command that ran no tests. The exact final test totals are recorded in the deployment receipt and private `v2-deploy-gate.log`, rather than inferred from prior test discovery.
