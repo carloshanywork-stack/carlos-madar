@@ -1,0 +1,5619 @@
+{
+  "schemaVersion": 1,
+  "sourceRevision": "e2aa41b116fcd2ca40138d083247de43e0ca82f6",
+  "verifiedAt": "2026-11-13T15:20:37.596Z",
+  "method": "Babel AST: mounted Express routers, client HTTP call sites, native string contracts, event names and test declarations. Static matches do not prove runtime behavior; dynamic calls and externally consumed routes can remain unmatched.",
+  "repositoryMap": {
+    "production": "madar-v2",
+    "legacy": "system (separate npm package; migration input; not the running MADAR V2 API)",
+    "separateProject": "madar-flow (separate workflow product; not n8n or MADAR V2 runtime)"
+  },
+  "denominator": {
+    "mountedApiAndDownloadRouteDefinitions": 193,
+    "clientHttpCallSites": 133,
+    "nativePathLiterals": 8,
+    "testDeclarations": 163,
+    "eventEntries": 89
+  },
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/api/health",
+      "file": "madar-v2/server/app.js",
+      "line": 87,
+      "mount": null,
+      "middleware": []
+    },
+    {
+      "method": "GET",
+      "path": "/download/apk",
+      "file": "madar-v2/server/app.js",
+      "line": 91,
+      "mount": null,
+      "middleware": [
+        "requireAuthentication"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/download/apk/debug-transition",
+      "file": "madar-v2/server/app.js",
+      "line": 110,
+      "mount": null,
+      "middleware": [
+        "requireAuthentication"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/download/apk/status",
+      "file": "madar-v2/server/app.js",
+      "line": 129,
+      "mount": null,
+      "middleware": [
+        "requireAuthentication"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/auth/status",
+      "file": "madar-v2/server/modules/auth/routes.js",
+      "line": 29,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 161
+      },
+      "middleware": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/setup",
+      "file": "madar-v2/server/modules/auth/routes.js",
+      "line": 40,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 161
+      },
+      "middleware": [
+        "asyncHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/login",
+      "file": "madar-v2/server/modules/auth/routes.js",
+      "line": 47,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 161
+      },
+      "middleware": [
+        "loginRateLimiter",
+        "asyncHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/logout",
+      "file": "madar-v2/server/modules/auth/routes.js",
+      "line": 72,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 161
+      },
+      "middleware": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/rep/login",
+      "file": "madar-v2/server/modules/rep/routes.js",
+      "line": 58,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 162
+      },
+      "middleware": [
+        "loginRateLimiter",
+        "asyncHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/rep/events",
+      "file": "madar-v2/server/modules/rep/routes.js",
+      "line": 87,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 162
+      },
+      "middleware": []
+    },
+    {
+      "method": "GET",
+      "path": "/api/rep/attendance/today",
+      "file": "madar-v2/server/modules/rep/routes.js",
+      "line": 130,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 162
+      },
+      "middleware": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/rep/attendance/overtime-request",
+      "file": "madar-v2/server/modules/rep/routes.js",
+      "line": 135,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 162
+      },
+      "middleware": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/rep/attendance/overtime-request/cancel",
+      "file": "madar-v2/server/modules/rep/routes.js",
+      "line": 148,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 162
+      },
+      "middleware": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/rep/attendance/clock-in",
+      "file": "madar-v2/server/modules/rep/routes.js",
+      "line": 161,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 162
+      },
+      "middleware": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/rep/attendance/clock-out",
+      "file": "madar-v2/server/modules/rep/routes.js",
+      "line": 172,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 162
+      },
+      "middleware": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/rep/attendance/sync",
+      "file": "madar-v2/server/modules/rep/routes.js",
+      "line": 192,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 162
+      },
+      "middleware": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/rep/attendance/mock-location",
+      "file": "madar-v2/server/modules/rep/routes.js",
+      "line": 217,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 162
+      },
+      "middleware": []
+    },
+    {
+      "method": "GET",
+      "path": "/api/rep/today-route",
+      "file": "madar-v2/server/modules/rep/routes.js",
+      "line": 226,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 162
+      },
+      "middleware": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/rep/machines/:cardId/start-work",
+      "file": "madar-v2/server/modules/rep/routes.js",
+      "line": 236,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 162
+      },
+      "middleware": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/rep/machines/:cardId/stop-work",
+      "file": "madar-v2/server/modules/rep/routes.js",
+      "line": 251,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 162
+      },
+      "middleware": []
+    },
+    {
+      "method": "GET",
+      "path": "/api/rep/location-confirmations",
+      "file": "madar-v2/server/modules/rep/routes.js",
+      "line": 264,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 162
+      },
+      "middleware": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/rep/machines/:machineId/confirm-location",
+      "file": "madar-v2/server/modules/rep/routes.js",
+      "line": 269,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 162
+      },
+      "middleware": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/rep/machines/:machineId/corrections",
+      "file": "madar-v2/server/modules/rep/routes.js",
+      "line": 286,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 162
+      },
+      "middleware": [
+        "machineCorrectionUpload",
+        "asyncHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/rep/fault-reasons",
+      "file": "madar-v2/server/modules/rep/routes.js",
+      "line": 307,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 162
+      },
+      "middleware": []
+    },
+    {
+      "method": "GET",
+      "path": "/api/rep/map/packs",
+      "file": "madar-v2/server/modules/rep/routes.js",
+      "line": 312,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 162
+      },
+      "middleware": []
+    },
+    {
+      "method": "GET",
+      "path": "/api/rep/map/google",
+      "file": "madar-v2/server/modules/rep/routes.js",
+      "line": 317,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 162
+      },
+      "middleware": []
+    },
+    {
+      "method": "GET",
+      "path": "/api/rep/map/packs/:packId/manifest",
+      "file": "madar-v2/server/modules/rep/routes.js",
+      "line": 326,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 162
+      },
+      "middleware": []
+    },
+    {
+      "method": "GET",
+      "path": "/api/rep/map/tiles/:packId/:z/:x/:y",
+      "file": "madar-v2/server/modules/rep/routes.js",
+      "line": 335,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 162
+      },
+      "middleware": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/rep/tracking",
+      "file": "madar-v2/server/modules/rep/routes.js",
+      "line": 352,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 162
+      },
+      "middleware": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/rep/track-location",
+      "file": "madar-v2/server/modules/rep/routes.js",
+      "line": 352,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 162
+      },
+      "middleware": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/rep/location-ping",
+      "file": "madar-v2/server/modules/rep/routes.js",
+      "line": 367,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 162
+      },
+      "middleware": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/rep/sync-visit",
+      "file": "madar-v2/server/modules/rep/routes.js",
+      "line": 382,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 162
+      },
+      "middleware": [
+        "asyncHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/notifications",
+      "file": "madar-v2/server/modules/notifications/routes.js",
+      "line": 16,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 166
+      },
+      "middleware": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/notifications/read-all",
+      "file": "madar-v2/server/modules/notifications/routes.js",
+      "line": 20,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 166
+      },
+      "middleware": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/notifications/:id/read",
+      "file": "madar-v2/server/modules/notifications/routes.js",
+      "line": 24,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 166
+      },
+      "middleware": []
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/notifications/:id",
+      "file": "madar-v2/server/modules/notifications/routes.js",
+      "line": 28,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 166
+      },
+      "middleware": []
+    },
+    {
+      "method": "GET",
+      "path": "/api/users",
+      "file": "madar-v2/server/modules/auth/users.js",
+      "line": 94,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 174
+      },
+      "middleware": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/users",
+      "file": "madar-v2/server/modules/auth/users.js",
+      "line": 100,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 174
+      },
+      "middleware": [
+        "asyncHandler"
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/users/:id",
+      "file": "madar-v2/server/modules/auth/users.js",
+      "line": 198,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 174
+      },
+      "middleware": [
+        "updateUser"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/users/:id",
+      "file": "madar-v2/server/modules/auth/users.js",
+      "line": 199,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 174
+      },
+      "middleware": [
+        "updateUser"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/users/:id",
+      "file": "madar-v2/server/modules/auth/users.js",
+      "line": 201,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 174
+      },
+      "middleware": []
+    },
+    {
+      "method": "GET",
+      "path": "/api/auth/users",
+      "file": "madar-v2/server/modules/auth/users.js",
+      "line": 94,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 174
+      },
+      "middleware": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/users",
+      "file": "madar-v2/server/modules/auth/users.js",
+      "line": 100,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 174
+      },
+      "middleware": [
+        "asyncHandler"
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/auth/users/:id",
+      "file": "madar-v2/server/modules/auth/users.js",
+      "line": 198,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 174
+      },
+      "middleware": [
+        "updateUser"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/auth/users/:id",
+      "file": "madar-v2/server/modules/auth/users.js",
+      "line": 199,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 174
+      },
+      "middleware": [
+        "updateUser"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/auth/users/:id",
+      "file": "madar-v2/server/modules/auth/users.js",
+      "line": 201,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 174
+      },
+      "middleware": []
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/audit-log",
+      "file": "madar-v2/server/modules/system/audit-routes.js",
+      "line": 72,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 176
+      },
+      "middleware": [
+        "requireAdmin"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/health",
+      "file": "madar-v2/server/modules/system/backup.js",
+      "line": 733,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 177
+      },
+      "middleware": [
+        "asyncHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/system/backup",
+      "file": "madar-v2/server/modules/system/backup.js",
+      "line": 765,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 177
+      },
+      "middleware": [
+        "asyncHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/backups",
+      "file": "madar-v2/server/modules/system/backup.js",
+      "line": 770,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 177
+      },
+      "middleware": [
+        "asyncHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/backups/:filename/download",
+      "file": "madar-v2/server/modules/system/backup.js",
+      "line": 771,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 177
+      },
+      "middleware": [
+        "asyncHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/system/backup/restore",
+      "file": "madar-v2/server/modules/system/backup.js",
+      "line": 772,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 177
+      },
+      "middleware": [
+        "restoreUpload",
+        "asyncHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/apk-info",
+      "file": "madar-v2/server/modules/system/backup.js",
+      "line": 781,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 177
+      },
+      "middleware": [
+        "asyncHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/clients",
+      "file": "madar-v2/server/modules/clients/routes.js",
+      "line": 26,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 178
+      },
+      "middleware": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/clients",
+      "file": "madar-v2/server/modules/clients/routes.js",
+      "line": 30,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 178
+      },
+      "middleware": [
+        "asyncHandler"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/clients/:id",
+      "file": "madar-v2/server/modules/clients/routes.js",
+      "line": 34,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 178
+      },
+      "middleware": [
+        "asyncHandler"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/clients/:id",
+      "file": "madar-v2/server/modules/clients/routes.js",
+      "line": 38,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 178
+      },
+      "middleware": [
+        "asyncHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/clients/:id/logo",
+      "file": "madar-v2/server/modules/clients/routes.js",
+      "line": 42,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 178
+      },
+      "middleware": [
+        "asyncHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/clients/:id/logo",
+      "file": "madar-v2/server/modules/clients/routes.js",
+      "line": 56,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 178
+      },
+      "middleware": [
+        "logoUpload",
+        "asyncHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/clients/:id/statement",
+      "file": "madar-v2/server/modules/clients/routes.js",
+      "line": 60,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 178
+      },
+      "middleware": [
+        "requireFinanceOrAdmin"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/clients/:id",
+      "file": "madar-v2/server/modules/clients/routes.js",
+      "line": 68,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 178
+      },
+      "middleware": []
+    },
+    {
+      "method": "GET",
+      "path": "/api/maintenance/areas",
+      "file": "madar-v2/server/modules/maintenance/routes.js",
+      "line": 150,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 179
+      },
+      "middleware": []
+    },
+    {
+      "method": "GET",
+      "path": "/api/maintenance/area-notes/export.xlsx",
+      "file": "madar-v2/server/modules/maintenance/routes.js",
+      "line": 154,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 179
+      },
+      "middleware": [
+        "asyncHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/maintenance/area-notes",
+      "file": "madar-v2/server/modules/maintenance/routes.js",
+      "line": 183,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 179
+      },
+      "middleware": []
+    },
+    {
+      "method": "GET",
+      "path": "/api/maintenance/storage-explorer",
+      "file": "madar-v2/server/modules/maintenance/routes.js",
+      "line": 188,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 179
+      },
+      "middleware": [
+        "asyncHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/maintenance/machines",
+      "file": "madar-v2/server/modules/maintenance/routes.js",
+      "line": 217,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 179
+      },
+      "middleware": []
+    },
+    {
+      "method": "GET",
+      "path": "/api/maintenance/machines/map",
+      "file": "madar-v2/server/modules/maintenance/routes.js",
+      "line": 235,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 179
+      },
+      "middleware": [
+        "requireRole"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/maintenance/machine-corrections",
+      "file": "madar-v2/server/modules/maintenance/routes.js",
+      "line": 244,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 179
+      },
+      "middleware": [
+        "requireRole"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/maintenance/machine-corrections/:id/candidates",
+      "file": "madar-v2/server/modules/maintenance/routes.js",
+      "line": 249,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 179
+      },
+      "middleware": [
+        "requireRole"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/maintenance/machine-corrections/:id/evidence",
+      "file": "madar-v2/server/modules/maintenance/routes.js",
+      "line": 254,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 179
+      },
+      "middleware": [
+        "requireRole"
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/maintenance/machine-corrections/:id/review",
+      "file": "madar-v2/server/modules/maintenance/routes.js",
+      "line": 265,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 179
+      },
+      "middleware": [
+        "requireRole",
+        "asyncHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/maintenance/representatives",
+      "file": "madar-v2/server/modules/maintenance/routes.js",
+      "line": 269,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 179
+      },
+      "middleware": [
+        "requireRole"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/maintenance/machines/import/preview",
+      "file": "madar-v2/server/modules/maintenance/routes.js",
+      "line": 274,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 179
+      },
+      "middleware": [
+        "machineImportUpload"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/maintenance/machines/import",
+      "file": "madar-v2/server/modules/maintenance/routes.js",
+      "line": 279,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 179
+      },
+      "middleware": [
+        "machineImportUpload",
+        "asyncHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/maintenance/machines",
+      "file": "madar-v2/server/modules/maintenance/routes.js",
+      "line": 283,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 179
+      },
+      "middleware": [
+        "asyncHandler"
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/maintenance/machines/:id",
+      "file": "madar-v2/server/modules/maintenance/routes.js",
+      "line": 287,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 179
+      },
+      "middleware": [
+        "asyncHandler"
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/maintenance/machines/:id/geofence",
+      "file": "madar-v2/server/modules/maintenance/routes.js",
+      "line": 291,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 179
+      },
+      "middleware": [
+        "requireRole"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/maintenance/machines/:id/reset-location",
+      "file": "madar-v2/server/modules/maintenance/routes.js",
+      "line": 296,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 179
+      },
+      "middleware": [
+        "requireAdminOrOperations"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/maintenance/machines/:id",
+      "file": "madar-v2/server/modules/maintenance/routes.js",
+      "line": 304,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 179
+      },
+      "middleware": []
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/maintenance/machines/:id/test-mock",
+      "file": "madar-v2/server/modules/maintenance/routes.js",
+      "line": 309,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 179
+      },
+      "middleware": [
+        "requireRole",
+        "asyncHandler"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/maintenance/machines/:id/maintenance-note",
+      "file": "madar-v2/server/modules/maintenance/routes.js",
+      "line": 313,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 179
+      },
+      "middleware": [
+        "requireRole"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/maintenance/machines/:id/maintenance-note",
+      "file": "madar-v2/server/modules/maintenance/routes.js",
+      "line": 318,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 179
+      },
+      "middleware": [
+        "requireRole"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/maintenance/areas/notes",
+      "file": "madar-v2/server/modules/maintenance/routes.js",
+      "line": 329,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 179
+      },
+      "middleware": [
+        "requireRole"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/maintenance/machines/:id/notes-history",
+      "file": "madar-v2/server/modules/maintenance/routes.js",
+      "line": 340,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 179
+      },
+      "middleware": []
+    },
+    {
+      "method": "GET",
+      "path": "/api/maintenance/reasons",
+      "file": "madar-v2/server/modules/maintenance/routes.js",
+      "line": 348,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 179
+      },
+      "middleware": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/maintenance/reasons",
+      "file": "madar-v2/server/modules/maintenance/routes.js",
+      "line": 359,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 179
+      },
+      "middleware": [
+        "requireRole"
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/maintenance/reasons/:id",
+      "file": "madar-v2/server/modules/maintenance/routes.js",
+      "line": 363,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 179
+      },
+      "middleware": [
+        "requireRole"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/maintenance/reasons/:id",
+      "file": "madar-v2/server/modules/maintenance/routes.js",
+      "line": 367,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 179
+      },
+      "middleware": [
+        "requireRole"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/maintenance/analysis/areas",
+      "file": "madar-v2/server/modules/maintenance/routes.js",
+      "line": 372,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 179
+      },
+      "middleware": []
+    },
+    {
+      "method": "GET",
+      "path": "/api/maintenance/analysis/export.xlsx",
+      "file": "madar-v2/server/modules/maintenance/routes.js",
+      "line": 376,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 179
+      },
+      "middleware": []
+    },
+    {
+      "method": "GET",
+      "path": "/api/maintenance/orders",
+      "file": "madar-v2/server/modules/maintenance/routes.js",
+      "line": 389,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 179
+      },
+      "middleware": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/maintenance/orders",
+      "file": "madar-v2/server/modules/maintenance/routes.js",
+      "line": 398,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 179
+      },
+      "middleware": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/maintenance/orders/test-mock",
+      "file": "madar-v2/server/modules/maintenance/routes.js",
+      "line": 418,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 179
+      },
+      "middleware": [
+        "requireAdminOrOperations"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/maintenance/orders/:id/representatives",
+      "file": "madar-v2/server/modules/maintenance/routes.js",
+      "line": 431,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 179
+      },
+      "middleware": [
+        "requireRole"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/maintenance/orders/:id",
+      "file": "madar-v2/server/modules/maintenance/routes.js",
+      "line": 451,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 179
+      },
+      "middleware": [
+        "requireRole",
+        "asyncHandler"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/maintenance/orders/:id/test-mock",
+      "file": "madar-v2/server/modules/maintenance/routes.js",
+      "line": 455,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 179
+      },
+      "middleware": [
+        "requireRole",
+        "asyncHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/maintenance/orders/:id/unarchive",
+      "file": "madar-v2/server/modules/maintenance/routes.js",
+      "line": 459,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 179
+      },
+      "middleware": [
+        "requireRole",
+        "asyncHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/maintenance/orders/:id/cards",
+      "file": "madar-v2/server/modules/maintenance/routes.js",
+      "line": 463,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 179
+      },
+      "middleware": []
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/maintenance/orders/:id/cards/:cardId",
+      "file": "madar-v2/server/modules/maintenance/routes.js",
+      "line": 471,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 179
+      },
+      "middleware": [
+        "asyncHandler"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/maintenance/orders/:id/machines/:machineId",
+      "file": "madar-v2/server/modules/maintenance/routes.js",
+      "line": 475,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 179
+      },
+      "middleware": [
+        "asyncHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/maintenance/orders/:id/populate-area",
+      "file": "madar-v2/server/modules/maintenance/routes.js",
+      "line": 483,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 179
+      },
+      "middleware": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/maintenance/orders/:id/import-server-folder",
+      "file": "madar-v2/server/modules/maintenance/routes.js",
+      "line": 488,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 179
+      },
+      "middleware": [
+        "asyncHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/maintenance/orders/:id/trip-progress",
+      "file": "madar-v2/server/modules/maintenance/routes.js",
+      "line": 492,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 179
+      },
+      "middleware": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/maintenance/orders/:id/process-folder",
+      "file": "madar-v2/server/modules/maintenance/routes.js",
+      "line": 497,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 179
+      },
+      "middleware": [
+        "receiveTripFolderUpload",
+        "asyncHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/maintenance/orders/:id/unmatched/:folderId/bind",
+      "file": "madar-v2/server/modules/maintenance/routes.js",
+      "line": 512,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 179
+      },
+      "middleware": [
+        "asyncHandler"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/maintenance/orders/:id/unmatched/:folderId",
+      "file": "madar-v2/server/modules/maintenance/routes.js",
+      "line": 521,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 179
+      },
+      "middleware": [
+        "asyncHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/maintenance/orders/:id/unmatched/:folderId/photos/:filename",
+      "file": "madar-v2/server/modules/maintenance/routes.js",
+      "line": 529,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 179
+      },
+      "middleware": [
+        "asyncHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/maintenance/export/pptx/progress",
+      "file": "madar-v2/server/modules/maintenance/routes.js",
+      "line": 548,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 179
+      },
+      "middleware": [
+        "asyncHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/maintenance/export/pptx/download/:exportId",
+      "file": "madar-v2/server/modules/maintenance/routes.js",
+      "line": 557,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 179
+      },
+      "middleware": [
+        "asyncHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/maintenance/export/pptx",
+      "file": "madar-v2/server/modules/maintenance/routes.js",
+      "line": 565,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 179
+      },
+      "middleware": [
+        "asyncHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/maintenance/export/pptx",
+      "file": "madar-v2/server/modules/maintenance/routes.js",
+      "line": 569,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 179
+      },
+      "middleware": [
+        "asyncHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/maintenance/orders/:id/export.pptx",
+      "file": "madar-v2/server/modules/maintenance/routes.js",
+      "line": 573,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 179
+      },
+      "middleware": [
+        "asyncHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/maintenance/orders/:id/export.docx",
+      "file": "madar-v2/server/modules/maintenance/routes.js",
+      "line": 576,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 179
+      },
+      "middleware": [
+        "asyncHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/maintenance/orders/:id/custody-advance",
+      "file": "madar-v2/server/modules/maintenance/routes.js",
+      "line": 580,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 179
+      },
+      "middleware": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/maintenance/orders/:id/cards/:cardId/photos/move",
+      "file": "madar-v2/server/modules/maintenance/routes.js",
+      "line": 588,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 179
+      },
+      "middleware": [
+        "asyncHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/maintenance/orders/:id/photos/tag-targets",
+      "file": "madar-v2/server/modules/maintenance/routes.js",
+      "line": 602,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 179
+      },
+      "middleware": [
+        "requireAdminOrOperations"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/maintenance/orders/:id/cards/:cardId/photos/rotate",
+      "file": "madar-v2/server/modules/maintenance/routes.js",
+      "line": 607,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 179
+      },
+      "middleware": [
+        "requireAdminOrOperations",
+        "asyncHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/maintenance/photos/rotate",
+      "file": "madar-v2/server/modules/maintenance/routes.js",
+      "line": 616,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 179
+      },
+      "middleware": [
+        "requireAdminOrOperations",
+        "asyncHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/maintenance/orders/:id/cards/:cardId/photos/:phase",
+      "file": "madar-v2/server/modules/maintenance/routes.js",
+      "line": 627,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 179
+      },
+      "middleware": [
+        "photoUpload",
+        "asyncHandler"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/maintenance/orders/:id/cards/:cardId/photos/:phase/:filename",
+      "file": "madar-v2/server/modules/maintenance/routes.js",
+      "line": 637,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 179
+      },
+      "middleware": [
+        "asyncHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/maintenance/orders/:id/cards/:cardId/photos/:phase/:filename",
+      "file": "madar-v2/server/modules/maintenance/routes.js",
+      "line": 647,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 179
+      },
+      "middleware": [
+        "asyncHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/maintenance/orders/:id/cards/:cardId/photos/:phase/:filename/thumbnail",
+      "file": "madar-v2/server/modules/maintenance/routes.js",
+      "line": 671,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 179
+      },
+      "middleware": [
+        "asyncHandler"
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/maintenance/orders/:id/cards/:cardId",
+      "file": "madar-v2/server/modules/maintenance/routes.js",
+      "line": 686,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 179
+      },
+      "middleware": [
+        "asyncHandler"
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/maintenance/orders/:id/status",
+      "file": "madar-v2/server/modules/maintenance/routes.js",
+      "line": 699,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 179
+      },
+      "middleware": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/maintenance/orders/:id/archive",
+      "file": "madar-v2/server/modules/maintenance/routes.js",
+      "line": 707,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 179
+      },
+      "middleware": []
+    },
+    {
+      "method": "GET",
+      "path": "/api/maintenance/orders/:id",
+      "file": "madar-v2/server/modules/maintenance/routes.js",
+      "line": 715,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 179
+      },
+      "middleware": []
+    },
+    {
+      "method": "GET",
+      "path": "/api/workshop/orders",
+      "file": "madar-v2/server/modules/workshop/routes.js",
+      "line": 28,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 180
+      },
+      "middleware": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/workshop/orders",
+      "file": "madar-v2/server/modules/workshop/routes.js",
+      "line": 37,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 180
+      },
+      "middleware": [
+        "requireWorkshopMutationAccess"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/workshop/orders/:id/designs",
+      "file": "madar-v2/server/modules/workshop/routes.js",
+      "line": 45,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 180
+      },
+      "middleware": [
+        "requireWorkshopMutationAccess",
+        "designUpload",
+        "asyncHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/workshop/orders/:id/ready",
+      "file": "madar-v2/server/modules/workshop/routes.js",
+      "line": 54,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 180
+      },
+      "middleware": [
+        "requireWorkshopMutationAccess"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/workshop/orders/:id/deliver",
+      "file": "madar-v2/server/modules/workshop/routes.js",
+      "line": 62,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 180
+      },
+      "middleware": [
+        "requireWorkshopMutationAccess"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/workshop/designs/:fileId/download",
+      "file": "madar-v2/server/modules/workshop/routes.js",
+      "line": 70,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 180
+      },
+      "middleware": [
+        "asyncHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/workshop/orders/:id",
+      "file": "madar-v2/server/modules/workshop/routes.js",
+      "line": 79,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 180
+      },
+      "middleware": []
+    },
+    {
+      "method": "GET",
+      "path": "/api/warehouse/export.xlsx",
+      "file": "madar-v2/server/modules/warehouse/routes.js",
+      "line": 19,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 181
+      },
+      "middleware": [
+        "requireFinanceOrAdmin"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/warehouse/materials",
+      "file": "madar-v2/server/modules/warehouse/routes.js",
+      "line": 29,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 181
+      },
+      "middleware": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/warehouse/materials",
+      "file": "madar-v2/server/modules/warehouse/routes.js",
+      "line": 34,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 181
+      },
+      "middleware": [
+        "requireWarehouseMutationAccess"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/warehouse/movements",
+      "file": "madar-v2/server/modules/warehouse/routes.js",
+      "line": 38,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 181
+      },
+      "middleware": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/warehouse/issue",
+      "file": "madar-v2/server/modules/warehouse/routes.js",
+      "line": 42,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 181
+      },
+      "middleware": [
+        "requireWarehouseMutationAccess"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/warehouse/offcuts",
+      "file": "madar-v2/server/modules/warehouse/routes.js",
+      "line": 46,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 181
+      },
+      "middleware": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/warehouse/offcuts",
+      "file": "madar-v2/server/modules/warehouse/routes.js",
+      "line": 51,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 181
+      },
+      "middleware": [
+        "requireWarehouseMutationAccess"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/warehouse/offcuts/scrap-sales",
+      "file": "madar-v2/server/modules/warehouse/routes.js",
+      "line": 55,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 181
+      },
+      "middleware": [
+        "requireFinanceOrAdmin"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/warehouse/stock-counts/start",
+      "file": "madar-v2/server/modules/warehouse/routes.js",
+      "line": 59,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 181
+      },
+      "middleware": [
+        "requireWarehouseMutationAccess"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/warehouse/stock-counts/:id/reconcile",
+      "file": "madar-v2/server/modules/warehouse/routes.js",
+      "line": 63,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 181
+      },
+      "middleware": [
+        "requireWarehouseMutationAccess"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/finance/treasury",
+      "file": "madar-v2/server/modules/finance/routes.js",
+      "line": 9,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 182
+      },
+      "middleware": [
+        "requireFinanceOrAdmin"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/finance/treasury/entries",
+      "file": "madar-v2/server/modules/finance/routes.js",
+      "line": 13,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 182
+      },
+      "middleware": [
+        "requireFinanceOrAdmin"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/finance/invoices",
+      "file": "madar-v2/server/modules/finance/routes.js",
+      "line": 17,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 182
+      },
+      "middleware": [
+        "requireFinanceOrAdmin"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/finance/invoices/purchase",
+      "file": "madar-v2/server/modules/finance/routes.js",
+      "line": 21,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 182
+      },
+      "middleware": [
+        "requireFinanceOrAdmin"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/finance/invoices/:id/receipt",
+      "file": "madar-v2/server/modules/finance/routes.js",
+      "line": 25,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 182
+      },
+      "middleware": [
+        "requireFinanceOrAdmin"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/finance/invoices/:id/payment",
+      "file": "madar-v2/server/modules/finance/routes.js",
+      "line": 29,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 182
+      },
+      "middleware": [
+        "requireFinanceOrAdmin"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/employees",
+      "file": "madar-v2/server/modules/employees/routes.js",
+      "line": 27,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 183
+      },
+      "middleware": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/employees",
+      "file": "madar-v2/server/modules/employees/routes.js",
+      "line": 42,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 183
+      },
+      "middleware": [
+        "requireFinanceOrAdmin"
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/employees/:id",
+      "file": "madar-v2/server/modules/employees/routes.js",
+      "line": 45,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 183
+      },
+      "middleware": [
+        "requireFinanceOrAdmin"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/employees/:id",
+      "file": "madar-v2/server/modules/employees/routes.js",
+      "line": 48,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 183
+      },
+      "middleware": [
+        "requireFinanceOrAdmin"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/employees/attendance",
+      "file": "madar-v2/server/modules/employees/routes.js",
+      "line": 52,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 183
+      },
+      "middleware": []
+    },
+    {
+      "method": "GET",
+      "path": "/api/employees/attendance/monthly",
+      "file": "madar-v2/server/modules/employees/routes.js",
+      "line": 55,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 183
+      },
+      "middleware": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/employees/attendance/monthly",
+      "file": "madar-v2/server/modules/employees/routes.js",
+      "line": 58,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 183
+      },
+      "middleware": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/employees/attendance/mark-all-present",
+      "file": "madar-v2/server/modules/employees/routes.js",
+      "line": 63,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 183
+      },
+      "middleware": []
+    },
+    {
+      "method": "GET",
+      "path": "/api/employees/attendance/export-monthly",
+      "file": "madar-v2/server/modules/employees/routes.js",
+      "line": 68,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 183
+      },
+      "middleware": [
+        "requireFinanceOrAdmin"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/employees/attendance",
+      "file": "madar-v2/server/modules/employees/routes.js",
+      "line": 77,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 183
+      },
+      "middleware": []
+    },
+    {
+      "method": "GET",
+      "path": "/api/employees/payroll",
+      "file": "madar-v2/server/modules/employees/routes.js",
+      "line": 83,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 183
+      },
+      "middleware": [
+        "requireFinanceOrAdmin"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/employees/payroll/finalize",
+      "file": "madar-v2/server/modules/employees/routes.js",
+      "line": 86,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 183
+      },
+      "middleware": [
+        "requireFinanceOrAdmin"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/employees/:id/advances",
+      "file": "madar-v2/server/modules/employees/routes.js",
+      "line": 89,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 183
+      },
+      "middleware": [
+        "requireFinanceOrAdmin"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/employees/:id/payroll-adjustments",
+      "file": "madar-v2/server/modules/employees/routes.js",
+      "line": 94,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 183
+      },
+      "middleware": [
+        "requireFinanceOrAdmin"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/employees/:id/tools",
+      "file": "madar-v2/server/modules/employees/routes.js",
+      "line": 100,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 183
+      },
+      "middleware": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/employees/:id/tools",
+      "file": "madar-v2/server/modules/employees/routes.js",
+      "line": 103,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 183
+      },
+      "middleware": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/employees/tools/:toolId/return",
+      "file": "madar-v2/server/modules/employees/routes.js",
+      "line": 106,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 183
+      },
+      "middleware": []
+    },
+    {
+      "method": "GET",
+      "path": "/api/staff",
+      "file": "madar-v2/server/modules/employees/staff-routes.js",
+      "line": 17,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 184
+      },
+      "middleware": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/staff",
+      "file": "madar-v2/server/modules/employees/staff-routes.js",
+      "line": 22,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 184
+      },
+      "middleware": [
+        "asyncHandler"
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/staff/:id",
+      "file": "madar-v2/server/modules/employees/staff-routes.js",
+      "line": 28,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 184
+      },
+      "middleware": [
+        "asyncHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/attendance/pending-overtime",
+      "file": "madar-v2/server/modules/employees/attendance-routes.js",
+      "line": 30,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 185
+      },
+      "middleware": [
+        "requireFinanceOrAdmin"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/attendance/overtime-requests",
+      "file": "madar-v2/server/modules/employees/attendance-routes.js",
+      "line": 35,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 185
+      },
+      "middleware": [
+        "requireFinanceOrAdmin"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/attendance/overtime-requests/:id/approve",
+      "file": "madar-v2/server/modules/employees/attendance-routes.js",
+      "line": 40,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 185
+      },
+      "middleware": [
+        "requireFinanceOrAdmin"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/attendance/overtime-requests/:id/reject",
+      "file": "madar-v2/server/modules/employees/attendance-routes.js",
+      "line": 59,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 185
+      },
+      "middleware": [
+        "requireFinanceOrAdmin"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/attendance/today",
+      "file": "madar-v2/server/modules/employees/attendance-routes.js",
+      "line": 78,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 185
+      },
+      "middleware": [
+        "requireAdmin"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/attendance/mark",
+      "file": "madar-v2/server/modules/employees/attendance-routes.js",
+      "line": 89,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 185
+      },
+      "middleware": [
+        "requireAdmin"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/attendance/clock-out",
+      "file": "madar-v2/server/modules/employees/attendance-routes.js",
+      "line": 101,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 185
+      },
+      "middleware": [
+        "requireAdmin"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/attendance/cancel",
+      "file": "madar-v2/server/modules/employees/attendance-routes.js",
+      "line": 124,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 185
+      },
+      "middleware": [
+        "requireFinanceOrAdmin"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/attendance/:id/approve-overtime",
+      "file": "madar-v2/server/modules/employees/attendance-routes.js",
+      "line": 139,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 185
+      },
+      "middleware": [
+        "requireFinanceOrAdmin"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/attendance/:id/reject-overtime",
+      "file": "madar-v2/server/modules/employees/attendance-routes.js",
+      "line": 145,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 185
+      },
+      "middleware": [
+        "requireFinanceOrAdmin"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/supervisor/map/status",
+      "file": "madar-v2/server/modules/supervisor/routes.js",
+      "line": 28,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 186
+      },
+      "middleware": []
+    },
+    {
+      "method": "GET",
+      "path": "/api/supervisor/map/tiles/:z/:x/:y",
+      "file": "madar-v2/server/modules/supervisor/routes.js",
+      "line": 33,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 186
+      },
+      "middleware": []
+    },
+    {
+      "method": "GET",
+      "path": "/api/supervisor/events",
+      "file": "madar-v2/server/modules/supervisor/routes.js",
+      "line": 46,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 186
+      },
+      "middleware": []
+    },
+    {
+      "method": "GET",
+      "path": "/api/supervisor/radar",
+      "file": "madar-v2/server/modules/supervisor/routes.js",
+      "line": 80,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 186
+      },
+      "middleware": []
+    },
+    {
+      "method": "GET",
+      "path": "/api/supervisor/reps/:id/route",
+      "file": "madar-v2/server/modules/supervisor/routes.js",
+      "line": 85,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 186
+      },
+      "middleware": []
+    },
+    {
+      "method": "GET",
+      "path": "/api/supervisor/location-confirmations",
+      "file": "madar-v2/server/modules/supervisor/routes.js",
+      "line": 94,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 186
+      },
+      "middleware": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/supervisor/corrections/:id/reject",
+      "file": "madar-v2/server/modules/supervisor/routes.js",
+      "line": 99,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 186
+      },
+      "middleware": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/supervisor/corrections/:id/approve",
+      "file": "madar-v2/server/modules/supervisor/routes.js",
+      "line": 106,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 186
+      },
+      "middleware": []
+    },
+    {
+      "method": "GET",
+      "path": "/api/supervisor/qa/queue",
+      "file": "madar-v2/server/modules/supervisor/routes.js",
+      "line": 115,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 186
+      },
+      "middleware": []
+    },
+    {
+      "method": "GET",
+      "path": "/api/supervisor/visits/:id/photos/:phase",
+      "file": "madar-v2/server/modules/supervisor/routes.js",
+      "line": 126,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 186
+      },
+      "middleware": [
+        "sendVisitPhoto"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/supervisor/visits/:id/photos/:phase/:ordinal",
+      "file": "madar-v2/server/modules/supervisor/routes.js",
+      "line": 127,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 186
+      },
+      "middleware": [
+        "sendVisitPhoto"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/supervisor/visits/:id/review",
+      "file": "madar-v2/server/modules/supervisor/routes.js",
+      "line": 129,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 186
+      },
+      "middleware": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/supervisor/visits/approve-all",
+      "file": "madar-v2/server/modules/supervisor/routes.js",
+      "line": 144,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 186
+      },
+      "middleware": []
+    },
+    {
+      "method": "GET",
+      "path": "/api/supervisor/reports/approved-visits.xlsx",
+      "file": "madar-v2/server/modules/supervisor/routes.js",
+      "line": 155,
+      "mount": {
+        "file": "madar-v2/server/app.js",
+        "line": 186
+      },
+      "middleware": [
+        "asyncHandler"
+      ]
+    }
+  ],
+  "clientHttpCalls": [
+    {
+      "method": "GET",
+      "path": "/api/auth/status",
+      "file": "madar-v2/client/src/App.jsx",
+      "line": 93,
+      "possibleServerRoutes": [
+        {
+          "method": "GET",
+          "path": "/api/auth/status",
+          "file": "madar-v2/server/modules/auth/routes.js",
+          "line": 29
+        }
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/auth/status",
+      "file": "madar-v2/client/src/App.jsx",
+      "line": 127,
+      "possibleServerRoutes": [
+        {
+          "method": "GET",
+          "path": "/api/auth/status",
+          "file": "madar-v2/server/modules/auth/routes.js",
+          "line": 29
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/logout",
+      "file": "madar-v2/client/src/App.jsx",
+      "line": 235,
+      "possibleServerRoutes": [
+        {
+          "method": "POST",
+          "path": "/api/auth/logout",
+          "file": "madar-v2/server/modules/auth/routes.js",
+          "line": 72
+        }
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/notifications",
+      "file": "madar-v2/client/src/components/notifications/NotificationBell.jsx",
+      "line": 120,
+      "possibleServerRoutes": [
+        {
+          "method": "GET",
+          "path": "/api/notifications",
+          "file": "madar-v2/server/modules/notifications/routes.js",
+          "line": 16
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/notifications/{dynamic}/read",
+      "file": "madar-v2/client/src/components/notifications/NotificationBell.jsx",
+      "line": 209,
+      "possibleServerRoutes": [
+        {
+          "method": "POST",
+          "path": "/api/notifications/:id/read",
+          "file": "madar-v2/server/modules/notifications/routes.js",
+          "line": 24
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/notifications/read-all",
+      "file": "madar-v2/client/src/components/notifications/NotificationBell.jsx",
+      "line": 232,
+      "possibleServerRoutes": [
+        {
+          "method": "POST",
+          "path": "/api/notifications/read-all",
+          "file": "madar-v2/server/modules/notifications/routes.js",
+          "line": 20
+        }
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/notifications/{dynamic}",
+      "file": "madar-v2/client/src/components/notifications/NotificationBell.jsx",
+      "line": 254,
+      "possibleServerRoutes": [
+        {
+          "method": "DELETE",
+          "path": "/api/notifications/:id",
+          "file": "madar-v2/server/modules/notifications/routes.js",
+          "line": 28
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/employees/{dynamic}/advances",
+      "file": "madar-v2/client/src/modules/accounting/AccountingPage.jsx",
+      "line": 132,
+      "possibleServerRoutes": [
+        {
+          "method": "POST",
+          "path": "/api/employees/:id/advances",
+          "file": "madar-v2/server/modules/employees/routes.js",
+          "line": 89
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/employees/{dynamic}/payroll-adjustments",
+      "file": "madar-v2/client/src/modules/accounting/AccountingPage.jsx",
+      "line": 136,
+      "possibleServerRoutes": [
+        {
+          "method": "POST",
+          "path": "/api/employees/:id/payroll-adjustments",
+          "file": "madar-v2/server/modules/employees/routes.js",
+          "line": 94
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/employees/attendance",
+      "file": "madar-v2/client/src/modules/accounting/AccountingPage.jsx",
+      "line": 178,
+      "possibleServerRoutes": [
+        {
+          "method": "POST",
+          "path": "/api/employees/attendance",
+          "file": "madar-v2/server/modules/employees/routes.js",
+          "line": 77
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/attendance/clock-out",
+      "file": "madar-v2/client/src/modules/accounting/AccountingPage.jsx",
+      "line": 209,
+      "possibleServerRoutes": [
+        {
+          "method": "POST",
+          "path": "/api/attendance/clock-out",
+          "file": "madar-v2/server/modules/employees/attendance-routes.js",
+          "line": 101
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/attendance/{dynamic}/{dynamic}-overtime",
+      "file": "madar-v2/client/src/modules/accounting/AccountingPage.jsx",
+      "line": 225,
+      "possibleServerRoutes": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/attendance/overtime-requests/{dynamic}/{dynamic}",
+      "file": "madar-v2/client/src/modules/accounting/AccountingPage.jsx",
+      "line": 236,
+      "possibleServerRoutes": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/employees/payroll/finalize",
+      "file": "madar-v2/client/src/modules/accounting/AccountingPage.jsx",
+      "line": 254,
+      "possibleServerRoutes": [
+        {
+          "method": "POST",
+          "path": "/api/employees/payroll/finalize",
+          "file": "madar-v2/server/modules/employees/routes.js",
+          "line": 86
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/employees/{dynamic}/tools",
+      "file": "madar-v2/client/src/modules/accounting/AccountingPage.jsx",
+      "line": 269,
+      "possibleServerRoutes": [
+        {
+          "method": "POST",
+          "path": "/api/employees/:id/tools",
+          "file": "madar-v2/server/modules/employees/routes.js",
+          "line": 103
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/employees/tools/{dynamic}/return",
+      "file": "madar-v2/client/src/modules/accounting/AccountingPage.jsx",
+      "line": 281,
+      "possibleServerRoutes": [
+        {
+          "method": "POST",
+          "path": "/api/employees/tools/:toolId/return",
+          "file": "madar-v2/server/modules/employees/routes.js",
+          "line": 106
+        }
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/employees/attendance/monthly?month={dynamic}",
+      "file": "madar-v2/client/src/modules/accounting/MonthlyAttendanceMatrix.jsx",
+      "line": 89,
+      "possibleServerRoutes": [
+        {
+          "method": "GET",
+          "path": "/api/employees/attendance/monthly",
+          "file": "madar-v2/server/modules/employees/routes.js",
+          "line": 55
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/employees/attendance/monthly",
+      "file": "madar-v2/client/src/modules/accounting/MonthlyAttendanceMatrix.jsx",
+      "line": 150,
+      "possibleServerRoutes": [
+        {
+          "method": "POST",
+          "path": "/api/employees/attendance/monthly",
+          "file": "madar-v2/server/modules/employees/routes.js",
+          "line": 58
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/employees/attendance/mark-all-present",
+      "file": "madar-v2/client/src/modules/accounting/MonthlyAttendanceMatrix.jsx",
+      "line": 168,
+      "possibleServerRoutes": [
+        {
+          "method": "POST",
+          "path": "/api/employees/attendance/mark-all-present",
+          "file": "madar-v2/server/modules/employees/routes.js",
+          "line": 63
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/attendance/cancel",
+      "file": "madar-v2/client/src/modules/accounting/MonthlyAttendanceMatrix.jsx",
+      "line": 184,
+      "possibleServerRoutes": [
+        {
+          "method": "POST",
+          "path": "/api/attendance/cancel",
+          "file": "madar-v2/server/modules/employees/attendance-routes.js",
+          "line": 124
+        }
+      ]
+    },
+    {
+      "method": "UNSPECIFIED",
+      "path": "/api/employees/attendance/export-monthly?month={dynamic}",
+      "file": "madar-v2/client/src/modules/accounting/MonthlyAttendanceMatrix.jsx",
+      "line": 194,
+      "possibleServerRoutes": [
+        {
+          "method": "GET",
+          "path": "/api/employees/attendance/export-monthly",
+          "file": "madar-v2/server/modules/employees/routes.js",
+          "line": 68
+        }
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/maintenance/orders/{dynamic}",
+      "file": "madar-v2/client/src/modules/archive/ArchivePage.jsx",
+      "line": 37,
+      "possibleServerRoutes": [
+        {
+          "method": "GET",
+          "path": "/api/maintenance/orders/:id",
+          "file": "madar-v2/server/modules/maintenance/routes.js",
+          "line": 715
+        }
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/health",
+      "file": "madar-v2/client/src/modules/auth/SignInPage.jsx",
+      "line": 20,
+      "possibleServerRoutes": [
+        {
+          "method": "GET",
+          "path": "/api/health",
+          "file": "madar-v2/server/app.js",
+          "line": 87
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/setup",
+      "file": "madar-v2/client/src/modules/auth/SignInPage.jsx",
+      "line": 55,
+      "possibleServerRoutes": [
+        {
+          "method": "POST",
+          "path": "/api/auth/setup",
+          "file": "madar-v2/server/modules/auth/routes.js",
+          "line": 40
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/login",
+      "file": "madar-v2/client/src/modules/auth/SignInPage.jsx",
+      "line": 61,
+      "possibleServerRoutes": [
+        {
+          "method": "POST",
+          "path": "/api/auth/login",
+          "file": "madar-v2/server/modules/auth/routes.js",
+          "line": 47
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/clients",
+      "file": "madar-v2/client/src/modules/clients/ClientsPage.jsx",
+      "line": 46,
+      "possibleServerRoutes": [
+        {
+          "method": "POST",
+          "path": "/api/clients",
+          "file": "madar-v2/server/modules/clients/routes.js",
+          "line": 30
+        }
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/clients/{dynamic}",
+      "file": "madar-v2/client/src/modules/clients/ClientsPage.jsx",
+      "line": 70,
+      "possibleServerRoutes": [
+        {
+          "method": "PUT",
+          "path": "/api/clients/:id",
+          "file": "madar-v2/server/modules/clients/routes.js",
+          "line": 34
+        }
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/clients/{dynamic}",
+      "file": "madar-v2/client/src/modules/clients/ClientsPage.jsx",
+      "line": 95,
+      "possibleServerRoutes": [
+        {
+          "method": "DELETE",
+          "path": "/api/clients/:id",
+          "file": "madar-v2/server/modules/clients/routes.js",
+          "line": 38
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/clients/{dynamic}/logo",
+      "file": "madar-v2/client/src/modules/clients/ClientsPage.jsx",
+      "line": 113,
+      "possibleServerRoutes": [
+        {
+          "method": "POST",
+          "path": "/api/clients/:id/logo",
+          "file": "madar-v2/server/modules/clients/routes.js",
+          "line": 56
+        }
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/clients",
+      "file": "madar-v2/client/src/modules/dashboard/OverviewPage.jsx",
+      "line": 28,
+      "possibleServerRoutes": [
+        {
+          "method": "GET",
+          "path": "/api/clients",
+          "file": "madar-v2/server/modules/clients/routes.js",
+          "line": 26
+        }
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/maintenance/orders?status=in_progress",
+      "file": "madar-v2/client/src/modules/dashboard/OverviewPage.jsx",
+      "line": 29,
+      "possibleServerRoutes": [
+        {
+          "method": "GET",
+          "path": "/api/maintenance/orders",
+          "file": "madar-v2/server/modules/maintenance/routes.js",
+          "line": 389
+        }
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/maintenance/orders?status=review",
+      "file": "madar-v2/client/src/modules/dashboard/OverviewPage.jsx",
+      "line": 30,
+      "possibleServerRoutes": [
+        {
+          "method": "GET",
+          "path": "/api/maintenance/orders",
+          "file": "madar-v2/server/modules/maintenance/routes.js",
+          "line": 389
+        }
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/workshop/orders?status=in_production",
+      "file": "madar-v2/client/src/modules/dashboard/OverviewPage.jsx",
+      "line": 31,
+      "possibleServerRoutes": [
+        {
+          "method": "GET",
+          "path": "/api/workshop/orders",
+          "file": "madar-v2/server/modules/workshop/routes.js",
+          "line": 28
+        }
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/workshop/orders?status=ready",
+      "file": "madar-v2/client/src/modules/dashboard/OverviewPage.jsx",
+      "line": 32,
+      "possibleServerRoutes": [
+        {
+          "method": "GET",
+          "path": "/api/workshop/orders",
+          "file": "madar-v2/server/modules/workshop/routes.js",
+          "line": 28
+        }
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/warehouse/materials",
+      "file": "madar-v2/client/src/modules/dashboard/OverviewPage.jsx",
+      "line": 33,
+      "possibleServerRoutes": [
+        {
+          "method": "GET",
+          "path": "/api/warehouse/materials",
+          "file": "madar-v2/server/modules/warehouse/routes.js",
+          "line": 29
+        }
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/maintenance/orders/{dynamic}",
+      "file": "madar-v2/client/src/modules/dashboard/OverviewPage.jsx",
+      "line": 39,
+      "possibleServerRoutes": [
+        {
+          "method": "GET",
+          "path": "/api/maintenance/orders/:id",
+          "file": "madar-v2/server/modules/maintenance/routes.js",
+          "line": 715
+        }
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/staff/{dynamic}",
+      "file": "madar-v2/client/src/modules/employees/StaffDirectoryPage.jsx",
+      "line": 109,
+      "possibleServerRoutes": [
+        {
+          "method": "PATCH",
+          "path": "/api/staff/:id",
+          "file": "madar-v2/server/modules/employees/staff-routes.js",
+          "line": 28
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/staff",
+      "file": "madar-v2/client/src/modules/employees/StaffDirectoryPage.jsx",
+      "line": 110,
+      "possibleServerRoutes": [
+        {
+          "method": "POST",
+          "path": "/api/staff",
+          "file": "madar-v2/server/modules/employees/staff-routes.js",
+          "line": 22
+        }
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/staff/{dynamic}",
+      "file": "madar-v2/client/src/modules/employees/StaffDirectoryPage.jsx",
+      "line": 126,
+      "possibleServerRoutes": [
+        {
+          "method": "PATCH",
+          "path": "/api/staff/:id",
+          "file": "madar-v2/server/modules/employees/staff-routes.js",
+          "line": 28
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/finance/treasury/entries",
+      "file": "madar-v2/client/src/modules/finance/FinancePage.jsx",
+      "line": 63,
+      "possibleServerRoutes": [
+        {
+          "method": "POST",
+          "path": "/api/finance/treasury/entries",
+          "file": "madar-v2/server/modules/finance/routes.js",
+          "line": 13
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/finance/invoices/purchase",
+      "file": "madar-v2/client/src/modules/finance/FinancePage.jsx",
+      "line": 94,
+      "possibleServerRoutes": [
+        {
+          "method": "POST",
+          "path": "/api/finance/invoices/purchase",
+          "file": "madar-v2/server/modules/finance/routes.js",
+          "line": 21
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/finance/invoices/{dynamic}/{dynamic}",
+      "file": "madar-v2/client/src/modules/finance/FinancePage.jsx",
+      "line": 132,
+      "possibleServerRoutes": []
+    },
+    {
+      "method": "GET",
+      "path": "/api/maintenance/machines/{dynamic}/notes-history",
+      "file": "madar-v2/client/src/modules/maintenance/AreaMaintenanceDirectory.jsx",
+      "line": 74,
+      "possibleServerRoutes": [
+        {
+          "method": "GET",
+          "path": "/api/maintenance/machines/:id/notes-history",
+          "file": "madar-v2/server/modules/maintenance/routes.js",
+          "line": 340
+        }
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/maintenance/machines/{dynamic}/maintenance-note",
+      "file": "madar-v2/client/src/modules/maintenance/AreaMaintenanceDirectory.jsx",
+      "line": 105,
+      "possibleServerRoutes": [
+        {
+          "method": "DELETE",
+          "path": "/api/maintenance/machines/:id/maintenance-note",
+          "file": "madar-v2/server/modules/maintenance/routes.js",
+          "line": 313
+        }
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/maintenance/areas/notes",
+      "file": "madar-v2/client/src/modules/maintenance/AreaMaintenanceDirectory.jsx",
+      "line": 140,
+      "possibleServerRoutes": [
+        {
+          "method": "PUT",
+          "path": "/api/maintenance/areas/notes",
+          "file": "madar-v2/server/modules/maintenance/routes.js",
+          "line": 329
+        }
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/maintenance/machine-corrections/{dynamic}/candidates?code={dynamic}",
+      "file": "madar-v2/client/src/modules/maintenance/MachineCorrectionReview.jsx",
+      "line": 39,
+      "possibleServerRoutes": [
+        {
+          "method": "GET",
+          "path": "/api/maintenance/machine-corrections/:id/candidates",
+          "file": "madar-v2/server/modules/maintenance/routes.js",
+          "line": 249
+        }
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/maintenance/machine-corrections/{dynamic}/review",
+      "file": "madar-v2/client/src/modules/maintenance/MachineCorrectionReview.jsx",
+      "line": 69,
+      "possibleServerRoutes": [
+        {
+          "method": "PATCH",
+          "path": "/api/maintenance/machine-corrections/:id/review",
+          "file": "madar-v2/server/modules/maintenance/routes.js",
+          "line": 265
+        }
+      ]
+    },
+    {
+      "method": "UNSPECIFIED",
+      "path": "/api/supervisor/map/tiles/{dynamic}/{dynamic}/{dynamic}",
+      "file": "madar-v2/client/src/modules/maintenance/MachineDirectoryMap.jsx",
+      "line": 10,
+      "possibleServerRoutes": [
+        {
+          "method": "GET",
+          "path": "/api/supervisor/map/tiles/:z/:x/:y",
+          "file": "madar-v2/server/modules/supervisor/routes.js",
+          "line": 33
+        }
+      ]
+    },
+    {
+      "method": "UNSPECIFIED",
+      "path": "/api/supervisor/map/status",
+      "file": "madar-v2/client/src/modules/maintenance/MachineDirectoryMap.jsx",
+      "line": 29,
+      "possibleServerRoutes": [
+        {
+          "method": "GET",
+          "path": "/api/supervisor/map/status",
+          "file": "madar-v2/server/modules/supervisor/routes.js",
+          "line": 28
+        }
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/maintenance/machines/{dynamic}",
+      "file": "madar-v2/client/src/modules/maintenance/MachinesDirectory.jsx",
+      "line": 69,
+      "possibleServerRoutes": [
+        {
+          "method": "PATCH",
+          "path": "/api/maintenance/machines/:id",
+          "file": "madar-v2/server/modules/maintenance/routes.js",
+          "line": 287
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/maintenance/machines",
+      "file": "madar-v2/client/src/modules/maintenance/MachinesDirectory.jsx",
+      "line": 70,
+      "possibleServerRoutes": [
+        {
+          "method": "POST",
+          "path": "/api/maintenance/machines",
+          "file": "madar-v2/server/modules/maintenance/routes.js",
+          "line": 283
+        }
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/maintenance/machines/{dynamic}/test-mock",
+      "file": "madar-v2/client/src/modules/maintenance/MachinesDirectory.jsx",
+      "line": 83,
+      "possibleServerRoutes": [
+        {
+          "method": "DELETE",
+          "path": "/api/maintenance/machines/:id/test-mock",
+          "file": "madar-v2/server/modules/maintenance/routes.js",
+          "line": 309
+        }
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/maintenance/machines/{dynamic}",
+      "file": "madar-v2/client/src/modules/maintenance/MachinesDirectory.jsx",
+      "line": 91,
+      "possibleServerRoutes": [
+        {
+          "method": "DELETE",
+          "path": "/api/maintenance/machines/:id",
+          "file": "madar-v2/server/modules/maintenance/routes.js",
+          "line": 304
+        }
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/maintenance/machines/{dynamic}/geofence",
+      "file": "madar-v2/client/src/modules/maintenance/MachinesDirectory.jsx",
+      "line": 133,
+      "possibleServerRoutes": [
+        {
+          "method": "PATCH",
+          "path": "/api/maintenance/machines/:id/geofence",
+          "file": "madar-v2/server/modules/maintenance/routes.js",
+          "line": 291
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/maintenance/machines/import/preview",
+      "file": "madar-v2/client/src/modules/maintenance/MachinesDirectory.jsx",
+      "line": 158,
+      "possibleServerRoutes": [
+        {
+          "method": "POST",
+          "path": "/api/maintenance/machines/import/preview",
+          "file": "madar-v2/server/modules/maintenance/routes.js",
+          "line": 274
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/maintenance/orders",
+      "file": "madar-v2/client/src/modules/maintenance/MaintenancePage.jsx",
+      "line": 82,
+      "possibleServerRoutes": [
+        {
+          "method": "POST",
+          "path": "/api/maintenance/orders",
+          "file": "madar-v2/server/modules/maintenance/routes.js",
+          "line": 398
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/maintenance/orders/test-mock",
+      "file": "madar-v2/client/src/modules/maintenance/MaintenancePage.jsx",
+      "line": 103,
+      "possibleServerRoutes": [
+        {
+          "method": "POST",
+          "path": "/api/maintenance/orders/test-mock",
+          "file": "madar-v2/server/modules/maintenance/routes.js",
+          "line": 418
+        }
+      ]
+    },
+    {
+      "method": "UNSPECIFIED",
+      "path": "/api/maintenance/export/pptx/progress?{dynamic}",
+      "file": "madar-v2/client/src/modules/maintenance/MaintenancePptxExportModal.jsx",
+      "line": 100,
+      "possibleServerRoutes": [
+        {
+          "method": "GET",
+          "path": "/api/maintenance/export/pptx/progress",
+          "file": "madar-v2/server/modules/maintenance/routes.js",
+          "line": 548
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/maintenance/export/pptx",
+      "file": "madar-v2/client/src/modules/maintenance/MaintenancePptxExportModal.jsx",
+      "line": 166,
+      "possibleServerRoutes": [
+        {
+          "method": "POST",
+          "path": "/api/maintenance/export/pptx",
+          "file": "madar-v2/server/modules/maintenance/routes.js",
+          "line": 569
+        }
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/maintenance/reasons/{dynamic}",
+      "file": "madar-v2/client/src/modules/maintenance/MaintenanceReasonsDirectory.jsx",
+      "line": 41,
+      "possibleServerRoutes": [
+        {
+          "method": "PATCH",
+          "path": "/api/maintenance/reasons/:id",
+          "file": "madar-v2/server/modules/maintenance/routes.js",
+          "line": 363
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/maintenance/reasons",
+      "file": "madar-v2/client/src/modules/maintenance/MaintenanceReasonsDirectory.jsx",
+      "line": 42,
+      "possibleServerRoutes": [
+        {
+          "method": "POST",
+          "path": "/api/maintenance/reasons",
+          "file": "madar-v2/server/modules/maintenance/routes.js",
+          "line": 359
+        }
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/maintenance/reasons/{dynamic}",
+      "file": "madar-v2/client/src/modules/maintenance/MaintenanceReasonsDirectory.jsx",
+      "line": 57,
+      "possibleServerRoutes": [
+        {
+          "method": "DELETE",
+          "path": "/api/maintenance/reasons/:id",
+          "file": "madar-v2/server/modules/maintenance/routes.js",
+          "line": 367
+        }
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/maintenance/reasons/{dynamic}",
+      "file": "madar-v2/client/src/modules/maintenance/MaintenanceReasonsDirectory.jsx",
+      "line": 67,
+      "possibleServerRoutes": [
+        {
+          "method": "PATCH",
+          "path": "/api/maintenance/reasons/:id",
+          "file": "madar-v2/server/modules/maintenance/routes.js",
+          "line": 363
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/maintenance/machines/{dynamic}/reset-location",
+      "file": "madar-v2/client/src/modules/maintenance/OrderDetail.jsx",
+      "line": 276,
+      "possibleServerRoutes": [
+        {
+          "method": "POST",
+          "path": "/api/maintenance/machines/:id/reset-location",
+          "file": "madar-v2/server/modules/maintenance/routes.js",
+          "line": 296
+        }
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/maintenance/orders/{dynamic}/trip-progress",
+      "file": "madar-v2/client/src/modules/maintenance/OrderDetail.jsx",
+      "line": 288,
+      "possibleServerRoutes": [
+        {
+          "method": "GET",
+          "path": "/api/maintenance/orders/:id/trip-progress",
+          "file": "madar-v2/server/modules/maintenance/routes.js",
+          "line": 492
+        }
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/maintenance/orders/{dynamic}/cards/{dynamic}",
+      "file": "madar-v2/client/src/modules/maintenance/OrderDetail.jsx",
+      "line": 333,
+      "possibleServerRoutes": [
+        {
+          "method": "PATCH",
+          "path": "/api/maintenance/orders/:id/cards/:cardId",
+          "file": "madar-v2/server/modules/maintenance/routes.js",
+          "line": 686
+        }
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/maintenance/orders/{dynamic}/status",
+      "file": "madar-v2/client/src/modules/maintenance/OrderDetail.jsx",
+      "line": 365,
+      "possibleServerRoutes": [
+        {
+          "method": "PATCH",
+          "path": "/api/maintenance/orders/:id/status",
+          "file": "madar-v2/server/modules/maintenance/routes.js",
+          "line": 699
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/maintenance/orders/{dynamic}/cards",
+      "file": "madar-v2/client/src/modules/maintenance/OrderDetail.jsx",
+      "line": 379,
+      "possibleServerRoutes": [
+        {
+          "method": "POST",
+          "path": "/api/maintenance/orders/:id/cards",
+          "file": "madar-v2/server/modules/maintenance/routes.js",
+          "line": 463
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/maintenance/orders/{dynamic}/cards/{dynamic}/photos/{dynamic}",
+      "file": "madar-v2/client/src/modules/maintenance/OrderDetail.jsx",
+      "line": 404,
+      "possibleServerRoutes": [
+        {
+          "method": "POST",
+          "path": "/api/maintenance/orders/:id/cards/:cardId/photos/:phase",
+          "file": "madar-v2/server/modules/maintenance/routes.js",
+          "line": 627
+        }
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/maintenance/orders/{dynamic}/cards/{dynamic}/photos/{dynamic}/{dynamic}",
+      "file": "madar-v2/client/src/modules/maintenance/OrderDetail.jsx",
+      "line": 416,
+      "possibleServerRoutes": [
+        {
+          "method": "DELETE",
+          "path": "/api/maintenance/orders/:id/cards/:cardId/photos/:phase/:filename",
+          "file": "madar-v2/server/modules/maintenance/routes.js",
+          "line": 637
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/maintenance/orders/{dynamic}/cards/{dynamic}/photos/move",
+      "file": "madar-v2/client/src/modules/maintenance/OrderDetail.jsx",
+      "line": 434,
+      "possibleServerRoutes": [
+        {
+          "method": "POST",
+          "path": "/api/maintenance/orders/:id/cards/:cardId/photos/move",
+          "file": "madar-v2/server/modules/maintenance/routes.js",
+          "line": 588
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/maintenance/orders/{dynamic}/archive",
+      "file": "madar-v2/client/src/modules/maintenance/OrderDetail.jsx",
+      "line": 464,
+      "possibleServerRoutes": [
+        {
+          "method": "POST",
+          "path": "/api/maintenance/orders/:id/archive",
+          "file": "madar-v2/server/modules/maintenance/routes.js",
+          "line": 707
+        }
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/maintenance/orders/{dynamic}",
+      "file": "madar-v2/client/src/modules/maintenance/OrderDetail.jsx",
+      "line": 487,
+      "possibleServerRoutes": [
+        {
+          "method": "DELETE",
+          "path": "/api/maintenance/orders/:id",
+          "file": "madar-v2/server/modules/maintenance/routes.js",
+          "line": 451
+        }
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/maintenance/orders/{dynamic}/test-mock",
+      "file": "madar-v2/client/src/modules/maintenance/OrderDetail.jsx",
+      "line": 506,
+      "possibleServerRoutes": [
+        {
+          "method": "DELETE",
+          "path": "/api/maintenance/orders/:id/test-mock",
+          "file": "madar-v2/server/modules/maintenance/routes.js",
+          "line": 455
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/maintenance/orders/{dynamic}/unarchive",
+      "file": "madar-v2/client/src/modules/maintenance/OrderDetail.jsx",
+      "line": 523,
+      "possibleServerRoutes": [
+        {
+          "method": "POST",
+          "path": "/api/maintenance/orders/:id/unarchive",
+          "file": "madar-v2/server/modules/maintenance/routes.js",
+          "line": 459
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/maintenance/orders/{dynamic}/custody-advance",
+      "file": "madar-v2/client/src/modules/maintenance/OrderDetail.jsx",
+      "line": 540,
+      "possibleServerRoutes": [
+        {
+          "method": "POST",
+          "path": "/api/maintenance/orders/:id/custody-advance",
+          "file": "madar-v2/server/modules/maintenance/routes.js",
+          "line": 580
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/maintenance/orders/{dynamic}/populate-area",
+      "file": "madar-v2/client/src/modules/maintenance/OrderDetail.jsx",
+      "line": 558,
+      "possibleServerRoutes": [
+        {
+          "method": "POST",
+          "path": "/api/maintenance/orders/:id/populate-area",
+          "file": "madar-v2/server/modules/maintenance/routes.js",
+          "line": 483
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/maintenance/orders/{dynamic}/process-folder",
+      "file": "madar-v2/client/src/modules/maintenance/OrderDetail.jsx",
+      "line": 584,
+      "possibleServerRoutes": [
+        {
+          "method": "POST",
+          "path": "/api/maintenance/orders/:id/process-folder",
+          "file": "madar-v2/server/modules/maintenance/routes.js",
+          "line": 497
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/maintenance/orders/{dynamic}/unmatched/{dynamic}/bind",
+      "file": "madar-v2/client/src/modules/maintenance/OrderDetail.jsx",
+      "line": 615,
+      "possibleServerRoutes": [
+        {
+          "method": "POST",
+          "path": "/api/maintenance/orders/:id/unmatched/:folderId/bind",
+          "file": "madar-v2/server/modules/maintenance/routes.js",
+          "line": 512
+        }
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/maintenance/orders/{dynamic}/unmatched/{dynamic}",
+      "file": "madar-v2/client/src/modules/maintenance/OrderDetail.jsx",
+      "line": 631,
+      "possibleServerRoutes": [
+        {
+          "method": "DELETE",
+          "path": "/api/maintenance/orders/:id/unmatched/:folderId",
+          "file": "madar-v2/server/modules/maintenance/routes.js",
+          "line": 521
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/maintenance/orders/{dynamic}/cards",
+      "file": "madar-v2/client/src/modules/maintenance/OrderDetail.jsx",
+      "line": 662,
+      "possibleServerRoutes": [
+        {
+          "method": "POST",
+          "path": "/api/maintenance/orders/:id/cards",
+          "file": "madar-v2/server/modules/maintenance/routes.js",
+          "line": 463
+        }
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/maintenance/orders/{dynamic}/cards/{dynamic}",
+      "file": "madar-v2/client/src/modules/maintenance/OrderDetail.jsx",
+      "line": 689,
+      "possibleServerRoutes": [
+        {
+          "method": "DELETE",
+          "path": "/api/maintenance/orders/:id/cards/:cardId",
+          "file": "madar-v2/server/modules/maintenance/routes.js",
+          "line": 471
+        }
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/maintenance/orders/{dynamic}/machines/{dynamic}",
+      "file": "madar-v2/client/src/modules/maintenance/OrderDetail.jsx",
+      "line": 691,
+      "possibleServerRoutes": [
+        {
+          "method": "DELETE",
+          "path": "/api/maintenance/orders/:id/machines/:machineId",
+          "file": "madar-v2/server/modules/maintenance/routes.js",
+          "line": 475
+        }
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/maintenance/orders/{dynamic}/cards/{dynamic}",
+      "file": "madar-v2/client/src/modules/maintenance/OrderDetail.jsx",
+      "line": 833,
+      "possibleServerRoutes": [
+        {
+          "method": "PATCH",
+          "path": "/api/maintenance/orders/:id/cards/:cardId",
+          "file": "madar-v2/server/modules/maintenance/routes.js",
+          "line": 686
+        }
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/maintenance/orders/{dynamic}/cards/{dynamic}",
+      "file": "madar-v2/client/src/modules/maintenance/OrderDetail.jsx",
+      "line": 883,
+      "possibleServerRoutes": [
+        {
+          "method": "PATCH",
+          "path": "/api/maintenance/orders/:id/cards/:cardId",
+          "file": "madar-v2/server/modules/maintenance/routes.js",
+          "line": 686
+        }
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/maintenance/orders/{dynamic}/representatives",
+      "file": "madar-v2/client/src/modules/maintenance/OrderDetail.jsx",
+      "line": 900,
+      "possibleServerRoutes": [
+        {
+          "method": "PUT",
+          "path": "/api/maintenance/orders/:id/representatives",
+          "file": "madar-v2/server/modules/maintenance/routes.js",
+          "line": 431
+        }
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/maintenance/orders/{dynamic}/photos/tag-targets",
+      "file": "madar-v2/client/src/modules/maintenance/OrderDetail.jsx",
+      "line": 2039,
+      "possibleServerRoutes": [
+        {
+          "method": "GET",
+          "path": "/api/maintenance/orders/:id/photos/tag-targets",
+          "file": "madar-v2/server/modules/maintenance/routes.js",
+          "line": 602
+        }
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/maintenance/orders/{dynamic}",
+      "file": "madar-v2/client/src/modules/maintenance/OrderDetail.jsx",
+      "line": 2133,
+      "possibleServerRoutes": [
+        {
+          "method": "GET",
+          "path": "/api/maintenance/orders/:id",
+          "file": "madar-v2/server/modules/maintenance/routes.js",
+          "line": 715
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/maintenance/photos/rotate",
+      "file": "madar-v2/client/src/modules/maintenance/OrderDetail.jsx",
+      "line": 2168,
+      "possibleServerRoutes": [
+        {
+          "method": "POST",
+          "path": "/api/maintenance/photos/rotate",
+          "file": "madar-v2/server/modules/maintenance/routes.js",
+          "line": 616
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/rep/attendance/mock-location",
+      "file": "madar-v2/client/src/modules/rep/RepApp.jsx",
+      "line": 361,
+      "possibleServerRoutes": [
+        {
+          "method": "POST",
+          "path": "/api/rep/attendance/mock-location",
+          "file": "madar-v2/server/modules/rep/routes.js",
+          "line": 217
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/rep/location-ping",
+      "file": "madar-v2/client/src/modules/rep/RepApp.jsx",
+      "line": 476,
+      "possibleServerRoutes": [
+        {
+          "method": "POST",
+          "path": "/api/rep/location-ping",
+          "file": "madar-v2/server/modules/rep/routes.js",
+          "line": 367
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/rep/location-ping",
+      "file": "madar-v2/client/src/modules/rep/RepApp.jsx",
+      "line": 491,
+      "possibleServerRoutes": [
+        {
+          "method": "POST",
+          "path": "/api/rep/location-ping",
+          "file": "madar-v2/server/modules/rep/routes.js",
+          "line": 367
+        }
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/rep/today-route?{dynamic}",
+      "file": "madar-v2/client/src/modules/rep/RepApp.jsx",
+      "line": 646,
+      "possibleServerRoutes": [
+        {
+          "method": "GET",
+          "path": "/api/rep/today-route",
+          "file": "madar-v2/server/modules/rep/routes.js",
+          "line": 226
+        }
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/rep/fault-reasons",
+      "file": "madar-v2/client/src/modules/rep/RepApp.jsx",
+      "line": 647,
+      "possibleServerRoutes": [
+        {
+          "method": "GET",
+          "path": "/api/rep/fault-reasons",
+          "file": "madar-v2/server/modules/rep/routes.js",
+          "line": 307
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/rep/machines/{dynamic}/start-work",
+      "file": "madar-v2/client/src/modules/rep/RepApp.jsx",
+      "line": 690,
+      "possibleServerRoutes": [
+        {
+          "method": "POST",
+          "path": "/api/rep/machines/:cardId/start-work",
+          "file": "madar-v2/server/modules/rep/routes.js",
+          "line": 236
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/rep/machines/{dynamic}/stop-work",
+      "file": "madar-v2/client/src/modules/rep/RepApp.jsx",
+      "line": 703,
+      "possibleServerRoutes": [
+        {
+          "method": "POST",
+          "path": "/api/rep/machines/:cardId/stop-work",
+          "file": "madar-v2/server/modules/rep/routes.js",
+          "line": 251
+        }
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/rep/attendance/today",
+      "file": "madar-v2/client/src/modules/rep/RepApp.jsx",
+      "line": 711,
+      "possibleServerRoutes": [
+        {
+          "method": "GET",
+          "path": "/api/rep/attendance/today",
+          "file": "madar-v2/server/modules/rep/routes.js",
+          "line": 130
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/rep/attendance/overtime-request",
+      "file": "madar-v2/client/src/modules/rep/RepApp.jsx",
+      "line": 747,
+      "possibleServerRoutes": [
+        {
+          "method": "POST",
+          "path": "/api/rep/attendance/overtime-request",
+          "file": "madar-v2/server/modules/rep/routes.js",
+          "line": 135
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/rep/attendance/overtime-request/cancel",
+      "file": "madar-v2/client/src/modules/rep/RepApp.jsx",
+      "line": 766,
+      "possibleServerRoutes": [
+        {
+          "method": "POST",
+          "path": "/api/rep/attendance/overtime-request/cancel",
+          "file": "madar-v2/server/modules/rep/routes.js",
+          "line": 148
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/rep/attendance/sync",
+      "file": "madar-v2/client/src/modules/rep/RepApp.jsx",
+      "line": 851,
+      "possibleServerRoutes": [
+        {
+          "method": "POST",
+          "path": "/api/rep/attendance/sync",
+          "file": "madar-v2/server/modules/rep/routes.js",
+          "line": 192
+        }
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/health",
+      "file": "madar-v2/client/src/modules/rep/RepApp.jsx",
+      "line": 914,
+      "possibleServerRoutes": [
+        {
+          "method": "GET",
+          "path": "/api/health",
+          "file": "madar-v2/server/app.js",
+          "line": 87
+        }
+      ]
+    },
+    {
+      "method": "UNSPECIFIED",
+      "path": "/api/rep/events",
+      "file": "madar-v2/client/src/modules/rep/RepApp.jsx",
+      "line": 960,
+      "possibleServerRoutes": [
+        {
+          "method": "GET",
+          "path": "/api/rep/events",
+          "file": "madar-v2/server/modules/rep/routes.js",
+          "line": 87
+        }
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/rep/location-confirmations",
+      "file": "madar-v2/client/src/modules/rep/RepApp.jsx",
+      "line": 1284,
+      "possibleServerRoutes": [
+        {
+          "method": "GET",
+          "path": "/api/rep/location-confirmations",
+          "file": "madar-v2/server/modules/rep/routes.js",
+          "line": 264
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/rep/machines/{dynamic}/confirm-location",
+      "file": "madar-v2/client/src/modules/rep/RepApp.jsx",
+      "line": 1353,
+      "possibleServerRoutes": [
+        {
+          "method": "POST",
+          "path": "/api/rep/machines/:machineId/confirm-location",
+          "file": "madar-v2/server/modules/rep/routes.js",
+          "line": 269
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/rep/machines/{dynamic}/corrections",
+      "file": "madar-v2/client/src/modules/rep/RepApp.jsx",
+      "line": 1371,
+      "possibleServerRoutes": [
+        {
+          "method": "POST",
+          "path": "/api/rep/machines/:machineId/corrections",
+          "file": "madar-v2/server/modules/rep/routes.js",
+          "line": 286
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/rep/sync-visit",
+      "file": "madar-v2/client/src/modules/rep/RepApp.jsx",
+      "line": 1433,
+      "possibleServerRoutes": [
+        {
+          "method": "POST",
+          "path": "/api/rep/sync-visit",
+          "file": "madar-v2/server/modules/rep/routes.js",
+          "line": 382
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/rep/machines/{dynamic}/confirm-location",
+      "file": "madar-v2/client/src/modules/rep/RepApp.jsx",
+      "line": 1797,
+      "possibleServerRoutes": [
+        {
+          "method": "POST",
+          "path": "/api/rep/machines/:machineId/confirm-location",
+          "file": "madar-v2/server/modules/rep/routes.js",
+          "line": 269
+        }
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/users/{dynamic}",
+      "file": "madar-v2/client/src/modules/settings/SettingsPage.jsx",
+      "line": 92,
+      "possibleServerRoutes": [
+        {
+          "method": "PUT",
+          "path": "/api/users/:id",
+          "file": "madar-v2/server/modules/auth/users.js",
+          "line": 199
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/users",
+      "file": "madar-v2/client/src/modules/settings/SettingsPage.jsx",
+      "line": 95,
+      "possibleServerRoutes": [
+        {
+          "method": "POST",
+          "path": "/api/users",
+          "file": "madar-v2/server/modules/auth/users.js",
+          "line": 100
+        }
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/users/{dynamic}",
+      "file": "madar-v2/client/src/modules/settings/SettingsPage.jsx",
+      "line": 114,
+      "possibleServerRoutes": [
+        {
+          "method": "DELETE",
+          "path": "/api/users/:id",
+          "file": "madar-v2/server/modules/auth/users.js",
+          "line": 201
+        }
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/users/{dynamic}",
+      "file": "madar-v2/client/src/modules/settings/SettingsPage.jsx",
+      "line": 123,
+      "possibleServerRoutes": [
+        {
+          "method": "PUT",
+          "path": "/api/users/:id",
+          "file": "madar-v2/server/modules/auth/users.js",
+          "line": 199
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/system/backup",
+      "file": "madar-v2/client/src/modules/settings/SettingsPage.jsx",
+      "line": 133,
+      "possibleServerRoutes": [
+        {
+          "method": "POST",
+          "path": "/api/system/backup",
+          "file": "madar-v2/server/modules/system/backup.js",
+          "line": 765
+        }
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/supervisor/location-confirmations",
+      "file": "madar-v2/client/src/modules/supervisor/LocationReviews.jsx",
+      "line": 23,
+      "possibleServerRoutes": [
+        {
+          "method": "GET",
+          "path": "/api/supervisor/location-confirmations",
+          "file": "madar-v2/server/modules/supervisor/routes.js",
+          "line": 94
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/supervisor/corrections/{dynamic}/{dynamic}",
+      "file": "madar-v2/client/src/modules/supervisor/LocationReviews.jsx",
+      "line": 40,
+      "possibleServerRoutes": []
+    },
+    {
+      "method": "GET",
+      "path": "/api/supervisor/map/status",
+      "file": "madar-v2/client/src/modules/supervisor/SupervisorRadarPage.jsx",
+      "line": 64,
+      "possibleServerRoutes": [
+        {
+          "method": "GET",
+          "path": "/api/supervisor/map/status",
+          "file": "madar-v2/server/modules/supervisor/routes.js",
+          "line": 28
+        }
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/supervisor/radar",
+      "file": "madar-v2/client/src/modules/supervisor/SupervisorRadarPage.jsx",
+      "line": 232,
+      "possibleServerRoutes": [
+        {
+          "method": "GET",
+          "path": "/api/supervisor/radar",
+          "file": "madar-v2/server/modules/supervisor/routes.js",
+          "line": 80
+        }
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/supervisor/qa/queue",
+      "file": "madar-v2/client/src/modules/supervisor/SupervisorRadarPage.jsx",
+      "line": 233,
+      "possibleServerRoutes": [
+        {
+          "method": "GET",
+          "path": "/api/supervisor/qa/queue",
+          "file": "madar-v2/server/modules/supervisor/routes.js",
+          "line": 115
+        }
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/attendance/today",
+      "file": "madar-v2/client/src/modules/supervisor/SupervisorRadarPage.jsx",
+      "line": 234,
+      "possibleServerRoutes": [
+        {
+          "method": "GET",
+          "path": "/api/attendance/today",
+          "file": "madar-v2/server/modules/employees/attendance-routes.js",
+          "line": 78
+        }
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/supervisor/reps/{dynamic}/route?date={dynamic}",
+      "file": "madar-v2/client/src/modules/supervisor/SupervisorRadarPage.jsx",
+      "line": 282,
+      "possibleServerRoutes": [
+        {
+          "method": "GET",
+          "path": "/api/supervisor/reps/:id/route",
+          "file": "madar-v2/server/modules/supervisor/routes.js",
+          "line": 85
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/supervisor/visits/{dynamic}/review",
+      "file": "madar-v2/client/src/modules/supervisor/SupervisorRadarPage.jsx",
+      "line": 294,
+      "possibleServerRoutes": [
+        {
+          "method": "POST",
+          "path": "/api/supervisor/visits/:id/review",
+          "file": "madar-v2/server/modules/supervisor/routes.js",
+          "line": 129
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/supervisor/visits/approve-all",
+      "file": "madar-v2/client/src/modules/supervisor/SupervisorRadarPage.jsx",
+      "line": 324,
+      "possibleServerRoutes": [
+        {
+          "method": "POST",
+          "path": "/api/supervisor/visits/approve-all",
+          "file": "madar-v2/server/modules/supervisor/routes.js",
+          "line": 144
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/warehouse/materials",
+      "file": "madar-v2/client/src/modules/warehouse/WarehousePage.jsx",
+      "line": 59,
+      "possibleServerRoutes": [
+        {
+          "method": "POST",
+          "path": "/api/warehouse/materials",
+          "file": "madar-v2/server/modules/warehouse/routes.js",
+          "line": 34
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/warehouse/offcuts",
+      "file": "madar-v2/client/src/modules/warehouse/WarehousePage.jsx",
+      "line": 77,
+      "possibleServerRoutes": [
+        {
+          "method": "POST",
+          "path": "/api/warehouse/offcuts",
+          "file": "madar-v2/server/modules/warehouse/routes.js",
+          "line": 51
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/warehouse/issue",
+      "file": "madar-v2/client/src/modules/warehouse/WarehousePage.jsx",
+      "line": 110,
+      "possibleServerRoutes": [
+        {
+          "method": "POST",
+          "path": "/api/warehouse/issue",
+          "file": "madar-v2/server/modules/warehouse/routes.js",
+          "line": 42
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/warehouse/offcuts/scrap-sales",
+      "file": "madar-v2/client/src/modules/warehouse/WarehousePage.jsx",
+      "line": 127,
+      "possibleServerRoutes": [
+        {
+          "method": "POST",
+          "path": "/api/warehouse/offcuts/scrap-sales",
+          "file": "madar-v2/server/modules/warehouse/routes.js",
+          "line": 55
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/warehouse/stock-counts/start",
+      "file": "madar-v2/client/src/modules/warehouse/WarehousePage.jsx",
+      "line": 143,
+      "possibleServerRoutes": [
+        {
+          "method": "POST",
+          "path": "/api/warehouse/stock-counts/start",
+          "file": "madar-v2/server/modules/warehouse/routes.js",
+          "line": 59
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/warehouse/stock-counts/{dynamic}/reconcile",
+      "file": "madar-v2/client/src/modules/warehouse/WarehousePage.jsx",
+      "line": 161,
+      "possibleServerRoutes": [
+        {
+          "method": "POST",
+          "path": "/api/warehouse/stock-counts/:id/reconcile",
+          "file": "madar-v2/server/modules/warehouse/routes.js",
+          "line": 63
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/workshop/orders/{dynamic}/designs",
+      "file": "madar-v2/client/src/modules/workshop/WorkshopOrderDetail.jsx",
+      "line": 31,
+      "possibleServerRoutes": [
+        {
+          "method": "POST",
+          "path": "/api/workshop/orders/:id/designs",
+          "file": "madar-v2/server/modules/workshop/routes.js",
+          "line": 45
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/workshop/orders/{dynamic}/ready",
+      "file": "madar-v2/client/src/modules/workshop/WorkshopOrderDetail.jsx",
+      "line": 41,
+      "possibleServerRoutes": [
+        {
+          "method": "POST",
+          "path": "/api/workshop/orders/:id/ready",
+          "file": "madar-v2/server/modules/workshop/routes.js",
+          "line": 54
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/workshop/orders/{dynamic}/deliver",
+      "file": "madar-v2/client/src/modules/workshop/WorkshopOrderDetail.jsx",
+      "line": 52,
+      "possibleServerRoutes": [
+        {
+          "method": "POST",
+          "path": "/api/workshop/orders/:id/deliver",
+          "file": "madar-v2/server/modules/workshop/routes.js",
+          "line": 62
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/workshop/orders",
+      "file": "madar-v2/client/src/modules/workshop/WorkshopPage.jsx",
+      "line": 51,
+      "possibleServerRoutes": [
+        {
+          "method": "POST",
+          "path": "/api/workshop/orders",
+          "file": "madar-v2/server/modules/workshop/routes.js",
+          "line": 37
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/workshop/orders/{dynamic}/ready",
+      "file": "madar-v2/client/src/modules/workshop/WorkshopPage.jsx",
+      "line": 83,
+      "possibleServerRoutes": [
+        {
+          "method": "POST",
+          "path": "/api/workshop/orders/:id/ready",
+          "file": "madar-v2/server/modules/workshop/routes.js",
+          "line": 54
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/workshop/orders/{dynamic}/deliver",
+      "file": "madar-v2/client/src/modules/workshop/WorkshopPage.jsx",
+      "line": 96,
+      "possibleServerRoutes": [
+        {
+          "method": "POST",
+          "path": "/api/workshop/orders/:id/deliver",
+          "file": "madar-v2/server/modules/workshop/routes.js",
+          "line": 62
+        }
+      ]
+    }
+  ],
+  "nativeHttpPaths": [
+    {
+      "path": "/api/health",
+      "file": "madar-v2/android/app/src/main/java/com/madar/rep/app/MadarSyncWorker.java",
+      "line": 80,
+      "method": "DYNAMIC_NATIVE_CALL"
+    },
+    {
+      "path": "/api/rep/attendance/sync",
+      "file": "madar-v2/android/app/src/main/java/com/madar/rep/app/MadarSyncWorker.java",
+      "line": 96,
+      "method": "DYNAMIC_NATIVE_CALL"
+    },
+    {
+      "path": "/api/rep/sync-visit",
+      "file": "madar-v2/android/app/src/main/java/com/madar/rep/app/MadarSyncWorker.java",
+      "line": 193,
+      "method": "DYNAMIC_NATIVE_CALL"
+    },
+    {
+      "path": "/api/rep/machines/",
+      "file": "madar-v2/android/app/src/main/java/com/madar/rep/app/MadarSyncWorker.java",
+      "line": 267,
+      "method": "DYNAMIC_NATIVE_CALL"
+    },
+    {
+      "path": "/api/rep/machines/",
+      "file": "madar-v2/android/app/src/main/java/com/madar/rep/app/MadarSyncWorker.java",
+      "line": 322,
+      "method": "DYNAMIC_NATIVE_CALL"
+    },
+    {
+      "path": "/api/rep/location-confirmations",
+      "file": "madar-v2/android/app/src/main/java/com/madar/rep/app/MadarSyncWorker.java",
+      "line": 365,
+      "method": "DYNAMIC_NATIVE_CALL"
+    },
+    {
+      "path": "/api/rep/location-ping",
+      "file": "madar-v2/android/app/src/main/java/com/madar/rep/app/MadarSyncWorker.java",
+      "line": 476,
+      "method": "DYNAMIC_NATIVE_CALL"
+    },
+    {
+      "path": "/api/rep/events?lastEventId=",
+      "file": "madar-v2/android/app/src/main/java/com/madar/rep/app/RepRealtimeConnection.java",
+      "line": 42,
+      "method": "DYNAMIC_NATIVE_CALL"
+    }
+  ],
+  "events": [
+    {
+      "kind": "consumer",
+      "event": "overtime.requested",
+      "file": "madar-v2/client/src/modules/accounting/AccountingPage.jsx",
+      "line": 101
+    },
+    {
+      "kind": "consumer",
+      "event": "overtime.pending",
+      "file": "madar-v2/client/src/modules/accounting/AccountingPage.jsx",
+      "line": 102
+    },
+    {
+      "kind": "consumer",
+      "event": "system.reconcile-required",
+      "file": "madar-v2/client/src/modules/rep/RepApp.jsx",
+      "line": 967
+    },
+    {
+      "kind": "consumer",
+      "event": "maintenance.changed",
+      "file": "madar-v2/client/src/modules/rep/RepApp.jsx",
+      "line": 968
+    },
+    {
+      "kind": "consumer",
+      "event": "rep.machine.location-reset",
+      "file": "madar-v2/client/src/modules/rep/RepApp.jsx",
+      "line": 968
+    },
+    {
+      "kind": "consumer",
+      "event": "rep.machine.work-started",
+      "file": "madar-v2/client/src/modules/rep/RepApp.jsx",
+      "line": 969
+    },
+    {
+      "kind": "consumer",
+      "event": "rep.machine.work-ended",
+      "file": "madar-v2/client/src/modules/rep/RepApp.jsx",
+      "line": 969
+    },
+    {
+      "kind": "consumer",
+      "event": "rep.visit.submitted",
+      "file": "madar-v2/client/src/modules/rep/RepApp.jsx",
+      "line": 970
+    },
+    {
+      "kind": "consumer",
+      "event": "maintenance.order.assigned",
+      "file": "madar-v2/client/src/modules/rep/RepApp.jsx",
+      "line": 971
+    },
+    {
+      "kind": "consumer",
+      "event": "rep.visit.reviewed",
+      "file": "madar-v2/client/src/modules/rep/RepApp.jsx",
+      "line": 983
+    },
+    {
+      "kind": "consumer",
+      "event": "rep.machine.location-reviewed",
+      "file": "madar-v2/client/src/modules/rep/RepApp.jsx",
+      "line": 986
+    },
+    {
+      "kind": "consumer",
+      "event": "attendance.changed",
+      "file": "madar-v2/client/src/modules/rep/RepApp.jsx",
+      "line": 989
+    },
+    {
+      "kind": "consumer",
+      "event": "overtime.reviewed",
+      "file": "madar-v2/client/src/modules/rep/RepApp.jsx",
+      "line": 998
+    },
+    {
+      "kind": "consumer",
+      "event": "confirm_location",
+      "file": "madar-v2/client/src/modules/rep/RepApp.jsx",
+      "line": 1285
+    },
+    {
+      "kind": "consumer",
+      "event": "confirm_location",
+      "file": "madar-v2/client/src/modules/rep/RepApp.jsx",
+      "line": 1307
+    },
+    {
+      "kind": "consumer",
+      "event": "report_correction",
+      "file": "madar-v2/client/src/modules/rep/RepApp.jsx",
+      "line": 1315
+    },
+    {
+      "kind": "consumer",
+      "event": "confirm_location",
+      "file": "madar-v2/client/src/modules/rep/RepApp.jsx",
+      "line": 1319
+    },
+    {
+      "kind": "consumer",
+      "event": "confirm_location",
+      "file": "madar-v2/client/src/modules/rep/RepApp.jsx",
+      "line": 1327
+    },
+    {
+      "kind": "consumer",
+      "event": "report_correction",
+      "file": "madar-v2/client/src/modules/rep/RepApp.jsx",
+      "line": 1334
+    },
+    {
+      "kind": "consumer",
+      "event": "report_correction",
+      "file": "madar-v2/client/src/modules/rep/RepApp.jsx",
+      "line": 1337
+    },
+    {
+      "kind": "consumer",
+      "event": "report_correction",
+      "file": "madar-v2/client/src/modules/rep/RepApp.jsx",
+      "line": 1340
+    },
+    {
+      "kind": "consumer",
+      "event": "confirm_location",
+      "file": "madar-v2/client/src/modules/rep/RepApp.jsx",
+      "line": 1352
+    },
+    {
+      "kind": "consumer",
+      "event": "confirm_location",
+      "file": "madar-v2/client/src/modules/rep/RepApp.jsx",
+      "line": 2159
+    },
+    {
+      "kind": "consumer",
+      "event": "confirm_location",
+      "file": "madar-v2/client/src/modules/rep/RepApp.jsx",
+      "line": 2162
+    },
+    {
+      "kind": "consumer",
+      "event": "confirm_location",
+      "file": "madar-v2/client/src/modules/rep/location-review.js",
+      "line": 54
+    },
+    {
+      "kind": "consumer",
+      "event": "report_correction",
+      "file": "madar-v2/client/src/modules/rep/location-review.js",
+      "line": 64
+    },
+    {
+      "kind": "producer",
+      "event": "system.shutdown",
+      "file": "madar-v2/server/index.js",
+      "line": 78
+    },
+    {
+      "kind": "producer",
+      "event": "overtime.reviewed",
+      "file": "madar-v2/server/modules/employees/attendance-routes.js",
+      "line": 46
+    },
+    {
+      "kind": "producer",
+      "event": "overtime.reviewed",
+      "file": "madar-v2/server/modules/employees/attendance-routes.js",
+      "line": 65
+    },
+    {
+      "kind": "producer",
+      "event": "attendance.changed",
+      "file": "madar-v2/server/modules/employees/attendance-routes.js",
+      "line": 93
+    },
+    {
+      "kind": "producer",
+      "event": "attendance.changed",
+      "file": "madar-v2/server/modules/employees/attendance-routes.js",
+      "line": 108
+    },
+    {
+      "kind": "producer",
+      "event": "overtime.pending",
+      "file": "madar-v2/server/modules/employees/attendance-routes.js",
+      "line": 114
+    },
+    {
+      "kind": "producer",
+      "event": "attendance.changed",
+      "file": "madar-v2/server/modules/employees/attendance-routes.js",
+      "line": 129
+    },
+    {
+      "kind": "producer",
+      "event": "overtime.reviewed",
+      "file": "madar-v2/server/modules/employees/attendance-routes.js",
+      "line": 141
+    },
+    {
+      "kind": "producer",
+      "event": "overtime.reviewed",
+      "file": "madar-v2/server/modules/employees/attendance-routes.js",
+      "line": 147
+    },
+    {
+      "kind": "producer",
+      "event": "attendance.changed",
+      "file": "madar-v2/server/modules/employees/routes.js",
+      "line": 60
+    },
+    {
+      "kind": "producer",
+      "event": "attendance.changed",
+      "file": "madar-v2/server/modules/employees/routes.js",
+      "line": 65
+    },
+    {
+      "kind": "producer",
+      "event": "attendance.changed",
+      "file": "madar-v2/server/modules/employees/routes.js",
+      "line": 79
+    },
+    {
+      "kind": "producer",
+      "event": "payroll.changed",
+      "file": "madar-v2/server/modules/employees/routes.js",
+      "line": 91
+    },
+    {
+      "kind": "producer",
+      "event": "payroll.changed",
+      "file": "madar-v2/server/modules/employees/routes.js",
+      "line": 96
+    },
+    {
+      "kind": "producer",
+      "event": "staff.changed",
+      "file": "madar-v2/server/modules/employees/staff-routes.js",
+      "line": 24
+    },
+    {
+      "kind": "producer",
+      "event": "staff.changed",
+      "file": "madar-v2/server/modules/employees/staff-routes.js",
+      "line": 30
+    },
+    {
+      "kind": "consumer",
+      "event": "area-divider",
+      "file": "madar-v2/server/modules/maintenance/export.js",
+      "line": 864
+    },
+    {
+      "kind": "consumer",
+      "event": "area-index",
+      "file": "madar-v2/server/modules/maintenance/export.js",
+      "line": 868
+    },
+    {
+      "kind": "consumer",
+      "event": "reason-divider",
+      "file": "madar-v2/server/modules/maintenance/export.js",
+      "line": 882
+    },
+    {
+      "kind": "consumer",
+      "event": "machine",
+      "file": "madar-v2/server/modules/maintenance/export.js",
+      "line": 886
+    },
+    {
+      "kind": "producer",
+      "event": "maintenance.changed",
+      "file": "madar-v2/server/modules/maintenance/routes.js",
+      "line": 84
+    },
+    {
+      "kind": "producer",
+      "event": "rep.machine.location-reset",
+      "file": "madar-v2/server/modules/maintenance/routes.js",
+      "line": 299
+    },
+    {
+      "kind": "producer",
+      "event": "maintenance.order.assigned",
+      "file": "madar-v2/server/modules/maintenance/routes.js",
+      "line": 405
+    },
+    {
+      "kind": "producer",
+      "event": "maintenance.order.assigned",
+      "file": "madar-v2/server/modules/maintenance/routes.js",
+      "line": 421
+    },
+    {
+      "kind": "producer",
+      "event": "maintenance.order.assigned",
+      "file": "madar-v2/server/modules/maintenance/routes.js",
+      "line": 436
+    },
+    {
+      "kind": "consumer",
+      "event": "system.shutdown",
+      "file": "madar-v2/server/modules/rep/routes.js",
+      "line": 106
+    },
+    {
+      "kind": "producer",
+      "event": "overtime.requested",
+      "file": "madar-v2/server/modules/rep/routes.js",
+      "line": 137
+    },
+    {
+      "kind": "producer",
+      "event": "overtime.reviewed",
+      "file": "madar-v2/server/modules/rep/routes.js",
+      "line": 150
+    },
+    {
+      "kind": "producer",
+      "event": "attendance.changed",
+      "file": "madar-v2/server/modules/rep/routes.js",
+      "line": 163
+    },
+    {
+      "kind": "producer",
+      "event": "attendance.changed",
+      "file": "madar-v2/server/modules/rep/routes.js",
+      "line": 174
+    },
+    {
+      "kind": "producer",
+      "event": "overtime.pending",
+      "file": "madar-v2/server/modules/rep/routes.js",
+      "line": 181
+    },
+    {
+      "kind": "producer",
+      "event": "attendance.changed",
+      "file": "madar-v2/server/modules/rep/routes.js",
+      "line": 195
+    },
+    {
+      "kind": "producer",
+      "event": "overtime.pending",
+      "file": "madar-v2/server/modules/rep/routes.js",
+      "line": 202
+    },
+    {
+      "kind": "producer",
+      "event": "rep.machine.work-started",
+      "file": "madar-v2/server/modules/rep/routes.js",
+      "line": 240
+    },
+    {
+      "kind": "producer",
+      "event": "rep.machine.work-ended",
+      "file": "madar-v2/server/modules/rep/routes.js",
+      "line": 254
+    },
+    {
+      "kind": "producer",
+      "event": "rep.machine.location-reviewed",
+      "file": "madar-v2/server/modules/rep/routes.js",
+      "line": 273
+    },
+    {
+      "kind": "producer",
+      "event": "rep.machine.correction-submitted",
+      "file": "madar-v2/server/modules/rep/routes.js",
+      "line": 295
+    },
+    {
+      "kind": "producer",
+      "event": "rep.tracking.updated",
+      "file": "madar-v2/server/modules/rep/routes.js",
+      "line": 356
+    },
+    {
+      "kind": "producer",
+      "event": "rep.tracking.updated",
+      "file": "madar-v2/server/modules/rep/routes.js",
+      "line": 371
+    },
+    {
+      "kind": "producer",
+      "event": "rep.visit.submitted",
+      "file": "madar-v2/server/modules/rep/routes.js",
+      "line": 402
+    },
+    {
+      "kind": "producer",
+      "event": "rep.machine.location-reviewed",
+      "file": "madar-v2/server/modules/rep/service.js",
+      "line": 930
+    },
+    {
+      "kind": "consumer",
+      "event": "system.shutdown",
+      "file": "madar-v2/server/modules/supervisor/routes.js",
+      "line": 65
+    },
+    {
+      "kind": "producer",
+      "event": "rep.visit.reviewed",
+      "file": "madar-v2/server/modules/supervisor/routes.js",
+      "line": 133
+    },
+    {
+      "kind": "producer",
+      "event": "rep.visit.reviewed",
+      "file": "madar-v2/server/modules/supervisor/routes.js",
+      "line": 147
+    },
+    {
+      "kind": "producer",
+      "event": "rep.visit.submitted",
+      "file": "madar-v2/test/notifications.test.js",
+      "line": 142
+    },
+    {
+      "kind": "producer",
+      "event": "overtime.pending",
+      "file": "madar-v2/test/notifications.test.js",
+      "line": 143
+    },
+    {
+      "kind": "producer",
+      "event": "attendance.changed",
+      "file": "madar-v2/test/notifications.test.js",
+      "line": 144
+    },
+    {
+      "kind": "producer",
+      "event": "rep.machine.location-reviewed",
+      "file": "madar-v2/test/notifications.test.js",
+      "line": 145
+    },
+    {
+      "kind": "producer",
+      "event": "rep.tracking.updated",
+      "file": "madar-v2/test/notifications.test.js",
+      "line": 250
+    },
+    {
+      "kind": "producer",
+      "event": "system.shutdown",
+      "file": "madar-v2/test/notifications.test.js",
+      "line": 251
+    },
+    {
+      "kind": "producer",
+      "event": "rep.visit.reviewed",
+      "file": "madar-v2/test/notifications.test.js",
+      "line": 263
+    },
+    {
+      "kind": "producer",
+      "event": "rep.tracking.updated",
+      "file": "madar-v2/test/operations-events.test.js",
+      "line": 31
+    },
+    {
+      "kind": "producer",
+      "event": "rep.visit.submitted",
+      "file": "madar-v2/test/operations-events.test.js",
+      "line": 38
+    },
+    {
+      "kind": "producer",
+      "event": "attendance.changed",
+      "file": "madar-v2/test/operations-events.test.js",
+      "line": 55
+    },
+    {
+      "kind": "producer",
+      "event": "rep.visit.submitted",
+      "file": "madar-v2/test/operations-events.test.js",
+      "line": 64
+    },
+    {
+      "kind": "consumer",
+      "event": "rep.visit.submitted",
+      "file": "madar-v2/test/operations-events.test.js",
+      "line": 68
+    },
+    {
+      "kind": "consumer",
+      "event": "rep.visit.submitted",
+      "file": "madar-v2/test/operations-events.test.js",
+      "line": 70
+    },
+    {
+      "kind": "consumer",
+      "event": "rep.tracking.updated",
+      "file": "madar-v2/test/rep-api.test.js",
+      "line": 1132
+    },
+    {
+      "kind": "consumer",
+      "event": "rect",
+      "file": "madar-v2/test/rep-watermark-map.test.js",
+      "line": 70
+    },
+    {
+      "kind": "consumer",
+      "event": "text",
+      "file": "madar-v2/test/rep-watermark-map.test.js",
+      "line": 71
+    },
+    {
+      "kind": "consumer",
+      "event": "image",
+      "file": "madar-v2/test/rep-watermark-map.test.js",
+      "line": 100
+    },
+    {
+      "kind": "consumer",
+      "event": "text",
+      "file": "madar-v2/test/rep-watermark-map.test.js",
+      "line": 101
+    },
+    {
+      "kind": "consumer",
+      "event": "image",
+      "file": "madar-v2/test/rep-watermark-map.test.js",
+      "line": 103
+    }
+  ],
+  "tests": [
+    {
+      "name": "Android application ID, namespace, Capacitor ID, and native packages are aligned",
+      "file": "madar-v2/test/android-packaging.test.js",
+      "line": 10
+    },
+    {
+      "name": "native rep gate, private SQLite queue, and WorkManager upload contract are configured",
+      "file": "madar-v2/test/android-packaging.test.js",
+      "line": 51
+    },
+    {
+      "name": "FileProvider authority is application-specific and only exposes app-owned camera files",
+      "file": "madar-v2/test/android-packaging.test.js",
+      "line": 177
+    },
+    {
+      "name": "representative Android bundle stays local in standalone mode and lazy-loads capture and map modules",
+      "file": "madar-v2/test/android-packaging.test.js",
+      "line": 195
+    },
+    {
+      "name": "release signing credentials are loaded locally and missing signing blocks release builds",
+      "file": "madar-v2/test/android-packaging.test.js",
+      "line": 230
+    },
+    {
+      "name": "4-character passwords, new user employee sync, and first-admin employee sync",
+      "file": "madar-v2/test/attendance-engine.test.js",
+      "line": 64
+    },
+    {
+      "name": "shift engine classifies outside-shift work at 1.5x and all Friday work at 2x",
+      "file": "madar-v2/test/attendance-engine.test.js",
+      "line": 141
+    },
+    {
+      "name": "unified staff directory, salary advances, adjustments, Friday pay, treasury settlement, and 4-character credentials",
+      "file": "madar-v2/test/attendance-engine.test.js",
+      "line": 172
+    },
+    {
+      "name": "rep and admin clock actions persist source/GPS, guard duplicate punches, and review overtime",
+      "file": "madar-v2/test/attendance-engine.test.js",
+      "line": 305
+    },
+    {
+      "name": "overtime requests are approved once and open exactly one extra attendance session",
+      "file": "madar-v2/test/attendance-engine.test.js",
+      "line": 471
+    },
+    {
+      "name": "overtime approval endpoints let a representative use one extra session and expose map config",
+      "file": "madar-v2/test/attendance-engine.test.js",
+      "line": 547
+    },
+    {
+      "name": "user-to-employee migration backfills unlinked active and inactive accounts idempotently",
+      "file": "madar-v2/test/attendance-engine.test.js",
+      "line": 605
+    },
+    {
+      "name": "profile reconciliation repairs existing account links without losing payroll details",
+      "file": "madar-v2/test/attendance-engine.test.js",
+      "line": 625
+    },
+    {
+      "name": "staff payroll migration backfills legacy Friday rates and finalized payroll identity snapshots idempotently",
+      "file": "madar-v2/test/attendance-engine.test.js",
+      "line": 651
+    },
+    {
+      "name": "offline attendance age configuration defaults to 24 hours and accepts only positive finite numbers",
+      "file": "madar-v2/test/attendance-offline-policy.test.js",
+      "line": 6
+    },
+    {
+      "name": "invalid offline-age settings fail application configuration at startup",
+      "file": "madar-v2/test/attendance-offline-policy.test.js",
+      "line": 19
+    },
+    {
+      "name": "configured half-hour policy accepts recent offline clock-in and clock-out",
+      "file": "madar-v2/test/attendance-offline-sync.test.js",
+      "line": 60
+    },
+    {
+      "name": "exact configured age is accepted but one millisecond older cannot write clock-in",
+      "file": "madar-v2/test/attendance-offline-sync.test.js",
+      "line": 70
+    },
+    {
+      "name": "expired clock-out preserves an open attendance record and all payroll effects",
+      "file": "madar-v2/test/attendance-offline-sync.test.js",
+      "line": 78
+    },
+    {
+      "name": "arbitrarily old punches in an unfinalized month never create attendance",
+      "file": "madar-v2/test/attendance-offline-sync.test.js",
+      "line": 88
+    },
+    {
+      "name": "identical accepted clock-in and clock-out replays remain safe after expiry",
+      "file": "madar-v2/test/attendance-offline-sync.test.js",
+      "line": 96
+    },
+    {
+      "name": "expired UUID replay with changed data or a different owner remains a conflict",
+      "file": "madar-v2/test/attendance-offline-sync.test.js",
+      "line": 112
+    },
+    {
+      "name": "future allowance includes exactly five minutes and rejects the next millisecond",
+      "file": "madar-v2/test/attendance-offline-sync.test.js",
+      "line": 126
+    },
+    {
+      "name": "administrator attendance reconciliation is not restricted by the rep offline window",
+      "file": "madar-v2/test/attendance-offline-sync.test.js",
+      "line": 135
+    },
+    {
+      "name": "auth status, one-time setup, protected APIs, login and revocable sessions",
+      "file": "madar-v2/test/auth.test.js",
+      "line": 66
+    },
+    {
+      "name": "unified sign-in authenticates representatives, returns cookie and bearer credentials, and rejects disabled reps distinctly",
+      "file": "madar-v2/test/auth.test.js",
+      "line": 196
+    },
+    {
+      "name": "CORS permits the local UI, the request host, trusted forwarded hosts, and HTTPS Tailscale origins",
+      "file": "madar-v2/test/auth.test.js",
+      "line": 231
+    },
+    {
+      "name": "five consecutive account failures lock for 15 minutes and a later valid login resets the counter",
+      "file": "madar-v2/test/auth.test.js",
+      "line": 255
+    },
+    {
+      "name": "both login endpoints share a five-failure-per-IP limiter with the requested Arabic message",
+      "file": "madar-v2/test/auth.test.js",
+      "line": 278
+    },
+    {
+      "name": "GET and HEAD requests to web SPA routes return HTTP 200 index.html",
+      "file": "madar-v2/test/auth.test.js",
+      "line": 296
+    },
+    {
+      "name": "hidden file paths do not fall through to the SPA shell",
+      "file": "madar-v2/test/auth.test.js",
+      "line": 307
+    },
+    {
+      "name": "old backup is migrated in an isolated copy with IDs/history intact and original unchanged",
+      "file": "madar-v2/test/backup-compatibility.test.js",
+      "line": 17
+    },
+    {
+      "name": "newer migrations and corrupt snapshots are rejected without changing current data",
+      "file": "madar-v2/test/backup-compatibility.test.js",
+      "line": 35
+    },
+    {
+      "name": "startup upgrades legacy attendance with referenced offline actions without losing history",
+      "file": "madar-v2/test/database-maintenance.test.js",
+      "line": 21
+    },
+    {
+      "name": "database initialization sets Cairo and adds account lockout fields",
+      "file": "madar-v2/test/database-maintenance.test.js",
+      "line": 54
+    },
+    {
+      "name": "main-stock migration preserves movement IDs and adds fractional-offcut movements and whole-unit triggers",
+      "file": "madar-v2/test/database-maintenance.test.js",
+      "line": 110
+    },
+    {
+      "name": "machine notes history migration backfills card and fallback notes additively and is idempotent",
+      "file": "madar-v2/test/database-maintenance.test.js",
+      "line": 154
+    },
+    {
+      "name": "maintenance photo rotation migration is additive, preserves records, and is idempotent",
+      "file": "madar-v2/test/database-maintenance.test.js",
+      "line": 220
+    },
+    {
+      "name": "physical photo-rotation migration adds only a nullable derivative path and preserves rotation history",
+      "file": "madar-v2/test/database-maintenance.test.js",
+      "line": 251
+    },
+    {
+      "name": "attendance GPS migration is additive, preserves existing records, and is idempotent",
+      "file": "madar-v2/test/database-maintenance.test.js",
+      "line": 282
+    },
+    {
+      "name": "attendance biometric migration is additive, preserves existing rows, and is idempotent",
+      "file": "madar-v2/test/database-maintenance.test.js",
+      "line": 304
+    },
+    {
+      "name": "legacy timezone migration updates Riyadh only and preserves explicit custom zones",
+      "file": "madar-v2/test/database-maintenance.test.js",
+      "line": 326
+    },
+    {
+      "name": "account lockout migration preserves user identity and can run repeatedly",
+      "file": "madar-v2/test/database-maintenance.test.js",
+      "line": 343
+    },
+    {
+      "name": "weekly maintenance retains every breadcrumb forever and checkpoints SQLite",
+      "file": "madar-v2/test/database-maintenance.test.js",
+      "line": 364
+    },
+    {
+      "name": "connection enables required SQLite pragmas",
+      "file": "madar-v2/test/database.test.js",
+      "line": 27
+    },
+    {
+      "name": "transaction helper commits successful work and rolls back failures",
+      "file": "madar-v2/test/database.test.js",
+      "line": 34
+    },
+    {
+      "name": "client profile migration adds fields without changing legacy client identity or code",
+      "file": "madar-v2/test/database.test.js",
+      "line": 52
+    },
+    {
+      "name": "finance/accountant role migration preserves user IDs and foreign keys",
+      "file": "madar-v2/test/database.test.js",
+      "line": 93
+    },
+    {
+      "name": "initializer can seed a bcrypt-hashed admin with an explicit password and remains idempotent",
+      "file": "madar-v2/test/database.test.js",
+      "line": 147
+    },
+    {
+      "name": "fresh initialization leaves administrator setup to the first-run screen by default",
+      "file": "madar-v2/test/database.test.js",
+      "line": 166
+    },
+    {
+      "name": "offcut nullability migration preserves existing rows and records its version",
+      "file": "madar-v2/test/database.test.js",
+      "line": 212
+    },
+    {
+      "name": "client-machine deployment migration backfills service-card relationships once",
+      "file": "madar-v2/test/database.test.js",
+      "line": 267
+    },
+    {
+      "name": "warehouse lifecycle migration preserves existing movements and offcut IDs",
+      "file": "madar-v2/test/database.test.js",
+      "line": 297
+    },
+    {
+      "name": "adaptive GPS reduces polling only after three stationary minutes",
+      "file": "madar-v2/test/gps-adaptive.test.js",
+      "line": 9
+    },
+    {
+      "name": "adaptive GPS immediately restores high-frequency polling on speed or displacement",
+      "file": "madar-v2/test/gps-adaptive.test.js",
+      "line": 14
+    },
+    {
+      "name": "field image compression emits an EXIF-free Full HD JPEG and reports measured savings",
+      "file": "madar-v2/test/image-compression.test.js",
+      "line": 7
+    },
+    {
+      "name": "first empty machine location is locked immediately, scoped, validated and idempotent",
+      "file": "madar-v2/test/location-approval.test.js",
+      "line": 82
+    },
+    {
+      "name": "historical pending location can still be rejected and a new first location can be locked",
+      "file": "madar-v2/test/location-approval.test.js",
+      "line": 126
+    },
+    {
+      "name": "competing representatives cannot lock different first coordinates",
+      "file": "madar-v2/test/location-approval.test.js",
+      "line": 150
+    },
+    {
+      "name": "failed first-location audit rolls back coordinates and history",
+      "file": "madar-v2/test/location-approval.test.js",
+      "line": 165
+    },
+    {
+      "name": "client proposal states preserve approved coordinates and separate rejection from resubmission",
+      "file": "madar-v2/test/location-approval.test.js",
+      "line": 178
+    },
+    {
+      "name": "location approval survives application restart and reconciles a stale route snapshot",
+      "file": "madar-v2/test/location-approval.test.js",
+      "line": 212
+    },
+    {
+      "name": "visit upload is rejected before first location and succeeds immediately after confirmation",
+      "file": "madar-v2/test/location-approval.test.js",
+      "line": 235
+    },
+    {
+      "name": "bulk visit approval is admin-only, idempotent, atomic, and does not archive orders",
+      "file": "madar-v2/test/location-approval.test.js",
+      "line": 259
+    },
+    {
+      "name": "test mock order creates and assigns an isolated visit; geofence reset clears and audits the machine location",
+      "file": "madar-v2/test/maintenance-multi-area.test.js",
+      "line": 72
+    },
+    {
+      "name": "deleting one isolated training order permanently removes its machine, visit, photos, and files without affecting another",
+      "file": "madar-v2/test/maintenance-multi-area.test.js",
+      "line": 92
+    },
+    {
+      "name": "prepared test purge restores staged files and makes the order visible again after interruption",
+      "file": "madar-v2/test/maintenance-multi-area.test.js",
+      "line": 154
+    },
+    {
+      "name": "legacy shared test machine purge removes all linked test orders including previously hidden ones",
+      "file": "madar-v2/test/maintenance-multi-area.test.js",
+      "line": 179
+    },
+    {
+      "name": "failed test purge transaction restores staged files and keeps the training order usable",
+      "file": "madar-v2/test/maintenance-multi-area.test.js",
+      "line": 226
+    },
+    {
+      "name": "committed test purge recovery finishes deleting staged files after interruption",
+      "file": "madar-v2/test/maintenance-multi-area.test.js",
+      "line": 249
+    },
+    {
+      "name": "machine-directory purge removes a training machine even when its only order was hidden earlier",
+      "file": "madar-v2/test/maintenance-multi-area.test.js",
+      "line": 266
+    },
+    {
+      "name": "maintenance orders accept multiple areas and use every selected area for population, matching, and filtering",
+      "file": "madar-v2/test/maintenance-multi-area.test.js",
+      "line": 333
+    },
+    {
+      "name": "admins can edit archived card reasons, notes, and machine codes while photo edits stay blocked",
+      "file": "madar-v2/test/maintenance-multi-area.test.js",
+      "line": 458
+    },
+    {
+      "name": "duplicate trip folders keep the first machine match and route later folders to review without merging photos",
+      "file": "madar-v2/test/maintenance-multi-area.test.js",
+      "line": 555
+    },
+    {
+      "name": "maintenance card decommission stages files, rolls them back on database failure, audits, and deactivates the machine",
+      "file": "madar-v2/test/maintenance-multi-area.test.js",
+      "line": 611
+    },
+    {
+      "name": "maintenance card photos can be moved or deleted without losing files on DB failure",
+      "file": "madar-v2/test/maintenance-multi-area.test.js",
+      "line": 723
+    },
+    {
+      "name": "maintenance photo rotation is audited metadata applied to viewer, thumbnails, and exports without changing source bytes",
+      "file": "madar-v2/test/maintenance-multi-area.test.js",
+      "line": 871
+    },
+    {
+      "name": "maintenance card startup recovery restores staged folders for an uncommitted deletion",
+      "file": "madar-v2/test/maintenance-multi-area.test.js",
+      "line": 1075
+    },
+    {
+      "name": "missing trip machine without a card is decommissioned with staged folder cleanup",
+      "file": "madar-v2/test/maintenance-multi-area.test.js",
+      "line": 1115
+    },
+    {
+      "name": "machine decommission startup recovery restores folders before the DB commit",
+      "file": "madar-v2/test/maintenance-multi-area.test.js",
+      "line": 1168
+    },
+    {
+      "name": "unmatched-folder purge stages archive/source directories, rolls back failures, deletes rows, and audits",
+      "file": "madar-v2/test/maintenance-multi-area.test.js",
+      "line": 1209
+    },
+    {
+      "name": "unmatched-folder startup recovery restores prepared purges and completes committed purges",
+      "file": "madar-v2/test/maintenance-multi-area.test.js",
+      "line": 1281
+    },
+    {
+      "name": "unmatched-folder purge rejects archived and bound folders without deleting ZIP sources",
+      "file": "madar-v2/test/maintenance-multi-area.test.js",
+      "line": 1356
+    },
+    {
+      "name": "machine creation restores matching soft-deleted and inactive codes, audits changes, and rejects active duplicates",
+      "file": "madar-v2/test/maintenance-multi-area.test.js",
+      "line": 1403
+    },
+    {
+      "name": "Admin can soft-delete a review order while retaining files/history; archived orders remain undeletable",
+      "file": "madar-v2/test/maintenance-order-deletion.test.js",
+      "line": 77
+    },
+    {
+      "name": "Admin can reopen archived maintenance and rearchive without duplicating or misposting the cash refund",
+      "file": "madar-v2/test/maintenance-order-deletion.test.js",
+      "line": 223
+    },
+    {
+      "name": "V1 migration preserves identities, soft deletes, assignments, cards, and legacy photo references",
+      "file": "madar-v2/test/migrate-from-v1.test.js",
+      "line": 130
+    },
+    {
+      "name": "V1 migration rolls back the complete target transaction when source rows cannot map safely",
+      "file": "madar-v2/test/migrate-from-v1.test.js",
+      "line": 182
+    },
+    {
+      "name": "the inbox exposes unread counts and newest-first notifications per recipient",
+      "file": "madar-v2/test/notifications.test.js",
+      "line": 115
+    },
+    {
+      "name": "read and dismiss persist across re-login and stay scoped to their owner",
+      "file": "madar-v2/test/notifications.test.js",
+      "line": 178
+    },
+    {
+      "name": "reconnect replays the missed event and the inbox includes it",
+      "file": "madar-v2/test/notifications.test.js",
+      "line": 255
+    },
+    {
+      "name": "the migration backlog is bounded and opens as already read",
+      "file": "madar-v2/test/notifications.test.js",
+      "line": 277
+    },
+    {
+      "name": "IndexedDB v5 includes every offline queue, map store, and the attendance cache RepApp reads",
+      "file": "madar-v2/test/offline-gps-store.test.js",
+      "line": 5
+    },
+    {
+      "name": "GPS recovery drains the oldest unsynced samples first without mutating the IndexedDB result",
+      "file": "madar-v2/test/offline-gps-store.test.js",
+      "line": 13
+    },
+    {
+      "name": "missing IndexedDB stores recover in place and remain readable after a repaired DB version is reopened",
+      "file": "madar-v2/test/offline-gps-store.test.js",
+      "line": 151
+    },
+    {
+      "name": "supervisor receives business notifications but not GPS or reconciliation spam",
+      "file": "madar-v2/test/operation-notifications.test.js",
+      "line": 5
+    },
+    {
+      "name": "the catalog covers overtime decisions and attendance cancellation",
+      "file": "madar-v2/test/operation-notifications.test.js",
+      "line": 17
+    },
+    {
+      "name": "operations events fan out after publication and unsubscribe cleanly",
+      "file": "madar-v2/test/operations-events.test.js",
+      "line": 26
+    },
+    {
+      "name": "a failed event subscriber cannot prevent delivery to other subscribers",
+      "file": "madar-v2/test/operations-events.test.js",
+      "line": 50
+    },
+    {
+      "name": "failed SQLite publication is durably retried with a numeric cursor and no invented replay ID",
+      "file": "madar-v2/test/operations-events.test.js",
+      "line": 61
+    },
+    {
+      "name": "cursor reconciliation resets a cursor from a future or restored database",
+      "file": "madar-v2/test/operations-events.test.js",
+      "line": 73
+    },
+    {
+      "name": "Phase 2 client, maintenance, and workshop flows remain isolated and transactional",
+      "file": "madar-v2/test/phase2-operations.test.js",
+      "line": 71
+    },
+    {
+      "name": "Phase 3 warehouse lifecycle preserves Phase 1/2 domains and reconciles physical stock",
+      "file": "madar-v2/test/phase3-warehouse.test.js",
+      "line": 75
+    },
+    {
+      "name": "Phase 4 finance lifecycle keeps integer-cents, stock, custody, billing, and client debt coherent",
+      "file": "madar-v2/test/phase4-finance.test.js",
+      "line": 63
+    },
+    {
+      "name": "monthly attendance matrix exports, bulk-marks present idempotently, and feeds draft payroll",
+      "file": "madar-v2/test/phase4-finance.test.js",
+      "line": 511
+    },
+    {
+      "name": "employee selectors filter active staff and maintenance custody advances stay linked and auditable",
+      "file": "madar-v2/test/phase5-client.test.js",
+      "line": 68
+    },
+    {
+      "name": "empty maintenance archive returns the localized no-photo export error",
+      "file": "madar-v2/test/phase6-parity.test.js",
+      "line": 151
+    },
+    {
+      "name": "maintenance Storage explorer browses safe Areas folders and reports direct photos",
+      "file": "madar-v2/test/phase6-parity.test.js",
+      "line": 162
+    },
+    {
+      "name": "area folder renames translate Windows EPERM locks into an actionable Arabic error",
+      "file": "madar-v2/test/phase6-parity.test.js",
+      "line": 202
+    },
+    {
+      "name": "V2 parity operations cover imports, area maintenance, HR, exports, users, and backups",
+      "file": "madar-v2/test/phase6-parity.test.js",
+      "line": 210
+    },
+    {
+      "name": "asynchronous maintenance PPTX exports return 202 and expose the completed report for download",
+      "file": "madar-v2/test/phase6-parity.test.js",
+      "line": 852
+    },
+    {
+      "name": "maintenance reasons support audited soft deactivation and area analysis exports filtered Excel records",
+      "file": "madar-v2/test/phase6-parity.test.js",
+      "line": 947
+    },
+    {
+      "name": "area maintenance notes show the latest eligible note, export styled area groups, and clear notes with audit",
+      "file": "madar-v2/test/phase6-parity.test.js",
+      "line": 1102
+    },
+    {
+      "name": "area maintenance workbook keeps actual rows only and gives each area a filterable RTL sheet",
+      "file": "madar-v2/test/phase6-parity.test.js",
+      "line": 1246
+    },
+    {
+      "name": "area maintenance comments can be created without a card, edited on the latest card, and audited",
+      "file": "madar-v2/test/phase6-parity.test.js",
+      "line": 1292
+    },
+    {
+      "name": "maintenance PPTX and Excel exports sort Arabic areas and machine codes naturally",
+      "file": "madar-v2/test/phase6-parity.test.js",
+      "line": 1392
+    },
+    {
+      "name": "maintenance PowerPoint export exposes live machine progress and a final completion state",
+      "file": "madar-v2/test/phase6-parity.test.js",
+      "line": 1532
+    },
+    {
+      "name": "maintenance PPTX exports the latest edited card snapshot and never falls back to stale photos",
+      "file": "madar-v2/test/phase6-parity.test.js",
+      "line": 1616
+    },
+    {
+      "name": "rep role migration preserves users and their existing foreign-key references",
+      "file": "madar-v2/test/rep-api.test.js",
+      "line": 138
+    },
+    {
+      "name": "geofence and breadcrumb migrations are additive and idempotent",
+      "file": "madar-v2/test/rep-api.test.js",
+      "line": 208
+    },
+    {
+      "name": "rep login, assigned-region route sync, active fault reasons, and strict API isolation",
+      "file": "madar-v2/test/rep-api.test.js",
+      "line": 232
+    },
+    {
+      "name": "validates and preserves actual visit and machine evidence bytes in a recovery package",
+      "file": "madar-v2/test/rep-queue-recovery.test.js",
+      "line": 61
+    },
+    {
+      "name": "rejects account changes, corrupt hashes, and packages that report omissions",
+      "file": "madar-v2/test/rep-queue-recovery.test.js",
+      "line": 68
+    },
+    {
+      "name": "native-only actions are merged once; changed UUID content is a surfaced conflict",
+      "file": "madar-v2/test/rep-queue-recovery.test.js",
+      "line": 80
+    },
+    {
+      "name": "rejects changed payloads and GPS fields even when the old identity hash remains valid",
+      "file": "madar-v2/test/rep-queue-recovery.test.js",
+      "line": 89
+    },
+    {
+      "name": "rejects a GPS capture time changed independently of its durable timestamp",
+      "file": "madar-v2/test/rep-queue-recovery.test.js",
+      "line": 103
+    },
+    {
+      "name": "rep folders remain alphabetical by region and machine name regardless of GPS or approval state",
+      "file": "madar-v2/test/rep-route-folders.test.js",
+      "line": 5
+    },
+    {
+      "name": "photo watermark includes Cairo date, Arabic weekday, seconds, GPS, region, machine identity and visit phase",
+      "file": "madar-v2/test/rep-watermark-map.test.js",
+      "line": 15
+    },
+    {
+      "name": "photo watermark names unavailable location explicitly and never infers a governorate",
+      "file": "madar-v2/test/rep-watermark-map.test.js",
+      "line": 34
+    },
+    {
+      "name": "watermark processing returns JPEG bytes containing rendered MADAR logo and GPS/location text layers",
+      "file": "madar-v2/test/rep-watermark-map.test.js",
+      "line": 44
+    },
+    {
+      "name": "approved machines sort by straight-line distance only from a fresh GPS fix; unapproved pins stay separate",
+      "file": "madar-v2/test/rep-watermark-map.test.js",
+      "line": 116
+    },
+    {
+      "name": "watermark badge stays on the physical left edge and reserves a readable six-line panel",
+      "file": "madar-v2/test/rep-watermark-map.test.js",
+      "line": 132
+    },
+    {
+      "name": "Google Maps navigation prefers the machine GPS pin and safely falls back to address search",
+      "file": "madar-v2/test/rep-watermark-map.test.js",
+      "line": 140
+    },
+    {
+      "name": "offline map projection round-trips coordinates and resolves the expected Cairo raster tile",
+      "file": "madar-v2/test/rep-watermark-map.test.js",
+      "line": 153
+    },
+    {
+      "name": "clean schema contains every V2 domain table",
+      "file": "madar-v2/test/schema-integrity.test.js",
+      "line": 42
+    },
+    {
+      "name": "foreign keys reject maintenance orders for unknown clients",
+      "file": "madar-v2/test/schema-integrity.test.js",
+      "line": 82
+    },
+    {
+      "name": "maintenance stays free of workshop pricing and cost columns",
+      "file": "madar-v2/test/schema-integrity.test.js",
+      "line": 90
+    },
+    {
+      "name": "deleting a maintenance order cascades to cards and technician assignments",
+      "file": "madar-v2/test/schema-integrity.test.js",
+      "line": 118
+    },
+    {
+      "name": "schema connection uses WAL journal mode",
+      "file": "madar-v2/test/schema-integrity.test.js",
+      "line": 136
+    },
+    {
+      "name": "storage layout preserves existing local defaults when no mount is configured",
+      "file": "madar-v2/test/storage-layout.test.js",
+      "line": 12
+    },
+    {
+      "name": "storage mount defaults database, uploads, and backups beneath the mounted root",
+      "file": "madar-v2/test/storage-layout.test.js",
+      "line": 22
+    },
+    {
+      "name": "mount path overrides are allowed only when all persistent roots remain beneath the mount",
+      "file": "madar-v2/test/storage-layout.test.js",
+      "line": 33
+    },
+    {
+      "name": "Linux mountpoint parsing is exact and decodes mountinfo path escapes",
+      "file": "madar-v2/test/storage-layout.test.js",
+      "line": 56
+    },
+    {
+      "name": "mounted-storage assertion rejects missing, aliased, and same-device mounts",
+      "file": "madar-v2/test/storage-layout.test.js",
+      "line": 67
+    },
+    {
+      "name": "paths module refuses startup when STORAGE_MOUNT_PATH is not a verified mount",
+      "file": "madar-v2/test/storage-layout.test.js",
+      "line": 82
+    },
+    {
+      "name": "catalog API stores typed configuration, validates units, versions changes, and audits",
+      "file": "madar-v2/test/structured-maintenance.test.js",
+      "line": 79
+    },
+    {
+      "name": "legacy card backfill uses explicit defaults once, preserves explicit lines and snapshots, and reruns safely",
+      "file": "madar-v2/test/structured-maintenance.test.js",
+      "line": 98
+    },
+    {
+      "name": "getRepFaultReasons returns explicit countability metadata without active column",
+      "file": "madar-v2/test/structured-maintenance.test.js",
+      "line": 125
+    },
+    {
+      "name": "end-to-end representative visit with multiple quantities, validation, offline retry, and replay protection",
+      "file": "madar-v2/test/structured-maintenance.test.js",
+      "line": 141
+    },
+    {
+      "name": "PowerPoint export includes explicit and historical quantities with action wording",
+      "file": "madar-v2/test/structured-maintenance.test.js",
+      "line": 334
+    },
+    {
+      "name": "analytics records and workbook aggregate quantities and include summary sheets",
+      "file": "madar-v2/test/structured-maintenance.test.js",
+      "line": 381
+    },
+    {
+      "name": "supervisor review preserves existing card lines when approving visit with different reason",
+      "file": "madar-v2/test/structured-maintenance.test.js",
+      "line": 456
+    },
+    {
+      "name": "Word DOCX export carries replacement quantities and formats correctly",
+      "file": "madar-v2/test/structured-maintenance.test.js",
+      "line": 508
+    },
+    {
+      "name": "explicit user submission transitions legacy_default to user_entered",
+      "file": "madar-v2/test/structured-maintenance.test.js",
+      "line": 531
+    },
+    {
+      "name": "PowerPoint export correctly handles filtered reasons and maintains reason ID alignment",
+      "file": "madar-v2/test/structured-maintenance.test.js",
+      "line": 558
+    },
+    {
+      "name": "secondary reasons remain searchable while replaced totals exclude pending and required work",
+      "file": "madar-v2/test/structured-maintenance.test.js",
+      "line": 585
+    },
+    {
+      "name": "storage health warns below the 15 percent free-space threshold",
+      "file": "madar-v2/test/system-health.test.js",
+      "line": 15
+    },
+    {
+      "name": "storage health is healthy at the exact free-space threshold",
+      "file": "madar-v2/test/system-health.test.js",
+      "line": 29
+    },
+    {
+      "name": "storage health fails closed when the filesystem cannot be checked",
+      "file": "madar-v2/test/system-health.test.js",
+      "line": 39
+    },
+    {
+      "name": "late worker-shaped ingestion preserves closed duty and original session",
+      "file": "madar-v2/test/tracking-identity.test.js",
+      "line": 18
+    },
+    {
+      "name": "receipt replay is idempotent and changed content conflicts without extra points",
+      "file": "madar-v2/test/tracking-identity.test.js",
+      "line": 25
+    },
+    {
+      "name": "distinct points at the same timestamp are retained and visible to supervisor queries",
+      "file": "madar-v2/test/tracking-identity.test.js",
+      "line": 31
+    },
+    {
+      "name": "another account cannot attach the point to the original representative session",
+      "file": "madar-v2/test/tracking-identity.test.js",
+      "line": 36
+    }
+  ]
+}

@@ -1,0 +1,199 @@
+<?xml version="1.0" encoding="utf-8"?>
+<testsuites>
+	<testcase name="Android application ID, namespace, Capacitor ID, and native packages are aligned" time="0.004646" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/android-packaging.test.js"/>
+	<testcase name="native rep gate, private SQLite queue, and WorkManager upload contract are configured" time="0.003861" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/android-packaging.test.js"/>
+	<testcase name="FileProvider authority is application-specific and only exposes app-owned camera files" time="0.000522" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/android-packaging.test.js"/>
+	<testcase name="representative Android bundle stays local in standalone mode and lazy-loads capture and map modules" time="0.001888" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/android-packaging.test.js"/>
+	<testcase name="release signing credentials are loaded locally and missing signing blocks release builds" time="0.000727" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/android-packaging.test.js"/>
+	<testcase name="4-character passwords, new user employee sync, and first-admin employee sync" time="4.113103" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/attendance-engine.test.js"/>
+	<testcase name="shift engine classifies outside-shift work at 1.5x and all Friday work at 2x" time="0.005769" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/attendance-engine.test.js"/>
+	<testcase name="unified staff directory, salary advances, adjustments, Friday pay, treasury settlement, and 4-character credentials" time="2.957629" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/attendance-engine.test.js"/>
+	<testcase name="rep and admin clock actions persist source/GPS, guard duplicate punches, and review overtime" time="1.343104" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/attendance-engine.test.js"/>
+	<testcase name="overtime requests are approved once and open exactly one extra attendance session" time="0.027919" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/attendance-engine.test.js"/>
+	<testcase name="overtime approval endpoints let a representative use one extra session and expose map config" time="0.923142" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/attendance-engine.test.js"/>
+	<testcase name="user-to-employee migration backfills unlinked active and inactive accounts idempotently" time="0.003253" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/attendance-engine.test.js"/>
+	<testcase name="profile reconciliation repairs existing account links without losing payroll details" time="0.002529" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/attendance-engine.test.js"/>
+	<testcase name="staff payroll migration backfills legacy Friday rates and finalized payroll identity snapshots idempotently" time="0.004138" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/attendance-engine.test.js"/>
+	<testcase name="offline attendance age configuration defaults to 24 hours and accepts only positive finite numbers" time="0.002970" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/attendance-offline-policy.test.js"/>
+	<testcase name="invalid offline-age settings fail application configuration at startup" time="0.364364" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/attendance-offline-policy.test.js"/>
+	<testcase name="configured half-hour policy accepts recent offline clock-in and clock-out" time="0.016509" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/attendance-offline-sync.test.js"/>
+	<testcase name="exact configured age is accepted but one millisecond older cannot write clock-in" time="0.009057" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/attendance-offline-sync.test.js"/>
+	<testcase name="expired clock-out preserves an open attendance record and all payroll effects" time="0.006546" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/attendance-offline-sync.test.js"/>
+	<testcase name="arbitrarily old punches in an unfinalized month never create attendance" time="0.002413" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/attendance-offline-sync.test.js"/>
+	<testcase name="identical accepted clock-in and clock-out replays remain safe after expiry" time="0.009798" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/attendance-offline-sync.test.js"/>
+	<testcase name="expired UUID replay with changed data or a different owner remains a conflict" time="0.005389" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/attendance-offline-sync.test.js"/>
+	<testcase name="future allowance includes exactly five minutes and rejects the next millisecond" time="0.004510" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/attendance-offline-sync.test.js"/>
+	<testcase name="administrator attendance reconciliation is not restricted by the rep offline window" time="0.003321" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/attendance-offline-sync.test.js"/>
+	<testcase name="auth status, one-time setup, protected APIs, login and revocable sessions" time="2.562440" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/auth.test.js"/>
+	<testcase name="unified sign-in authenticates representatives, returns cookie and bearer credentials, and rejects disabled reps distinctly" time="0.033521" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/auth.test.js"/>
+	<testcase name="CORS permits the local UI, the request host, trusted forwarded hosts, and HTTPS Tailscale origins" time="0.023549" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/auth.test.js"/>
+	<testcase name="five consecutive account failures lock for 15 minutes and a later valid login resets the counter" time="3.265454" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/auth.test.js"/>
+	<testcase name="both login endpoints share a five-failure-per-IP limiter with the requested Arabic message" time="1.655214" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/auth.test.js"/>
+	<testcase name="GET and HEAD requests to web SPA routes return HTTP 200 index.html" time="0.012774" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/auth.test.js"/>
+	<testcase name="hidden file paths do not fall through to the SPA shell" time="0.011550" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/auth.test.js"/>
+	<testcase name="old backup is migrated in an isolated copy with IDs/history intact and original unchanged" time="0.060453" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/backup-compatibility.test.js"/>
+	<testcase name="newer migrations and corrupt snapshots are rejected without changing current data" time="0.010794" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/backup-compatibility.test.js"/>
+	<testcase name="startup upgrades legacy attendance with referenced offline actions without losing history" time="0.505719" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/database-maintenance.test.js"/>
+	<testcase name="database initialization sets Cairo and adds account lockout fields" time="0.004919" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/database-maintenance.test.js"/>
+	<testcase name="main-stock migration preserves movement IDs and adds fractional-offcut movements and whole-unit triggers" time="0.005014" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/database-maintenance.test.js"/>
+	<testcase name="machine notes history migration backfills card and fallback notes additively and is idempotent" time="0.003661" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/database-maintenance.test.js"/>
+	<testcase name="maintenance photo rotation migration is additive, preserves records, and is idempotent" time="0.001680" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/database-maintenance.test.js"/>
+	<testcase name="physical photo-rotation migration adds only a nullable derivative path and preserves rotation history" time="0.002033" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/database-maintenance.test.js"/>
+	<testcase name="attendance GPS migration is additive, preserves existing records, and is idempotent" time="0.001779" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/database-maintenance.test.js"/>
+	<testcase name="attendance biometric migration is additive, preserves existing rows, and is idempotent" time="0.001868" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/database-maintenance.test.js"/>
+	<testcase name="legacy timezone migration updates Riyadh only and preserves explicit custom zones" time="0.002769" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/database-maintenance.test.js"/>
+	<testcase name="account lockout migration preserves user identity and can run repeatedly" time="0.002041" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/database-maintenance.test.js"/>
+	<testcase name="weekly maintenance retains every breadcrumb forever and checkpoints SQLite" time="0.003258" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/database-maintenance.test.js"/>
+	<testcase name="connection enables required SQLite pragmas" time="0.001708" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/database.test.js"/>
+	<testcase name="transaction helper commits successful work and rolls back failures" time="0.002938" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/database.test.js"/>
+	<testcase name="client profile migration adds fields without changing legacy client identity or code" time="0.004187" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/database.test.js"/>
+	<testcase name="finance/accountant role migration preserves user IDs and foreign keys" time="0.005127" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/database.test.js"/>
+	<testcase name="initializer can seed a bcrypt-hashed admin with an explicit password and remains idempotent" time="0.920428" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/database.test.js"/>
+	<testcase name="fresh initialization leaves administrator setup to the first-run screen by default" time="0.089248" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/database.test.js"/>
+	<testcase name="offcut nullability migration preserves existing rows and records its version" time="0.010387" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/database.test.js"/>
+	<testcase name="client-machine deployment migration backfills service-card relationships once" time="0.001472" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/database.test.js"/>
+	<testcase name="warehouse lifecycle migration preserves existing movements and offcut IDs" time="0.496249" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/database.test.js"/>
+	<testcase name="adaptive GPS reduces polling only after three stationary minutes" time="0.001248" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/gps-adaptive.test.js"/>
+	<testcase name="adaptive GPS immediately restores high-frequency polling on speed or displacement" time="0.000383" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/gps-adaptive.test.js"/>
+	<testcase name="field image compression emits an EXIF-free Full HD JPEG and reports measured savings" time="1.296736" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/image-compression.test.js"/>
+	<testcase name="first empty machine location is locked immediately, scoped, validated and idempotent" time="0.081684" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/location-approval.test.js"/>
+	<testcase name="historical pending location can still be rejected and a new first location can be locked" time="0.037855" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/location-approval.test.js"/>
+	<testcase name="competing representatives cannot lock different first coordinates" time="0.017416" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/location-approval.test.js"/>
+	<testcase name="failed first-location audit rolls back coordinates and history" time="0.012406" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/location-approval.test.js"/>
+	<testcase name="client proposal states preserve approved coordinates and separate rejection from resubmission" time="0.001519" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/location-approval.test.js"/>
+	<testcase name="location approval survives application restart and reconciles a stale route snapshot" time="0.215885" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/location-approval.test.js"/>
+	<testcase name="visit upload is rejected before first location and succeeds immediately after confirmation" time="0.124277" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/location-approval.test.js"/>
+	<testcase name="bulk visit approval is admin-only, idempotent, atomic, and does not archive orders" time="0.345440" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/location-approval.test.js"/>
+	<testcase name="test mock order creates and assigns an isolated visit; geofence reset clears and audits the machine location" time="0.065662" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/maintenance-multi-area.test.js"/>
+	<testcase name="deleting one isolated training order permanently removes its machine, visit, photos, and files without affecting another" time="0.073606" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/maintenance-multi-area.test.js"/>
+	<testcase name="prepared test purge restores staged files and makes the order visible again after interruption" time="0.014654" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/maintenance-multi-area.test.js"/>
+	<testcase name="legacy shared test machine purge removes all linked test orders including previously hidden ones" time="0.033808" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/maintenance-multi-area.test.js"/>
+	<testcase name="failed test purge transaction restores staged files and keeps the training order usable" time="0.025927" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/maintenance-multi-area.test.js"/>
+	<testcase name="committed test purge recovery finishes deleting staged files after interruption" time="0.003855" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/maintenance-multi-area.test.js"/>
+	<testcase name="machine-directory purge removes a training machine even when its only order was hidden earlier" time="0.019475" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/maintenance-multi-area.test.js"/>
+	<testcase name="maintenance orders accept multiple areas and use every selected area for population, matching, and filtering" time="0.595799" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/maintenance-multi-area.test.js"/>
+	<testcase name="admins can edit archived card reasons, notes, and machine codes while photo edits stay blocked" time="0.073067" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/maintenance-multi-area.test.js"/>
+	<testcase name="duplicate trip folders keep the first machine match and route later folders to review without merging photos" time="0.044735" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/maintenance-multi-area.test.js"/>
+	<testcase name="maintenance card decommission stages files, rolls them back on database failure, audits, and deactivates the machine" time="0.071800" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/maintenance-multi-area.test.js"/>
+	<testcase name="maintenance card photos can be moved or deleted without losing files on DB failure" time="0.126675" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/maintenance-multi-area.test.js"/>
+	<testcase name="maintenance photo rotation is audited metadata applied to viewer, thumbnails, and exports without changing source bytes" time="0.344255" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/maintenance-multi-area.test.js"/>
+	<testcase name="maintenance card startup recovery restores staged folders for an uncommitted deletion" time="0.015983" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/maintenance-multi-area.test.js"/>
+	<testcase name="missing trip machine without a card is decommissioned with staged folder cleanup" time="0.051067" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/maintenance-multi-area.test.js"/>
+	<testcase name="machine decommission startup recovery restores folders before the DB commit" time="0.015380" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/maintenance-multi-area.test.js"/>
+	<testcase name="unmatched-folder purge stages archive/source directories, rolls back failures, deletes rows, and audits" time="0.036689" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/maintenance-multi-area.test.js"/>
+	<testcase name="unmatched-folder startup recovery restores prepared purges and completes committed purges" time="0.015495" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/maintenance-multi-area.test.js"/>
+	<testcase name="unmatched-folder purge rejects archived and bound folders without deleting ZIP sources" time="0.020503" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/maintenance-multi-area.test.js"/>
+	<testcase name="machine creation restores matching soft-deleted and inactive codes, audits changes, and rejects active duplicates" time="0.027490" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/maintenance-multi-area.test.js"/>
+	<testcase name="Admin can soft-delete a review order while retaining files/history; archived orders remain undeletable" time="0.470674" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/maintenance-order-deletion.test.js"/>
+	<testcase name="Admin can reopen archived maintenance and rearchive without duplicating or misposting the cash refund" time="0.268894" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/maintenance-order-deletion.test.js"/>
+	<testcase name="V1 migration preserves identities, soft deletes, assignments, cards, and legacy photo references" time="0.029335" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/migrate-from-v1.test.js"/>
+	<testcase name="V1 migration rolls back the complete target transaction when source rows cannot map safely" time="0.009588" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/migrate-from-v1.test.js"/>
+	<testcase name="the inbox exposes unread counts and newest-first notifications per recipient" time="3.074758" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/notifications.test.js"/>
+	<testcase name="read and dismiss persist across re-login and stay scoped to their owner" time="0.913999" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/notifications.test.js"/>
+	<testcase name="reconnect replays the missed event and the inbox includes it" time="0.016766" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/notifications.test.js"/>
+	<testcase name="the migration backlog is bounded and opens as already read" time="0.011016" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/notifications.test.js"/>
+	<testcase name="IndexedDB v5 includes every offline queue, map store, and the attendance cache RepApp reads" time="0.001362" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/offline-gps-store.test.js"/>
+	<testcase name="GPS recovery drains the oldest unsynced samples first without mutating the IndexedDB result" time="0.016678" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/offline-gps-store.test.js"/>
+	<testcase name="missing IndexedDB stores recover in place and remain readable after a repaired DB version is reopened" time="0.020681" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/offline-gps-store.test.js"/>
+	<testcase name="supervisor receives business notifications but not GPS or reconciliation spam" time="0.002203" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/operation-notifications.test.js"/>
+	<testcase name="the catalog covers overtime decisions and attendance cancellation" time="0.000473" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/operation-notifications.test.js"/>
+	<testcase name="operations events fan out after publication and unsubscribe cleanly" time="0.005063" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/operations-events.test.js"/>
+	<testcase name="a failed event subscriber cannot prevent delivery to other subscribers" time="0.001121" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/operations-events.test.js"/>
+	<testcase name="failed SQLite publication is durably retried with a numeric cursor and no invented replay ID" time="0.003505" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/operations-events.test.js"/>
+	<testcase name="cursor reconciliation resets a cursor from a future or restored database" time="0.000745" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/operations-events.test.js"/>
+	<testcase name="Phase 2 client, maintenance, and workshop flows remain isolated and transactional" time="0.364179" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/phase2-operations.test.js"/>
+	<testcase name="Phase 3 warehouse lifecycle preserves Phase 1/2 domains and reconciles physical stock" time="1.159244" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/phase3-warehouse.test.js"/>
+	<testcase name="Phase 4 finance lifecycle keeps integer-cents, stock, custody, billing, and client debt coherent" time="4.482514" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/phase4-finance.test.js"/>
+	<testcase name="monthly attendance matrix exports, bulk-marks present idempotently, and feeds draft payroll" time="0.078655" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/phase4-finance.test.js"/>
+	<testcase name="employee selectors filter active staff and maintenance custody advances stay linked and auditable" time="0.202652" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/phase5-client.test.js"/>
+	<testcase name="empty maintenance archive returns the localized no-photo export error" time="0.032653" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/phase6-parity.test.js"/>
+	<testcase name="maintenance Storage explorer browses safe Areas folders and reports direct photos" time="0.030225" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/phase6-parity.test.js"/>
+	<testcase name="area folder renames translate Windows EPERM locks into an actionable Arabic error" time="0.001393" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/phase6-parity.test.js"/>
+	<testcase name="V2 parity operations cover imports, area maintenance, HR, exports, users, and backups" time="3.602241" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/phase6-parity.test.js"/>
+	<testcase name="asynchronous maintenance PPTX exports return 202 and expose the completed report for download" time="0.101863" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/phase6-parity.test.js"/>
+	<testcase name="maintenance reasons support audited soft deactivation and area analysis exports filtered Excel records" time="0.620348" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/phase6-parity.test.js"/>
+	<testcase name="area maintenance notes show the latest eligible note, export styled area groups, and clear notes with audit" time="0.258257" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/phase6-parity.test.js"/>
+	<testcase name="area maintenance workbook keeps actual rows only and gives each area a filterable RTL sheet" time="0.025864" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/phase6-parity.test.js"/>
+	<testcase name="area maintenance comments can be created without a card, edited on the latest card, and audited" time="0.113335" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/phase6-parity.test.js"/>
+	<testcase name="maintenance PPTX and Excel exports sort Arabic areas and machine codes naturally" time="0.529638" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/phase6-parity.test.js"/>
+	<testcase name="maintenance PowerPoint export exposes live machine progress and a final completion state" time="53.675761" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/phase6-parity.test.js"/>
+	<testcase name="maintenance PPTX exports the latest edited card snapshot and never falls back to stale photos" time="0.103693" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/phase6-parity.test.js"/>
+	<testcase name="rep role migration preserves users and their existing foreign-key references" time="0.009606" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/rep-api.test.js"/>
+	<testcase name="geofence and breadcrumb migrations are additive and idempotent" time="0.001602" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/rep-api.test.js"/>
+	<testcase name="rep login, assigned-region route sync, active fault reasons, and strict API isolation" time="0.572748" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/rep-api.test.js" failure="The input did not match the regular expression /madar-rep-debug-transition-2\.0\.6\.apk/. Input:&#10;&#10;'attachment; filename=&quot;madar-rep-debug-transition-2.0.7.apk&quot;'&#10;">
+		<failure type="testCodeFailure" message="The input did not match the regular expression /madar-rep-debug-transition-2\.0\.6\.apk/. Input:&#10;&#10;'attachment; filename=&quot;madar-rep-debug-transition-2.0.7.apk&quot;'">
+[Error [ERR_TEST_FAILURE]: The input did not match the regular expression /madar-rep-debug-transition-2\.0\.6\.apk/. Input:
+
+'attachment; filename="madar-rep-debug-transition-2.0.7.apk"'
+] {
+  code: 'ERR_TEST_FAILURE',
+  failureType: 'testCodeFailure',
+  cause: AssertionError [ERR_ASSERTION]: The input did not match the regular expression /madar-rep-debug-transition-2\.0\.6\.apk/. Input:
+
+  'attachment; filename="madar-rep-debug-transition-2.0.7.apk"'
+
+      at TestContext.&lt;anonymous> (file:///home/carlos/Desktop/MADAR/madar-v2/test/rep-api.test.js:283:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'attachment; filename="madar-rep-debug-transition-2.0.7.apk"',
+    expected: /madar-rep-debug-transition-2\.0\.6\.apk/,
+    operator: 'match',
+    diff: 'simple'
+  }
+}
+		</failure>
+	</testcase>
+	<testcase name="validates and preserves actual visit and machine evidence bytes in a recovery package" time="0.013604" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/rep-queue-recovery.test.js"/>
+	<testcase name="rejects account changes, corrupt hashes, and packages that report omissions" time="0.004390" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/rep-queue-recovery.test.js"/>
+	<testcase name="native-only actions are merged once; changed UUID content is a surfaced conflict" time="0.001055" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/rep-queue-recovery.test.js"/>
+	<testcase name="rejects changed payloads and GPS fields even when the old identity hash remains valid" time="0.012187" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/rep-queue-recovery.test.js"/>
+	<testcase name="rejects a GPS capture time changed independently of its durable timestamp" time="0.002815" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/rep-queue-recovery.test.js"/>
+	<testcase name="rep folders remain alphabetical by region and machine name regardless of GPS or approval state" time="0.002520" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/rep-route-folders.test.js"/>
+	<testcase name="photo watermark includes Cairo date, Arabic weekday, seconds, GPS, region, machine identity and visit phase" time="0.024968" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/rep-watermark-map.test.js"/>
+	<testcase name="photo watermark names unavailable location explicitly and never infers a governorate" time="0.000869" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/rep-watermark-map.test.js"/>
+	<testcase name="watermark processing returns JPEG bytes containing rendered MADAR logo and GPS/location text layers" time="0.072538" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/rep-watermark-map.test.js"/>
+	<testcase name="approved machines sort by straight-line distance only from a fresh GPS fix; unapproved pins stay separate" time="0.002108" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/rep-watermark-map.test.js"/>
+	<testcase name="watermark badge stays on the physical left edge and reserves a readable six-line panel" time="0.000313" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/rep-watermark-map.test.js"/>
+	<testcase name="Google Maps navigation prefers the machine GPS pin and safely falls back to address search" time="0.000559" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/rep-watermark-map.test.js"/>
+	<testcase name="offline map projection round-trips coordinates and resolves the expected Cairo raster tile" time="0.000488" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/rep-watermark-map.test.js"/>
+	<testcase name="clean schema contains every V2 domain table" time="0.002317" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/schema-integrity.test.js"/>
+	<testcase name="foreign keys reject maintenance orders for unknown clients" time="0.001384" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/schema-integrity.test.js"/>
+	<testcase name="maintenance stays free of workshop pricing and cost columns" time="0.002302" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/schema-integrity.test.js"/>
+	<testcase name="deleting a maintenance order cascades to cards and technician assignments" time="0.001405" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/schema-integrity.test.js"/>
+	<testcase name="schema connection uses WAL journal mode" time="0.000250" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/schema-integrity.test.js"/>
+	<testcase name="storage layout preserves existing local defaults when no mount is configured" time="0.002846" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/storage-layout.test.js"/>
+	<testcase name="storage mount defaults database, uploads, and backups beneath the mounted root" time="0.000552" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/storage-layout.test.js"/>
+	<testcase name="mount path overrides are allowed only when all persistent roots remain beneath the mount" time="0.000993" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/storage-layout.test.js"/>
+	<testcase name="Linux mountpoint parsing is exact and decodes mountinfo path escapes" time="0.000499" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/storage-layout.test.js"/>
+	<testcase name="mounted-storage assertion rejects missing, aliased, and same-device mounts" time="0.000603" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/storage-layout.test.js"/>
+	<testcase name="paths module refuses startup when STORAGE_MOUNT_PATH is not a verified mount" time="0.076607" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/storage-layout.test.js"/>
+	<testcase name="catalog API stores typed configuration, validates units, versions changes, and audits" time="0.004504" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/structured-maintenance.test.js"/>
+	<testcase name="legacy card backfill uses explicit defaults once, preserves explicit lines and snapshots, and reruns safely" time="0.506662" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/structured-maintenance.test.js"/>
+	<testcase name="getRepFaultReasons returns explicit countability metadata without active column" time="0.000864" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/structured-maintenance.test.js"/>
+	<testcase name="end-to-end representative visit with multiple quantities, validation, offline retry, and replay protection" time="0.076971" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/structured-maintenance.test.js"/>
+	<testcase name="PowerPoint export includes explicit and historical quantities with action wording" time="0.079480" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/structured-maintenance.test.js"/>
+	<testcase name="analytics records and workbook aggregate quantities and include summary sheets" time="0.053821" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/structured-maintenance.test.js"/>
+	<testcase name="supervisor review preserves existing card lines when approving visit with different reason" time="0.068667" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/structured-maintenance.test.js"/>
+	<testcase name="Word DOCX export carries replacement quantities and formats correctly" time="0.077027" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/structured-maintenance.test.js"/>
+	<testcase name="explicit user submission transitions legacy_default to user_entered" time="0.005253" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/structured-maintenance.test.js"/>
+	<testcase name="PowerPoint export correctly handles filtered reasons and maintains reason ID alignment" time="0.035497" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/structured-maintenance.test.js"/>
+	<testcase name="secondary reasons remain searchable while replaced totals exclude pending and required work" time="0.014772" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/structured-maintenance.test.js"/>
+	<testcase name="storage health warns below the 15 percent free-space threshold" time="0.001810" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/system-health.test.js"/>
+	<testcase name="storage health is healthy at the exact free-space threshold" time="0.000296" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/system-health.test.js"/>
+	<testcase name="storage health fails closed when the filesystem cannot be checked" time="0.000500" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/system-health.test.js"/>
+	<testcase name="late worker-shaped ingestion preserves closed duty and original session" time="0.006518" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/tracking-identity.test.js"/>
+	<testcase name="receipt replay is idempotent and changed content conflicts without extra points" time="0.001581" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/tracking-identity.test.js"/>
+	<testcase name="distinct points at the same timestamp are retained and visible to supervisor queries" time="0.002028" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/tracking-identity.test.js"/>
+	<testcase name="another account cannot attach the point to the original representative session" time="0.000979" classname="test" file="/home/carlos/Desktop/MADAR/madar-v2/test/tracking-identity.test.js"/>
+	<!-- tests 163 -->
+	<!-- suites 0 -->
+	<!-- pass 162 -->
+	<!-- fail 1 -->
+	<!-- cancelled 0 -->
+	<!-- skipped 0 -->
+	<!-- todo 0 -->
+	<!-- duration_ms 128270.999533 -->
+</testsuites>

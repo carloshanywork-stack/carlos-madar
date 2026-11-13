@@ -1,0 +1,206 @@
+{
+  "id": "MadarConnections20261113",
+  "name": "MADAR — Actual System Connections — Evidence Map 2026-11-13",
+  "nodes": [
+    {
+      "id": "e3a0fb45-fcdd-5794-9ffc-3b44fe8c7c56",
+      "name": "Read the evidence boundary",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "parameters": {
+        "content": "# MADAR — actual source connections and verification\n\nSource `e2aa41b116fcd2ca40138d083247de43e0ca82f6`\nVerified 2026-11-13T15:32:57.143978+00:00 · Africa/Cairo\n\n**This canvas documents business connections; it does not execute those business operations.** Arrows in the notes mean producer → interface → consumer. No noOp or pretend compilation/synchronization nodes exist. Open the companion *Live Read-only Connection Verifier* for real HTTP checks.\n\n🟢 PASS = stated test/inspection scope only. 🟡 IMPLEMENTED_NOT_VERIFIED. 🔴 VERIFIED_FAIL. ⛔ BLOCKED_PREREQUISITE. Optional missing capabilities are explicitly identified.\n\nOriginal V2 suite: 162/163 passed, 1 stale filename assertion. Later rep scenarios ran only in the documented temporary current-version contract copy.\n\nFull route/call-site inventory: `audit/live-connections-20261113/source-inventory.json`\nReport: `audit/live-connections-20261113/README.md`",
+        "width": 1150,
+        "height": 570,
+        "color": 5
+      },
+      "position": [
+        0,
+        -650
+      ]
+    },
+    {
+      "id": "822b4f79-abc1-5194-add8-2bb0fcc8d51e",
+      "name": "Runtime / network",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "parameters": {
+        "content": "## Runtime / network\n\n### NET-01 — VERIFIED_PASS\n**Browser / APK HTTPS client → Express API :3000**\nHTTPS :443 → existing Tailscale ingress → /api/health\nEvidence: [server/app.js:87](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/server/app.js#L87)\nLimit: Reachability and service identity only; does not prove a business transaction or every handset.\n\n### WEB-01 — VERIFIED_PASS\n**React build → Served web / representative UI**\nGET /, /rep/, /assets/RepApp-*.js\nEvidence: [server/app.js:189](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/server/app.js#L189), [client/src/modules/rep/RepApp.jsx:2090](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/client/src/modules/rep/RepApp.jsx#L2090)\n\n### APK-01 — VERIFIED_PASS\n**Clean source e2aa41b → Published release / transition APK**\nGradle → signed com.madar.rep.app 2.0.7 (9)\nEvidence: [scripts/build-android.js:124](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/scripts/build-android.js#L124), [android/version.properties:3](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/android/version.properties#L3)\nLimit: Exact APK SHA-256 and unchanged certificates verified; no handset install acceptance.\n\n### APK-02 — IMPLEMENTED_NOT_VERIFIED\n**Authenticated download endpoint → Release APK / Debug transition**\nGET /download/apk; /download/apk/debug-transition\nEvidence: [server/config/paths.js:25](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/server/config/paths.js#L25), [server/app.js:91](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/server/app.js#L91)\nLimit: Published files and runtime path selection verified; unauthenticated requests return 401. No authenticated production download session available.\n\n",
+        "width": 850,
+        "height": 920,
+        "color": 1
+      },
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "073d9cc7-dbe8-5ba4-87a3-cf189fad504d",
+      "name": "Authentication",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "parameters": {
+        "content": "## Authentication\n\n### AUTH-01 — VERIFIED_PASS\n**Web / representative login → Session DB and role middleware**\nPOST /api/auth/login; /api/rep/login → sessions → requireAuthentication\nEvidence: [server/modules/auth/service.js:212](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/server/modules/auth/service.js#L212), [server/modules/auth/service.js:261](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/server/modules/auth/service.js#L261)\nTests: auth.test.js, rep-current-contract\n\n### AUTH-02 — VERIFIED_PASS\n**Admin / supervisor / finance / rep requests → Authorized API modules**\nPer-route role checks and account ownership\nEvidence: [server/app.js:163](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/server/app.js#L163), [server/modules/auth/authorization.js:7](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/server/modules/auth/authorization.js#L7)\nTests: auth.test.js, phase2-operations.test.js, phase4-finance.test.js, rep-current-contract\nLimit: Isolated HTTP tests; live calls only prove anonymous requests are rejected.\n\n",
+        "width": 850,
+        "height": 650,
+        "color": 2
+      },
+      "position": [
+        920,
+        0
+      ]
+    },
+    {
+      "id": "eec1f0a0-b878-5c08-a63b-a29a8b3840ba",
+      "name": "Representative / location",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "parameters": {
+        "content": "## Representative / location\n\n### REP-01 — VERIFIED_PASS\n**Assigned maintenance order → Representative route / alphabetic region folders**\nGET /api/rep/today-route → local cache → grouped cards\nEvidence: [server/modules/rep/service.js:169](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/server/modules/rep/service.js#L169), [client/src/modules/rep/route-folders.js:4](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/client/src/modules/rep/route-folders.js#L4)\nTests: rep-current-contract, rep-route-folders.test.js\n\n### REP-02 — VERIFIED_PASS\n**Representative starts machine work → Lease / other representative route visibility**\nPOST start-work / stop-work → rep_machine_work_leases\nEvidence: [server/modules/rep/service.js:315](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/server/modules/rep/service.js#L315), [server/modules/rep/service.js:251](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/server/modules/rep/service.js#L251)\nTests: rep-current-contract\nLimit: Other online rep loses the card after authoritative route refresh; offline cached screens cannot receive instant updates; lease expiry/release restores eligibility.\n\n### LOC-01 — VERIFIED_PASS\n**First GPS confirmation on unlocated machine → Locked approved coordinates and dependent visit**\nPOST /api/rep/machines/:id/confirm-location → SQLite → route\nEvidence: [server/modules/rep/service.js:708](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/server/modules/rep/service.js#L708), [client/src/modules/rep/RepApp.jsx:1752](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/client/src/modules/rep/RepApp.jsx#L1752)\nTests: location-approval.test.js, rep-current-contract\nLimit: First location path and subsequent correction path are separate; no universal autoapproval claim.\n\n### LOC-02 — VERIFIED_PASS\n**Correction request plus evidence → Supervisor approve / reject → route reconciliation**\nMultipart corrections → pending request → review event\nEvidence: [server/modules/rep/service.js:938](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/server/modules/rep/service.js#L938), [server/modules/supervisor/routes.js:106](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/server/modules/supervisor/routes.js#L106)\nTests: location-approval.test.js, rep-current-contract\n\n### MAP-01 — IMPLEMENTED_NOT_VERIFIED\n**Assigned coordinates / representative GPS → Local MBTiles / Google view / directions**\nmap packs, /api/rep/map/google, Google Maps navigation URL\nEvidence: [client/src/modules/rep/OfflineMapPanel.jsx:70](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/client/src/modules/rep/OfflineMapPanel.jsx#L70), [client/src/modules/rep/map-utils.js:12](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/client/src/modules/rep/map-utils.js#L12)\nTests: rep-watermark-map.test.js\nLimit: Projection and URL helpers tested; external map key, offline package availability and phone navigation not accepted on a device.\n\n",
+        "width": 850,
+        "height": 1150,
+        "color": 3
+      },
+      "position": [
+        1840,
+        0
+      ]
+    },
+    {
+      "id": "38a1805a-37eb-5401-a7cf-0ca336caaec1",
+      "name": "Android / durable queues",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "parameters": {
+        "content": "## Android / durable queues\n\n### CAM-01 — BLOCKED_PREREQUISITE\n**Native consecutive camera capture → Before / After evidence, watermark and local archive**\nCapacitor bridge → RepCameraSequenceActivity → RepPhotoArchive\nEvidence: [android/app/src/main/java/com/madar/rep/app/RepCameraSequenceActivity.java:49](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/android/app/src/main/java/com/madar/rep/app/RepCameraSequenceActivity.java#L49), [android/app/src/main/java/com/madar/rep/app/RepPhotoArchive.java:19](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/android/app/src/main/java/com/madar/rep/app/RepPhotoArchive.java#L19), [client/src/modules/rep/native-bridges.js:56](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/client/src/modules/rep/native-bridges.js#L56)\nTests: android-packaging.test.js, rep-watermark-map.test.js\nLimit: No physical device connected. Source, packaging and server watermark tests cannot prove OEM camera / GPS / SAF behavior.\n\n### QUEUE-01 — BLOCKED_PREREQUISITE\n**Saved visit / machine action / attendance → SQLite → WorkManager → HTTP upload**\nRepLocalStore → MadarSyncWorker; account-scoped stable operation identities\nEvidence: [android/app/src/main/java/com/madar/rep/app/RepLocalStore.java:19](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/android/app/src/main/java/com/madar/rep/app/RepLocalStore.java#L19), [android/app/src/main/java/com/madar/rep/app/MadarSyncWorker.java:40](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/android/app/src/main/java/com/madar/rep/app/MadarSyncWorker.java#L40), [client/src/modules/rep/native-bridges.js:94](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/client/src/modules/rep/native-bridges.js#L94)\nTests: rep-queue-recovery.test.js, rep-current-contract\nLimit: Server contracts and JS recovery tested. Native process death/reboot/upgrade and real background upload not executed here.\n\n### RECOVERY-01 — BLOCKED_PREREQUISITE\n**Pending native visits / files / ownership → Recovery export / validated import**\nRepRecoveryValidator / RepRecoveryImporter → same-owner queue\nEvidence: [android/app/src/main/java/com/madar/rep/app/RepRecoveryValidator.java:15](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/android/app/src/main/java/com/madar/rep/app/RepRecoveryValidator.java#L15), [android/app/src/main/java/com/madar/rep/app/RepRecoveryImporter.java:11](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/android/app/src/main/java/com/madar/rep/app/RepRecoveryImporter.java#L11)\nTests: rep-queue-recovery.test.js\nLimit: JS recovery package tests passed; complete physical-phone export/reinstall/import drill unverified.\n\n### GPS-01 — BLOCKED_PREREQUISITE\n**Native location provider / foreground service → Durable local GPS identity ledger**\nRepLocationService → RepTrackStore\nEvidence: [android/app/src/main/java/com/madar/rep/app/RepLocationService.java:27](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/android/app/src/main/java/com/madar/rep/app/RepLocationService.java#L27), [android/app/src/main/java/com/madar/rep/app/RepTrackStore.java:16](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/android/app/src/main/java/com/madar/rep/app/RepTrackStore.java#L16)\nTests: tracking-identity.test.js, gps-adaptive.test.js\nLimit: Actual GPS enabled detection, OEM background policy and battery behavior require a phone.\n\n",
+        "width": 850,
+        "height": 920,
+        "color": 4
+      },
+      "position": [
+        2760,
+        0
+      ]
+    },
+    {
+      "id": "b856b21e-f0ee-596f-ba78-1ae1756ff7a4",
+      "name": "Visits / supervisor",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "parameters": {
+        "content": "## Visits / supervisor\n\n### GPS-02 — VERIFIED_PASS\n**Offline points after duty closes → Server point ledger / per-point receipt**\nPOST /api/rep/location-ping → stored/duplicate/rejected; session preserved\nEvidence: [server/modules/rep/service.js:1569](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/server/modules/rep/service.js#L1569), [server/modules/rep/tracking-ledger.js:3](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/server/modules/rep/tracking-ledger.js#L3)\nTests: tracking-identity.test.js, rep-current-contract\nLimit: Server isolated integration. Phone acknowledgment cleanup remains device acceptance, not a server test claim.\n\n### VISIT-01 — VERIFIED_PASS\n**Multipart visit with stable UUID / payload → Durable files + completed ingestion + pending review**\nPOST /api/rep/sync-visit; staged writes; rep_visits/reviews/lines\nEvidence: [server/modules/rep/service.js:1238](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/server/modules/rep/service.js#L1238), [server/modules/rep/routes.js:382](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/server/modules/rep/routes.js#L382)\nTests: rep-current-contract, structured-maintenance.test.js\n\n### VISIT-02 — VERIFIED_PASS\n**Supervisor QA / bulk approval / reshoot → Approved card or reshoot request + event**\nPOST /api/supervisor/visits/:id/review; /visits/approve-all\nEvidence: [server/modules/supervisor/service.js:373](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/server/modules/supervisor/service.js#L373), [server/modules/supervisor/service.js:551](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/server/modules/supervisor/service.js#L551)\nTests: rep-current-contract, structured-maintenance.test.js\n\n### VISIT-03 — IMPLEMENTED_NOT_VERIFIED\n**Review / submission event → APK sent tab / remaining card / reshoot reconciliation**\nSSE or native realtime → refreshData → route filters\nEvidence: [client/src/modules/rep/RepApp.jsx:983](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/client/src/modules/rep/RepApp.jsx#L983), [client/src/modules/rep/RepApp.jsx:1577](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/client/src/modules/rep/RepApp.jsx#L1577)\nTests: rep-current-contract\nLimit: Server statuses verified; installed APK final visual reconciliation not exercised on a physical phone.\n\n### RADAR-01 — VERIFIED_PASS\n**GPS points / duty sessions / visits → Supervisor all-rep radar and per-rep route**\nGET /api/supervisor/radar; /reps/:id/route\nEvidence: [server/modules/supervisor/service.js:110](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/server/modules/supervisor/service.js#L110), [server/modules/supervisor/service.js:193](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/server/modules/supervisor/service.js#L193)\nTests: rep-current-contract\nLimit: Isolated API assertions; displayed instantaneous/average speed depends on valid point timestamps and samples, not vehicle telemetry calibration.\n\n",
+        "width": 850,
+        "height": 1150,
+        "color": 5
+      },
+      "position": [
+        0,
+        2100
+      ]
+    },
+    {
+      "id": "cdc62b7d-ed1c-5625-a703-5ac78526347f",
+      "name": "Attendance / HR",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "parameters": {
+        "content": "## Attendance / HR\n\n### ATT-01 — VERIFIED_PASS\n**Offline attendance action → Age-window validation / replay / review and attendance**\nPOST /api/rep/attendance/sync → action ledger → attendance\nEvidence: [server/modules/employees/attendance.js:73](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/server/modules/employees/attendance.js#L73), [client/src/modules/rep/RepApp.jsx:851](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/client/src/modules/rep/RepApp.jsx#L851)\nTests: attendance-offline-policy.test.js, attendance-offline-sync.test.js, attendance-engine.test.js\n\n### ATT-02 — BLOCKED_PREREQUISITE\n**Device credential / biometric client result → Attendance client assurance assertion**\nRepBiometricAuth → attendance bridge → server request\nEvidence: [android/app/src/main/java/com/madar/rep/app/RepBiometricAuth.java:13](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/android/app/src/main/java/com/madar/rep/app/RepBiometricAuth.java#L13), [client/src/modules/rep/native-bridges.js:82](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/client/src/modules/rep/native-bridges.js#L82)\nTests: android-packaging.test.js\nLimit: Phone assurance is a client assertion; no independent server hardware attestation or physical biometric acceptance established.\n\n### HR-01 — VERIFIED_PASS\n**Linked login / employee master and attendance → Payroll preview / finalized treasury expense**\nstaff sync → attendance → payroll finalization transaction\nEvidence: [server/modules/employees/staff-service.js:126](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/server/modules/employees/staff-service.js#L126), [server/modules/employees/service.js:654](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/server/modules/employees/service.js#L654)\nTests: attendance-engine.test.js, phase4-finance.test.js, phase5-client.test.js\n\n### HR-02 — VERIFIED_PASS\n**Employee tools / advances / maintenance custody → Custody / finance history / audit**\nemployee tools and custody APIs → durable records\nEvidence: [server/modules/employees/service.js:275](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/server/modules/employees/service.js#L275), [server/modules/employees/service.js:599](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/server/modules/employees/service.js#L599)\nTests: phase4-finance.test.js, phase5-client.test.js\n\n",
+        "width": 850,
+        "height": 920,
+        "color": 6
+      },
+      "position": [
+        920,
+        2100
+      ]
+    },
+    {
+      "id": "e2d5ba89-6f83-5ccb-86fc-8f405b6fc691",
+      "name": "Maintenance / reporting",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "parameters": {
+        "content": "## Maintenance / reporting\n\n### MAINT-01 — VERIFIED_PASS\n**Client and machine business identities → Orders / cards / representative assignments**\nclients → machines → maintenance_order_reps → assigned route\nEvidence: [server/modules/clients/service.js:52](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/server/modules/clients/service.js#L52), [server/modules/maintenance/routes.js:431](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/server/modules/maintenance/routes.js#L431)\nTests: phase2-operations.test.js, phase6-parity.test.js, rep-current-contract\n\n### MAINT-02 — VERIFIED_PASS\n**Countable reasons with explicit quantities → Card/visit lines → analytics → PPTX / DOCX / XLSX**\ntyped catalog → line snapshots / provenance → approved business exports\nEvidence: [server/modules/maintenance/analysis.js:44](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/server/modules/maintenance/analysis.js#L44), [server/modules/maintenance/export.js:658](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/server/modules/maintenance/export.js#L658)\nTests: structured-maintenance.test.js\nLimit: Exact quantity examples and export assertions, not every historical customer record.\n\n### MAINT-03 — VERIFIED_PASS\n**Original uploaded images → Derived rotation / thumbnails / export buffers**\nstorage containment → photo-images/thumbnails → exports\nEvidence: [server/modules/maintenance/photo-images.js:8](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/server/modules/maintenance/photo-images.js#L8), [server/modules/maintenance/thumbnails.js:46](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/server/modules/maintenance/thumbnails.js#L46), [server/modules/storage.js:60](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/server/modules/storage.js#L60)\nTests: maintenance-multi-area.test.js, image-compression.test.js, phase6-parity.test.js\n\n### MAINT-04 — VERIFIED_PASS\n**Folder / spreadsheet import → Non-destructive matched machine and photo records**\ntrip-folder matching / EXIF ordering / import routes\nEvidence: [server/modules/maintenance/trip-folder.js:407](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/server/modules/maintenance/trip-folder.js#L407), [server/modules/maintenance/routes.js:279](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/server/modules/maintenance/routes.js#L279)\nTests: phase6-parity.test.js, maintenance-multi-area.test.js\n\n### MAINT-05 — VERIFIED_PASS\n**Order deletion / training fixture deletion → Staged file removal / DB transaction / recovery**\ndelete routes → locks → stage rename → rollback/startup recovery\nEvidence: [server/modules/maintenance/routes.js:451](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/server/modules/maintenance/routes.js#L451), [server/modules/maintenance/routes.js:455](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/server/modules/maintenance/routes.js#L455)\nTests: maintenance-order-deletion.test.js\n\n",
+        "width": 850,
+        "height": 1150,
+        "color": 1
+      },
+      "position": [
+        1840,
+        2100
+      ]
+    },
+    {
+      "id": "0ffa1fe9-0334-5d4a-b875-606602e9dafa",
+      "name": "Workshop / stock / finance",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "parameters": {
+        "content": "## Workshop / stock / finance\n\n### STOCK-01 — VERIFIED_PASS\n**Whole main-warehouse material issue → Stock movements / sub-warehouse reusable offcut**\nissueMaterial transaction and explicit rounded issue choice\nEvidence: [server/modules/warehouse/service.js:165](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/server/modules/warehouse/service.js#L165)\nTests: phase3-warehouse.test.js, database-maintenance.test.js\n\n### WORKSHOP-01 — VERIFIED_PASS\n**Workshop order + material issue → Ready offcuts / delivered sales invoice**\nproduction → ready → delivered_archived\nEvidence: [server/modules/workshop/service.js:281](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/server/modules/workshop/service.js#L281), [server/modules/workshop/service.js:323](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/server/modules/workshop/service.js#L323)\nTests: phase2-operations.test.js, phase3-warehouse.test.js, phase4-finance.test.js\n\n### FIN-01 — VERIFIED_PASS\n**Purchase invoice → Stock receipt + unpaid liability; separate payment**\ncreatePurchaseInvoice → recordPurchasePayment\nEvidence: [server/modules/finance/invoices.service.js:174](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/server/modules/finance/invoices.service.js#L174), [server/modules/finance/invoices.service.js:328](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/server/modules/finance/invoices.service.js#L328)\nTests: phase4-finance.test.js\nLimit: Integer cents and isolated retries/concurrency tested; no bank/payment-provider integration claimed.\n\n### FIN-02 — VERIFIED_PASS\n**Sales receipt / purchase payment stable operation ID → Settlement + treasury + invoice balance + audit**\nIdentical replay returns committed result; changed payload conflicts\nEvidence: [server/modules/finance/invoices.service.js:411](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/server/modules/finance/invoices.service.js#L411), [server/modules/finance/invoices.service.js:328](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/server/modules/finance/invoices.service.js#L328)\nTests: phase4-finance.test.js\n\n",
+        "width": 850,
+        "height": 920,
+        "color": 2
+      },
+      "position": [
+        2760,
+        2100
+      ]
+    },
+    {
+      "id": "69148697-5cd8-5325-b163-c92ff26fb458",
+      "name": "Events / notification",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "parameters": {
+        "content": "## Events / notification\n\n### EVENT-01 — VERIFIED_PASS\n**Business producers → Persisted outbox/event log and bounded SSE replay**\npublishOperationsEvent → operations_events/outbox → rep/supervisor SSE\nEvidence: [server/modules/operations-events.js:94](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/server/modules/operations-events.js#L94), [server/modules/operations-events.js:43](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/server/modules/operations-events.js#L43), [server/modules/rep/routes.js:87](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/server/modules/rep/routes.js#L87)\nTests: operations-events.test.js, operation-notifications.test.js, rep-current-contract\nLimit: Single-process deployment. Client API reconciliation remains authoritative; not an unbounded broker.\n\n### EVENT-02 — VERIFIED_PASS\n**Persisted business event → User-owned inbox / bell / read and dismiss**\nmaterializeNotificationsForEvent → /api/notifications → bell\nEvidence: [server/modules/notifications/service.js:58](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/server/modules/notifications/service.js#L58), [client/src/components/notifications/NotificationBell.jsx:120](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/client/src/components/notifications/NotificationBell.jsx#L120)\nTests: notifications.test.js, operation-notifications.test.js\nLimit: Foreground/live-browser or open-app synchronization; no closed-app push delivery claim.\n\n### PUSH-01 — NOT_IMPLEMENTED\n**Closed application → External push delivery**\nNo implemented FCM/APNs registration or delivery path found\nEvidence: [client/src/modules/rep/native-bridges.js:23](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/client/src/modules/rep/native-bridges.js#L23)\nLimit: Optional capability / product decision, not a mandatory defect. No alert destination configured in this n8n delivery.\n\n",
+        "width": 850,
+        "height": 690,
+        "color": 3
+      },
+      "position": [
+        0,
+        4200
+      ]
+    },
+    {
+      "id": "194e808d-9665-51a6-9f4d-9f8b141b0612",
+      "name": "Persistence / recovery",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "parameters": {
+        "content": "## Persistence / recovery\n\n### DB-01 — VERIFIED_PASS\n**API services / additive initialization → Single local SQLite WAL database**\nmigrations → transactions / foreign keys → local DB\nEvidence: [server/database/connection.js:7](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/server/database/connection.js#L7), [server/database/init.js:89](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/server/database/init.js#L89)\nTests: database.test.js, schema-integrity.test.js, database-maintenance.test.js\nLimit: Live integrity/foreign-key checks separately captured; no multi-instance SQLite scaling.\n\n### BACKUP-01 — VERIFIED_PASS\n**SQLite snapshot + configured files → Backup ZIP → isolated migration → restored state / rollback**\ncreateSystemBackup / prepareRestorableSnapshot / interrupted restore journal\nEvidence: [server/modules/system/backup.js:648](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/server/modules/system/backup.js#L648), [server/modules/system/backup.js:264](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/server/modules/system/backup.js#L264), [server/modules/system/backup.js:484](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/server/modules/system/backup.js#L484)\nTests: backup-compatibility.test.js, phase5-client.test.js\nLimit: Temporary restore tests only. This task does not perform a production restore or prove off-device recovery.\n\n### BACKUP-02 — BLOCKED_PREREQUISITE\n**Mounted local backups → Off-device disaster recovery / physical restore drill**\nExternal storage on same host does not itself prove off-device backup\nEvidence: [server/config/paths.js:21](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/server/config/paths.js#L21)\nLimit: No authorized fresh off-device restore drill evidence supplied.\n\n",
+        "width": 850,
+        "height": 690,
+        "color": 4
+      },
+      "position": [
+        920,
+        4200
+      ]
+    },
+    {
+      "id": "71cd5199-486f-5484-8bad-32a3e80a605f",
+      "name": "n8n / separate projects",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "parameters": {
+        "content": "## n8n / separate projects\n\n### N8N-01 — VERIFIED_PASS\n**Manual n8n verifier → Actual read-only API / web / auth-boundary probes**\nHTTP Request nodes with timeout and bounded safe retry\nEvidence: [server/app.js:87](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/server/app.js#L87)\nLimit: Workflow runtime evidence captured separately. Not inserted into business transactions.\n\n### N8N-02 — IMPLEMENTED_NOT_VERIFIED\n**Existing scheduled CI health workflow → Local check script / execution metadata**\nExisting Execute Command workflow (not modified)\nEvidence: [scripts/n8n-system-check.mjs:61](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/scripts/n8n-system-check.mjs#L61)\nLimit: Existing 06:00 Cairo success predates this audit. Do not equate it with complete current business verification.\n\n### LEGACY-01 — NOT_APPLICABLE\n**Legacy system/ data → One-time migration into V2**\nmigrate-from-v1; separate codebase, not a live second V2 service\nEvidence: [scripts/migrate-from-v1.js:1](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-v2/scripts/migrate-from-v1.js#L1)\nTests: migrate-from-v1.test.js\nLimit: No automatic live synchronization between legacy and V2 established.\n\n### FLOW-01 — NOT_APPLICABLE\n**madar-flow project → Separate workflow editor/runtime**\nSeparate project; no demonstrated production integration to V2 or n8n\nEvidence: [madar-flow/README.md:1](https://github.com/carloshanywork-stack/carlos-madar/blob/e2aa41b116fcd2ca40138d083247de43e0ca82f6/madar-flow/README.md#L1)\nLimit: Do not treat its canvas, routes or graph engine as n8n or proof of MADAR V2 business integration.\n\n",
+        "width": 850,
+        "height": 920,
+        "color": 5
+      },
+      "position": [
+        1840,
+        4200
+      ]
+    }
+  ],
+  "connections": {},
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Africa/Cairo"
+  },
+  "versionId": "6271e50a-7fc1-4426-8700-37458bcea889",
+  "tags": []
+}

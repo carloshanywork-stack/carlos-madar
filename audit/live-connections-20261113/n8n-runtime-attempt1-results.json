@@ -1,0 +1,73 @@
+{
+  "verifiedAt": "2026-11-13T15:30:14.760598+00:00",
+  "sourceRevision": "e2aa41b116fcd2ca40138d083247de43e0ca82f6",
+  "runtime": "n8n 2.46.7",
+  "isolation": "Disposable /tmp N8N_USER_FOLDER and SQLite, independent runner ports; all production-target checks are read-only GET. No production business writes, workflow activation or credentials used.",
+  "steps": [
+    {
+      "step": "import-map",
+      "exitCode": 0,
+      "log": "runtime-import-map.log"
+    },
+    {
+      "step": "import-live",
+      "exitCode": 0,
+      "log": "runtime-import-live.log"
+    },
+    {
+      "step": "import-fixture",
+      "exitCode": 0,
+      "log": "runtime-import-fixture.log"
+    },
+    {
+      "step": "fixture-success",
+      "exitCode": 1,
+      "log": "runtime-fixture-success.log"
+    },
+    {
+      "step": "fixture-deliberate-failure",
+      "exitCode": 1,
+      "log": "runtime-fixture-deliberate-failure.log"
+    },
+    {
+      "step": "actual-read-only-live-targets",
+      "exitCode": 1,
+      "log": "runtime-actual-read-only-live-targets.log"
+    }
+  ],
+  "executions": [
+    {
+      "id": 1,
+      "workflowId": "MadarConnectionsFixture20261113",
+      "status": "error",
+      "startedAt": "2026-11-13 15:29:59.895",
+      "stoppedAt": "2026-11-13 15:30:01.446"
+    },
+    {
+      "id": 2,
+      "workflowId": "MadarConnectionsFixture20261113",
+      "status": "error",
+      "startedAt": "2026-11-13 15:30:05.968",
+      "stoppedAt": "2026-11-13 15:30:08.140"
+    },
+    {
+      "id": 3,
+      "workflowId": "MadarReadOnlyVerifier20261113",
+      "status": "error",
+      "startedAt": "2026-11-13 15:30:12.786",
+      "stoppedAt": "2026-11-13 15:30:14.334"
+    }
+  ],
+  "summaries": [],
+  "fixtureRequests": [],
+  "fixtureSuccess": false,
+  "deliberateFailureVisible": false,
+  "actualReadOnlyLiveTargets": false,
+  "artifactSha256": {
+    "n8n-system-connections.json": "8e5ff6c6050f2bfc444b4059cca547310b9ea899cef7e9450d66ae36e240df6b",
+    "n8n-live-verifier.json": "26be3267e086a344365c691f04f4ec93e9461a270a7346b41bd1631b2be67150"
+  },
+  "originalReportedDeliberateFailureVisible": true,
+  "attemptValid": false,
+  "limitation": "Unsuccessful prerequisite/response-adapter attempt; not valid acceptance evidence. See final runtime results."
+}

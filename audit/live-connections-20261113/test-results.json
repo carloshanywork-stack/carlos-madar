@@ -1,0 +1,37 @@
+{
+  "sourceRevision": "e2aa41b116fcd2ca40138d083247de43e0ca82f6",
+  "verifiedAt": "2026-11-13T15:32:57.143978+00:00",
+  "fullSuite": {
+    "file": "v2-tests.junit.xml",
+    "tests": 163,
+    "passed": 162,
+    "failed": 1,
+    "skipped": 0,
+    "failures": [
+      {
+        "name": "rep login, assigned-region route sync, active fault reasons, and strict API isolation",
+        "sourceFile": "/home/carlos/Desktop/MADAR/madar-v2/test/rep-api.test.js",
+        "message": "The input did not match the regular expression /madar-rep-debug-transition-2\\.0\\.6\\.apk/. Input:\n\n'attachment; filename=\"madar-rep-debug-transition-2.0.7.apk\"'\n"
+      }
+    ]
+  },
+  "adaptedRepContract": {
+    "file": "rep-current-contract.junit.xml",
+    "tests": 3,
+    "passed": 3,
+    "failed": 0,
+    "skipped": 0,
+    "failures": []
+  },
+  "adaptation": {
+    "sourceRevision": "e2aa41b116fcd2ca40138d083247de43e0ca82f6",
+    "verifiedAt": "2026-11-13T15:22:48.578477+00:00",
+    "method": "Temporary copy of rep-api.test.js; original source and tests unchanged. One expected download filename changed from 2.0.6 to actual 2.0.7. All assertions and scenario ordering retained. Server code is the original source via symlink; test-created DB/storage/HTTP server remain temporary.",
+    "substitution": {
+      "from": "madar-rep-debug-transition-2\\.0\\.6\\.apk",
+      "to": "madar-rep-debug-transition-2\\.0\\.7\\.apk",
+      "count": 1
+    },
+    "exitCode": 0
+  }
+}

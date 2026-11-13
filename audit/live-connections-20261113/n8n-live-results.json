@@ -1,0 +1,257 @@
+{
+  "verifiedAt": "2026-11-13T15:36:36.459Z",
+  "runtime": "n8n 2.46.7",
+  "workflows": [
+    {
+      "id": "MadarConnections20261113",
+      "name": "MADAR — Actual System Connections — Evidence Map 2026-11-13",
+      "active": 0
+    },
+    {
+      "id": "MadarReadOnlyVerifier20261113",
+      "name": "MADAR — System Connections + Live Verification 2026-11-13",
+      "active": 0
+    }
+  ],
+  "execution": {
+    "id": 27,
+    "workflowId": "MadarReadOnlyVerifier20261113",
+    "status": "success",
+    "mode": "cli",
+    "startedAt": "2026-11-13 15:35:54.029",
+    "stoppedAt": "2026-11-13 15:35:56.529"
+  },
+  "summary": {
+    "sourceRevision": "e2aa41b116fcd2ca40138d083247de43e0ca82f6",
+    "verifiedAt": "2026-11-13T15:35:56.515Z",
+    "fixtureOnly": false,
+    "liveOperationalStatus": "PASS",
+    "overall": "VERIFIED_WITH_GAPS",
+    "releaseAcceptance": "NOT_ESTABLISHED",
+    "allConnectionsProven": false,
+    "sourceSnapshotAt": "2026-11-13T15:32:57.143978+00:00",
+    "sourceCoverage": {
+      "curatedSystemBoundaries": 43,
+      "mountedApiAndDownloadRouteDefinitions": 193,
+      "clientHttpCallSites": 133,
+      "nativePathLiterals": 8,
+      "testDeclarations": 163,
+      "eventEntries": 89
+    },
+    "sourceStatusCounts": {
+      "VERIFIED_PASS": 30,
+      "IMPLEMENTED_NOT_VERIFIED": 4,
+      "BLOCKED_PREREQUISITE": 6,
+      "NOT_IMPLEMENTED": 1,
+      "NOT_APPLICABLE": 2
+    },
+    "liveChecks": [
+      {
+        "id": "local-api",
+        "status": "VERIFIED_PASS",
+        "verificationMethod": "actual read-only HTTP GET",
+        "expectedStatus": 200,
+        "actualStatus": 200,
+        "verifiedAt": "2026-11-13T15:35:55.662Z",
+        "limitation": "Health identity only; not business readiness"
+      },
+      {
+        "id": "public-api",
+        "status": "VERIFIED_PASS",
+        "verificationMethod": "actual read-only HTTP GET",
+        "expectedStatus": 200,
+        "actualStatus": 200,
+        "verifiedAt": "2026-11-13T15:35:55.745Z",
+        "limitation": "Health identity only; not business readiness"
+      },
+      {
+        "id": "web",
+        "status": "VERIFIED_PASS",
+        "verificationMethod": "actual read-only HTTP GET",
+        "expectedStatus": 200,
+        "actualStatus": 200,
+        "verifiedAt": "2026-11-13T15:35:55.814Z",
+        "limitation": null
+      },
+      {
+        "id": "rep-bundle",
+        "status": "VERIFIED_PASS",
+        "verificationMethod": "actual read-only HTTP GET",
+        "expectedStatus": 200,
+        "actualStatus": 200,
+        "verifiedAt": "2026-11-13T15:35:55.890Z",
+        "limitation": null
+      },
+      {
+        "id": "n8n",
+        "status": "VERIFIED_PASS",
+        "verificationMethod": "actual read-only HTTP GET",
+        "expectedStatus": 200,
+        "actualStatus": 200,
+        "verifiedAt": "2026-11-13T15:35:55.940Z",
+        "limitation": null
+      },
+      {
+        "id": "rep-auth-boundary",
+        "status": "VERIFIED_PASS",
+        "verificationMethod": "actual read-only HTTP GET",
+        "expectedStatus": 401,
+        "actualStatus": 401,
+        "verifiedAt": "2026-11-13T15:35:55.996Z",
+        "limitation": "Anonymous denial only; authenticated business function not exercised"
+      },
+      {
+        "id": "supervisor-auth-boundary",
+        "status": "VERIFIED_PASS",
+        "verificationMethod": "actual read-only HTTP GET",
+        "expectedStatus": 401,
+        "actualStatus": 401,
+        "verifiedAt": "2026-11-13T15:35:56.038Z",
+        "limitation": "Anonymous denial only; authenticated business function not exercised"
+      },
+      {
+        "id": "finance-auth-boundary",
+        "status": "VERIFIED_PASS",
+        "verificationMethod": "actual read-only HTTP GET",
+        "expectedStatus": 401,
+        "actualStatus": 401,
+        "verifiedAt": "2026-11-13T15:35:56.077Z",
+        "limitation": "Anonymous denial only; authenticated business function not exercised"
+      },
+      {
+        "id": "apk-auth-boundary",
+        "status": "VERIFIED_PASS",
+        "verificationMethod": "actual read-only HTTP GET",
+        "expectedStatus": 401,
+        "actualStatus": 401,
+        "verifiedAt": "2026-11-13T15:35:56.115Z",
+        "limitation": "Anonymous denial only; authenticated business function not exercised"
+      },
+      {
+        "id": "system-auth-boundary",
+        "status": "VERIFIED_PASS",
+        "verificationMethod": "actual read-only HTTP GET",
+        "expectedStatus": 401,
+        "actualStatus": 401,
+        "verifiedAt": "2026-11-13T15:35:56.159Z",
+        "limitation": "Anonymous denial only; authenticated business function not exercised"
+      },
+      {
+        "id": "maintenance-auth-boundary",
+        "status": "VERIFIED_PASS",
+        "verificationMethod": "actual read-only HTTP GET",
+        "expectedStatus": 401,
+        "actualStatus": 401,
+        "verifiedAt": "2026-11-13T15:35:56.201Z",
+        "limitation": "Anonymous denial only; authenticated business function not exercised"
+      },
+      {
+        "id": "warehouse-auth-boundary",
+        "status": "VERIFIED_PASS",
+        "verificationMethod": "actual read-only HTTP GET",
+        "expectedStatus": 401,
+        "actualStatus": 401,
+        "verifiedAt": "2026-11-13T15:35:56.243Z",
+        "limitation": "Anonymous denial only; authenticated business function not exercised"
+      },
+      {
+        "id": "workshop-auth-boundary",
+        "status": "VERIFIED_PASS",
+        "verificationMethod": "actual read-only HTTP GET",
+        "expectedStatus": 401,
+        "actualStatus": 401,
+        "verifiedAt": "2026-11-13T15:35:56.290Z",
+        "limitation": "Anonymous denial only; authenticated business function not exercised"
+      },
+      {
+        "id": "clients-auth-boundary",
+        "status": "VERIFIED_PASS",
+        "verificationMethod": "actual read-only HTTP GET",
+        "expectedStatus": 401,
+        "actualStatus": 401,
+        "verifiedAt": "2026-11-13T15:35:56.335Z",
+        "limitation": "Anonymous denial only; authenticated business function not exercised"
+      },
+      {
+        "id": "employees-auth-boundary",
+        "status": "VERIFIED_PASS",
+        "verificationMethod": "actual read-only HTTP GET",
+        "expectedStatus": 401,
+        "actualStatus": 401,
+        "verifiedAt": "2026-11-13T15:35:56.375Z",
+        "limitation": "Anonymous denial only; authenticated business function not exercised"
+      },
+      {
+        "id": "staff-auth-boundary",
+        "status": "VERIFIED_PASS",
+        "verificationMethod": "actual read-only HTTP GET",
+        "expectedStatus": 401,
+        "actualStatus": 401,
+        "verifiedAt": "2026-11-13T15:35:56.415Z",
+        "limitation": "Anonymous denial only; authenticated business function not exercised"
+      },
+      {
+        "id": "attendance-auth-boundary",
+        "status": "VERIFIED_PASS",
+        "verificationMethod": "actual read-only HTTP GET",
+        "expectedStatus": 401,
+        "actualStatus": 401,
+        "verifiedAt": "2026-11-13T15:35:56.454Z",
+        "limitation": "Anonymous denial only; authenticated business function not exercised"
+      },
+      {
+        "id": "notifications-auth-boundary",
+        "status": "VERIFIED_PASS",
+        "verificationMethod": "actual read-only HTTP GET",
+        "expectedStatus": 401,
+        "actualStatus": 401,
+        "verifiedAt": "2026-11-13T15:35:56.496Z",
+        "limitation": "Anonymous denial only; authenticated business function not exercised"
+      }
+    ],
+    "originalTestSuite": {
+      "file": "v2-tests.junit.xml",
+      "tests": 163,
+      "passed": 162,
+      "failed": 1,
+      "skipped": 0,
+      "failures": [
+        {
+          "name": "rep login, assigned-region route sync, active fault reasons, and strict API isolation",
+          "sourceFile": "/home/carlos/Desktop/MADAR/madar-v2/test/rep-api.test.js",
+          "message": "The input did not match the regular expression /madar-rep-debug-transition-2\\.0\\.6\\.apk/. Input:\n\n'attachment; filename=\"madar-rep-debug-transition-2.0.7.apk\"'\n"
+        }
+      ]
+    },
+    "adaptedContract": {
+      "file": "rep-current-contract.junit.xml",
+      "tests": 3,
+      "passed": 3,
+      "failed": 0,
+      "skipped": 0,
+      "failures": []
+    },
+    "blockedOrUnverifiedConnectionIds": [
+      "APK-02",
+      "MAP-01",
+      "CAM-01",
+      "QUEUE-01",
+      "RECOVERY-01",
+      "GPS-01",
+      "VISIT-03",
+      "ATT-02",
+      "BACKUP-02",
+      "N8N-02"
+    ],
+    "physicalDevice": "BLOCKED_PREREQUISITE",
+    "authenticatedBusinessChecks": "BLOCKED_PREREQUISITE_NO_N8N_CREDENTIALS",
+    "alerts": "NOT_CONFIGURED",
+    "meaning": "Actual read-only HTTP reachability and anonymous auth boundaries. Business evidence is an explicitly dated source/test snapshot. It is not a live business transaction, port scanner, APK installer, CI runner or phone acceptance test."
+  },
+  "links": {
+    "main": "http://carlos-pc.tail852ef0.ts.net:5678/workflow/MadarReadOnlyVerifier20261113",
+    "documentation": "http://carlos-pc.tail852ef0.ts.net:5678/workflow/MadarConnections20261113"
+  },
+  "liveActivation": "NONE; both newly imported workflows inactive; manually executable",
+  "alertDelivery": "NOT_CONFIGURED_NOT_TESTED"
+}

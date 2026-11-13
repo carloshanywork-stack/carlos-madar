@@ -1,0 +1,7 @@
+{
+  "verifiedAt": "2026-11-13T15:40:02.223Z",
+  "existingWorkflowDefinitionsCompared": 9,
+  "existingWorkflowDefinitionsChanged": 0,
+  "newInactiveWorkflowCount": 2,
+  "sqliteIntegrity": "ok"
+}
