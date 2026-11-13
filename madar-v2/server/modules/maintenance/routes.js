@@ -28,6 +28,8 @@ import {
   createMaintenanceReason,
   createMaintenanceOrder,
   createTestMockMaintenanceOrder,
+  purgeTestMockMaintenanceOrder,
+  purgeTestMockMaintenanceMachine,
   deactivateMachine,
   deactivateMaintenanceReason,
   deleteMaintenanceCard,
@@ -304,6 +306,10 @@ router.delete('/machines/:id', (req, res, next) => {
   catch (error) { next(error); }
 });
 
+router.delete('/machines/:id/test-mock', requireRole('admin'), asyncHandler(async (req, res) => {
+  res.json(await purgeTestMockMaintenanceMachine(req.params.id, requestActorId(req)));
+}));
+
 router.delete('/machines/:id/maintenance-note', requireRole('admin'), (req, res, next) => {
   try { res.json(clearMachineMaintenanceNotes(req.params.id, requestActorId(req))); }
   catch (error) { next(error); }
@@ -444,6 +450,10 @@ router.put('/orders/:id/representatives', requireRole('admin'), (req, res, next)
 
 router.delete('/orders/:id', requireRole('admin'), asyncHandler(async (req, res) => {
   res.json(await deleteMaintenanceOrder(req.params.id, requestActorId(req)));
+}));
+
+router.delete('/orders/:id/test-mock', requireRole('admin'), asyncHandler(async (req, res) => {
+  res.json(await purgeTestMockMaintenanceOrder(req.params.id, requestActorId(req)));
 }));
 
 router.post('/orders/:id/unarchive', requireRole('admin'), asyncHandler(async (req, res) => {
@@ -709,6 +719,7 @@ router.get('/orders/:id', (req, res, next) => {
     res.json({
       ...order,
       canAssignRepresentatives: req.user?.role === 'admin',
+      canPurgeTestMock: req.user?.role === 'admin' && order.order_code.startsWith('MN-TEST-'),
       canDelete: req.user?.role === 'admin' && order.status === 'review',
       canEditReasons: ['admin', 'operations'].includes(req.user?.role)
         && (order.status !== 'archived' || req.user?.role === 'admin'),

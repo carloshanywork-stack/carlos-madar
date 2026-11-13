@@ -146,6 +146,7 @@ export default function MaintenanceOrderDetail() {
   const orderRef = useRef(order);
   orderRef.current = order;
   const { notice, showToast, clearToast } = useToast();
+  const isTestMockOrder = Boolean(order?.order_code?.startsWith('MN-TEST-'));
   const orderAreaNames = useMemo(() => [...new Set((order?.area ?? '').split(/[،,]/).map((area) => area.trim()).filter(Boolean))], [order?.area]);
   const populateAreaOptions = useMemo(() => orderAreaNames.length
     ? (apiAreas ?? []).filter((area) => orderAreaNames.some((selected) => selected.normalize('NFKC').toLocaleLowerCase('ar') === area.normalize('NFKC').toLocaleLowerCase('ar')))
@@ -493,6 +494,25 @@ export default function MaintenanceOrderDetail() {
     }
   }
 
+  async function handlePurgeTestMockOrder() {
+    if (!window.confirm(`حذف ماكينة التدريب والأمر ${order.order_code} نهائيًا؟\n\nسيُحذف أيضًا كل أمر اختبار آخر مرتبط بنفس ماكينة التدريب، بما فيه الأوامر المخفية سابقًا، مع الزيارات والصور وبيانات الموقع الخاصة بها. لا يمكن التراجع عن الحذف. لن يُحذف أي أمر عادي أو حركة مالية.`)) return;
+    setSaving(true);
+    try {
+      const failedCardIds = await flushPendingCardSaves();
+      if (failedCardIds.size) {
+        showToast('تعذر حفظ بعض تعديلات البطاقة؛ لم تُحذف ماكينة التدريب.', 'error');
+        return;
+      }
+      const result = await api.delete(`/api/maintenance/orders/${id}/test-mock`);
+      showToast(result.cleanupPending ? 'حُذفت بيانات التدريب؛ سيكتمل تنظيف الملفات عند تشغيل الخادم التالي.' : 'حُذفت ماكينة التدريب وجميع بياناتها المرتبطة.');
+      navigate('/maintenance');
+    } catch (caught) {
+      showToast(errorMessage(caught), 'error');
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function handleUnarchiveOrder() {
     const confirmed = window.confirm(
       `هل تريد إلغاء أرشفة أمر الصيانة (${order.order_code}) وإعادة فتحه؟\n\n- سيعود الأمر لحالة (قيد التنفيذ).\n- ستتمكن من تعديل البطاقات وإضافة أو حذف ماكينات ورفع أو نقل الصور.`,
@@ -651,6 +671,11 @@ export default function MaintenanceOrderDetail() {
   }
 
   async function decommissionMachine({ machineId, machineCode, machineName, cardId }) {
+    if (isTestMockOrder) {
+      if (!order.canPurgeTestMock) return;
+      await handlePurgeTestMockOrder();
+      return;
+    }
     const name = machineName || machineCode;
     const confirmed = window.confirm(
       `هل أنت متأكد من إزالة الماكينة "${name}" (كود: ${machineCode}) من التشغيل؟\n\n- سيتم حذف مجلد وصور الماكينة المرتبطة بأمر الصيانة ومجلد المنطقة.\n- سيتم إخفاء كارت الفحص من الأمر مع الاحتفاظ بسجل التدقيق.\n- سيتم إلغاء تفعيل الماكينة ولن تظهر ضمن الرحلات أو المعالجة القادمة.`
@@ -1014,7 +1039,7 @@ export default function MaintenanceOrderDetail() {
               >✏️ تعديل الكود</button>
             )}
           </span>
-          {order.status === 'in_progress' && (
+          {order.status === 'in_progress' && (!isTestMockOrder || order.canPurgeTestMock) && (
             <button
               type="button"
               className="madar-button-icon"
@@ -1190,7 +1215,7 @@ export default function MaintenanceOrderDetail() {
                   style={{ color: '#38bdf8', borderColor: 'rgba(56, 189, 248, 0.4)' }}
                   onClick={() => openMachineCodeEditor(card)}
                 >✏️ تعديل كود الماكينة ({card.machine_code})</Button>
-                {order.status === 'in_progress' && <button
+                {order.status === 'in_progress' && (!isTestMockOrder || order.canPurgeTestMock) && <button
                   type="button"
                   className="madar-button madar-button-small"
                   style={{ background: 'rgba(239, 68, 68, 0.15)', color: '#fca5a5', border: '1px solid rgba(239, 68, 68, 0.3)', fontSize: '11px', fontWeight: 'bold', display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '5px 12px', borderRadius: '6px', cursor: 'pointer' }}
@@ -1201,9 +1226,9 @@ export default function MaintenanceOrderDetail() {
                     machineName: card.machine_name_ar,
                     cardId: card.id,
                   })}
-                  title="حذف كارت الفحص وصوره وإلغاء تفعيل الماكينة"
+                  title={isTestMockOrder ? 'حذف ماكينة التدريب وكل أوامرها التجريبية نهائيًا' : 'حذف كارت الفحص وصوره وإلغاء تفعيل الماكينة'}
                 >
-                  🗑️ إزالة الماكينة وحذف مجلدها نهائياً
+                  {isTestMockOrder ? '🗑️ حذف ماكينة التدريب وكل بياناتها' : '🗑️ إزالة الماكينة وحذف مجلدها نهائياً'}
                 </button>}
               </div>
             )}
@@ -1239,7 +1264,10 @@ export default function MaintenanceOrderDetail() {
           {order.canAssignRepresentatives && order.status !== 'archived' && <Button variant="secondary" icon="users" onClick={() => { setRepresentativeError(''); setRepresentativesOpen(true); }}>تعيين المندوبين</Button>}
           {order.status === 'in_progress' && <Button icon="check" disabled={saving} onClick={transitionToReview}>إرسال للمراجعة</Button>}
           {order.status === 'review' && <Button icon="archive" onClick={() => { setExpenseError(''); setArchiveOpen(true); }}>أرشفة وتسوية العهدة</Button>}
-          {order.canDelete && <Button
+          {order.canPurgeTestMock && <Button variant="danger" icon="trash" disabled={saving}
+            onClick={handlePurgeTestMockOrder} title="حذف ماكينة التدريب والأمر وبياناتهما نهائيًا"
+          >حذف ماكينة التدريب نهائيًا</Button>}
+          {!isTestMockOrder && order.canDelete && <Button
             variant="danger"
             icon="trash"
             disabled={saving}
@@ -1563,7 +1591,7 @@ export default function MaintenanceOrderDetail() {
                  <div className="madar-missing-machine-existing" key={machine.id}>
                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem', flexWrap: 'wrap', gap: '0.5rem' }}>
                      <p style={{ margin: 0, fontSize: '12px', color: '#94a3b8' }}>تحتاج البطاقة إلى استكمال صور قبل وبعد؛ افتحها لإضافة الصور أو بيانات الفحص.</p>
-                     {order.status === 'in_progress' && (
+                     {order.status === 'in_progress' && (!isTestMockOrder || order.canPurgeTestMock) && (
                        <button
                          type="button"
                          className="madar-button madar-button-small"
@@ -1593,7 +1621,7 @@ export default function MaintenanceOrderDetail() {
                   <Badge tone="warning">0 صور</Badge>
                   <div className="madar-inline-wrap">
                     {order.status === 'in_progress' && <Button icon="plus" size="small" variant="secondary" disabled={saving} onClick={() => addManualCardForMachine(machine)}>إضافة كارت فحص يدوي</Button>}
-                    {order.status === 'in_progress' && (
+                    {order.status === 'in_progress' && (!isTestMockOrder || order.canPurgeTestMock) && (
                       <button
                         type="button"
                         className="madar-button madar-button-small"

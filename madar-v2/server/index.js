@@ -9,6 +9,7 @@ import {
   recoverMachineCorrectionRenames,
   recoverMaintenanceMachineDecommissions,
   recoverMaintenanceOrderDeletions,
+  recoverTestMockPurges,
   recoverUnmatchedMaintenanceFolderDeletions,
 } from './modules/maintenance/service.js';
 import { recoverRepVisitUploads } from './modules/rep/service.js';
@@ -17,6 +18,10 @@ import { startOperationsOutboxScheduler, publishOperationsEvent } from './module
 const initialization = initializeDatabase();
 try {
   await recoverInterruptedRestore();
+  const testPurgeRecovery = await recoverTestMockPurges();
+  if (testPurgeRecovery.recoveredCount) {
+    console.log(`Recovered ${testPurgeRecovery.recoveredCount} staged test fixture purge(s).`);
+  }
   const recovery = await recoverMaintenanceOrderDeletions();
   if (recovery.recoveredCount) {
     console.log(`Recovered ${recovery.recoveredCount} staged maintenance order deletion(s).`);

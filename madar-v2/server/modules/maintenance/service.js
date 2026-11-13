@@ -1600,11 +1600,14 @@ const MAINTENANCE_CARD_DELETION_STAGE_ROOT = ['.madar-recovery', 'maintenance-ca
 const MAINTENANCE_MACHINE_DECOMMISSION_STAGE_ROOT = ['.madar-recovery', 'maintenance-machine-decommissions'];
 const MACHINE_CORRECTION_RENAME_STAGE_ROOT = ['.madar-recovery', 'machine-correction-renames'];
 const MAINTENANCE_UNMATCHED_FOLDER_DELETION_STAGE_ROOT = ['.madar-recovery', 'maintenance-unmatched-folder-deletions'];
+const TEST_MOCK_PURGE_STAGE_ROOT = ['.madar-recovery', 'test-mock-purges'];
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function hasPendingMaintenanceFileRecovery(database) {
   return Boolean(database.prepare(`
     SELECT 1 FROM maintenance_order_deletion_operations WHERE state = 'prepared'
+    UNION ALL
+    SELECT 1 FROM test_mock_purge_operations WHERE state = 'prepared'
     UNION ALL
     SELECT 1 FROM maintenance_card_deletion_operations WHERE state = 'prepared'
     UNION ALL
@@ -2940,6 +2943,9 @@ export function createTestMockMaintenanceOrder(input, actorId = null, database =
   allowOnlyKeys(body, ['representativeId', 'regionName']);
   const representativeId = positiveId(body.representativeId, 'representativeId');
   const region = optionalText(body.regionName, 'regionName', { maxLength: 160 }) || 'تجريبي';
+  const fixtureId = randomUUID().replaceAll('-', '').toUpperCase();
+  const machineCode = `TEST-ATM-${fixtureId}`;
+  const orderCode = `MN-TEST-${fixtureId}`;
   const orderId = database.transaction(() => {
     const representative = database.prepare(`SELECT id FROM users
       WHERE id = ? AND role = 'rep' AND active = 1 AND deleted_at IS NULL`).get(representativeId);
@@ -2956,26 +2962,15 @@ export function createTestMockMaintenanceOrder(input, actorId = null, database =
       recordAudit({ database, actorId, action: priorClient ? 'update_test_fixture' : 'create_test_fixture',
         entityType: 'client', entityId: Number(client.id), oldValues: priorClient, newValues: currentClient });
     }
-    const priorMachine = database.prepare(`SELECT * FROM machines WHERE code = 'TEST-ATM-999'`).get() ?? null;
     database.prepare(`INSERT INTO machines (code, name_ar, name_en, area, is_location_locked)
-      VALUES ('TEST-ATM-999', 'ماكينة تجريبية لاختبار التطبيق', 'Test ATM', ?, 0)
-      ON CONFLICT(code) DO UPDATE SET name_ar = excluded.name_ar, name_en = excluded.name_en,
-        area = excluded.area, latitude = NULL, longitude = NULL,
-        is_location_locked = 0, geofence_radius_meters = 50, active = 1, deleted_at = NULL,
-        updated_at = CURRENT_TIMESTAMP`).run(region);
-    const machine = database.prepare(`SELECT id FROM machines WHERE code = 'TEST-ATM-999'`).get();
+      VALUES (?, 'ماكينة تجريبية لاختبار التطبيق', 'Test ATM', ?, 0)`).run(machineCode, region);
+    const machine = database.prepare(`SELECT id FROM machines WHERE code = ?`).get(machineCode);
     const currentMachine = database.prepare('SELECT * FROM machines WHERE id = ?').get(machine.id);
-    if (JSON.stringify(priorMachine) !== JSON.stringify(currentMachine)) {
-      recordAudit({ database, actorId, action: priorMachine ? 'update_test_fixture' : 'create_test_fixture',
-        entityType: 'machine', entityId: Number(machine.id), oldValues: priorMachine, newValues: currentMachine });
-    }
+    recordAudit({ database, actorId, action: 'create_test_fixture',
+      entityType: 'machine', entityId: Number(machine.id), newValues: currentMachine });
     database.prepare(`INSERT INTO client_machines (client_id, machine_id, site_area, active)
       VALUES (?, ?, ?, 1) ON CONFLICT(client_id, machine_id) DO UPDATE SET site_area = excluded.site_area, active = 1`)
       .run(client.id, machine.id, region);
-    const highestSuffix = Number(database.prepare(`SELECT COALESCE(MAX(CAST(SUBSTR(order_code, 9) AS INTEGER)), 0) AS suffix
-      FROM maintenance_orders WHERE order_code GLOB 'MN-TEST-[0-9]*'`).get().suffix);
-    const suffix = String(highestSuffix + 1).padStart(4, '0');
-    const orderCode = `MN-TEST-${suffix}`;
     const created = database.prepare(`INSERT INTO maintenance_orders (order_code, client_id, area, notes, created_by)
       VALUES (?, ?, ?, 'Test order for mobile representative workflow', ?)`).run(orderCode, client.id, region, actorId);
     const id = Number(created.lastInsertRowid);
@@ -2987,6 +2982,316 @@ export function createTestMockMaintenanceOrder(input, actorId = null, database =
     return id;
   }).immediate();
   return getMaintenanceOrder(orderId, database);
+}
+
+function testMockPurgeStagePath(operationId) {
+  return storageDirectory(...TEST_MOCK_PURGE_STAGE_ROOT, operationId);
+}
+
+function testMockPurgeItemPath(operationId, index) {
+  return storageDirectory(...TEST_MOCK_PURGE_STAGE_ROOT, operationId, `item-${index}`);
+}
+
+function readTestMockPurgeContext(orderId, database) {
+  const anchor = database.prepare(`SELECT order_record.id, order_record.order_code, order_record.client_id,
+    order_record.status, order_record.archived_at, order_record.deleted_at,
+    client.code AS client_code, client.storage_code AS client_storage_code
+    FROM maintenance_orders order_record JOIN clients client ON client.id = order_record.client_id
+    WHERE order_record.id = ?`).get(positiveId(orderId, 'orderId'));
+  if (!anchor) throw new HttpError(404, 'Test maintenance order was not found.');
+  const anchorCard = database.prepare(`SELECT card.id, card.order_id, card.machine_id,
+    card.before_photos_json, card.after_photos_json, machine.code AS machine_code,
+    machine.name_ar AS machine_name_ar, machine.area AS machine_area
+    FROM maintenance_cards card JOIN machines machine ON machine.id = card.machine_id
+    WHERE card.order_id = ?`).all(anchor.id);
+  if (anchorCard.length !== 1) throw new HttpError(409, 'The test order is no longer a single-machine fixture.');
+  const card = anchorCard[0];
+  if (!/^TEST-ATM-[A-Z0-9-]{1,64}$/iu.test(card.machine_code)) {
+    throw new HttpError(409, 'The test order contains a non-test machine.');
+  }
+  const linkedOrders = database.prepare(`SELECT DISTINCT order_record.id, order_record.order_code,
+    order_record.client_id, order_record.notes, order_record.deleted_at,
+    client.code AS client_code, client.storage_code AS client_storage_code, order_record.area
+    FROM maintenance_cards card
+    JOIN maintenance_orders order_record ON order_record.id = card.order_id
+    JOIN clients client ON client.id = order_record.client_id
+    WHERE card.machine_id = ? ORDER BY CASE WHEN order_record.id = ? THEN 0 ELSE 1 END, order_record.id`)
+    .all(card.machine_id, anchor.id);
+  const contexts = linkedOrders.map((order) => {
+    const cards = database.prepare(`SELECT card.id, card.order_id, card.machine_id,
+      card.before_photos_json, card.after_photos_json, machine.code AS machine_code,
+      machine.name_ar AS machine_name_ar, machine.area AS machine_area
+      FROM maintenance_cards card JOIN machines machine ON machine.id = card.machine_id
+      WHERE card.order_id = ?`).all(order.id);
+    if (order.client_code !== 'C-TEST' || !/^MN-TEST-/u.test(order.order_code)
+      || order.notes !== 'Test order for mobile representative workflow'
+      || cards.length !== 1 || cards[0].machine_id !== card.machine_id) {
+      throw new HttpError(409, 'The training machine is linked to non-test data.');
+    }
+    return { order, card: cards[0] };
+  });
+  const orderIds = contexts.map(({ order }) => order.id);
+  const placeholders = orderIds.map(() => '?').join(', ');
+  const crossReferences = [
+    [`SELECT 1 FROM rep_visits WHERE machine_id = ? AND (order_id IS NULL OR order_id NOT IN (${placeholders})) LIMIT 1`, [card.machine_id, ...orderIds]],
+    [`SELECT 1 FROM rep_visits WHERE order_id IN (${placeholders}) AND machine_id IS NOT NULL AND machine_id != ? LIMIT 1`, [...orderIds, card.machine_id]],
+    ['SELECT 1 FROM client_machines WHERE machine_id = ? AND client_id != ? LIMIT 1', [card.machine_id, anchor.client_id]],
+    [`SELECT 1 FROM maintenance_unmatched_folders WHERE (duplicate_machine_id = ? OR bound_machine_id = ?) AND order_id NOT IN (${placeholders}) LIMIT 1`, [card.machine_id, card.machine_id, ...orderIds]],
+    [`SELECT 1 FROM maintenance_unmatched_folders WHERE order_id IN (${placeholders})
+      AND ((duplicate_machine_id IS NOT NULL AND duplicate_machine_id != ?)
+        OR (bound_machine_id IS NOT NULL AND bound_machine_id != ?)) LIMIT 1`, [...orderIds, card.machine_id, card.machine_id]],
+    [`SELECT 1 FROM machine_notes_history WHERE machine_id = ? AND order_id IS NOT NULL
+      AND order_id NOT IN (${placeholders}) LIMIT 1`, [card.machine_id, ...orderIds]],
+    ['SELECT 1 FROM machine_correction_requests WHERE resolved_machine_id = ? AND machine_id != ? LIMIT 1', [card.machine_id, card.machine_id]],
+    ['SELECT 1 FROM machine_correction_reviews review JOIN machine_correction_requests request ON request.id = review.correction_id WHERE review.resolved_machine_id = ? AND request.machine_id != ? LIMIT 1', [card.machine_id, card.machine_id]],
+    [`SELECT 1 FROM treasury_entries WHERE maintenance_order_id IN (${placeholders}) LIMIT 1`, orderIds],
+    [`SELECT 1 FROM maintenance_order_deletion_operations WHERE order_id IN (${placeholders}) LIMIT 1`, orderIds],
+    [`SELECT 1 FROM maintenance_card_deletion_operations WHERE order_id IN (${placeholders}) LIMIT 1`, orderIds],
+    [`SELECT 1 FROM maintenance_machine_decommission_operations WHERE order_id IN (${placeholders}) LIMIT 1`, orderIds],
+    ['SELECT 1 FROM machine_correction_rename_operations WHERE machine_id = ? LIMIT 1', [card.machine_id]],
+    [`SELECT 1 FROM rep_visits WHERE order_id IN (${placeholders}) AND status = 'receiving' LIMIT 1`, orderIds],
+  ];
+  if (crossReferences.some(([sql, parameters]) => database.prepare(sql).get(...parameters))) {
+    throw new HttpError(409, 'The test machine has other references, an active upload, or financial history; permanent deletion was stopped.');
+  }
+  return { order: anchor, card, contexts };
+}
+
+async function collectTestMockPurgeTargets(order, card, database) {
+  const candidates = [];
+  const machineFolder = safeMachineStorageSegment(`${card.machine_code}_${card.machine_name_ar}`);
+  const areaRoot = storageDirectory('Areas', safeMachineStorageSegment(card.machine_area));
+  const testAreaFolder = (storedPath) => {
+    const parts = storedPath.split('/');
+    if (parts.length < 5 || parts[0] !== 'Areas' || parts[1] !== safeMachineStorageSegment(card.machine_area)
+      || !/^\d{4}$/u.test(parts[2]) || !/^(0[1-9]|1[0-2])$/u.test(parts[3])
+      || !/^TEST-ATM-[A-Z0-9-]+_.+/iu.test(parts[4])) {
+      throw new HttpError(409, 'A test photo or visit file is outside a test machine folder.');
+    }
+    const folder = storageDirectory(...parts.slice(0, 5));
+    if (database.prepare('SELECT 1 FROM rep_visits WHERE final_path = ? AND machine_id != ? LIMIT 1')
+      .get(folder, card.machine_id)) throw new HttpError(409, 'The test photo folder is shared with another machine.');
+    for (const other of database.prepare(`SELECT machine_id, before_photos_json, after_photos_json
+      FROM maintenance_cards WHERE machine_id != ?`).iterate(card.machine_id)) {
+      for (const value of [other.before_photos_json, other.after_photos_json]) {
+        let paths;
+        try { paths = JSON.parse(value); } catch { throw new HttpError(409, 'Other machine photo metadata is invalid.'); }
+        if (!Array.isArray(paths) || paths.some((path) => typeof path === 'string' && path.startsWith(`${folder}/`))) {
+          throw new HttpError(409, 'The test photo folder is referenced by another machine.');
+        }
+      }
+    }
+    return folder;
+  };
+  const orderDirectories = [
+    storageDirectory('Machines', card.machine_code),
+    storageDirectory('clients', order.client_storage_code, 'maintenance', order.order_code),
+    storageDirectory('Clients', order.client_storage_code, 'Archived_Orders', order.order_code),
+    storageDirectory(areaRoot, machineFolder),
+  ];
+  const areaDirectory = await resolveStorageDirectoryIfPresent(areaRoot);
+  if (areaDirectory) {
+    for (const year of await readdir(areaDirectory, { withFileTypes: true })) {
+      if (!year.isDirectory() || !/^\d{4}$/u.test(year.name)) continue;
+      const yearDirectory = await resolveStorageDirectoryIfPresent(storageDirectory(areaRoot, year.name));
+      for (const month of await readdir(yearDirectory, { withFileTypes: true })) {
+        if (!month.isDirectory() || !/^(0[1-9]|1[0-2])$/u.test(month.name)) continue;
+        orderDirectories.push(storageDirectory(areaRoot, year.name, month.name, machineFolder));
+      }
+    }
+  }
+  for (const path of orderDirectories) {
+    if (await resolveStorageDirectoryIfPresent(path)) candidates.push({ path, kind: 'directory' });
+  }
+  for (const path of maintenanceCardPhotoPaths(card)) {
+    if (!orderDirectories.some((directory) => path.startsWith(`${directory}/`))) {
+      if (!path.startsWith('Areas/')) throw new HttpError(409, 'A test inspection photo is outside its machine folder.');
+      const folder = testAreaFolder(path);
+      if (!orderDirectories.includes(folder)) orderDirectories.push(folder);
+      if (await resolveStorageDirectoryIfPresent(folder)) candidates.push({ path: folder, kind: 'directory' });
+    }
+    if (!candidates.some((directory) => path.startsWith(`${directory.path}/`))
+      && await resolveStorageFileIfPresent(path)) candidates.push({ path, kind: 'file' });
+  }
+  const visits = database.prepare(`SELECT visit_uuid, status, staging_path, final_path
+    FROM rep_visits WHERE order_id = ?`).all(order.id);
+  for (const visit of visits) {
+    if (visit.status === 'receiving') throw new HttpError(409, 'A test visit upload is still in progress.');
+    const visitSegments = visit.final_path.split('/');
+    if (visitSegments.length !== 5 || testAreaFolder(visit.final_path) !== visit.final_path)
+      throw new HttpError(409, 'A test visit file path is outside its machine folder.');
+    if (await resolveStorageDirectoryIfPresent(visit.final_path)) {
+      candidates.push({ path: visit.final_path, kind: 'directory' });
+    }
+    if (visit.staging_path !== storageDirectory('.madar-recovery', 'rep-visits', visit.visit_uuid)) {
+      throw new HttpError(409, 'A test visit staging path is unexpected.');
+    }
+    if (await resolveStorageDirectoryIfPresent(visit.staging_path)) {
+      candidates.push({ path: visit.staging_path, kind: 'directory' });
+    }
+  }
+  const unique = [...new Map(candidates.map((target) => [`${target.kind}:${target.path}`, target])).values()];
+  return unique.filter((target) => !unique.some((parent) => parent.kind === 'directory'
+    && parent.path !== target.path && target.path.startsWith(`${parent.path}/`)));
+}
+
+async function recoverOneTestMockPurge(operation, database) {
+  if (!UUID_PATTERN.test(operation.operation_id)) throw new HttpError(500, 'Invalid test purge recovery ID.');
+  const manifest = JSON.parse(operation.targets_json);
+  const { orders, targets } = manifest;
+  if (!Array.isArray(orders) || !orders.length || orders.length > 2048
+    || orders[0].id !== operation.order_id || orders[0].orderCode !== operation.order_code
+    || orders.some((order) => !Number.isSafeInteger(order.id) || order.id < 1
+      || typeof order.orderCode !== 'string' || !/^MN-TEST-/u.test(order.orderCode)
+      || (order.deletedAt !== null && typeof order.deletedAt !== 'string'))
+    || !Array.isArray(targets) || targets.length > 2048 || targets.some((target) =>
+    !target || !['directory', 'file'].includes(target.kind) || typeof target.path !== 'string'
+    || target.path.startsWith('.madar-recovery/test-mock-purges/'))) {
+    throw new HttpError(500, 'Invalid test purge recovery paths.');
+  }
+  const stagePath = testMockPurgeStagePath(operation.operation_id);
+  const stage = await resolveStorageDirectoryIfPresent(stagePath);
+  const entries = stage ? await readdir(stage) : [];
+  if (entries.some((name) => !/^item-\d+$/u.test(name) || Number(name.slice(5)) >= targets.length)) {
+    throw new HttpError(500, 'Unexpected test purge recovery files.');
+  }
+  if (operation.state === 'prepared') {
+    for (const saved of orders) {
+      const order = database.prepare('SELECT id, order_code FROM maintenance_orders WHERE id = ?').get(saved.id);
+      if (!order || order.order_code !== saved.orderCode) throw new HttpError(500, 'Test purge recovery order changed.');
+    }
+    for (const [index, target] of targets.entries()) {
+      const resolver = target.kind === 'directory' ? resolveStorageDirectoryIfPresent : resolveStorageFileIfPresent;
+      const original = await resolver(target.path);
+      const staged = await resolver(testMockPurgeItemPath(operation.operation_id, index));
+      if (original && staged) throw new HttpError(500, 'Both original and staged test files exist.');
+      if (!original && !staged) throw new HttpError(500, 'A test purge file is missing from both locations.');
+      if (staged) {
+        const segments = target.path.split('/');
+        const parent = await ensureStorageDirectory(...segments.slice(0, -1));
+        await rename(staged, join(parent, segments.at(-1)));
+      }
+    }
+    database.transaction(() => {
+      for (const saved of orders) {
+        database.prepare('UPDATE maintenance_orders SET deleted_at = ? WHERE id = ?').run(saved.deletedAt, saved.id);
+      }
+      database.prepare('DELETE FROM test_mock_purge_operations WHERE operation_id = ?').run(operation.operation_id);
+    }).immediate();
+  } else if (operation.state === 'committed') {
+    if (orders.some((saved) => database.prepare('SELECT 1 FROM maintenance_orders WHERE id = ?').get(saved.id))) {
+      throw new HttpError(500, 'Committed test purge still has an order.');
+    }
+  } else {
+    throw new HttpError(500, 'Invalid test purge recovery state.');
+  }
+  if (stage) await rm(stage, { recursive: true });
+  if (operation.state === 'committed') {
+    database.prepare('DELETE FROM test_mock_purge_operations WHERE operation_id = ?').run(operation.operation_id);
+  }
+}
+
+export async function recoverTestMockPurges(database = db) {
+  return withMaintenanceOrderStorageLock(async () => {
+    const operations = database.prepare('SELECT * FROM test_mock_purge_operations ORDER BY created_at, operation_id').all();
+    const stageRoot = await ensureStorageDirectory(...TEST_MOCK_PURGE_STAGE_ROOT);
+    const entries = await readdir(stageRoot, { withFileTypes: true });
+    if (entries.some((entry) => !entry.isDirectory() || !operations.some((operation) => operation.operation_id === entry.name))) {
+      throw new HttpError(500, 'Unrecognized test purge staging folder.');
+    }
+    for (const operation of operations) await recoverOneTestMockPurge(operation, database);
+    return { recoveredCount: operations.length };
+  });
+}
+
+export async function purgeTestMockMaintenanceOrder(orderId, actorId = null, database = db) {
+  return withMaintenanceOrderStorageLock(async () => {
+    assertNoPendingMaintenanceFileRecovery(database);
+    const { order, card, contexts } = readTestMockPurgeContext(orderId, database);
+    const candidates = [];
+    for (const context of contexts) {
+      candidates.push(...await collectTestMockPurgeTargets(context.order, context.card, database));
+    }
+    const unique = [...new Map(candidates.map((target) => [`${target.kind}:${target.path}`, target])).values()];
+    const targets = unique.filter((target) => !unique.some((parent) => parent.kind === 'directory'
+      && parent.path !== target.path && target.path.startsWith(`${parent.path}/`)));
+    if (targets.length > 2048) throw new HttpError(409, 'Too many training files to delete safely in one operation.');
+    const manifest = { orders: contexts.map((context) => ({
+      id: context.order.id, orderCode: context.order.order_code, deletedAt: context.order.deleted_at,
+    })), targets };
+    const operationId = randomUUID();
+    database.transaction(() => {
+      readTestMockPurgeContext(order.id, database);
+      for (const context of contexts) {
+        database.prepare('UPDATE maintenance_orders SET deleted_at = CURRENT_TIMESTAMP WHERE id = ? AND deleted_at IS NULL')
+          .run(context.order.id);
+      }
+      database.prepare(`INSERT INTO test_mock_purge_operations (operation_id, order_id, order_code, targets_json, state)
+        VALUES (?, ?, ?, ?, 'prepared')`).run(operationId, order.id, order.order_code, JSON.stringify(manifest));
+    }).immediate();
+    let committed = false;
+    try {
+      await ensureStorageDirectory(...TEST_MOCK_PURGE_STAGE_ROOT, operationId);
+      for (const [index, target] of targets.entries()) {
+        const resolver = target.kind === 'directory' ? resolveStorageDirectoryIfPresent : resolveStorageFileIfPresent;
+        const original = await resolver(target.path);
+        if (!original) throw new HttpError(409, 'A test file changed during deletion.');
+        const stage = await ensureStorageDirectory(...TEST_MOCK_PURGE_STAGE_ROOT, operationId);
+        await rename(original, join(stage, `item-${index}`));
+      }
+      database.transaction(() => {
+        for (const context of contexts) {
+          const current = database.prepare('SELECT order_code, deleted_at FROM maintenance_orders WHERE id = ?')
+            .get(context.order.id);
+          if (!current || current.order_code !== context.order.order_code || !current.deleted_at) {
+            throw new HttpError(409, 'Test order changed during deletion.');
+          }
+        }
+        database.prepare(`DELETE FROM machine_correction_reviews WHERE correction_id IN
+          (SELECT id FROM machine_correction_requests WHERE machine_id = ?)`).run(card.machine_id);
+        database.prepare('DELETE FROM machine_correction_requests WHERE machine_id = ?').run(card.machine_id);
+        database.prepare('DELETE FROM rep_machine_location_verifications WHERE machine_id = ?').run(card.machine_id);
+        for (const context of contexts) {
+          database.prepare('DELETE FROM maintenance_card_photo_rotations WHERE card_id = ?').run(context.card.id);
+          database.prepare('DELETE FROM maintenance_unmatched_folders WHERE order_id = ?').run(context.order.id);
+          database.prepare('DELETE FROM rep_visits WHERE order_id = ?').run(context.order.id);
+          database.prepare('DELETE FROM maintenance_cards WHERE order_id = ?').run(context.order.id);
+          database.prepare('DELETE FROM maintenance_orders WHERE id = ?').run(context.order.id);
+        }
+        database.prepare('DELETE FROM client_machines WHERE machine_id = ?').run(card.machine_id);
+        database.prepare('DELETE FROM machines WHERE id = ?').run(card.machine_id);
+        recordAudit({ database, actorId, action: 'purge_test_mock_order', entityType: 'maintenance_order', entityId: order.id,
+          oldValues: { order_code: order.order_code, machine_code: card.machine_code, machine_id: card.machine_id },
+          newValues: { deleted: true, linked_test_orders_deleted: contexts.length, files_staged_for_removal: targets.length } });
+        database.prepare(`UPDATE test_mock_purge_operations SET state = 'committed' WHERE operation_id = ?`).run(operationId);
+      }).immediate();
+      committed = true;
+    } catch (error) {
+      if (!committed) {
+        const operation = database.prepare('SELECT * FROM test_mock_purge_operations WHERE operation_id = ?').get(operationId);
+        if (operation) await recoverOneTestMockPurge(operation, database);
+      }
+      throw error;
+    }
+    let cleanupPending = false;
+    try {
+      await recoverOneTestMockPurge(database.prepare('SELECT * FROM test_mock_purge_operations WHERE operation_id = ?').get(operationId), database);
+    } catch {
+      cleanupPending = true;
+    }
+    return { ok: true, permanentlyDeleted: true, deletedOrderCode: order.order_code,
+      deletedMachineCode: card.machine_code, deletedOrderCount: contexts.length, cleanupPending };
+  });
+}
+
+export async function purgeTestMockMaintenanceMachine(machineId, actorId = null, database = db) {
+  const id = positiveId(machineId, 'machineId');
+  const linked = database.prepare(`SELECT card.order_id FROM maintenance_cards card
+    JOIN maintenance_orders order_record ON order_record.id = card.order_id
+    WHERE card.machine_id = ? AND order_record.order_code LIKE 'MN-TEST-%'
+    ORDER BY order_record.deleted_at IS NULL DESC, order_record.id LIMIT 1`).get(id);
+  if (!linked) throw new HttpError(404, 'No training order is linked to this machine.');
+  return purgeTestMockMaintenanceOrder(linked.order_id, actorId, database);
 }
 
 export function listMaintenanceRepresentatives(database = db) {

@@ -3,14 +3,12 @@ import { subscribeNativeOperations } from './native-bridges.js';
 import { lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, apiUrl } from '../../lib/api.js';
 import { distanceBetweenGpsPointsMeters, getAdaptiveGpsInterval, GPS_POLLING } from './gps-adaptive.js';
-import { googleMapsNavigationUrl } from './map-utils.js';
 import {
   applyPendingMachineLocations,
-  isFreshGpsFix,
   locationReviewState,
   locationReviewLabel,
-  orderMachinesByStraightLineDistance,
 } from './location-review.js';
+import { groupRouteMachinesByRegion } from './route-folders.js';
 import {
   addPendingVisit,
   addPendingMachineAction,
@@ -221,11 +219,6 @@ function applyPendingAttendance(attendance, actions = []) {
 function formatGps(location) {
   if (!location) return 'الموقع غير متاح';
   return `${location.latitude.toFixed(5)}, ${location.longitude.toFixed(5)} · دقة ±${Math.round(location.accuracy)}م`;
-}
-
-function machineDistance(machine, location) {
-  if (!machine.isLocationLocked || !Number.isFinite(machine.latitude) || !Number.isFinite(machine.longitude) || !location) return null;
-  return distanceBetweenGpsPointsMeters(location, { latitude: machine.latitude, longitude: machine.longitude });
 }
 
 function queuedPhotos(visit, phase) {
@@ -1567,13 +1560,9 @@ let canDrainVisits = true;
   }, [toast]);
 
   const summary = route?.summary ?? { totalMachines: 0, completed: 0, pending: 0, pendingReview: 0, progress: 0 };
-  const freshGps = isFreshGpsFix(gps);
   const filteredRegions = useMemo(() => {
     const term = normalize(query);
-    const machines = (route?.regions ?? []).flatMap((region) => region.machines.map((machine) => ({
-      ...machine,
-      regionName: region.regionName,
-    }))).filter((machine) => {
+    return groupRouteMachinesByRegion(route?.regions, (machine) => {
         const matchesTerm = !term
           || normalize(machine.machineCode).includes(term)
           || normalize(machine.arabicName).includes(term)
@@ -1584,22 +1573,7 @@ let canDrainVisits = true;
           || (routeFilter === 'completed' && visitSubmitted(machine));
         return matchesTerm && matchesFilter;
       });
-    const { located, needsLocation } = orderMachinesByStraightLineDistance(machines, freshGps ? gps : null);
-    if (freshGps) return [
-      ...(located.length ? [{ regionName: 'الأقرب أولاً · مسافة خط مستقيم', machines: located }] : []),
-      ...(needsLocation.length ? [{ regionName: 'تحتاج تثبيت الموقع', machines: needsLocation }] : []),
-    ];
-    const byRegion = new Map();
-    for (const machine of located) {
-      const name = machine.regionName || 'منطقة غير محددة';
-      if (!byRegion.has(name)) byRegion.set(name, []);
-      byRegion.get(name).push(machine);
-    }
-    return [
-      ...[...byRegion].map(([regionName, groupedMachines]) => ({ regionName, machines: groupedMachines })),
-      ...(needsLocation.length ? [{ regionName: 'تحتاج تثبيت الموقع', machines: needsLocation }] : []),
-    ];
-  }, [freshGps, gps, query, route, routeFilter]);
+  }, [query, route, routeFilter]);
 
   const routeMachines = useMemo(() => (route?.regions ?? []).flatMap((region) => (region.machines ?? []).map((machine) => ({ ...machine, regionName: region.regionName }))), [route]);
   const routeFilterCounts = {
@@ -2130,7 +2104,7 @@ try {
             {filteredRegions.map((region) => {
               const done = region.machines.filter((machine) => machine.workStatus === 'done').length;
               return (
-                <details className="rep-region-folder" key={region.regionName} open>
+                <details className="rep-region-folder" key={region.regionName}>
                   <summary>
                     <span className="rep-folder-icon" aria-hidden="true">▰</span>
                     <span className="rep-folder-name"><strong>{region.regionName}</strong><small>{region.machines.length} ماكينة · {done} مكتملة</small></span>
@@ -2151,33 +2125,9 @@ try {
                           {machine.clientName && <strong className="rep-machine-branch">{machine.clientName}</strong>}
                           <span className="rep-machine-name">{machine.arabicName || `ماكينة ${machine.machineCode}`}</span>
                           <span className="rep-machine-address"><i aria-hidden="true">⌖</i>{machine.address || 'عنوان العميل غير مسجل'}</span>
-                            <span className={`rep-machine-distance ${freshGps && machine.straightLineDistanceMeters !== undefined ? 'is-straight-line' : ''}`}>
-                              <i aria-hidden="true">↔</i>
-                              {machine.locationConfirmationPending
-                                 ? ['queued', 'syncing'].includes(machine.locationReviewState)
-                                   ? 'موقع أول محفوظ محلياً · بانتظار المزامنة'
-                                   : machine.locationReviewState === 'blocked'
-                                     ? 'إرسال الموقع يحتاج مراجعة · افتح البطاقة'
-                                     : 'تصحيح الموقع بانتظار المراجعة الإدارية'
-                                : !machine.isLocationLocked || machineDistance(machine, gps) === null
-                                ? !machine.isLocationLocked || !Number.isFinite(machine.latitude) || !Number.isFinite(machine.longitude)
-                                  ? 'الموقع يحتاج تثبيتاً · لا توجد مسافة معتمدة'
-                                  : 'لا يوجد تثبيت GPS حديث للمقارنة'
-                                : machine.straightLineDistanceMeters !== undefined
-                                  ? `خط مستقيم ${Math.round(machine.straightLineDistanceMeters)}م · ترتيب تقريبي من الأقرب · GPS ±${Math.round(gps.accuracy)}م`
-                                  : `المسافة الحالية ${Math.round(machineDistance(machine, gps))}م · GPS ±${Math.round(gps.accuracy)}م`}
-                          </span>
                            {machine.reviewNote && <small className="rep-review-note">ملاحظة المشرف: {machine.reviewNote}</small>}
-                           {machine.locationConfirmation && <small className="rep-review-note">
-                             طلب الموقع: {({ queued: 'بانتظار الإرسال', pending_approval: 'بانتظار الاعتماد', approved: 'معتمد', rejected: 'مرفوض؛ يمكنك إرسال موقع مصحح' })[machine.locationReviewState] || 'بانتظار المراجعة'}
-                             {machine.locationConfirmation.reviewNote ? ` · ${machine.locationConfirmation.reviewNote}` : ''}
-                           </small>}
-                           {machine.locationConfirmation?.proposedLocation && <small>
-                             الموقع المقترح: <bdi>{machine.locationConfirmation.proposedLocation.latitude}, {machine.locationConfirmation.proposedLocation.longitude}</bdi>
-                           </small>}
                            <span className="rep-machine-open">{machine.isCompleted ? 'تم اعتماد الزيارة' : machine.reviewStatus === 'pending' ? 'بانتظار مراجعة الصور · تابع إلى ماكينة أخرى' : machine.reviewStatus === 'reshoot' ? 'افتح لإعادة التصوير' : machine.canVisit === false ? 'للعرض فقط' : 'ابدأ الزيارة'} <b aria-hidden="true">←</b></span>
                         </button>
-                        {googleMapsNavigationUrl(machine) && <a className="rep-map-link" href={googleMapsNavigationUrl(machine)} target="_blank" rel="noopener noreferrer">⌖ ملاحة إلى الماكينة في Google Maps</a>}
                       </article>
                     ))}
                   </div>

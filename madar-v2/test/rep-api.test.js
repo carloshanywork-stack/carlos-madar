@@ -280,7 +280,7 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   const adminTransition = await fetch(`${baseUrl}/download/apk/debug-transition`, { headers: { cookie: adminCookie } });
   assert.equal(adminTransition.status, 200);
   assert.match(adminTransition.headers.get('content-type'), /application\/vnd\.android\.package-archive/);
-  assert.match(adminTransition.headers.get('content-disposition'), /madar-rep-debug-transition-2\.0\.4\.apk/);
+  assert.match(adminTransition.headers.get('content-disposition'), /madar-rep-debug-transition-2\.0\.6\.apk/);
   assert.equal(Buffer.from(await adminTransition.arrayBuffer()).toString(), 'synthetic-transition-apk');
 
   const createRep = await request('/api/users', jsonOptions('POST', {

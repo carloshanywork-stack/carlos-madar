@@ -121,7 +121,7 @@ app.get('/download/apk/debug-transition', requireAuthentication, (req, res, next
     'X-Content-Type-Options': 'nosniff',
     'Content-Type': 'application/vnd.android.package-archive',
   });
-  res.download(repTransitionApkPath, 'madar-rep-debug-transition-2.0.4.apk', (error) => {
+  res.download(repTransitionApkPath, 'madar-rep-debug-transition-2.0.6.apk', (error) => {
     if (error && !res.headersSent) next(error);
   });
 });

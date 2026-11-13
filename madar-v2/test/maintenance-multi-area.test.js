@@ -21,6 +21,7 @@ const [{ app }, { db }, { initializeDatabase }, {
   recoverMaintenanceCardDeletions,
   recoverMaintenanceMachineDecommissions,
   recoverUnmatchedMaintenanceFolderDeletions,
+  recoverTestMockPurges,
 }, { buildMaintenanceDocx, buildMaintenancePptx }] = await Promise.all([
   import('../server/app.js'),
   import('../server/database/connection.js'),
@@ -73,9 +74,9 @@ test('test mock order creates and assigns an isolated visit; geofence reset clea
     VALUES (?, ?, ?, 'rep')`).run(`mock-rep-${randomUUID()}`, bcrypt.hashSync('test-rep-password', 4), 'Mock Test Rep').lastInsertRowid);
   const created = await request('/api/maintenance/orders/test-mock', json('POST', { representativeId: repId, regionName: 'QA North' }));
   assert.equal(created.response.status, 201, JSON.stringify(created.body));
-  assert.match(created.body.order_code, /^MN-TEST-\d{4,}$/);
+  assert.match(created.body.order_code, /^MN-TEST-[A-F0-9]{32}$/);
   assert.equal(created.body.cards.length, 1);
-  assert.equal(created.body.cards[0].machine_code, 'TEST-ATM-999');
+  assert.equal(created.body.cards[0].machine_code, created.body.order_code.replace('MN-TEST-', 'TEST-ATM-'));
   assert.equal(created.body.representatives.some((rep) => Number(rep.id) === repId), true);
   const machineId = Number(created.body.cards[0].machine_id);
   db.prepare('UPDATE machines SET latitude = 30.1, longitude = 31.2, is_location_locked = 1 WHERE id = ?').run(machineId);
@@ -86,6 +87,194 @@ test('test mock order creates and assigns an isolated visit; geofence reset clea
   assert.equal(reset.body.machine.is_location_locked, 0);
   assert.equal(reset.body.machine.geofence_radius_meters, 50);
   assert.equal(db.prepare(`SELECT action FROM audit_log WHERE entity_type = 'machine' AND entity_id = ? ORDER BY id DESC LIMIT 1`).get(String(machineId)).action, 'reset_geofence_location');
+});
+
+test('deleting one isolated training order permanently removes its machine, visit, photos, and files without affecting another', async () => {
+  const repId = Number(db.prepare(`INSERT INTO users (username, password_hash, full_name, role)
+    VALUES (?, ?, ?, 'rep')`).run(`purge-rep-${randomUUID()}`, bcrypt.hashSync('test-rep-password', 4), 'Purge Test Rep').lastInsertRowid);
+  const first = await request('/api/maintenance/orders/test-mock', json('POST', { representativeId: repId, regionName: 'QA Training' }));
+  const second = await request('/api/maintenance/orders/test-mock', json('POST', { representativeId: repId, regionName: 'QA Training' }));
+  assert.equal(first.response.status, 201);
+  assert.equal(second.response.status, 201);
+  const orderId = first.body.id;
+  const machineId = first.body.cards[0].machine_id;
+  const machineCode = first.body.cards[0].machine_code;
+  assert.notEqual(machineCode, second.body.cards[0].machine_code);
+  const machineFolder = join(storageRoot, 'Machines', machineCode);
+  mkdirSync(machineFolder, { recursive: true });
+  writeFileSync(join(machineFolder, 'training.jpg'), 'training-photo');
+  const visitUuid = randomUUID();
+  const finalPath = `Areas/QA Training/2026/11/${machineCode}_ماكينة تجريبية لاختبار التطبيق`;
+  const finalFolder = join(storageRoot, finalPath);
+  mkdirSync(join(finalFolder, 'Before'), { recursive: true });
+  writeFileSync(join(finalFolder, 'Before', `${visitUuid}_0001.jpg`), 'visit-photo');
+  db.prepare('UPDATE maintenance_cards SET before_photos_json = ? WHERE id = ?')
+    .run(JSON.stringify([`${finalPath}/Before/${visitUuid}_0001.jpg`]), first.body.cards[0].id);
+  const visitId = Number(db.prepare(`INSERT INTO rep_visits
+    (visit_uuid, rep_user_id, order_id, card_id, machine_id, order_code, machine_code, region_name,
+     payload_sha256, status, captured_at, staging_path, final_path)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 'QA Training', ?, 'completed', ?, ?, ?)`).run(
+    visitUuid, repId, orderId, first.body.cards[0].id, machineId, first.body.order_code, machineCode,
+    'a'.repeat(64), '2026-11-13T09:00:00.000Z', `.madar-recovery/rep-visits/${visitUuid}`, finalPath,
+  ).lastInsertRowid);
+  db.prepare(`INSERT INTO rep_visit_photos (visit_id, phase, ordinal, stored_path, captured_at)
+    VALUES (?, 'before', 0, ?, ?)`).run(visitId, `${finalPath}/Before/${visitUuid}_0001.jpg`, '2026-11-13T09:00:00.000Z');
+  const anonymous = await fetch(`${baseUrl}/api/maintenance/orders/${orderId}/test-mock`, { method: 'DELETE' });
+  assert.equal(anonymous.status, 401);
+  const testClientId = Number(db.prepare("SELECT id FROM clients WHERE code = 'C-TEST'").get().id);
+  const otherOrderId = Number(db.prepare(`INSERT INTO maintenance_orders (order_code, client_id, area, notes)
+    VALUES (?, ?, 'QA Training', 'Non-test order')`).run(`MN-REAL-${randomUUID()}`, testClientId).lastInsertRowid);
+  const sharedCardId = Number(db.prepare('INSERT INTO maintenance_cards (order_id, machine_id) VALUES (?, ?)')
+    .run(otherOrderId, machineId).lastInsertRowid);
+  const sharedRejected = await request(`/api/maintenance/orders/${orderId}/test-mock`, { method: 'DELETE' });
+  assert.equal(sharedRejected.response.status, 409);
+  assert.ok(db.prepare('SELECT id FROM machines WHERE id = ?').get(machineId));
+  assert.equal(existsSync(machineFolder), true);
+  db.prepare('DELETE FROM maintenance_cards WHERE id = ?').run(sharedCardId);
+  db.prepare('DELETE FROM maintenance_orders WHERE id = ?').run(otherOrderId);
+  const deleted = await request(`/api/maintenance/orders/${orderId}/test-mock`, { method: 'DELETE' });
+  assert.equal(deleted.response.status, 200, JSON.stringify(deleted.body));
+  assert.equal(deleted.body.permanentlyDeleted, true);
+  assert.equal(deleted.body.cleanupPending, false);
+  for (const [table, column, id] of [
+    ['maintenance_orders', 'id', orderId], ['machines', 'id', machineId],
+    ['maintenance_cards', 'order_id', orderId], ['rep_visits', 'id', visitId],
+    ['rep_visit_photos', 'visit_id', visitId], ['client_machines', 'machine_id', machineId],
+  ]) assert.equal(db.prepare(`SELECT COUNT(*) AS count FROM ${table} WHERE ${column} = ?`).get(id).count, 0, table);
+  assert.equal(existsSync(machineFolder), false);
+  assert.equal(existsSync(finalFolder), false);
+  assert.ok(db.prepare('SELECT id FROM maintenance_orders WHERE id = ?').get(second.body.id));
+  assert.ok(db.prepare('SELECT id FROM machines WHERE id = ?').get(second.body.cards[0].machine_id));
+  assert.deepEqual(db.pragma('foreign_key_check'), []);
+  assert.equal(db.prepare("SELECT action FROM audit_log WHERE entity_type = 'maintenance_order' AND entity_id = ? ORDER BY id DESC LIMIT 1")
+    .get(String(orderId)).action, 'purge_test_mock_order');
+  assert.deepEqual(await recoverTestMockPurges(db), { recoveredCount: 0 });
+});
+
+test('prepared test purge restores staged files and makes the order visible again after interruption', async () => {
+  const repId = Number(db.prepare("SELECT id FROM users WHERE role = 'rep' AND active = 1 ORDER BY id LIMIT 1").get().id);
+  const created = await request('/api/maintenance/orders/test-mock', json('POST', { representativeId: repId }));
+  assert.equal(created.response.status, 201);
+  const machineCode = created.body.cards[0].machine_code;
+  const machineFolder = join(storageRoot, 'Machines', machineCode);
+  mkdirSync(machineFolder, { recursive: true });
+  writeFileSync(join(machineFolder, 'training.jpg'), 'training-photo');
+  const operationId = randomUUID();
+  const stage = join(storageRoot, '.madar-recovery', 'test-mock-purges', operationId);
+  mkdirSync(stage, { recursive: true });
+  db.transaction(() => {
+    db.prepare("UPDATE maintenance_orders SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?").run(created.body.id);
+    db.prepare(`INSERT INTO test_mock_purge_operations (operation_id, order_id, order_code, targets_json, state)
+      VALUES (?, ?, ?, ?, 'prepared')`).run(operationId, created.body.id, created.body.order_code,
+      JSON.stringify({ orders: [{ id: created.body.id, orderCode: created.body.order_code, deletedAt: null }],
+        targets: [{ path: `Machines/${machineCode}`, kind: 'directory' }] }));
+  }).immediate();
+  renameSync(machineFolder, join(stage, 'item-0'));
+  assert.deepEqual(await recoverTestMockPurges(db), { recoveredCount: 1 });
+  assert.equal(readFileSync(join(machineFolder, 'training.jpg'), 'utf8'), 'training-photo');
+  assert.equal(db.prepare('SELECT deleted_at FROM maintenance_orders WHERE id = ?').get(created.body.id).deleted_at, null);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM test_mock_purge_operations WHERE operation_id = ?').get(operationId).count, 0);
+});
+
+test('legacy shared test machine purge removes all linked test orders including previously hidden ones', async () => {
+  const repId = Number(db.prepare("SELECT id FROM users WHERE role = 'rep' AND active = 1 ORDER BY id LIMIT 1").get().id);
+  const other = await request('/api/maintenance/orders/test-mock', json('POST', { representativeId: repId }));
+  assert.equal(other.response.status, 201);
+  const clientId = Number(db.prepare("SELECT id FROM clients WHERE code = 'C-TEST'").get().id);
+  const machineId = Number(db.prepare(`INSERT INTO machines (code, name_ar, name_en, area)
+    VALUES ('TEST-ATM-44', 'ماكينة تجريبية لاختبار التطبيق', 'Test ATM', 'Legacy Training')`).run().lastInsertRowid);
+  db.prepare('INSERT INTO client_machines (client_id, machine_id, site_area) VALUES (?, ?, ?)')
+    .run(clientId, machineId, 'Legacy Training');
+  const orderIds = [];
+  for (let index = 0; index < 2; index += 1) {
+    const orderCode = `MN-TEST-${randomUUID().slice(0, 8).toUpperCase()}`;
+    const orderId = Number(db.prepare(`INSERT INTO maintenance_orders (order_code, client_id, area, notes)
+      VALUES (?, ?, 'Legacy Training', 'Test order for mobile representative workflow')`).run(orderCode, clientId).lastInsertRowid);
+    db.prepare('INSERT INTO maintenance_cards (order_id, machine_id) VALUES (?, ?)').run(orderId, machineId);
+    orderIds.push(orderId);
+  }
+  db.prepare('UPDATE maintenance_orders SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?').run(orderIds[1]);
+  const folder = join(storageRoot, 'Machines', 'TEST-ATM-44');
+  mkdirSync(folder, { recursive: true });
+  writeFileSync(join(folder, 'legacy.jpg'), 'training-photo');
+  const oldVisitUuid = randomUUID();
+  const oldVisitFolder = 'Areas/Legacy Training/2026/11/TEST-ATM-999_ماكينة تجريبية لاختبار التطبيق';
+  mkdirSync(join(storageRoot, oldVisitFolder, 'Before'), { recursive: true });
+  writeFileSync(join(storageRoot, oldVisitFolder, 'Before', `${oldVisitUuid}_0001.jpg`), 'old-photo');
+  const firstCardId = Number(db.prepare('SELECT id FROM maintenance_cards WHERE order_id = ?').get(orderIds[0]).id);
+  db.prepare('UPDATE maintenance_cards SET before_photos_json = ? WHERE id = ?')
+    .run(JSON.stringify([`${oldVisitFolder}/Before/${oldVisitUuid}_0001.jpg`]), firstCardId);
+  db.prepare(`INSERT INTO rep_visits
+    (visit_uuid, rep_user_id, order_id, card_id, machine_id, order_code, machine_code, region_name,
+     payload_sha256, status, captured_at, staging_path, final_path)
+    VALUES (?, ?, ?, ?, ?, ?, 'TEST-ATM-999', 'Legacy Training', ?, 'completed', ?, ?, ?)`).run(
+    oldVisitUuid, repId, orderIds[0], firstCardId, machineId,
+    db.prepare('SELECT order_code FROM maintenance_orders WHERE id = ?').get(orderIds[0]).order_code,
+    'b'.repeat(64), '2026-11-13T09:00:00.000Z', `.madar-recovery/rep-visits/${oldVisitUuid}`, oldVisitFolder,
+  );
+  const deleted = await request(`/api/maintenance/orders/${orderIds[0]}/test-mock`, { method: 'DELETE' });
+  assert.equal(deleted.response.status, 200, JSON.stringify(deleted.body));
+  assert.equal(deleted.body.deletedOrderCount, 2);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM maintenance_orders WHERE id IN (?, ?)').get(...orderIds).count, 0);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM machines WHERE id = ?').get(machineId).count, 0);
+  assert.equal(existsSync(folder), false);
+  assert.equal(existsSync(join(storageRoot, oldVisitFolder)), false);
+  assert.ok(db.prepare('SELECT id FROM maintenance_orders WHERE id = ?').get(other.body.id));
+  assert.deepEqual(db.pragma('foreign_key_check'), []);
+});
+
+test('failed test purge transaction restores staged files and keeps the training order usable', async () => {
+  const repId = Number(db.prepare("SELECT id FROM users WHERE role = 'rep' AND active = 1 ORDER BY id LIMIT 1").get().id);
+  const created = await request('/api/maintenance/orders/test-mock', json('POST', { representativeId: repId }));
+  assert.equal(created.response.status, 201);
+  const machineId = created.body.cards[0].machine_id;
+  const folder = join(storageRoot, 'Machines', created.body.cards[0].machine_code);
+  mkdirSync(folder, { recursive: true });
+  writeFileSync(join(folder, 'keep.jpg'), 'must-survive');
+  db.exec(`CREATE TRIGGER test_mock_purge_fail_delete BEFORE DELETE ON machines
+    WHEN OLD.id = ${Number(machineId)} BEGIN SELECT RAISE(ABORT, 'injected purge failure'); END;`);
+  try {
+    const failed = await request(`/api/maintenance/orders/${created.body.id}/test-mock`, { method: 'DELETE' });
+    assert.equal(failed.response.status, 500);
+    assert.equal(readFileSync(join(folder, 'keep.jpg'), 'utf8'), 'must-survive');
+    assert.ok(db.prepare('SELECT id FROM machines WHERE id = ?').get(machineId));
+    assert.equal(db.prepare('SELECT deleted_at FROM maintenance_orders WHERE id = ?').get(created.body.id).deleted_at, null);
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM test_mock_purge_operations').get().count, 0);
+    assert.deepEqual(db.pragma('foreign_key_check'), []);
+  } finally {
+    db.exec('DROP TRIGGER test_mock_purge_fail_delete');
+  }
+});
+
+test('committed test purge recovery finishes deleting staged files after interruption', async () => {
+  const operationId = randomUUID();
+  const stage = join(storageRoot, '.madar-recovery', 'test-mock-purges', operationId);
+  mkdirSync(join(stage, 'item-0'), { recursive: true });
+  writeFileSync(join(stage, 'item-0', 'old-photo.jpg'), 'already-deleted-training-photo');
+  const missingOrderId = 9_000_000;
+  assert.equal(db.prepare('SELECT id FROM maintenance_orders WHERE id = ?').get(missingOrderId), undefined);
+  db.prepare(`INSERT INTO test_mock_purge_operations (operation_id, order_id, order_code, targets_json, state)
+    VALUES (?, ?, ?, ?, 'committed')`).run(operationId, missingOrderId, 'MN-TEST-INTERRUPTED',
+    JSON.stringify({ orders: [{ id: missingOrderId, orderCode: 'MN-TEST-INTERRUPTED', deletedAt: null }],
+      targets: [{ path: 'Machines/TEST-ATM-INTERRUPTED', kind: 'directory' }] }));
+  assert.deepEqual(await recoverTestMockPurges(db), { recoveredCount: 1 });
+  assert.equal(existsSync(stage), false);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM test_mock_purge_operations WHERE operation_id = ?')
+    .get(operationId).count, 0);
+});
+
+test('machine-directory purge removes a training machine even when its only order was hidden earlier', async () => {
+  const repId = Number(db.prepare("SELECT id FROM users WHERE role = 'rep' AND active = 1 ORDER BY id LIMIT 1").get().id);
+  const created = await request('/api/maintenance/orders/test-mock', json('POST', { representativeId: repId }));
+  assert.equal(created.response.status, 201);
+  const machineId = created.body.cards[0].machine_id;
+  db.prepare('UPDATE maintenance_orders SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?').run(created.body.id);
+  const result = await request(`/api/maintenance/machines/${machineId}/test-mock`, { method: 'DELETE' });
+  assert.equal(result.response.status, 200, JSON.stringify(result.body));
+  assert.equal(result.body.deletedOrderCount, 1);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM maintenance_orders WHERE id = ?').get(created.body.id).count, 0);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM machines WHERE id = ?').get(machineId).count, 0);
+  assert.deepEqual(db.pragma('foreign_key_check'), []);
 });
 
 function assertNoCache(response) {

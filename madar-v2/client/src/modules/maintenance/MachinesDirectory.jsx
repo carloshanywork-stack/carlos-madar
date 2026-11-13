@@ -77,6 +77,15 @@ export default function MachinesDirectory({ isAdmin = false, initialCorrections 
   }
 
   async function deactivate(machine) {
+    if (/^TEST-ATM-[A-Z0-9-]+$/iu.test(machine.code)) {
+      if (!window.confirm(`حذف ماكينة التدريب ${machine.code} نهائيًا؟\n\nسيُحذف كل أمر اختبار مرتبط بها، حتى المخفي سابقًا، مع الزيارات والصور والملفات. لن تُحذف بيانات أو حركات مالية غير اختبارية.`)) return;
+      try {
+        const result = await api.delete(`/api/maintenance/machines/${machine.id}/test-mock`);
+        await Promise.all([reload(), reloadMap()]);
+        showToast(result.cleanupPending ? 'حُذفت بيانات التدريب؛ تنظيف الملفات الممرحلة سيكتمل عند التشغيل التالي.' : 'حُذفت ماكينة التدريب وكل بياناتها المرتبطة نهائيًا.');
+      } catch (caught) { showToast(errorMessage(caught), 'error'); }
+      return;
+    }
     if (!window.confirm(`هل تريد إيقاف الماكينة ${machine.code}؟ ستظل سجلاتها السابقة محفوظة.`)) return;
     try {
       await api.delete(`/api/maintenance/machines/${machine.id}`);
@@ -214,7 +223,7 @@ export default function MachinesDirectory({ isAdmin = false, initialCorrections 
                   setGeofenceError('');
                 }}>إعداد الموقع</Button>}
                 <Button variant="ghost" size="small" icon="settings" onClick={() => { setEditing(machine); setFormError(''); setModal('machine'); }}>تعديل</Button>
-                <Button variant="ghost" size="small" icon="close" onClick={() => deactivate(machine)}>إيقاف</Button>
+                {(!/^TEST-ATM-[A-Z0-9-]+$/iu.test(machine.code) || isAdmin) && <Button variant="ghost" size="small" icon="close" onClick={() => deactivate(machine)}>{/^TEST-ATM-[A-Z0-9-]+$/iu.test(machine.code) ? 'حذف اختبار نهائي' : 'إيقاف'}</Button>}
               </div></td>
             </tr>)}</tbody>
           </table></div>
