@@ -295,7 +295,14 @@ export default function NotificationBell({ user, online = true, variant = 'web' 
       <a
         className="madar-notification-body"
         href={notification.href}
-        onClick={() => { void markRead(notification); }}
+        onClick={(event) => {
+          if (notification.read || !connected) return;
+          // Persist the read state before the browser leaves the page; a plain
+          // anchor navigation would otherwise cancel the in-flight request.
+          event.preventDefault();
+          const target = notification.href;
+          void markRead(notification).finally(() => { window.location.assign(target); });
+        }}
       >
         {content}
       </a>
