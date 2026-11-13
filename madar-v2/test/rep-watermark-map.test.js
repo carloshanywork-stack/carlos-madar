@@ -147,6 +147,7 @@ test('Google Maps navigation prefers the machine GPS pin and safely falls back t
   assert.equal(addressUrl.pathname, '/maps/search/');
   assert.equal(addressUrl.searchParams.get('query'), 'الدقي، القاهرة');
   assert.equal(googleMapsNavigationUrl({}), null);
+  assert.equal(googleMapsNavigationUrl({ latitude: null, longitude: null, address: 'الدقي' }).includes('maps/search'), true);
 });
 
 test('offline map projection round-trips coordinates and resolves the expected Cairo raster tile', () => {

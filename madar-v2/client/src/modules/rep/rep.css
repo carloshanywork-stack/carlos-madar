@@ -167,6 +167,8 @@
 #madar-app .rep-machine-card-wrap { display: flex; min-width: 0; flex-direction: column; gap: 6px; }
 #madar-app .rep-machine-card { display: flex; min-width: 0; min-height: 180px; flex-direction: column; align-items: stretch; padding: 15px; border: 1px solid #cbd5db; border-radius: 13px; color: #192d41 !important; background: #fff; cursor: pointer; text-align: right; transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease; }
 #madar-app .rep-machine-card-wrap .rep-machine-card { width: 100%; flex: 1; }
+#madar-app .rep-machine-directions { display: inline-flex; min-height: 36px; align-items: center; justify-content: center; border: 1px solid #b8d2c7; border-radius: 9px; color: #0c604a; background: #edf7f1; font-size: 11px; font-weight: 850; text-decoration: none; }
+#madar-app .rep-machine-directions:hover { background: #e0f0e8; }
 #madar-app .rep-machine-card:not(:disabled):hover { border-color: #5b9c86; box-shadow: 0 8px 18px rgba(24,85,66,.09); transform: translateY(-1px); }
 #madar-app .rep-machine-card.is-complete { border-color: #8fc5b1; background: #fbfefc; }
 #madar-app .rep-machine-card.is-locked { opacity: .72; background: #f4f5f5; }

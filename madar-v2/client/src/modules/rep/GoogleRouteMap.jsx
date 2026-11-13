@@ -5,7 +5,8 @@ import { loadGoogleMaps } from './google-maps-loader.js';
 const CAIRO_CENTER = Object.freeze({ latitude: 30.0444, longitude: 31.2357 });
 
 function hasCoordinates(machine) {
-  return Number.isFinite(Number(machine?.latitude)) && Number.isFinite(Number(machine?.longitude));
+  return machine?.latitude != null && machine?.longitude != null
+    && Number.isFinite(Number(machine.latitude)) && Number.isFinite(Number(machine.longitude));
 }
 
 function machinePosition(machine) {

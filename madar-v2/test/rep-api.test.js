@@ -803,12 +803,11 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   const otherRepInProgress = await request('/api/rep/today-route?username=rep-all-regions', {}, universalLogin.cookie);
   const inProgressCard = otherRepInProgress.body.regions.flatMap((region) => region.machines)
     .find((machine) => machine.cardId === missingAfterCardId);
-  assert.equal(inProgressCard.workStatus, 'in_progress');
-  assert.equal(inProgressCard.canVisit, false);
+  assert.equal(inProgressCard, undefined);
   const conflictingWorkClaim = await request(`/api/rep/machines/${missingAfterCardId}/start-work`, jsonOptions('POST', {
     visitUuid: randomUUID(), location: visitPayload.location,
   }), universalLogin.cookie);
-  assert.equal(conflictingWorkClaim.response.status, 409);
+  assert.equal(conflictingWorkClaim.response.status, 403);
   const changedVisitClaim = await request(`/api/rep/machines/${missingAfterCardId}/start-work`, jsonOptions('POST', {
     visitUuid: randomUUID(), location: visitPayload.location,
   }), login.cookie);
@@ -852,8 +851,12 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   const otherRepDone = await request('/api/rep/today-route?username=rep-all-regions', {}, universalLogin.cookie);
   const doneCard = otherRepDone.body.regions.flatMap((region) => region.machines)
     .find((machine) => machine.cardId === missingAfterCardId);
-  assert.equal(doneCard.workStatus, 'done');
-  assert.equal(doneCard.canVisit, false);
+  assert.equal(doneCard, undefined);
+  const ownerSubmittedRoute = await request('/api/rep/today-route?username=rep-nour', {}, login.cookie);
+  const ownerSubmittedCard = ownerSubmittedRoute.body.regions.flatMap((region) => region.machines)
+    .find((machine) => machine.cardId === missingAfterCardId);
+  assert.equal(ownerSubmittedCard.reviewStatus, 'pending');
+  assert.equal(ownerSubmittedCard.isSubmitted, true);
   assert.equal(visitSync.body.visitUuid, visitUuid);
   assert.equal(visitSync.body.maintenanceLines[0].quantity, 3);
   assert.equal(visitSync.body.maintenanceLines[0].unit, 'piece');

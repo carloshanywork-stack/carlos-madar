@@ -10,7 +10,8 @@ export const OFFLINE_MAP_PACKS = Object.freeze([
 ]);
 
 export function googleMapsNavigationUrl(machine) {
-  if (Number.isFinite(Number(machine?.latitude)) && Number.isFinite(Number(machine?.longitude))) {
+  if (machine?.latitude != null && machine?.longitude != null
+    && Number.isFinite(Number(machine.latitude)) && Number.isFinite(Number(machine.longitude))) {
     const destination = `${Number(machine.latitude)},${Number(machine.longitude)}`;
     return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(destination)}&travelmode=driving`;
   }

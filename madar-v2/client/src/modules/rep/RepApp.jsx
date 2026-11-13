@@ -9,6 +9,7 @@ import {
   locationReviewLabel,
 } from './location-review.js';
 import { groupRouteMachinesByRegion } from './route-folders.js';
+import { googleMapsNavigationUrl } from './map-utils.js';
 import {
   addPendingVisit,
   addPendingMachineAction,
@@ -1567,10 +1568,14 @@ let canDrainVisits = true;
           || normalize(machine.machineCode).includes(term)
           || normalize(machine.arabicName).includes(term)
           || normalize(machine.clientName).includes(term)
-          || normalize(machine.address).includes(term);
+          || normalize(machine.address).includes(term)
+          || normalize(machine.workOrderCode).includes(term)
+          || normalize(machine.areaName).includes(term)
+          || normalize(machine.regionName).includes(term);
         const matchesFilter = routeFilter === 'all'
           || (routeFilter === 'remaining' && !visitSubmitted(machine))
-          || (routeFilter === 'completed' && visitSubmitted(machine));
+          || (routeFilter === 'sent' && machine.isSubmitted && !machine.isCompleted)
+          || (routeFilter === 'completed' && machine.isCompleted);
         return matchesTerm && matchesFilter;
       });
   }, [query, route, routeFilter]);
@@ -1579,7 +1584,8 @@ let canDrainVisits = true;
   const routeFilterCounts = {
   all: routeMachines.length,
   remaining: routeMachines.filter((machine) => !visitSubmitted(machine)).length,
-  completed: routeMachines.filter(visitSubmitted).length,
+  sent: routeMachines.filter((machine) => machine.isSubmitted && !machine.isCompleted).length,
+  completed: routeMachines.filter((machine) => machine.isCompleted).length,
 };
 const pendingGpsCount = pendingGpsQueue.pending.length + pendingGpsQueue.rejected.length;
 const pendingQueueCount = pendingVisits.length + pendingMachineActions.length + pendingAttendanceActions.length + pendingGpsCount;
@@ -2062,7 +2068,7 @@ try {
         <div className="rep-progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={summary.progress}>
           <span style={{ width: `${summary.progress}%` }} />
         </div>
-        <div className="rep-progress-foot"><span><i className="done-dot" />معتمدة <b>{summary.completed}</b></span><span><i className="pending-dot" />بانتظار الاعتماد <b>{summary.pendingReview ?? 0}</b></span><span>متبقية <b>{summary.pending}</b></span><small>{routeLoading ? 'جارٍ تحديث المسار…' : route ? `آخر تحديث ${formatTime(route.cachedAt ?? route.fetchedAt ?? new Date())}` : 'لا توجد نسخة مسار محفوظة بعد'}</small></div>
+        <div className="rep-progress-foot"><span><i className="done-dot" />معتمدة <b>{summary.completed}</b></span><span><i className="pending-dot" />بانتظار الاعتماد <b>{summary.pendingReview ?? 0}</b></span><span>متبقية <b>{routeFilterCounts.remaining}</b></span><small>{routeLoading ? 'جارٍ تحديث المسار…' : route ? `آخر تحديث ${formatTime(route.cachedAt ?? route.fetchedAt ?? new Date())}` : 'لا توجد نسخة مسار محفوظة بعد'}</small></div>
       </section>
 
       <section className="rep-route-section">
@@ -2074,14 +2080,14 @@ try {
             </button>
             <label className="rep-search">
               <span aria-hidden="true">⌕</span>
-              <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="ابحث بكود الماكينة أو اسمها" aria-label="ابحث بكود الماكينة أو اسمها" />
+              <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="ابحث بالكود أو العميل أو المنطقة" aria-label="ابحث بالكود أو العميل أو المنطقة" />
               {query && <button type="button" onClick={() => setQuery('')} aria-label="مسح البحث">×</button>}
             </label>
           </div>
         </div>
 
         <div className="rep-route-filters" role="group" aria-label="تصفية مسار اليوم">
-          {[['all', 'الكل'], ['remaining', 'المتبقية'], ['completed', 'المكتملة']].map(([value, label]) => (
+          {[['all', 'الكل'], ['remaining', 'المتبقية'], ['sent', 'تم الإرسال'], ['completed', 'المكتملة']].map(([value, label]) => (
             <button key={value} type="button" className={routeFilter === value ? 'active' : ''}
               aria-pressed={routeFilter === value} onClick={() => setRouteFilter(value)}>
               {label}<b>{routeFilterCounts[value]}</b>
@@ -2102,9 +2108,9 @@ try {
         {filteredRegions.length ? (
           <div className="rep-region-list">
             {filteredRegions.map((region) => {
-              const done = region.machines.filter((machine) => machine.workStatus === 'done').length;
+              const done = region.machines.filter((machine) => machine.isCompleted).length;
               return (
-                <details className="rep-region-folder" key={region.regionName}>
+                <details className="rep-region-folder" key={`${region.regionName}-${query.trim() ? 'search' : 'browse'}`} defaultOpen={Boolean(query.trim())}>
                   <summary>
                     <span className="rep-folder-icon" aria-hidden="true">▰</span>
                     <span className="rep-folder-name"><strong>{region.regionName}</strong><small>{region.machines.length} ماكينة · {done} مكتملة</small></span>
@@ -2128,6 +2134,7 @@ try {
                            {machine.reviewNote && <small className="rep-review-note">ملاحظة المشرف: {machine.reviewNote}</small>}
                            <span className="rep-machine-open">{machine.isCompleted ? 'تم اعتماد الزيارة' : machine.reviewStatus === 'pending' ? 'بانتظار مراجعة الصور · تابع إلى ماكينة أخرى' : machine.reviewStatus === 'reshoot' ? 'افتح لإعادة التصوير' : machine.canVisit === false ? 'للعرض فقط' : 'ابدأ الزيارة'} <b aria-hidden="true">←</b></span>
                         </button>
+                        {googleMapsNavigationUrl(machine) && <a className="rep-machine-directions" href={googleMapsNavigationUrl(machine)} target="_blank" rel="noopener noreferrer" aria-label={`افتح اتجاهات ماكينة ${machine.machineCode} على الخريطة`}>⌖ الاتجاهات للماكينة</a>}
                       </article>
                     ))}
                   </div>

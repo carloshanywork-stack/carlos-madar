@@ -207,7 +207,7 @@ export function getRepTodayRoute(rep, database = db) {
   `).all(rep.id, dayStart, dayEnd);
 
   const visitReviews = database.prepare(`
-    SELECT visit.card_id, review.status AS review_status, review.review_note, visit.visit_uuid
+    SELECT visit.card_id, visit.rep_user_id, review.status AS review_status, review.review_note, visit.visit_uuid
     FROM rep_visits visit
     JOIN rep_visit_reviews review ON review.visit_id = visit.id
     WHERE visit.status = 'completed'
@@ -246,6 +246,10 @@ export function getRepTodayRoute(rep, database = db) {
     const latestVisit = reviewByCard.get(Number(row.card_id));
     const correctionPending = correctionPendingMachineIds.has(Number(row.machine_id));
     const activeWork = activeWorkByCard.get(Number(row.card_id));
+    // Only the representative who owns the work can see it while it is claimed
+    // or after submission. The server still checks the lease on every write.
+    if (activeWork && Number(activeWork.rep_user_id) !== Number(rep.id)) continue;
+    if (latestVisit && Number(latestVisit.rep_user_id) !== Number(rep.id)) continue;
     const isCompleted = latestVisit
       ? latestVisit.review_status === 'approved'
       // Legacy card photo uploads have no visit/review record; keep those complete only when both phases exist.
