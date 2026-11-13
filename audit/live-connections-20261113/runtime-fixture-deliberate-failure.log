@@ -1,0 +1,28 @@
+REQUIRED_LIVE_CHECK_FAILED {"sourceRevision":"e2aa41b116fcd2ca40138d083247de43e0ca82f6","failed":[{"id":"local-api","status":"VERIFIED_FAIL","verificationMethod":"actual read-only HTTP GET","expectedStatus":200,"actualStatus":503,"verifiedAt":"2026-11-13T15:33:41.441Z","limitation":"Health identity only; not business readiness"}],"overall":"FAILED"} [line 1]
+REQUIRED_LIVE_CHECK_FAILED {"sourceRevision":"e2aa41b116fcd2ca40138d083247de43e0ca82f6","failed":[{"id":"local-api","status":"VERIFIED_FAIL","verificationMethod":"actual read-only HTTP GET","expectedStatus":200,"actualStatus":503,"verifiedAt":"2026-11-13T15:33:41.441Z","limitation":"Health identity only; not business readiness"}],"overall":"FAILED"} [line 1]
+Error: REQUIRED_LIVE_CHECK_FAILED {"sourceRevision":"e2aa41b116fcd2ca40138d083247de43e0ca82f6","failed":[{"id":"local-api","status":"VERIFIED_FAIL","verificationMethod":"actual read-only HTTP GET","expectedStatus":200,"actualStatus":503,"verifiedAt":"2026-11-13T15:33:41.441Z","limitation":"Health identity only; not business readiness"}],"overall":"FAILED"}
+    at VmCodeWrapper (evalmachine.<anonymous>:1:1045)
+    at evalmachine.<anonymous>:2:2
+    at Script.runInContext (node:vm:149:12)
+    at runInContext (node:vm:301:6)
+    at result (/usr/local/lib/node_modules/n8n/node_modules/@n8n/task-runner/dist/js-task-runner/js-task-runner.js:210:61)
+    at new Promise (<anonymous>)
+    at JsTaskRunner.runForAllItems (/usr/local/lib/node_modules/n8n/node_modules/@n8n/task-runner/dist/js-task-runner/js-task-runner.js:203:34)
+    at JsTaskRunner.executeTask (/usr/local/lib/node_modules/n8n/node_modules/@n8n/task-runner/dist/js-task-runner/js-task-runner.js:138:26)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async Object.waitingForSettings (/usr/local/lib/node_modules/n8n/node_modules/@n8n/task-runner/dist/task-runner.js:283:17)
+
+Error executing workflow. See log messages for details.
+
+Execution error:
+REQUIRED_LIVE_CHECK_FAILED {"sourceRevision":"e2aa41b116fcd2ca40138d083247de43e0ca82f6","failed":[{"id":"local-api","status":"VERIFIED_FAIL","verificationMethod":"actual read-only HTTP GET","expectedStatus":200,"actualStatus":503,"verifiedAt":"2026-11-13T15:33:41.441Z","limitation":"Health identity only; not business readiness"}],"overall":"FAILED"} [line 1]
+WrappedExecutionError: REQUIRED_LIVE_CHECK_FAILED {"sourceRevision":"e2aa41b116fcd2ca40138d083247de43e0ca82f6","failed":[{"id":"local-api","status":"VERIFIED_FAIL","verificationMethod":"actual read-only HTTP GET","expectedStatus":200,"actualStatus":503,"verifiedAt":"2026-11-13T15:33:41.441Z","limitation":"Health identity only; not business readiness"}],"overall":"FAILED"} [line 1]
+    at throwExecutionError (/usr/local/lib/node_modules/n8n/node_modules/n8n-nodes-base/nodes/Code/throw-execution-error.ts:11:9)
+    at JsTaskRunnerSandbox.runCodeAllItems (/usr/local/lib/node_modules/n8n/node_modules/n8n-nodes-base/nodes/Code/JsTaskRunnerSandbox.ts:46:23)
+    at processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at ExecuteContext.execute (/usr/local/lib/node_modules/n8n/node_modules/n8n-nodes-base/nodes/Code/Code.node.ts:219:8)
+    at WorkflowExecute.executeNode (/usr/local/lib/node_modules/n8n/node_modules/n8n-core/src/execution-engine/workflow-execute.ts:1157:8)
+    at WorkflowExecute.runNode (/usr/local/lib/node_modules/n8n/node_modules/n8n-core/src/execution-engine/workflow-execute.ts:1459:11)
+    at /usr/local/lib/node_modules/n8n/node_modules/n8n-core/src/execution-engine/workflow-execute.ts:2402:27
+    at /usr/local/lib/node_modules/n8n/node_modules/n8n-core/src/execution-engine/workflow-execute.ts:2883:11
+REQUIRED_LIVE_CHECK_FAILED {"sourceRevision":"e2aa41b116fcd2ca40138d083247de43e0ca82f6","failed":[{"id":"local-api","status":"VERIFIED_FAIL","verificationMethod":"actual read-only HTTP GET","expectedStatus":200,"actualStatus":503,"verifiedAt":"2026-11-13T15:33:41.441Z","limitation":"Health identity only; not business readiness"}],"overall":"FAILED"} [line 1]
