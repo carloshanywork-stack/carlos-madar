@@ -516,3 +516,10 @@
 @media (prefers-reduced-motion: reduce) {
   #madar-app .rep-app *, #madar-app .rep-app *::before, #madar-app .rep-app *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
+
+#madar-app .madar-notification-bell-rep .madar-notification-trigger { width: 38px; height: 38px; min-height: 38px; border: 1px solid #cbd4dc; border-radius: 11px; color: #213a53; background: #fff; }
+#madar-app .madar-notification-bell-rep .madar-notification-trigger[aria-expanded="true"] { border-color: #13836b; color: #0d604c; background: #eaf6f1; }
+#madar-app .madar-notification-bell-rep .madar-notification-badge { border-color: #fff; }
+@media (max-width: 760px) {
+  #madar-app .madar-notification-bell-rep .madar-notification-trigger { width: 35px; height: 35px; min-height: 35px; }
+}

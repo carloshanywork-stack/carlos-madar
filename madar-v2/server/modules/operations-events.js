@@ -2,6 +2,7 @@ import {randomUUID} from 'node:crypto';
 import {mkdirSync,writeFileSync,renameSync,readdirSync,readFileSync,unlinkSync,openSync,fsyncSync,closeSync} from 'node:fs';
 import {dirname,join,resolve} from 'node:path';
 import { db } from '../database/connection.js';
+import { materializeNotificationsForEvent } from './notifications/service.js';
 
 /** Durable SQLite event log with in-process fan-out for the single-process deployment. */
 const subscribers = new Set();
@@ -55,7 +56,15 @@ function persistPublication(database, publication) {
   database.prepare(`INSERT OR IGNORE INTO operations_events(event_type,payload_json,occurred_at,publication_key) VALUES (?,?,?,?)`)
     .run(publication.type,JSON.stringify(publication.details),publication.occurredAt,publication.key);
   const row=database.prepare('SELECT event_id,event_type,payload_json,occurred_at FROM operations_events WHERE publication_key=?').get(publication.key);
-  return deserializeEvent(row);
+  const event=deserializeEvent(row);
+  try {
+    materializeNotificationsForEvent(event, database);
+  } catch (error) {
+    // The durable event remains the source of truth; never block fan-out because
+    // an inbox row could not be written.
+    console.error('Notification inbox persistence failed:', error.message);
+  }
+  return event;
 }
 function outboxPath(database) {
   if(!database.name || database.name===':memory:')throw new Error('No durable database directory available for the event outbox');

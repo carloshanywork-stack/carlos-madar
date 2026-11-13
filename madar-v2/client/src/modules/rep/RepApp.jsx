@@ -64,6 +64,7 @@ startNativeDutyTracking,
 stopNativeDutyTracking,
 } from './native-bridges.js';
 import { mergeMachineActions } from './queue-recovery.js';
+import NotificationBell from '../../components/notifications/NotificationBell.jsx';
 import './rep.css';
 
 const MachineVisitSheet = lazy(() => import('./MachineVisitSheet.jsx'));
@@ -968,6 +969,7 @@ const loadLocalSnapshots = useCallback(async () => {
     const onOperationsEvent = (message) => {
       try {
         const event = JSON.parse(message.data);
+        window.dispatchEvent(new CustomEvent('madar:notifications-changed'));
         if (event.type === 'system.reconcile-required') { void refreshData(); void refreshAttendance(); void refreshPending(); }
         else if (event.type === 'maintenance.changed' || event.type === 'rep.machine.location-reset'
           || event.type === 'rep.machine.work-started' || event.type === 'rep.machine.work-ended') { void refreshData(); void refreshPending(); }
@@ -1011,7 +1013,10 @@ const loadLocalSnapshots = useCallback(async () => {
         // Ignore malformed frames; the regular route refresh remains a fallback.
       }
     };
-    const reconcile = () => { void refreshData(); void refreshAttendance(); void refreshPending(); };
+    const reconcile = () => {
+      window.dispatchEvent(new CustomEvent('madar:notifications-changed'));
+      void refreshData(); void refreshAttendance(); void refreshPending();
+    };
     if (nativeApp) {
       void subscribeNativeOperations((event) => onOperationsEvent({ data: JSON.stringify(event) }), (status) => {
         if (status.reconcile) reconcile();
@@ -1976,6 +1981,7 @@ try {
           <button className="rep-queue-count" type="button" onClick={() => setShowQueue((value) => !value)} aria-expanded={showQueue}>
             <span>⏳</span><b>{pendingQueueCount}</b><small>معلق</small>
           </button>
+          <NotificationBell user={user} online={serverState === 'online' && networkOnline && !offlineOnly} variant="rep" />
           <button className="rep-icon-button rep-refresh-button" type="button" onClick={() => { void checkServer(); void refreshData(); void refreshAttendance(); }} disabled={routeLoading} aria-label="تحديث مسار اليوم" title="تحديث المسار">
             <span className={routeLoading ? 'rep-spinning' : ''}>↻</span>
           </button>

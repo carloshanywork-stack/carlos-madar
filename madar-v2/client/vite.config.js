@@ -59,6 +59,9 @@ export default defineConfig(({ mode }) => {
     },
     server: {
       host: '127.0.0.1',
+      // The notification catalog lives in ../shared and is imported by both the
+      // API and the clients, so the dev server must be allowed to read it.
+      fs: { allow: [projectRoot] },
       proxy: {
         '/api': 'http://127.0.0.1:3000',
       },

@@ -21,6 +21,7 @@ import staffRouter from './modules/employees/staff-routes.js';
 import attendanceRouter from './modules/employees/attendance-routes.js';
 import repRouter from './modules/rep/routes.js';
 import supervisorRouter from './modules/supervisor/routes.js';
+import notificationsRouter from './modules/notifications/routes.js';
 
 export const app = express();
 
@@ -160,6 +161,9 @@ app.get('/download/apk/status', requireAuthentication, (req, res) => {
 app.use('/api/auth', authRouter);
 app.use('/api/rep', repRouter);
 app.use('/api', requireAuthentication);
+// Representatives may read and update only their own notification inbox, so
+// this router stays ahead of the business-route restriction below.
+app.use('/api/notifications', notificationsRouter);
 app.use('/api', (req, res, next) => {
   if (req.user?.role === 'rep') {
     res.status(403).json({ error: 'Field representative accounts may only access /api/rep endpoints.' });

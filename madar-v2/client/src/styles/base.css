@@ -86,10 +86,46 @@
 #madar-app .madar-mobile-menu { display: none; }
 #madar-app .madar-main { width: min(100%, 1520px); margin: 0 auto; padding: 30px clamp(18px, 3vw, 42px) 56px; }
 #madar-app .madar-footer { display: flex; justify-content: space-between; gap: 10px; padding: 0 clamp(18px, 3vw, 42px) 20px; color: #8995a6; font-size: 9px; }
-#madar-app .madar-operations-alert { position: sticky; z-index: 70; top: 0; display: flex; align-items: center; gap: 14px; padding: 10px clamp(18px, 3vw, 42px); color: #66480f; border-bottom: 1px solid #ead39c; background: #fff4d8; font-size: 12px; font-weight: 750; }
-#madar-app .madar-operations-alert span { flex: 1; }
-#madar-app .madar-operations-alert a { color: #72500c; text-decoration: underline; white-space: nowrap; }
-#madar-app .madar-operations-alert button { width: 28px; height: 28px; border-radius: 8px; color: #66480f; background: rgba(102,72,15,.08); cursor: pointer; font-size: 20px; }
+#madar-app .madar-notification-bell { position: relative; flex: 0 0 auto; }
+#madar-app .madar-notification-trigger { position: relative; display: grid; width: 38px; height: 38px; place-items: center; border: 1px solid var(--madar-border); border-radius: 11px; color: #42536a; background: var(--madar-surface); cursor: pointer; }
+#madar-app .madar-notification-trigger:hover { color: var(--madar-accent); border-color: #b9c6d6; }
+#madar-app .madar-notification-trigger[aria-expanded="true"] { color: var(--madar-accent); border-color: var(--madar-accent); background: var(--madar-accent-pale); }
+#madar-app .madar-notification-badge { position: absolute; top: -5px; inset-inline-start: -5px; display: grid; min-width: 18px; height: 18px; padding: 0 4px; place-items: center; border: 2px solid var(--madar-surface); border-radius: 999px; color: #fff; background: #ca5c5e; font-size: 9px; font-weight: 850; line-height: 1; }
+#madar-app .madar-notification-panel { position: absolute; z-index: 120; top: calc(100% + 10px); left: 0; display: flex; width: min(370px, calc(100vw - 28px)); max-height: min(74vh, 580px); flex-direction: column; overflow: hidden; border: 1px solid var(--madar-border); border-radius: 16px; background: var(--madar-surface); box-shadow: 0 24px 48px rgba(19, 37, 60, .18); }
+#madar-app .madar-notification-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 13px 15px; border-bottom: 1px solid var(--madar-border); }
+#madar-app .madar-notification-panel-head strong { display: block; color: var(--madar-text); font-size: 13px; font-weight: 850; }
+#madar-app .madar-notification-panel-head small { display: block; margin-top: 2px; color: var(--madar-muted); font-size: 10px; }
+#madar-app .madar-notification-panel-actions { display: flex; align-items: center; gap: 6px; }
+#madar-app .madar-notification-mark-all { min-height: 28px; padding: 0 9px; border-radius: 9px; color: #1f6b57; background: #e9f5f0; cursor: pointer; font-size: 10px; font-weight: 800; white-space: nowrap; }
+#madar-app .madar-notification-mark-all:disabled { opacity: .45; cursor: not-allowed; }
+#madar-app .madar-notification-close { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 8px; color: #5b6b7f; background: transparent; cursor: pointer; }
+#madar-app .madar-notification-close:hover { background: rgba(90, 107, 127, .1); }
+#madar-app .madar-notification-note { margin: 0; padding: 9px 15px; color: #66480f; background: #fff4d8; font-size: 10px; font-weight: 700; }
+#madar-app .madar-notification-error { margin: 0; padding: 9px 15px; color: #8c2c31; background: #fdecee; font-size: 10px; font-weight: 750; }
+#madar-app .madar-notification-empty { margin: 0; padding: 26px 15px; color: var(--madar-muted); text-align: center; font-size: 11px; }
+#madar-app .madar-notification-list { display: grid; flex: 1; min-height: 0; margin: 0; padding: 0; overflow-y: auto; list-style: none; }
+#madar-app .madar-notification-item { display: flex; align-items: flex-start; gap: 8px; padding: 11px 15px; border-bottom: 1px solid #eef1f4; }
+#madar-app .madar-notification-item:last-child { border-bottom: 0; }
+#madar-app .madar-notification-item.unread { background: #f4faf7; }
+#madar-app .madar-notification-dot { width: 8px; height: 8px; flex: 0 0 auto; margin-top: 6px; border-radius: 50%; background: #cbd5df; }
+#madar-app .madar-notification-item.unread .madar-notification-dot { background: #168367; box-shadow: 0 0 0 3px rgba(22, 131, 103, .12); }
+#madar-app .madar-notification-body { display: grid; min-width: 0; flex: 1; gap: 5px; padding: 0; color: inherit; border: 0; background: transparent; text-align: start; cursor: pointer; font: inherit; }
+#madar-app .madar-notification-message { color: #243348; font-size: 11.5px; font-weight: 750; line-height: 1.6; }
+#madar-app .madar-notification-item.read .madar-notification-message { color: #63718a; font-weight: 600; }
+#madar-app .madar-notification-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; color: #7b879a; font-size: 9.5px; }
+#madar-app .madar-notification-state { padding: 2px 6px; border-radius: 999px; font-weight: 800; }
+#madar-app .madar-notification-state.unread { color: #0d604c; background: #dff1e9; }
+#madar-app .madar-notification-state.read { color: #6a778b; background: #eef1f5; }
+#madar-app .madar-notification-new { color: #a4661a; font-weight: 850; }
+#madar-app .madar-notification-item-actions { display: flex; flex: 0 0 auto; gap: 3px; }
+#madar-app .madar-notification-item-action { display: grid; width: 26px; height: 26px; place-items: center; border-radius: 8px; color: #7c899b; background: transparent; cursor: pointer; }
+#madar-app .madar-notification-item-action:hover { color: #365069; background: rgba(54, 80, 105, .09); }
+#madar-app .madar-notification-item-action.read-action { color: #1f6b57; }
+#madar-app .madar-notification-item-action.read-action:hover { background: #e4f3ed; }
+#madar-app .madar-notification-item-action:disabled { opacity: .4; cursor: not-allowed; }
+#madar-app .madar-notification-panel-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 9px 15px; border-top: 1px solid var(--madar-border); color: var(--madar-muted); font-size: 10px; }
+#madar-app .madar-notification-panel-foot button { min-height: 26px; padding: 0 10px; border-radius: 8px; color: #1f6b57; background: #e9f5f0; cursor: pointer; font-size: 10px; font-weight: 800; }
+#madar-app .madar-notification-panel-foot button:disabled { opacity: .5; cursor: not-allowed; }
 #madar-app .madar-page-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 18px; margin-bottom: 24px; }
 #madar-app .madar-page-heading { margin: 0; color: var(--madar-text); font-size: clamp(21px, 2.3vw, 27px); font-weight: 850; letter-spacing: -.025em; }
 #madar-app .madar-page-description { max-width: 720px; margin: 7px 0 0; color: var(--madar-muted); font-size: 12px; }
@@ -469,6 +505,21 @@ body.madar-document { min-width: 320px; min-height: 100vh; margin: 0; background
 #madar-app .madar-logout-button { min-height: 34px; color: var(--madar-text); border-color: var(--madar-border); background: var(--madar-surface); }
 
 #madar-app[data-theme="dark"] .madar-topbar { background: rgba(16, 25, 37, .94); }
+#madar-app[data-theme="dark"] .madar-notification-trigger { color: #dbe6f3; border-color: #2d3b4e; background: #1b2839; }
+#madar-app[data-theme="dark"] .madar-notification-badge { border-color: #1b2839; }
+#madar-app[data-theme="dark"] .madar-notification-panel { border-color: #2d3b4e; background: #16202e; box-shadow: 0 24px 50px rgba(0, 0, 0, .45); }
+#madar-app[data-theme="dark"] .madar-notification-item { border-color: #223043; }
+#madar-app[data-theme="dark"] .madar-notification-item.unread { background: #1a2a36; }
+#madar-app[data-theme="dark"] .madar-notification-message { color: #e8eef7; }
+#madar-app[data-theme="dark"] .madar-notification-item.read .madar-notification-message { color: #a3b1c4; }
+#madar-app[data-theme="dark"] .madar-notification-state.read { color: #a3b1c4; background: #233043; }
+#madar-app[data-theme="dark"] .madar-notification-mark-all,
+#madar-app[data-theme="dark"] .madar-notification-panel-foot button { color: #9fe3cd; background: #1d3b33; }
+#madar-app[data-theme="dark"] .madar-notification-close { color: #a9b7c9; }
+#madar-app[data-theme="dark"] .madar-notification-close:hover,
+#madar-app[data-theme="dark"] .madar-notification-item-action:hover { background: rgba(255, 255, 255, .08); }
+#madar-app[data-theme="dark"] .madar-notification-note { color: #f3d79b; border-color: transparent; background: #352b1c; }
+#madar-app[data-theme="dark"] .madar-notification-error { color: #fecdd3; background: #3c1a20; }
 #madar-app[data-theme="dark"] .madar-status-pill,
 #madar-app[data-theme="dark"] .madar-logout-button { color: var(--madar-text); border-color: var(--madar-border); background: var(--madar-surface); }
 #madar-app[data-theme="dark"] .madar-panel,
@@ -901,4 +952,15 @@ body.madar-document { min-width: 320px; min-height: 100vh; margin: 0; background
   border-color: rgba(56, 189, 248, .3);
   color: #7dd3fc;
   background: rgba(56, 189, 248, .14);
+}
+
+@media (max-width: 560px) {
+  #madar-app .madar-notification-panel {
+    position: fixed;
+    top: 72px;
+    right: 12px;
+    left: 12px;
+    width: auto;
+    max-height: calc(100vh - 96px);
+  }
 }

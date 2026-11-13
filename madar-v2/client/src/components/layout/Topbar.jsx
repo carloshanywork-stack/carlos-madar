@@ -2,6 +2,7 @@ import { useLocation } from 'react-router-dom';
 import Icon from '../ui/Icon.jsx';
 import Button from '../ui/Button.jsx';
 import StatusPills from './StatusPills.jsx';
+import NotificationBell from '../notifications/NotificationBell.jsx';
 
 const titles = {
   '/': ['لوحة المتابعة', 'صورة تشغيلية سريعة لأعمال النظام اليوم'],
@@ -38,6 +39,7 @@ export default function Topbar({ onMenuClick, user, onLogout, theme, onThemeTogg
       </div>
       <div className="madar-topbar-right">
         <StatusPills />
+        <NotificationBell user={user} />
         <div className="madar-user-account" title={user?.username}>
           <span className="madar-user-avatar" aria-hidden="true">
             {(user?.fullName || user?.username || '?').trim().slice(0, 1).toUpperCase()}

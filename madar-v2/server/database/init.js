@@ -5,6 +5,7 @@ import { env } from '../config/env.js';
 import { schemaPath } from '../config/paths.js';
 import { db } from './connection.js';
 import { syncEmployeeForUser } from '../modules/employees/user-sync.js';
+import { backfillNotificationsFromEvents } from '../modules/notifications/service.js';
 
 const defaultSettings = [
   ['app_name', 'MADAR V2'],
@@ -54,6 +55,7 @@ const attendanceClockLocationMigration = '20261105-attendance-clock-gps';
 const attendanceBiometricMigration = '20261105-attendance-biometric-confirmation';
 const repAttendanceSyncMigration = '20261110-rep-offline-attendance-sync';
 const attendanceOvertimeRequestsMigration = '20261112-attendance-overtime-requests';
+const userNotificationsMigration = '20261113-user-notifications';
 const attendanceCancellationMigration = '20261111-attendance-cancellation-status';
 const machineUpdatedAtMigration = '20261111-machine-updated-at';
 const machineVerificationCorrectionsMigration = '20261104-machine-verification-corrections';
@@ -646,6 +648,40 @@ export function migrateDurableOperationsEvents(database) {
     `);
     database.prepare('INSERT INTO schema_migrations (version) VALUES (?)')
       .run(durableOperationsEventsMigration);
+  });
+  migrate.immediate();
+}
+
+export function migrateUserNotifications(database) {
+  const migrate = database.transaction(() => {
+    if (database.prepare('SELECT 1 FROM schema_migrations WHERE version = ?')
+      .get(userNotificationsMigration)) return;
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS user_notifications (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL REFERENCES users(id),
+        event_id INTEGER,
+        event_type TEXT NOT NULL,
+        message TEXT NOT NULL,
+        href TEXT,
+        occurred_at TEXT NOT NULL,
+        read_at TEXT,
+        dismissed_at TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (user_id, event_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_user_notifications_inbox
+        ON user_notifications(user_id, dismissed_at, occurred_at DESC, id DESC);
+      CREATE INDEX IF NOT EXISTS idx_user_notifications_unread
+        ON user_notifications(user_id, read_at, dismissed_at);
+    `);
+    // Preserve the recent notifications the old strip could still show by
+    // materializing a bounded backlog once, with per-user state starting
+    // unread/undismissed. Older history stays in the durable event log instead
+    // of flooding the bell on the first deploy.
+    backfillNotificationsFromEvents(database);
+    database.prepare('INSERT INTO schema_migrations (version) VALUES (?)')
+      .run(userNotificationsMigration);
   });
   migrate.immediate();
 }
@@ -1889,6 +1925,22 @@ export function migrateRepMachineWorkLeases(database) {
   })();
 }
 
+export function migrateTestMockPurgeRecovery(database) {
+  const version = '20261113-test-mock-purge-recovery';
+  if (database.prepare('SELECT 1 FROM schema_migrations WHERE version = ?').get(version)) return;
+  database.transaction(() => {
+    database.exec(`CREATE TABLE test_mock_purge_operations (
+      operation_id TEXT PRIMARY KEY,
+      order_id INTEGER NOT NULL,
+      order_code TEXT NOT NULL,
+      targets_json TEXT NOT NULL CHECK (json_valid(targets_json)),
+      state TEXT NOT NULL CHECK (state IN ('prepared', 'committed')),
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`);
+    database.prepare('INSERT INTO schema_migrations(version) VALUES (?)').run(version);
+  })();
+}
+
 export function initializeDatabase({ database = db, initialAdminPassword = env.initialAdminPassword } = {}) {
   const schema = readFileSync(schemaPath, 'utf8');
   let adminCreated = false;
@@ -1945,7 +1997,9 @@ export function initializeDatabase({ database = db, initialAdminPassword = env.i
     migrateMaintenancePhysicalPhotoRotations(database);
     migrateDurableOperationsEvents(database);
     migrateOperationsPublicationIdentity(database);
+    migrateUserNotifications(database);
     migrateRepMachineWorkLeases(database);
+    migrateTestMockPurgeRecovery(database);
     migrateMachineMaintenanceNotes(database);
     migrateMachineNotesHistory(database);
     migrateMaintenanceUnmatchedFolderDuplicates(database);
