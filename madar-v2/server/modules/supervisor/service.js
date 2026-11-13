@@ -5,6 +5,9 @@ import { resolveStorageFile } from '../storage.js';
 import { recordAudit } from '../audit.js';
 
 const DEFAULT_TIME_ZONE = 'Africa/Cairo';
+const MAX_SPEED_METERS_PER_SECOND = 200 / 3.6;
+const MAX_SPEED_ACCURACY_METERS = 100;
+const CURRENT_SPEED_MAX_AGE_MS = 2 * 60 * 1000;
 
 function getTimeZone(database) {
   const configured = database.prepare("SELECT value FROM settings WHERE key = 'timezone'").get()?.value;
@@ -87,6 +90,23 @@ function estimateDistance(points) {
   return Math.round(distance * 10) / 10;
 }
 
+function formatSpeedKmh(speed) {
+  const value = Number(speed);
+  return Number.isFinite(value) && value >= 0 && value <= MAX_SPEED_METERS_PER_SECOND
+    ? Math.round(value * 36) / 10 : null;
+}
+
+function summarizeMovingSpeeds(points) {
+  const speeds = points.filter((point) => Number(point.accuracy) <= MAX_SPEED_ACCURACY_METERS)
+    .map((point) => Number(point.speed))
+    .filter((speed) => Number.isFinite(speed) && speed > 0 && speed <= MAX_SPEED_METERS_PER_SECOND);
+  return {
+    averageKmh: speeds.length ? formatSpeedKmh(speeds.reduce((sum, speed) => sum + speed, 0) / speeds.length) : null,
+    maxKmh: speeds.length ? formatSpeedKmh(Math.max(...speeds)) : null,
+    sampleCount: speeds.length,
+  };
+}
+
 export function getSupervisorRadar(database = defaultDatabase, now = new Date()) {
   const todayRange = dayRange(undefined, database);
   const { start, end } = todayRange;
@@ -117,7 +137,8 @@ export function getSupervisorRadar(database = defaultDatabase, now = new Date())
 
   const result = reps.map((rep) => {
     const points = database.prepare(`
-      SELECT point.latitude, point.longitude, point.accuracy, point.recorded_at AS captured_at
+      SELECT point.latitude, point.longitude, point.accuracy, point.speed,
+        point.duty_session_id, point.recorded_at AS captured_at
       FROM rep_tracking_breadcrumbs point
       JOIN rep_duty_sessions duty ON duty.id = point.duty_session_id
       WHERE point.user_id = ? AND datetime(point.recorded_at) >= datetime(?) AND datetime(point.recorded_at) < datetime(?)
@@ -145,6 +166,12 @@ export function getSupervisorRadar(database = defaultDatabase, now = new Date())
     const trail = points.map((point) => ({
       latitude: Number(point.latitude), longitude: Number(point.longitude), accuracy: Number(point.accuracy), updatedAt: point.captured_at,
     }));
+    const speedPoint = latestPoint?.duty_session_id === rep.duty_session_id ? latestPoint : null;
+    const speedAgeMs = speedPoint ? now.valueOf() - new Date(speedPoint.captured_at).valueOf() : Number.POSITIVE_INFINITY;
+    const speedKmh = onDuty && speedAgeMs >= 0 && speedAgeMs <= CURRENT_SPEED_MAX_AGE_MS
+      && Number(speedPoint.accuracy) <= MAX_SPEED_ACCURACY_METERS
+      ? formatSpeedKmh(speedPoint.speed) : null;
+    const speedSummary = summarizeMovingSpeeds(points);
     return {
       id: Number(rep.id), username: rep.username, fullName: rep.full_name, phone: rep.phone ?? '',
       assignedRegions: parseJson(rep.assigned_regions_json, []).filter((region) => typeof region === 'string'),
@@ -152,7 +179,10 @@ export function getSupervisorRadar(database = defaultDatabase, now = new Date())
       completedToday: approvedByRep.get(Number(rep.id)) ?? 0,
       pendingReview: pendingByRep.get(Number(rep.id)) ?? 0,
       dutyStartedAt: rep.duty_started_at,
-      speedKmh: Number.isFinite(Number(location?.speed)) ? Math.round(Math.max(0, Number(location.speed) * 3.6) * 10) / 10 : null,
+      speedKmh,
+      speedCapturedAt: speedKmh === null ? null : speedPoint.captured_at,
+      averageSpeedKmh: speedSummary.averageKmh,
+      speedSampleCount: speedSummary.sampleCount,
       distanceKm: estimateDistance(points),
       trail,
     };
@@ -190,7 +220,7 @@ export function getSupervisorRepRoute(repIdInput, dateInput, database = defaultD
     WHERE visit.rep_user_id = ? AND datetime(visit.captured_at) >= datetime(?)
       AND datetime(visit.captured_at) < datetime(?)
     ORDER BY datetime(visit.captured_at), visit.id`).all(repId, start, end);
-  const speeds = points.map((point) => Number(point.speed)).filter((speed) => Number.isFinite(speed) && speed > 0);
+  const speedSummary = summarizeMovingSpeeds(points);
   const visitedMachines = visitedRows.map((visit) => {
     const location = parseJson(visit.location_json, {});
     const rawLatitude = location.latitude ?? visit.machine_latitude;
@@ -220,10 +250,7 @@ export function getSupervisorRepRoute(repIdInput, dateInput, database = defaultD
       speed: Number(point.speed),
       recordedAt: point.recorded_at,
     })),
-    speedSummary: {
-      averageKmh: speeds.length ? Math.round(speeds.reduce((sum, speed) => sum + speed, 0) / speeds.length * 36) / 10 : 0,
-      maxKmh: speeds.length ? Math.round(Math.max(...speeds) * 36) / 10 : 0,
-    },
+    speedSummary,
     visitedMachines,
     stops: stopRows.map((stop) => ({
       latitude: Number(stop.latitude),

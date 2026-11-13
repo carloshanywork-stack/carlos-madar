@@ -39,6 +39,9 @@
 #madar-app .radar-route-controls > span { margin-inline-start: auto; padding-bottom: 8px; color: #58717d; font-size: 9px; font-weight: 800; }
 #madar-app .radar-overview-button { min-height: 34px; padding: 0 10px; border: 1px solid #9dcaba; border-radius: 8px; color: #17664f; background: #eff8f3; cursor: pointer; font-size: 9px; font-weight: 900; }
 #madar-app .radar-stops-list { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; padding: 0 15px 12px; color: #566972; font-size: 9px; }
+#madar-app .radar-speed-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 14px; padding: 10px 15px; color: #315466; background: #f0f7fa; font-size: 10px; }
+#madar-app .radar-speed-summary strong { color: #173e57; }
+#madar-app .radar-speed-summary small { color: #647b85; font-size: 8px; }
 #madar-app .radar-stops-list > strong { flex: 0 0 100%; color: #364f60; font-size: 10px; }
 #madar-app .radar-stops-list > span { display: grid; gap: 3px; padding: 7px 9px; border: 1px solid #edd3c6; border-radius: 8px; color: #803d25; background: #fff7f2; }
 #madar-app .radar-stops-list > span small, #madar-app .radar-stops-list > small { color: #6d7375; font-size: 8px; }
@@ -54,6 +57,7 @@
 #madar-app .radar-rep-row > span { display: grid; min-width: 0; flex: 1; gap: 3px; }
 #madar-app .radar-rep-row strong { overflow: hidden; color: #20374b; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 #madar-app .radar-rep-row small { overflow: hidden; color: #6a7880; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+#madar-app .radar-rep-row .radar-rep-speed { color: #23617a; font-weight: 800; }
 #madar-app .radar-rep-row b { color: #385268; font-size: 9px; white-space: nowrap; }
 #madar-app .supervisor-empty-small { padding: 12px; color: #65737a; font-size: 10px; }
 #madar-app .radar-rep-details { padding: 11px; border: 1px solid #e1e8e7; border-radius: 11px; background: #fbfcfc; }

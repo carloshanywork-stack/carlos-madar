@@ -24,6 +24,10 @@ function formatDuration(seconds) {
   return `${Math.floor(minutes / 60) ? `${Math.floor(minutes / 60)} س ` : ''}${minutes % 60} د`;
 }
 
+function formatSpeed(value) {
+  return typeof value === 'number' && Number.isFinite(value) ? `${value.toFixed(1)} كم/س` : 'غير متاحة';
+}
+
 function currentLocalDate() {
   const parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Africa/Cairo', year: 'numeric', month: '2-digit', day: '2-digit',
@@ -340,6 +344,8 @@ export default function SupervisorRadarPage() {
   };
 
   const mapStatus = focusedRep ? STATUS[focusedRep.status] ?? STATUS.offline : null;
+  const visibleRoute = selectedRoute?.representative?.id === selectedRep && selectedRoute?.date === routeDate
+    ? selectedRoute : null;
 
   return (
     <div className="supervisor-page" dir="rtl">
@@ -383,19 +389,24 @@ export default function SupervisorRadarPage() {
             </select></label>
             <label>التاريخ<input type="date" value={routeDate} onChange={(event) => { manuallySelectedRouteDate.current = true; setRouteDate(event.target.value); }} /></label>
             {selectedRep !== null && <button type="button" className="radar-overview-button" onClick={() => setSelectedRep(null)}>العودة إلى كل المندوبين</button>}
-            <span>{selectedRep === null ? `${representatives.length} مندوب · الحالة وآخر إشارة على الخريطة` : routeLoading ? 'جارٍ تحميل كامل نقاط المسار…' : `${selectedRoute?.polyline?.length ?? 0} نقطة مسجلة · ${selectedRoute?.stops?.length ?? 0} توقف · ${selectedRoute?.visitedMachines?.length ?? 0} زيارة`}</span>
+            <span>{selectedRep === null ? `${representatives.length} مندوب · الحالة وآخر إشارة على الخريطة` : routeLoading ? 'جارٍ تحميل كامل نقاط المسار…' : `${visibleRoute?.polyline?.length ?? 0} نقطة مسجلة · ${visibleRoute?.stops?.length ?? 0} توقف · ${visibleRoute?.visitedMachines?.length ?? 0} زيارة`}</span>
           </div>
-          <TrackMap representatives={representatives} selectedId={selectedRep} onSelect={setSelectedRep} selectedRoute={selectedRoute} />
-          {selectedRoute && <div className="radar-stops-list" aria-label="توقفات المندوب المحدد">
-            <strong>التوقفات · {selectedRoute.date}</strong>
-            {selectedRoute.stops.length ? selectedRoute.stops.map((stop, index) => <span key={`${stop.arrivedAt}-${index}`}>
+          <TrackMap representatives={representatives} selectedId={selectedRep} onSelect={setSelectedRep} selectedRoute={visibleRoute} />
+          {visibleRoute && <div className="radar-speed-summary" aria-label="سرعة المندوب في اليوم المختار">
+            <span>متوسط السرعة أثناء الحركة · {visibleRoute.date}: <strong>{formatSpeed(visibleRoute.speedSummary?.averageKmh)}</strong></span>
+            <span>أعلى قراءة: <strong>{formatSpeed(visibleRoute.speedSummary?.maxKmh)}</strong></span>
+            <small>من {visibleRoute.speedSummary?.sampleCount ?? 0} قراءة GPS صالحة أثناء الحركة</small>
+          </div>}
+          {visibleRoute && <div className="radar-stops-list" aria-label="توقفات المندوب المحدد">
+            <strong>التوقفات · {visibleRoute.date}</strong>
+            {visibleRoute.stops.length ? visibleRoute.stops.map((stop, index) => <span key={`${stop.arrivedAt}-${index}`}>
               <b>{stop.name || `توقف ${index + 1}`}</b>
               <small>وصول {formatTime(stop.arrivedAt)} · مغادرة {formatTime(stop.departedAt)} · {stop.durationMinutes} دقيقة</small>
             </span>) : <small>لم تُسجّل توقفات متصلة لأكثر من 5 دقائق في هذا اليوم.</small>}
           </div>}
-          {selectedRoute && <div className="radar-visited-list" aria-label="الماكينات التي زارها المندوب">
-            <strong>الماكينات التي زارها · {selectedRoute.visitedMachines?.length ?? 0}</strong>
-            {selectedRoute.visitedMachines?.length ? selectedRoute.visitedMachines.map((visit, index) => <span key={visit.visitUuid ?? index}>
+          {visibleRoute && <div className="radar-visited-list" aria-label="الماكينات التي زارها المندوب">
+            <strong>الماكينات التي زارها · {visibleRoute.visitedMachines?.length ?? 0}</strong>
+            {visibleRoute.visitedMachines?.length ? visibleRoute.visitedMachines.map((visit, index) => <span key={visit.visitUuid ?? index}>
               <b dir="ltr">{visit.machineCode}</b>
               <small>{visit.machineName || 'ماكينة'} · {visit.regionName} · {formatTime(visit.capturedAt)} · {visit.reviewStatus === 'approved' ? 'معتمدة' : visit.reviewStatus === 'reshoot_requested' ? 'إعادة تصوير' : 'بانتظار المراجعة'}</small>
             </span>) : <small>لا توجد زيارات مسجلة لهذا المندوب في اليوم المحدد.</small>}
@@ -406,7 +417,7 @@ export default function SupervisorRadarPage() {
                 const status = STATUS[rep.status] ?? STATUS.offline;
                 return <button className={`radar-rep-row ${selectedRep === rep.id ? 'selected' : ''}`} key={rep.id} type="button" onClick={() => setSelectedRep(rep.id)}>
                   <i style={{ '--rep-status': status.color }} />
-                  <span><strong>{rep.fullName}</strong><small>{status.label} · {regionAccessLabel(rep.assignedRegions)}</small></span>
+                  <span><strong>{rep.fullName}</strong><small>{status.label} · {regionAccessLabel(rep.assignedRegions)}</small><small className="radar-rep-speed">الآن: {formatSpeed(rep.speedKmh)} · متوسط اليوم: {formatSpeed(rep.averageSpeedKmh)}</small></span>
                   <b>{rep.distanceKm.toFixed(1)} كم</b>
                 </button>;
               })}
@@ -420,11 +431,12 @@ export default function SupervisorRadarPage() {
                 <div><dt>زيارات معتمدة اليوم</dt><dd>{focusedRep.completedToday}</dd></div>
                 <div><dt>بانتظار المراجعة</dt><dd>{focusedRep.pendingReview}</dd></div>
                 <div><dt>المسافة التقديرية</dt><dd>{focusedRep.distanceKm.toFixed(1)} كم</dd></div>
-                <div><dt>السرعة الحالية المسجلة</dt><dd>{focusedRep.speedKmh === null ? 'غير متاحة' : `${focusedRep.speedKmh} كم/س`}</dd></div>
+                <div><dt>السرعة الآن · آخر إشارة حديثة</dt><dd>{formatSpeed(focusedRep.speedKmh)}</dd></div>
+                <div><dt>متوسط السرعة أثناء الحركة اليوم</dt><dd>{formatSpeed(focusedRep.averageSpeedKmh)}</dd></div>
                 <div><dt>آخر إشارة GPS</dt><dd>{formatTime(focusedRep.lastSignal)}</dd></div>
                 <div><dt>بداية الوردية</dt><dd>{formatTime(focusedRep.dutyStartedAt)}</dd></div>
               </dl>
-              <p className="estimate-note">المسافة تقديرية من نقاط GPS ذات دقة مناسبة؛ قد تتأثر بالتغطية أو التلاعب بالجهاز ولا تصلح وحدها لإثبات بدل انتقال.</p>
+              <p className="estimate-note">السرعة الحالية من آخر إشارة GPS خلال دقيقتين ووردية مفتوحة. المتوسط لقراءات الحركة الصالحة فقط، ولا يشمل التوقفات. الأرقام تقديرية وقد تتأثر بالتغطية أو التلاعب بالجهاز ولا تصلح وحدها لإثبات بدل انتقال.</p>
             </aside>}
           </div>
           {loading && <div className="supervisor-loading">جارٍ تحديث بيانات المندوبين…</div>}

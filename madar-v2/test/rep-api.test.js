@@ -1087,8 +1087,8 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   // Fixture captures must lie inside the existing attendance-created duty interval.
   db.prepare('UPDATE rep_duty_sessions SET started_at=?,ended_at=? WHERE rep_user_id=?').run(new Date(now-7200000).toISOString(),new Date(now-3600000).toISOString(),repId);
   const trackPoints = [
-    { clientPointId: 'track-1', latitude: 24.8000, longitude: 46.7000, accuracy: 10, updatedAt: new Date(now - 20000).toISOString() },
-    { clientPointId: 'track-2', latitude: 24.8010, longitude: 46.7010, accuracy: 10, updatedAt: new Date(now - 10000).toISOString() },
+    { clientPointId: 'track-1', latitude: 24.8000, longitude: 46.7000, accuracy: 10, speed: 2, updatedAt: new Date(now - 20000).toISOString() },
+    { clientPointId: 'track-2', latitude: 24.8010, longitude: 46.7010, accuracy: 10, speed: 4, updatedAt: new Date(now - 10000).toISOString() },
   ];
   const eventController = new AbortController();
   const supervisorEventCursor = db.prepare('SELECT COALESCE(MAX(event_id), 0) AS cursor FROM operations_events').get().cursor;
@@ -1238,6 +1238,14 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   assert.equal(nourOnRadar.completedToday, 1);
   assert.equal(nourOnRadar.phone, '+966500000001');
   assert.ok(nourOnRadar.distanceKm > 0);
+  assert.equal(nourOnRadar.speedKmh, 14.4);
+  assert.equal(nourOnRadar.averageSpeedKmh, 10.8);
+  assert.equal(nourOnRadar.speedSampleCount, 2);
+  assert.ok(nourOnRadar.speedCapturedAt);
+  const { getSupervisorRadar } = await import('../server/modules/supervisor/service.js');
+  const staleRadar = getSupervisorRadar(db, new Date(Date.now() + 3 * 60 * 1000));
+  assert.equal(staleRadar.representatives.find((rep) => rep.id === repId).speedKmh, null,
+    'a stale signal must not be presented as the current speed');
   const localDate = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Africa/Cairo', year: 'numeric', month: '2-digit', day: '2-digit',
   }).formatToParts(new Date()).filter((part) => part.type !== 'literal').map(({ type, value }) => [type, value]));
@@ -1246,7 +1254,8 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   assert.equal(repRoute.response.status, 200, JSON.stringify(repRoute.body));
   assert.equal(repRoute.body.date, routeDate);
   assert.ok(repRoute.body.polyline.length >= 3);
-  assert.ok(repRoute.body.speedSummary.averageKmh >= 0);
+  assert.equal(repRoute.body.speedSummary.averageKmh, 10.8);
+  assert.equal(repRoute.body.speedSummary.sampleCount, 2);
   assert.ok(repRoute.body.visitedMachines.length >= 2);
   assert.equal(repRoute.body.visitedMachines[0].machineCode, '1434');
   const stopWorkDate = new Intl.DateTimeFormat('en-CA', {
@@ -1258,6 +1267,8 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   assert.equal(stopRoute.response.status, 200);
   assert.equal(stopRoute.body.stops.length, 1);
   assert.equal(stopRoute.body.stops[0].durationMinutes, 6);
+  assert.equal(stopRoute.body.speedSummary.averageKmh, null, 'stationary readings do not create a moving average');
+  assert.equal(stopRoute.body.speedSummary.sampleCount, 0);
 
   const activeSession = db.prepare('SELECT id FROM rep_duty_sessions WHERE rep_user_id = ? AND ended_at IS NULL').get(repId);
   const finalTrailPoint = {
@@ -1270,6 +1281,8 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   assert.equal(stopTracking.response.status, 200);
   assert.equal(stopTracking.body.onDuty, false);
   assert.equal(stopTracking.body.acceptedPoints, 1);
+  assert.equal(getSupervisorRadar(db).representatives.find((rep) => rep.id === repId).speedKmh, null,
+    'a closed duty session cannot show a current speed');
   assert.ok(db.prepare('SELECT ended_at FROM rep_duty_sessions WHERE id = ?').get(activeSession.id).ended_at);
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM rep_location_points WHERE duty_session_id = ?').get(activeSession.id).count, 4);
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM rep_location_points WHERE duty_session_id=?').get(stopSessionId).count,4);
