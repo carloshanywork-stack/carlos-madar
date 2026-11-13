@@ -3,7 +3,7 @@ import express from 'express';
 import { existsSync, statSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { env } from './config/env.js';
-import { clientDistPath, repApkPath } from './config/paths.js';
+import { clientDistPath, repApkPath, repTransitionApkPath } from './config/paths.js';
 import { errorHandler, notFoundHandler } from './middleware/error-handler.js';
 import { requireAuthentication } from './modules/auth/service.js';
 import authRouter from './modules/auth/routes.js';
@@ -106,6 +106,25 @@ app.get('/download/apk', requireAuthentication, (req, res, next) => {
   });
 });
 
+app.get('/download/apk/debug-transition', requireAuthentication, (req, res, next) => {
+  if (req.user?.role !== 'admin') {
+    res.status(403).json({ error: 'Administrator access is required for the legacy debug transition APK.' });
+    return;
+  }
+  if (!existsSync(repTransitionApkPath)) {
+    res.status(404).json({ error: 'The legacy debug transition APK has not been built on this server.' });
+    return;
+  }
+  res.set({
+    'Cache-Control': 'private, no-store',
+    'X-Content-Type-Options': 'nosniff',
+    'Content-Type': 'application/vnd.android.package-archive',
+  });
+  res.download(repTransitionApkPath, 'madar-rep-debug-transition-2.0.4.apk', (error) => {
+    if (error && !res.headersSent) next(error);
+  });
+});
+
 app.get('/download/apk/status', requireAuthentication, (req, res) => {
   if (!['admin', 'rep'].includes(req.user?.role)) {
     res.status(403).json({ error: 'Administrator or field representative access is required.' });
@@ -121,6 +140,7 @@ app.get('/download/apk/status', requireAuthentication, (req, res) => {
       artifactType,
       sizeBytes: metadata.size,
       modifiedAt: metadata.mtime.toISOString(),
+      ...(req.user?.role === 'admin' ? { transitionAvailable: existsSync(repTransitionApkPath) } : {}),
     });
   } catch (error) {
     if (error.code !== 'ENOENT' && error.code !== 'ENOTDIR') {
@@ -132,6 +152,7 @@ app.get('/download/apk/status', requireAuthentication, (req, res) => {
       artifactType: 'missing',
       sizeBytes: null,
       modifiedAt: null,
+      ...(req.user?.role === 'admin' ? { transitionAvailable: existsSync(repTransitionApkPath) } : {}),
     });
   }
 });

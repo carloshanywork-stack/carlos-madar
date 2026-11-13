@@ -83,6 +83,7 @@ export const env = Object.freeze({
   googleMapsApiKey: process.env.GOOGLE_MAPS_API_KEY?.trim()
     || process.env.VITE_GOOGLE_MAPS_API_KEY?.trim() || '',
   repApkPath: process.env.MADAR_REP_APK_PATH?.trim() || undefined,
+  repTransitionApkPath: process.env.MADAR_REP_TRANSITION_APK_PATH?.trim() || undefined,
   initialAdminPassword: process.env.MADAR_INITIAL_ADMIN_PASSWORD ?? '',
   jwtSecret,
   authCookieName: 'madar_token',

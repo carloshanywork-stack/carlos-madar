@@ -11,6 +11,7 @@ process.env.MADAR_V2_DATABASE_PATH = join(temporaryDirectory, 'rep.sqlite');
 process.env.MADAR_V2_STORAGE_ROOT = join(temporaryDirectory, 'storage');
 process.env.MADAR_V2_OFFLINE_MAP_PATH = join(temporaryDirectory, 'local-map.mbtiles');
 process.env.MADAR_REP_APK_PATH = join(temporaryDirectory, 'madar-rep.apk');
+process.env.MADAR_REP_TRANSITION_APK_PATH = join(temporaryDirectory, 'madar-rep-transition.apk');
 process.env.REP_ATTENDANCE_MAX_OFFLINE_AGE_HOURS = '24';
 process.env.STORAGE_MOUNT_PATH = '';
 process.env.NODE_ENV = 'test';
@@ -58,6 +59,7 @@ tileDatabase.prepare('INSERT INTO tiles (zoom_level, tile_column, tile_row, tile
 tileDatabase.prepare('INSERT INTO tiles (zoom_level, tile_column, tile_row, tile_data) VALUES (8, 150, 150, ?)')
   .run(Buffer.from('cairo-raster-tile'));
 writeFileSync(process.env.MADAR_REP_APK_PATH, Buffer.from('synthetic-debug-apk'));
+writeFileSync(process.env.MADAR_REP_TRANSITION_APK_PATH, Buffer.from('synthetic-transition-apk'));
 const server = app.listen(0, '127.0.0.1');
 await new Promise((resolve, reject) => {
   server.once('listening', resolve);
@@ -232,6 +234,8 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   assert.equal(anonymousApk.response.status, 401);
   const anonymousApkStatus = await request('/download/apk/status');
   assert.equal(anonymousApkStatus.response.status, 401);
+  const anonymousTransition = await request('/download/apk/debug-transition');
+  assert.equal(anonymousTransition.response.status, 401);
 
   const setup = await request('/api/auth/setup', jsonOptions('POST', {
     username: 'root-admin',
@@ -248,6 +252,7 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
     artifactType: 'fallback',
     sizeBytes: Buffer.byteLength('synthetic-debug-apk'),
     modifiedAt: adminApkStatus.body.modifiedAt,
+    transitionAvailable: true,
   });
   assert.ok(Number.isFinite(Date.parse(adminApkStatus.body.modifiedAt)));
   const mapStatus = await request('/api/supervisor/map/status', {}, adminCookie);
@@ -272,6 +277,11 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   assert.match(adminApkDownload.headers.get('content-type'), /application\/vnd\.android\.package-archive/);
   assert.match(adminApkDownload.headers.get('content-disposition'), /madar-rep\.apk/);
   assert.equal(Buffer.from(await adminApkDownload.arrayBuffer()).toString(), 'synthetic-debug-apk');
+  const adminTransition = await fetch(`${baseUrl}/download/apk/debug-transition`, { headers: { cookie: adminCookie } });
+  assert.equal(adminTransition.status, 200);
+  assert.match(adminTransition.headers.get('content-type'), /application\/vnd\.android\.package-archive/);
+  assert.match(adminTransition.headers.get('content-disposition'), /madar-rep-debug-transition-2\.0\.4\.apk/);
+  assert.equal(Buffer.from(await adminTransition.arrayBuffer()).toString(), 'synthetic-transition-apk');
 
   const createRep = await request('/api/users', jsonOptions('POST', {
     username: 'rep-nour',
@@ -589,6 +599,9 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   const repApkStatus = await request('/download/apk/status', {}, login.cookie);
   assert.equal(repApkStatus.response.status, 200);
   assert.equal(repApkStatus.body.artifactType, 'fallback');
+  assert.equal(repApkStatus.body.transitionAvailable, undefined);
+  const repTransition = await request('/download/apk/debug-transition', {}, login.cookie);
+  assert.equal(repTransition.response.status, 403);
   const repApkDownload = await fetch(`${baseUrl}/download/apk`, { headers: { cookie: login.cookie } });
   assert.equal(repApkDownload.status, 200);
   assert.equal(Buffer.from(await repApkDownload.arrayBuffer()).toString(), 'synthetic-debug-apk');

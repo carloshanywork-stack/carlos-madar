@@ -31,6 +31,7 @@ export const repApkPath = resolve(
         ? 'madar-rep.apk'
         : 'madar-rep-release.apk')
 );
+export const repTransitionApkPath = resolve(projectRoot, env.repTransitionApkPath ?? 'madar-rep-transition.apk');
 
 function assertExistingPathIsSafe(path, { mountPath, mountDevice, type, label }) {
   const relativePath = relative(mountPath, path);

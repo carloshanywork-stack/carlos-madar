@@ -211,6 +211,10 @@ export default function SettingsPage() {
                 <Badge tone={apkStatus.artifactType === 'release' ? 'success' : 'warning'}>{apkStatus.artifactType === 'release' ? 'إصدار' : 'تجريبية'}</Badge>
               </div>}
               {apkStatus.available && <a className="madar-button madar-button-primary" href="/download/apk" aria-label="تنزيل تطبيق المندوب APK"><Icon name="download" size={15} /><span>تنزيل APK المندوب</span></a>}
+              {apkStatus.transitionAvailable && <>
+                <Alert tone="warning">للهواتف التي تستخدم إصدار Debug القديم 2.0.2 (رقم 4) فقط: نزّل حزمة الانتقال 2.0.4 (رقم 6) وثبّتها فوق التطبيق الحالي بعد حفظ العمل المعلّق. هذه حزمة Debug وليست إصدار الإنتاج الرسمي؛ لا تحذف التطبيق القديم قبل التأكد من حفظ بياناته.</Alert>
+                <a className="madar-button madar-button-secondary" href="/download/apk/debug-transition" aria-label="تنزيل حزمة انتقال Debug للهواتف القديمة"><Icon name="download" size={15} /><span>تنزيل حزمة الانتقال للهواتف القديمة</span></a>
+              </>}
             </>}
           </div>
         </section>
