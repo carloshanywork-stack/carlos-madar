@@ -50,7 +50,7 @@ public final class RepCameraSequenceActivity extends Activity {
     public static final String EXTRA_MAX_PHOTOS = "maxPhotos";
     public static final String EXTRA_PHASE_LABEL = "phaseLabel";
     public static final String EXTRA_PHOTOS = "photosJson";
-    private final ArrayList<String> photos = new ArrayList<>();
+    private final ArrayList<JSONObject> photos = new ArrayList<>();
     private TextureView preview;
     private TextView counter;
     private Button captureButton;
@@ -228,7 +228,7 @@ public final class RepCameraSequenceActivity extends Activity {
             item.put("sourceUri", android.net.Uri.fromFile(output).toString());
             item.put("capturedAt", captureTimestamp);
             item.put("location", captureLocation == null ? JSONObject.NULL : captureLocation);
-            photos.add(item.toString());
+            photos.add(item);
             temporaryFiles.add(output);
             runOnUiThread(() -> {
                 captureInFlight = false;
@@ -267,7 +267,9 @@ public final class RepCameraSequenceActivity extends Activity {
     private void finishWithPhotos() {
         if (photos.isEmpty()) return;
         Intent result = new Intent();
-        result.putExtra(EXTRA_PHOTOS, new JSONArray(photos).toString());
+        JSONArray resultPhotos = new JSONArray();
+        for (JSONObject photo : photos) resultPhotos.put(photo);
+        result.putExtra(EXTRA_PHOTOS, resultPhotos.toString());
         completed = true;
         setResult(RESULT_OK, result);
         finish();

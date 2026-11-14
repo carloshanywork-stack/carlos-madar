@@ -12,6 +12,7 @@ import {
   listPendingVisits,
 } from './offline-store.js';
 import { isNativeRepApp, RepEngine } from './native-session.js';
+import { normalizeNativeVisitPhotoResults } from './camera-photo-results.js';
 import { canonicalJson, REP_RECOVERY_PACKAGE_TYPE, REP_RECOVERY_SCHEMA_VERSION, sha256Hex, sha256Json, validateRepRecoveryPackage } from './queue-recovery.js';
 
 const PENDING_ROOT = 'Pending';
@@ -58,15 +59,7 @@ export async function captureNativeCameraPhotos({ maxPhotos = 3, phaseLabel = '�
   const archive = await getNativePhotoArchiveStatus();
   if (!archive?.configured) await chooseNativePhotoArchiveFolder();
   const result = await RepEngine.captureVisitPhotos({ maxPhotos, phaseLabel });
-  if (!Array.isArray(result?.photos) || !result.photos.length) throw new Error('لم تُرجع الكاميرا صوراً صالحة.');
-  return result.photos.map((photo) => ({
-    sourceUri: photo.sourceUri,
-    capturedAt: photo.capturedAt,
-    location: photo.location && Number.isFinite(photo.location.latitude)
-      && Number.isFinite(photo.location.longitude) && Number.isFinite(photo.location.accuracy)
-      && typeof photo.location.updatedAt === 'string'
-      ? photo.location : null,
-  })).filter((photo) => typeof photo.sourceUri === 'string' && photo.sourceUri.length > 0);
+  return normalizeNativeVisitPhotoResults(result);
 }
 
 export async function getNativePermissionState() {

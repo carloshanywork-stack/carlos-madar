@@ -157,6 +157,14 @@ test('native rep gate, private SQLite queue, and WorkManager upload contract are
   assert.match(cameraSequence, /capture\(request\.build\(\)/);
   assert.match(cameraSequence, /0 \/ " \+ maxPhotos/);
   assert.match(cameraSequence, /stream\.getFD\(\)\.sync\(\)/);
+  assert.match(cameraSequence, /ArrayList<JSONObject> photos/);
+  assert.match(cameraSequence, /photos\.add\(item\)/);
+  assert.match(cameraSequence, /for \(JSONObject photo : photos\) resultPhotos\.put\(photo\)/);
+  assert.doesNotMatch(cameraSequence, /photos\.add\(item\.toString\(\)\)/,
+    'native camera results must remain JSON objects through the activity result');
+  assert.match(nativeBridges, /normalizeNativeVisitPhotoResults\(result\)/);
+  assert.doesNotMatch(nativeBridges.match(/export async function captureNativeCameraPhotos\([\s\S]*?\n\}/)?.[0] ?? '', /\.filter\(/,
+    'malformed camera results must be rejected visibly, not silently filtered');
   assert.match(manifest, /android:name="\.RepCameraSequenceActivity"[\s\S]*?android:exported="false"/);
   assert.match(watermarkRenderer, /getAssets\(\)\.open\("public\/icon-192\.png"\)/);
   assert.match(photoProcessor, /RepGovernorateResolver\.resolve\(getContext\(\), location\)/);
