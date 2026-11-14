@@ -16,7 +16,7 @@ test('verified new full backup replaces old; failed creation preserves last good
  const a=await backup.createSystemBackup();assert.equal(a.verification.crcVerified,true);
  await new Promise(resolve=>setTimeout(resolve,5));const b=await backup.createSystemBackup();
  assert.equal(b.retention.removedBackups,1);assert.deepEqual((await backup.listSystemBackups()).map(x=>x.filename),[b.filename]);
- await symlink('/does-not-exist',join(root,'storage','forbidden-link'));
+ await symlink(join(root,'does-not-exist'),join(root,'storage','forbidden-link'),process.platform==='win32'?'junction':'dir');
  await assert.rejects(backup.createSystemBackup(),/symbolic links/);
  assert.equal((await backup.listSystemBackups())[0].filename,b.filename);await rm(join(root,'storage','forbidden-link'));
  const original=await readFile(join(root,'backups',b.filename));const corrupt=Buffer.from(original);

@@ -367,6 +367,9 @@ async function replaceDatabaseFromSnapshot(snapshotPath, actorId, restoreTimesta
 const restoreJournalPath = join(dataDirectory, '.restore-in-progress.json');
 
 async function syncDirectory(directory) {
+  // Node does not support directory fsync on Windows. File contents are
+  // flushed separately before rename; POSIX also flushes directory metadata.
+  if (process.platform === 'win32') return;
   const handle = await open(directory, 'r');
   try { await handle.sync(); } finally { await handle.close(); }
 }
@@ -681,7 +684,7 @@ export async function createSystemBackup(database = db) {
       await archive.finalize();
       await done;
       const verification = await verifyBackupArchive(temporaryOutput);
-      const handle = await open(temporaryOutput, 'r');
+      const handle = await open(temporaryOutput, 'r+');
       try { await handle.sync(); } finally { await handle.close(); }
       await rename(temporaryOutput, outputPath);
       await syncDirectory(backupRoot);

@@ -14,7 +14,7 @@ const temporaryDirectory = mkdtempSync(join(tmpdir(), 'madar-v2-parity-'));
 const storageRoot = join(temporaryDirectory, 'storage');
 const storageDrive = join(temporaryDirectory, 'drive-d');
 mkdirSync(storageDrive, { recursive: true });
-symlinkSync(storageDrive, storageRoot);
+symlinkSync(storageDrive, storageRoot, process.platform === 'win32' ? 'junction' : 'dir');
 process.env.MADAR_V2_DATABASE_PATH = join(temporaryDirectory, 'data', 'parity.sqlite');
 process.env.MADAR_V2_DATA_DIR = join(temporaryDirectory, 'data');
 process.env.MADAR_V2_STORAGE_ROOT = storageRoot;

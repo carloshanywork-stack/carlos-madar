@@ -133,9 +133,14 @@ export function publishOperationsEvent(type, details = {}, database = db) {
       const root=outboxPath(database);mkdirSync(root,{recursive:true,mode:0o700});
       const filename=join(root,`${Date.now()}-${publication.key}.json`);const temporary=filename+'.tmp';
       writeFileSync(temporary,JSON.stringify(publication),{flag:'wx',mode:0o600});
-      const fd=openSync(temporary,'r');try {fsyncSync(fd);}finally{closeSync(fd);}
+      // Windows requires a writable handle for FlushFileBuffers/fsync.
+      const fd=openSync(temporary,'r+');try {fsyncSync(fd);}finally{closeSync(fd);}
       renameSync(temporary,filename);
-      const directory=openSync(root,'r');try {fsyncSync(directory);}finally{closeSync(directory);}
+      // Node cannot flush directory handles on Windows. Keep the file flush
+      // and atomic rename there; POSIX also persists the directory entry.
+      if (process.platform !== 'win32') {
+        const directory=openSync(root,'r');try {fsyncSync(directory);}finally{closeSync(directory);}
+      }
     } catch(outboxError) {console.error('ALERT: operations event persistence and outbox failed; reconcile authoritative state:',outboxError.message);}
     console.error('Operations publication deferred; clients must reconcile:',error.message);
     // A reconciliation control frame has no durable cursor. Never advance a client to an invented ID.
