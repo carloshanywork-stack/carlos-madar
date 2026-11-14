@@ -10,6 +10,7 @@ android/app/build/
 madar-rep.apk
 madar-rep-release.apk
 madar-rep-transition.apk
+madar-rep*.apk.manifest.json
 .madar-rep-*.apk.tmp
 android/capacitor-cordova-android-plugins/build/
 android/.idea/
