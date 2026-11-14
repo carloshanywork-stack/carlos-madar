@@ -1,7 +1,10 @@
 import { runtimeIdentity } from './config/runtime-identity.js';
 import cors from 'cors';
 import express from 'express';
-import { existsSync, statSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import {
+  closeSync, constants as fsConstants, createReadStream, fstatSync, lstatSync, openSync, readFileSync, existsSync,
+} from 'node:fs';
 import { basename, join } from 'node:path';
 import { env } from './config/env.js';
 import { clientDistPath, repApkPath, repTransitionApkPath } from './config/paths.js';
@@ -89,22 +92,99 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', service: 'madar-v2', ...runtimeIdentity });
 });
 
+function openRegularFileNoFollow(path) {
+  const before = lstatSync(path);
+  if (before.isSymbolicLink() || !before.isFile()) throw Object.assign(new Error('Artifact is not a regular file.'), { code: 'EUNSAFEPATH' });
+  const noFollow = fsConstants.O_NOFOLLOW ?? 0;
+  const descriptor = openSync(path, fsConstants.O_RDONLY | noFollow);
+  try {
+    const opened = fstatSync(descriptor);
+    if (!opened.isFile() || (!noFollow && (opened.dev !== before.dev || opened.ino !== before.ino))) {
+      throw Object.assign(new Error('Artifact changed while it was opened.'), { code: 'EUNSAFEPATH' });
+    }
+    return { descriptor, metadata: opened };
+  } catch (error) {
+    closeSync(descriptor);
+    throw error;
+  }
+}
+
+function readVerifiedApkMetadata(apkPath, apkDescriptor, { required = false } = {}) {
+  const manifestPath = `${apkPath}.manifest.json`;
+  let manifestDescriptor;
+  try {
+    ({ descriptor: manifestDescriptor } = openRegularFileNoFollow(manifestPath));
+  } catch (error) {
+    if (error.code === 'ENOENT' || error.code === 'ENOTDIR') {
+      if (!required) return null;
+      throw Object.assign(new Error('The release APK has no matching build metadata.'), { code: 'EAPKMETADATA' });
+    }
+    throw error;
+  }
+  let manifest;
+  try { manifest = JSON.parse(readFileSync(manifestDescriptor, 'utf8')); }
+  finally { closeSync(manifestDescriptor); }
+  const apkBytes = readFileSync(apkDescriptor);
+  const apkSha256 = createHash('sha256').update(apkBytes).digest('hex');
+  if (!['release', 'debug'].includes(manifest?.buildType)
+      || (required && (manifest.buildType !== 'release' || manifest.sourceTreeDirty !== false))
+      || !Number.isSafeInteger(manifest?.versionCode) || manifest.versionCode < 1
+      || typeof manifest.versionName !== 'string' || !manifest.versionName.trim() || manifest.versionName.length > 40
+      || !/^([0-9a-f]{40}|[0-9a-f]{64})$/i.test(manifest.sourceRevision ?? '')
+      || !Number.isFinite(Date.parse(manifest.builtAt ?? ''))
+      || !/^[0-9a-f]{64}$/i.test(manifest.apkSha256 ?? '') || manifest.apkSha256.toLowerCase() !== apkSha256
+      || !/^[0-9a-f]{64}$/i.test(manifest.signerCertificateSha256 ?? '')) {
+    throw Object.assign(new Error('The release APK metadata does not match a verified clean release artifact.'), { code: 'EAPKMETADATA' });
+  }
+  return {
+    sourceRevision: manifest.sourceRevision,
+    sourceTreeDirty: false,
+    builtAt: manifest.builtAt,
+    versionName: manifest.versionName,
+    versionCode: manifest.versionCode,
+    buildType: manifest.buildType,
+    apkSha256,
+    signerCertificateSha256: manifest.signerCertificateSha256.toLowerCase(),
+  };
+}
+
+function downloadApkArtifact(req, res, next, path, downloadName, { release = false } = {}) {
+  let descriptor;
+  try {
+    ({ descriptor } = openRegularFileNoFollow(path));
+    if (release) readVerifiedApkMetadata(path, descriptor, { required: true });
+  } catch (error) {
+    if (descriptor !== undefined) closeSync(descriptor);
+    if (['ENOENT', 'ENOTDIR', 'ELOOP', 'EUNSAFEPATH', 'EAPKMETADATA'].includes(error.code)) {
+      res.status(error.code === 'EAPKMETADATA' ? 503 : 404).json({ error: 'The selected APK artifact is unavailable or failed its integrity checks.' });
+      return;
+    }
+    next(error);
+    return;
+  }
+  const metadata = fstatSync(descriptor);
+  res.set({
+    'Cache-Control': 'private, no-store',
+    'X-Content-Type-Options': 'nosniff',
+    'Content-Type': 'application/vnd.android.package-archive',
+    'Content-Length': String(metadata.size),
+  });
+  res.attachment(downloadName);
+  const stream = createReadStream(path, { fd: descriptor, autoClose: true, start: 0 });
+  stream.on('error', (error) => {
+    if (res.headersSent) res.destroy(error);
+    else next(error);
+  });
+  stream.pipe(res);
+}
+
 app.get('/download/apk', requireAuthentication, (req, res, next) => {
   if (!['admin', 'rep'].includes(req.user?.role)) {
     res.status(403).json({ error: 'Administrator or field representative access is required.' });
     return;
   }
-  if (!existsSync(repApkPath)) {
-    res.status(404).json({ error: 'The representative APK has not been built on this server.' });
-    return;
-  }
-  res.set({
-    'Cache-Control': 'private, no-store',
-    'X-Content-Type-Options': 'nosniff',
-    'Content-Type': 'application/vnd.android.package-archive',
-  });
-  res.download(repApkPath, 'madar-rep.apk', (error) => {
-    if (error && !res.headersSent) next(error);
+  downloadApkArtifact(req, res, next, repApkPath, 'madar-rep.apk', {
+    release: basename(repApkPath) === 'madar-rep-release.apk',
   });
 });
 
@@ -113,18 +193,7 @@ app.get('/download/apk/debug-transition', requireAuthentication, (req, res, next
     res.status(403).json({ error: 'Administrator access is required for the legacy debug transition APK.' });
     return;
   }
-  if (!existsSync(repTransitionApkPath)) {
-    res.status(404).json({ error: 'The legacy debug transition APK has not been built on this server.' });
-    return;
-  }
-  res.set({
-    'Cache-Control': 'private, no-store',
-    'X-Content-Type-Options': 'nosniff',
-    'Content-Type': 'application/vnd.android.package-archive',
-  });
-  res.download(repTransitionApkPath, 'madar-rep-debug-transition.apk', (error) => {
-    if (error && !res.headersSent) next(error);
-  });
+  downloadApkArtifact(req, res, next, repTransitionApkPath, 'madar-rep-debug-transition.apk');
 });
 
 app.get('/download/apk/status', requireAuthentication, (req, res) => {
@@ -134,14 +203,20 @@ app.get('/download/apk/status', requireAuthentication, (req, res) => {
   }
 
   try {
-    const metadata = statSync(repApkPath);
-    if (!metadata.isFile()) throw new Error('APK artifact is not a regular file.');
+    const { descriptor, metadata } = openRegularFileNoFollow(repApkPath);
+    let releaseMetadata = null;
+    try {
+      releaseMetadata = readVerifiedApkMetadata(repApkPath, descriptor, {
+        required: basename(repApkPath) === 'madar-rep-release.apk',
+      });
+    } finally { closeSync(descriptor); }
     const artifactType = basename(repApkPath) === 'madar-rep-release.apk' ? 'release' : 'fallback';
     res.set('Cache-Control', 'private, no-store').json({
       available: true,
       artifactType,
       sizeBytes: metadata.size,
       modifiedAt: metadata.mtime.toISOString(),
+      ...(releaseMetadata ? { releaseMetadata } : {}),
       ...(req.user?.role === 'admin' ? { transitionAvailable: existsSync(repTransitionApkPath) } : {}),
     });
   } catch (error) {

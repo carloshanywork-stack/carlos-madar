@@ -53,6 +53,7 @@ test('native rep gate, private SQLite queue, and WorkManager upload contract are
   const activity = read('android/app/src/main/java/com/madar/rep/app/MainActivity.java');
   const engine = read('android/app/src/main/java/com/madar/rep/app/RepNativeEnginePlugin.java');
   const cameraSequence = read('android/app/src/main/java/com/madar/rep/app/RepCameraSequenceActivity.java');
+  const locationPlugin = read('android/app/src/main/java/com/madar/rep/app/RepLocationPlugin.java');
   const store = read('android/app/src/main/java/com/madar/rep/app/RepLocalStore.java');
   const worker = read('android/app/src/main/java/com/madar/rep/app/MadarSyncWorker.java');
   const scheduler = read('android/app/src/main/java/com/madar/rep/app/MadarSyncScheduler.java');
@@ -156,6 +157,9 @@ test('native rep gate, private SQLite queue, and WorkManager upload contract are
   assert.match(store, /markStagedVisitPhotoProcessed/);
   assert.match(engine, /listStagedVisitPhotos/);
   assert.match(cameraSequence, /visit-camera-captures/);
+  assert.match(cameraSequence, /RepLocationPlugin\.isMockLocation\(best\)/,
+    'camera GPS freshness checks must use the API-level-safe mock-location guard');
+  assert.match(locationPlugin, /SDK_INT >= Build\.VERSION_CODES\.S\) return location\.isMock\(\);[\s\S]*?location\.isFromMockProvider\(\)/);
   assert.match(engine, /startActivityForResult\(call, intent, "visitPhotosCaptured"\)/);
   assert.match(cameraSequence, /createCaptureSession/);
   assert.match(cameraSequence, /capture\(request\.build\(\)/);

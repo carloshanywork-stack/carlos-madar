@@ -207,7 +207,7 @@ export default function SettingsPage() {
             {apkStatusLoading && !apkStatus ? <LoadingState label="جارٍ فحص ملف APK" /> : apkStatus && <>
               {!apkStatus.available ? <Alert tone="warning">لا يوجد APK متاح على الخادم حالياً. بعد بناء الإصدار الجديد سيظهر زر التنزيل هنا.</Alert> : <div className="madar-health-row">
                 <span className="madar-health-pulse" />
-                <div><strong>{apkStatus.artifactType === 'release' ? 'إصدار موقّع جاهز' : 'نسخة تجريبية / بانتظار بناء الإصدار الجديد'}</strong><small>{fileSize(apkStatus.sizeBytes)} · آخر تحديث {String(apkStatus.modifiedAt).replace('T', ' ').slice(0, 19)}</small></div>
+                <div><strong>{apkStatus.artifactType === 'release' ? 'إصدار موقّع جاهز' : 'نسخة تجريبية / بانتظار بناء الإصدار الجديد'}</strong><small>{apkStatus.releaseMetadata ? `الإصدار ${apkStatus.releaseMetadata.versionName} (${apkStatus.releaseMetadata.versionCode}) · SHA-256 ${apkStatus.releaseMetadata.apkSha256.slice(0, 16)}… · ` : ''}{fileSize(apkStatus.sizeBytes)} · آخر تحديث {String(apkStatus.modifiedAt).replace('T', ' ').slice(0, 19)}</small></div>
                 <Badge tone={apkStatus.artifactType === 'release' ? 'success' : 'warning'}>{apkStatus.artifactType === 'release' ? 'إصدار' : 'تجريبية'}</Badge>
               </div>}
               {apkStatus.available && <a className="madar-button madar-button-primary" href="/download/apk" aria-label="تنزيل تطبيق المندوب APK"><Icon name="download" size={15} /><span>تنزيل APK المندوب</span></a>}

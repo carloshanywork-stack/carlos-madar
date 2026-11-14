@@ -269,7 +269,7 @@ public final class RepCameraSequenceActivity extends Activity {
             }
             long now = System.currentTimeMillis();
             if (best != null) {
-                if (best.isMock()) return null;
+                if (RepLocationPlugin.isMockLocation(best)) return null;
                 long age = now - best.getTime();
                 if (age >= -30_000L && age <= 2 * 60_000L && best.hasAccuracy() && best.getAccuracy() <= 100f) {
                     JSONObject result = new JSONObject();

@@ -1,3 +1,4 @@
+import { usableNativeGpsSnapshot } from './native-gps-state.js';
 import { getNativePhotoArchiveStatus, chooseNativePhotoArchiveFolder } from './native-bridges.js';
 import { subscribeNativeOperations } from './native-bridges.js';
 import { lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -565,6 +566,7 @@ const routeRef = useRef(null);
       try {
         const state = await getNativeGpsAvailability();
         if (!active) return;
+        if (typeof state?.enabled === 'boolean') setNativeGpsEnabled(state.enabled);
         if (state && !state.enabled) {
           setGps(null);
           setGpsError('GPS مغلق على الهاتف؛ فعّله من الإعدادات قبل تسجيل الحضور أو التصوير.');
@@ -574,7 +576,7 @@ const routeRef = useRef(null);
       } catch { /* The capture path reports a concrete native error. */ }
     };
     void check();
-    const timer = window.setInterval(check, 10000);
+    const timer = window.setInterval(check, 5000);
     document.addEventListener('visibilitychange', check);
     return () => { active = false; window.clearInterval(timer); document.removeEventListener('visibilitychange', check); };
   }, [nativeApp]);
@@ -1083,15 +1085,9 @@ const loadLocalSnapshots = useCallback(async () => {
     let active = true;
     void getNativeDutyTrackingState().then((state) => {
       if (!active) return;
-      if (state.lastLocation && !state.mocked) {
-        setGps({
-          latitude: state.lastLocation.latitude,
-          longitude: state.lastLocation.longitude,
-          accuracy: state.lastLocation.accuracy,
-          updatedAt: new Date(state.lastLocation.timestamp).toISOString(),
-        });
-      }
-      if (state.active && state.gpsEnabled === false) setGpsError('فعّل GPS بالأقمار الصناعية لاستئناف تتبع الوردية.');
+      const restoredLocation = usableNativeGpsSnapshot(state);
+      if (restoredLocation) setGps(restoredLocation);
+      if (state.gpsEnabled === false) { setGps(null); setNativeGpsEnabled(false); }
       if (state.mocked) {
         setGps(null);
         setOnDuty(false);
@@ -1166,25 +1162,20 @@ const loadLocalSnapshots = useCallback(async () => {
       const readNativePosition = async () => {
         try {
           const availability = await getNativeGpsAvailability();
+          if (typeof availability?.enabled === 'boolean') setNativeGpsEnabled(availability.enabled);
           if (availability && !availability.enabled) throw new Error('GPS مغلق على الهاتف؛ فعّله من الإعدادات.');
           let location;
           if (onDuty) {
             const state = await getNativeDutyTrackingState();
             if (state.mocked) throw new Error('تم رصد تطبيق لتزييف الموقع، يرجى إغلاقه للمتابعة.');
-            const lastLocation = state.lastLocation;
-            if (lastLocation) {
-              const timestamp = Number(lastLocation.timestamp);
-              location = {
-                latitude: lastLocation.latitude,
-                longitude: lastLocation.longitude,
-                accuracy: lastLocation.accuracy,
-                speed: lastLocation.speed ?? 0,
-                updatedAt: new Date(Number.isFinite(timestamp) ? timestamp : Date.now()).toISOString(),
-              };
-            }
+            if (state.gpsEnabled === false) { setNativeGpsEnabled(false); throw new Error('GPS مغلق على الهاتف؛ فعّله من الإعدادات.'); }
+            location = usableNativeGpsSnapshot(state);
           }
           location ??= await getNativeGpsLocation();
+          const currentAvailability = await getNativeGpsAvailability();
           if (!active) return;
+          if (typeof currentAvailability?.enabled === 'boolean') setNativeGpsEnabled(currentAvailability.enabled);
+          if (currentAvailability?.enabled === false) throw new Error('GPS مغلق على الهاتف؛ فعّله من الإعدادات.');
           const displacementMeters = distanceBetweenGpsPointsMeters(previousLocation, location);
           const speedMetersPerSecond = Number(location.speed) || 0;
           const moving = speedMetersPerSecond > GPS_POLLING.movementSpeedMetersPerSecond
@@ -1529,8 +1520,9 @@ let canDrainVisits = true;
           setGpsError('تم رصد تطبيق لتزييف الموقع، يرجى إغلاقه للمتابعة.');
           setToast('تم إيقاف تتبع الوردية بعد رصد موقع مزيف.');
           void syncTracking({ duty: false, location: null });
-        } else if (state.active && state.gpsEnabled === false) {
-          setGpsError('فعّل GPS بالأقمار الصناعية لاستئناف تتبع الوردية.');
+        } else if (state.gpsEnabled === false) {
+          setGps(null);
+          setNativeGpsEnabled(false);
         }
       }).catch(() => undefined);
       void checkServer().then((reachable) => {

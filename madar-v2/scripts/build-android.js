@@ -36,6 +36,12 @@ process.env.MADAR_REP_LIVE_RELOAD = liveReloadBuild ? 'true' : 'false';
 // Android's bundled service-worker cache key must be reproducible for a version.
 process.env.MADAR_BUILD_VERSION = `${versionName}-${versionCode}`;
 
+const sourceRevision = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: projectRoot, encoding: 'utf8' }).trim();
+const sourceTreeDirty = Boolean(execFileSync('git', ['status', '--porcelain', '--untracked-files=normal'], { cwd: projectRoot, encoding: 'utf8' }).trim());
+if (releaseBuild && sourceTreeDirty) {
+  throw new Error('Release APKs must be built from a clean, committed source tree. Preserve local edits and build from a clean checkout.');
+}
+
 function run(command, args, options = {}) {
   console.log(`> ${command} ${args.join(' ')}`);
   execFileSync(command, args, {
@@ -109,6 +115,18 @@ if (!syncOnly) {
   run(java, ['-classpath', gradleWrapperJar, 'org.gradle.wrapper.GradleWrapperMain', task, '--no-daemon', '--max-workers=1', '-Dorg.gradle.jvmargs=-Xmx1024m'], { cwd: androidDirectory });
   const builtApk = resolve(projectRoot, `android/app/build/outputs/apk/${buildType}/app-${buildType}.apk`);
   if (!existsSync(builtApk)) throw new Error(`Gradle reported success but the APK is missing: ${builtApk}`);
+  const androidSdk = process.env.ANDROID_HOME || process.env.ANDROID_SDK_ROOT;
+  const buildTools = readdirSync(join(androidSdk, 'build-tools')).filter((version) => /^36\./.test(version)).sort().at(-1);
+  const apksigner = join(androidSdk, 'build-tools', buildTools, isWindows ? 'apksigner.bat' : 'apksigner');
+  if (!existsSync(apksigner)) throw new Error('Android Build Tools apksigner was not found; refusing to publish an unverifiable APK.');
+  const signatureReport = execFileSync(apksigner, ['verify', '--verbose', '--print-certs', builtApk], {
+    encoding: 'utf8',
+    shell: isWindows,
+  });
+  const certificateMatch = signatureReport.match(/Signer #1 certificate SHA-256 digest:\s*([0-9a-f:]{64,95})/i);
+  if (!certificateMatch) throw new Error('The APK has no verifiable signing certificate; refusing to publish it.');
+  const signerCertificateSha256 = certificateMatch[1].replaceAll(':', '').toLowerCase();
+  if (!/^[0-9a-f]{64}$/.test(signerCertificateSha256)) throw new Error('The APK signing-certificate fingerprint is malformed.');
   const publishedApk = resolve(projectRoot, releaseBuild ? 'madar-rep-release.apk' : 'madar-rep.apk');
   const temporaryApk = resolve(projectRoot, `${releaseBuild ? '.madar-rep-release' : '.madar-rep'}-${process.pid}.apk.tmp`);
   if (!artifactOnly) try {
@@ -119,13 +137,22 @@ if (!syncOnly) {
   }
   console.log(`${releaseBuild ? 'Release' : 'Debug'} APK: ${builtApk}`);
   if (!artifactOnly) console.log(`Published APK: ${publishedApk}`);
-  const sourceRevision = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: projectRoot, encoding: 'utf8' }).trim();
-  const sourceTreeDirty = Boolean(execFileSync('git', ['status', '--porcelain', '--untracked-files=normal'], { cwd: projectRoot, encoding: 'utf8' }).trim());
   const manifest = {
     sourceRevision, sourceTreeDirty, builtAt: new Date().toISOString(), versionCode, versionName,
     buildType, serverUrl: process.env.MADAR_REP_SERVER_URL || 'https://carlos-pc.tail852ef0.ts.net',
-    artifactOnly, apkSha256: createHash('sha256').update(readFileSync(builtApk)).digest('hex'),
+    artifactOnly, apkSha256: createHash('sha256').update(readFileSync(builtApk)).digest('hex'), signerCertificateSha256,
   };
-  writeFileSync(`${builtApk}.manifest.json`, `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o600 });
+  const manifestBytes = `${JSON.stringify(manifest, null, 2)}\n`;
+  writeFileSync(`${builtApk}.manifest.json`, manifestBytes, { mode: 0o600 });
+  if (!artifactOnly) {
+    const manifestPath = `${publishedApk}.manifest.json`;
+    const temporaryManifest = `${manifestPath}.${process.pid}.tmp`;
+    try {
+      writeFileSync(temporaryManifest, manifestBytes, { mode: 0o600, flag: 'wx' });
+      renameSync(temporaryManifest, manifestPath);
+    } finally {
+      rmSync(temporaryManifest, { force: true });
+    }
+  }
   console.log(`Android version: ${versionName} (versionCode ${versionCode})`);
 }

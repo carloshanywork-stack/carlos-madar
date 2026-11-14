@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { randomUUID } from 'node:crypto';
+import { existsSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { createHash, randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test, { after } from 'node:test';
@@ -229,7 +229,7 @@ test('geofence and breadcrumb migrations are additive and idempotent', () => {
   assert.deepEqual(db.pragma('foreign_key_check'), []);
 });
 
-test('rep login, assigned-region route sync, active fault reasons, and strict API isolation', async () => {
+test('rep login, assigned-region route sync, active fault reasons, and strict API isolation', async (t) => {
   const anonymousApk = await request('/download/apk');
   assert.equal(anonymousApk.response.status, 401);
   const anonymousApkStatus = await request('/download/apk/status');
@@ -277,6 +277,49 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   assert.match(adminApkDownload.headers.get('content-type'), /application\/vnd\.android\.package-archive/);
   assert.match(adminApkDownload.headers.get('content-disposition'), /madar-rep\.apk/);
   assert.equal(Buffer.from(await adminApkDownload.arrayBuffer()).toString(), 'synthetic-debug-apk');
+
+  const releaseMetadataPath = `${process.env.MADAR_REP_APK_PATH}.manifest.json`;
+  const artifactHash = createHash('sha256').update('synthetic-debug-apk').digest('hex');
+  writeFileSync(releaseMetadataPath, JSON.stringify({
+    sourceRevision: 'b'.repeat(40), sourceTreeDirty: false, builtAt: new Date().toISOString(),
+    versionCode: 12, versionName: '2.1.0', buildType: 'debug', apkSha256: artifactHash,
+    signerCertificateSha256: 'a'.repeat(64),
+  }));
+  const metadataStatus = await request('/download/apk/status', {}, adminCookie);
+  assert.equal(metadataStatus.response.status, 200);
+  assert.equal(metadataStatus.body.releaseMetadata.versionName, '2.1.0');
+  assert.equal(metadataStatus.body.releaseMetadata.versionCode, 12);
+  assert.equal(metadataStatus.body.releaseMetadata.apkSha256, artifactHash);
+  writeFileSync(releaseMetadataPath, JSON.stringify({
+    sourceRevision: 'b'.repeat(40), sourceTreeDirty: false, builtAt: new Date().toISOString(),
+    versionCode: 12, versionName: '2.1.0', buildType: 'debug', apkSha256: '0'.repeat(64),
+    signerCertificateSha256: 'a'.repeat(64),
+  }));
+  const staleMetadata = await request('/download/apk/status', {}, adminCookie);
+  assert.equal(staleMetadata.response.status, 500, 'status must not display metadata for different artifact bytes');
+  unlinkSync(releaseMetadataPath);
+
+  await t.test('APK routes reject symlink artifacts rather than serving their targets', async (symlinkTest) => {
+    const realApkPath = `${process.env.MADAR_REP_APK_PATH}.real`;
+    const privateTarget = join(temporaryDirectory, 'private-not-apk.txt');
+    renameSync(process.env.MADAR_REP_APK_PATH, realApkPath);
+    writeFileSync(privateTarget, 'private-local-content');
+    try {
+      try { symlinkSync(privateTarget, process.env.MADAR_REP_APK_PATH); }
+      catch (error) {
+        if (['EPERM', 'EACCES', 'ENOTSUP'].includes(error.code)) return symlinkTest.skip('Symlink creation is unavailable on this host.');
+        throw error;
+      }
+      const blockedDownload = await fetch(`${baseUrl}/download/apk`, { headers: { cookie: adminCookie } });
+      assert.notEqual(blockedDownload.status, 200);
+      assert.notEqual(await blockedDownload.text(), 'private-local-content');
+      const blockedStatus = await request('/download/apk/status', {}, adminCookie);
+      assert.notEqual(blockedStatus.response.status, 200);
+    } finally {
+      if (existsSync(process.env.MADAR_REP_APK_PATH)) unlinkSync(process.env.MADAR_REP_APK_PATH);
+      renameSync(realApkPath, process.env.MADAR_REP_APK_PATH);
+    }
+  });
   const adminTransition = await fetch(`${baseUrl}/download/apk/debug-transition`, { headers: { cookie: adminCookie } });
   assert.equal(adminTransition.status, 200);
   assert.match(adminTransition.headers.get('content-type'), /application\/vnd\.android\.package-archive/);
