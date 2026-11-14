@@ -147,11 +147,15 @@ test('native rep gate, private SQLite queue, and WorkManager upload contract are
   for (const watermarkField of ['machineCode', 'machineName', 'repName', 'capturedAt', 'latitude', 'longitude', 'accuracy']) {
     assert.match(watermarkRenderer, new RegExp(watermarkField));
   }
-  assert.match(visitSheet, /photos\.before\.length !== 3 \|\| photos\.after\.length > 3/);
-  assert.match(visitSheet, /const remaining = 3 - photos\[phase\]\.length/);
+  assert.match(visitSheet, /photos\.before\.length < 1 \|\| photos\.after\.length < 1/);
+  assert.match(visitSheet, /MAX_VISIT_PHOTOS_PER_PHASE - currentPhotos\.length - staged\.length/);
   assert.match(engine, /new File\(new File\(getContext\(\)\.getFilesDir\(\), "visits"\), visitUuid\)/);
   assert.match(nativeBridges, /sourceUri: photo\.path/);
-  assert.match(nativeBridges, /captureVisitPhotos\(\{ maxPhotos, phaseLabel \}\)/);
+  assert.match(nativeBridges, /captureVisitPhotos\(\{/);
+  assert.match(store, /CREATE TABLE IF NOT EXISTS visit_photo_drafts/);
+  assert.match(store, /markStagedVisitPhotoProcessed/);
+  assert.match(engine, /listStagedVisitPhotos/);
+  assert.match(cameraSequence, /visit-camera-captures/);
   assert.match(engine, /startActivityForResult\(call, intent, "visitPhotosCaptured"\)/);
   assert.match(cameraSequence, /createCaptureSession/);
   assert.match(cameraSequence, /capture\(request\.build\(\)/);
@@ -159,14 +163,16 @@ test('native rep gate, private SQLite queue, and WorkManager upload contract are
   assert.match(cameraSequence, /stream\.getFD\(\)\.sync\(\)/);
   assert.match(cameraSequence, /ArrayList<JSONObject> photos/);
   assert.match(cameraSequence, /photos\.add\(item\)/);
-  assert.match(cameraSequence, /for \(JSONObject photo : photos\) resultPhotos\.put\(photo\)/);
+  assert.match(cameraSequence, /for \(JSONObject photo : resultCopy\) resultPhotos\.put\(photo\)/);
   assert.doesNotMatch(cameraSequence, /photos\.add\(item\.toString\(\)\)/,
     'native camera results must remain JSON objects through the activity result');
+  assert.match(cameraSequence, /handler\.post\(this::closeCamera\)/);
+  assert.doesNotMatch(cameraSequence, /cameraThread\.join/);
   assert.match(nativeBridges, /normalizeNativeVisitPhotoResults\(result\)/);
   assert.doesNotMatch(nativeBridges.match(/export async function captureNativeCameraPhotos\([\s\S]*?\n\}/)?.[0] ?? '', /\.filter\(/,
     'malformed camera results must be rejected visibly, not silently filtered');
   assert.match(manifest, /android:name="\.RepCameraSequenceActivity"[\s\S]*?android:exported="false"/);
-  assert.match(watermarkRenderer, /getAssets\(\)\.open\("public\/icon-192\.png"\)/);
+  assert.match(watermarkRenderer, /getAssets\(\)\.open\("public\/watermark-logo\.png"\)/);
   assert.match(photoProcessor, /RepGovernorateResolver\.resolve\(getContext\(\), location\)/);
   assert.match(watermarkRenderer, /governorate == null \? "غير متاحة" : governorate/);
   assert.match(nativeBridges, /enqueueNativeAttendanceAction/);

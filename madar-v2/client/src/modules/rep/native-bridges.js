@@ -1,3 +1,4 @@
+import { validVisitPhotoCounts } from '../../../../shared/visit-photo-policy.js';
 import { App as NativeApp } from '@capacitor/app';
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera';
 import { Capacitor, registerPlugin } from '@capacitor/core';
@@ -54,12 +55,24 @@ export async function captureNativeCameraPhoto() {
   return { sourceUri: photo.path, previewUrl: photo.webPath };
 }
 
-export async function captureNativeCameraPhotos({ maxPhotos = 3, phaseLabel = 'الصور' } = {}) {
+export async function captureNativeCameraPhotos({
+  visitUuid, repId, cardId, phase, startIndex, fallbackLocation,
+  maxPhotos = 20, phaseLabel = 'الصور',
+} = {}) {
   if (!isNativeRepApp()) throw new Error('التقاط مجموعة الصور متاح داخل تطبيق أندرويد فقط.');
   const archive = await getNativePhotoArchiveStatus();
   if (!archive?.configured) await chooseNativePhotoArchiveFolder();
-  const result = await RepEngine.captureVisitPhotos({ maxPhotos, phaseLabel });
+  const result = await RepEngine.captureVisitPhotos({
+    visitUuid, repId: Number(repId), cardId: Number(cardId), phase, startIndex,
+    fallbackLocation, maxPhotos, phaseLabel,
+  });
   return normalizeNativeVisitPhotoResults(result);
+}
+
+export async function listNativeStagedVisitPhotos(visitUuid) {
+  if (!isNativeRepApp()) return [];
+  const result = await RepEngine.listStagedVisitPhotos({ visitUuid });
+  return Array.isArray(result?.photos) ? result.photos : [];
 }
 
 export async function getNativePermissionState() {
@@ -206,9 +219,12 @@ export async function processNativeVisitPhoto({ visitUuid, phase, index, sourceU
   return RepEngine.processVisitPhoto({ visitUuid, phase, index, sourceUri, watermark });
 }
 
-export async function deleteNativeVisitPhoto(visitUuid, phase, index, path) {
+export async function deleteNativeVisitPhoto(visitUuid, phase, index, path, stagedPhoto = null) {
   if (!isNativeRepApp()) return null;
-  return RepEngine.deleteVisitPhoto({ visitUuid, phase, index, path });
+  return RepEngine.deleteVisitPhoto({
+    visitUuid, phase, index, path,
+    ...(stagedPhoto ? { photoIndex: stagedPhoto.photoIndex, captureId: stagedPhoto.captureId } : {}),
+  });
 }
 
 export function nativeFilePreviewUrl(path) {
@@ -442,7 +458,7 @@ export async function restoreNativePendingBackups(repId) {
         return photos;
       };
       const [beforePhotos, afterPhotos] = await Promise.all([readPhotos('before'), readPhotos('after')]);
-      if (beforePhotos.length !== 3 || afterPhotos.length > 3) throw new Error('صور الزيارة الاحتياطية غير مكتملة.');
+      if (!validVisitPhotoCounts(metadata.payload?.photoPolicyVersion, beforePhotos.length, afterPhotos.length)) throw new Error('صور الزيارة الاحتياطية غير مكتملة.');
       await addPendingVisit({
         visitUuid: metadata.visitUuid,
         repId: Number(metadata.repId),

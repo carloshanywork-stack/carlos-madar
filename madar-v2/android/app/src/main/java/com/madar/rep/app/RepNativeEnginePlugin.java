@@ -397,13 +397,29 @@ public final class RepNativeEnginePlugin extends Plugin {
     @PluginMethod
     public void captureVisitPhotos(PluginCall call) {
         long owner = RepAuthStore.repId(getContext());
-        int maxPhotos = call.getInt("maxPhotos", 3);
+        int maxPhotos = call.getInt("maxPhotos", RepVisitPhotoPolicy.MAX_PER_PHASE);
         String phaseLabel = call.getString("phaseLabel", "الصور");
+        String visitUuid = call.getString("visitUuid");
+        String phase = call.getString("phase");
+        long cardId = call.getData().optLong("cardId", 0L);
+        int startIndex = call.getInt("startIndex", -1);
+        JSObject fallbackLocation = call.getObject("fallbackLocation");
         if (owner < 1L) { call.reject("يلزم تسجيل الدخول قبل التقاط صور الزيارة."); return; }
-        if (maxPhotos < 1 || maxPhotos > 3) { call.reject("عدد صور المجموعة يجب أن يكون من 1 إلى 3."); return; }
+        if (maxPhotos < 1 || maxPhotos > RepVisitPhotoPolicy.MAX_PER_PHASE) { call.reject("عدد صور المجموعة يجب أن يكون من 1 إلى 20."); return; }
+        if (visitUuid == null || !visitUuid.matches("(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
+            || cardId < 1 || !("before".equals(phase) || "after".equals(phase)) || startIndex < 0
+            || startIndex + maxPhotos > RepVisitPhotoPolicy.MAX_PER_PHASE) {
+            call.reject("بيانات مجموعة الصور أو الماكينة غير صالحة.", "INVALID_VISIT_CAPTURE_TARGET");
+            return;
+        }
         Intent intent = new Intent(getContext(), RepCameraSequenceActivity.class);
         intent.putExtra(RepCameraSequenceActivity.EXTRA_MAX_PHOTOS, maxPhotos);
         intent.putExtra(RepCameraSequenceActivity.EXTRA_PHASE_LABEL, phaseLabel);
+        intent.putExtra(RepCameraSequenceActivity.EXTRA_VISIT_UUID, visitUuid);
+        intent.putExtra(RepCameraSequenceActivity.EXTRA_REP_ID, owner);
+        intent.putExtra(RepCameraSequenceActivity.EXTRA_PHASE, phase);
+        intent.putExtra(RepCameraSequenceActivity.EXTRA_START_INDEX, startIndex);
+        if (fallbackLocation != null) intent.putExtra(RepCameraSequenceActivity.EXTRA_FALLBACK_LOCATION, fallbackLocation.toString());
         startActivityForResult(call, intent, "visitPhotosCaptured");
     }
 
@@ -416,7 +432,14 @@ public final class RepNativeEnginePlugin extends Plugin {
         }
         try {
             JSONArray photos = new JSONArray(result.getData().getStringExtra(RepCameraSequenceActivity.EXTRA_PHOTOS));
-            if (photos.length() < 1 || photos.length() > 3) throw new IllegalArgumentException("نتيجة الكاميرا لا تحتوي عدداً صالحاً من الصور.");
+            if (photos.length() < 1 || photos.length() > RepVisitPhotoPolicy.MAX_PER_PHASE) throw new IllegalArgumentException("نتيجة الكاميرا لا تحتوي عدداً صالحاً من الصور.");
+            for (int index = 0; index < photos.length(); index += 1) {
+                JSONObject photo = photos.optJSONObject(index);
+                if (photo == null || photo.optString("sourceUri").isEmpty() || photo.optString("captureId").isEmpty()
+                    || photo.optInt("photoIndex", -1) < 0 || photo.optString("capturedAt").isEmpty()) {
+                    throw new IllegalArgumentException("نتيجة الكاميرا تفتقد مرجع صورة محفوظة.");
+                }
+            }
             JSObject response = new JSObject();
             response.put("photos", photos);
             call.resolve(response);
@@ -430,9 +453,12 @@ public final class RepNativeEnginePlugin extends Plugin {
         String visitUuid = call.getString("visitUuid");
         String phase = call.getString("phase");
         int index = call.getInt("index", -1);
+        int photoIndex = call.getInt("photoIndex", index);
+        String captureId = call.getString("captureId");
         String sourceUri = call.getString("sourceUri");
         JSObject watermark = call.getObject("watermark");
-        if (!validPhotoTarget(visitUuid, phase, index) || sourceUri == null || watermark == null) {
+        if (!validPhotoTarget(visitUuid, phase, index) || !validPhotoTarget(visitUuid, phase, photoIndex)
+            || captureId == null || sourceUri == null || watermark == null) {
             call.reject("بيانات صورة الزيارة غير مكتملة.", "INVALID_VISIT_PHOTO");
             return;
         }
@@ -441,9 +467,20 @@ public final class RepNativeEnginePlugin extends Plugin {
         IO.execute(() -> {
             try {
                 if(RepAuthStore.repId(getContext())!=photoOwner)throw new SecurityException("Representative changed while capturing photo");
-                JSONObject location = watermark.optJSONObject("location");
-                try (RepLocalStore store=new RepLocalStore(getContext())) {store.assertVisitPhotoEditable(visitUuid);}
-                File output = writeWatermarkedPhoto(visitUuid, phase, index, sourceUri, watermark, location);
+                JSONObject location;
+                JSONObject secureWatermark = new JSONObject(watermark.toString());
+                File output;
+                try (RepLocalStore store=new RepLocalStore(getContext())) {
+                    store.assertVisitPhotoEditable(visitUuid);
+                    JSONObject staged = store.getStagedVisitPhoto(photoOwner, visitUuid, phase, photoIndex, captureId, sourceUri);
+                    location = staged.isNull("location") ? null : staged.optJSONObject("location");
+                    secureWatermark.put("capturedAt", staged.getString("capturedAt"));
+                    secureWatermark.put("location", location == null ? JSONObject.NULL : location);
+                    output = writeWatermarkedPhoto(visitUuid, phase, index, sourceUri, secureWatermark, location);
+                    store.markStagedVisitPhotoProcessed(getContext(), photoOwner, visitUuid, phase, photoIndex,
+                        captureId, sourceUri.startsWith("file:") ? Uri.parse(sourceUri).getPath() : sourceUri,
+                        output.getAbsolutePath(), output.length());
+                }
                 JSObject result = new JSObject();
                 result.put("path", output.getAbsolutePath());
                 result.put("sizeBytes", output.length());
@@ -456,7 +493,6 @@ public final class RepNativeEnginePlugin extends Plugin {
                 } catch(Exception archiveError) {
                     result.put("archiveWarning","الصورة محفوظة داخل التطبيق؛ تعذر تجهيز نسختها في المجلد المختار.");
                 }
-                deleteTemporaryCameraCapture(sourceUri);
                 call.resolve(result);
             } catch (Exception error) {
                 call.reject("تعذر ضغط الصورة وختمها وحفظها داخل الهاتف.", "VISIT_PHOTO_SAVE_FAILED", error);
@@ -479,6 +515,18 @@ public final class RepNativeEnginePlugin extends Plugin {
         String visitUuid = call.getString("visitUuid");
         String phase = call.getString("phase");
         int index = call.getInt("index", -1);
+        int photoIndex = call.getInt("photoIndex", index);
+        String captureId = call.getString("captureId");
+        long owner = RepAuthStore.repId(getContext());
+        if (captureId != null && validPhotoTarget(visitUuid, phase, photoIndex) && owner > 0) {
+            IO.execute(() -> {
+                try (RepLocalStore store = new RepLocalStore(getContext())) {
+                    boolean deleted = store.deleteStagedVisitPhoto(getContext(), owner, visitUuid, phase, photoIndex, captureId);
+                    call.resolve(new JSObject().put("deleted", deleted));
+                } catch (Exception error) { call.reject("تعذر حذف الصورة المؤقتة المحفوظة للزيارة.", "STAGED_VISIT_PHOTO_DELETE_FAILED", error); }
+            });
+            return;
+        }
         if (!validPhotoTarget(visitUuid, phase, index)) { call.reject("مسار صورة الزيارة غير صالح."); return; }
         File image;
         try {
@@ -489,6 +537,22 @@ public final class RepNativeEnginePlugin extends Plugin {
         }
         boolean deleted = !image.exists() || image.delete();
         call.resolve(new JSObject().put("deleted", deleted));
+    }
+
+    @PluginMethod
+    public void listStagedVisitPhotos(PluginCall call) {
+        String visitUuid = call.getString("visitUuid");
+        long owner = RepAuthStore.repId(getContext());
+        if (owner < 1 || visitUuid == null || !visitUuid.matches("(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")) {
+            call.reject("بيانات استعادة صور الزيارة غير صالحة.", "INVALID_STAGED_VISIT_QUERY");
+            return;
+        }
+        IO.execute(() -> {
+            try (RepLocalStore store = new RepLocalStore(getContext())) {
+                JSONArray photos = store.listStagedVisitPhotos(owner, visitUuid);
+                call.resolve(new JSObject().put("photos", photos));
+            } catch (Exception error) { call.reject("تعذر استعادة الصور المحلية لهذه الزيارة.", "STAGED_VISIT_PHOTO_READ_FAILED", error); }
+        });
     }
 
 @PluginMethod
@@ -834,7 +898,7 @@ private JSONArray exportPhasePhotos(JSONArray entries, String phase, String visi
         return visitUuid != null
             && visitUuid.matches("(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
             && ("before".equals(phase) || "after".equals(phase))
-            && index >= 0 && index < 3;
+            && index >= 0 && index < RepVisitPhotoPolicy.MAX_PER_PHASE;
     }
 
     private File writeWatermarkedPhoto(String visitUuid, String phase, int index, String sourceUri,
@@ -999,11 +1063,12 @@ private JSONArray exportPhasePhotos(JSONArray entries, String phase, String visi
         background.setColor(Color.argb(210, 7, 19, 31));
         canvas.drawRect(new RectF(0f, top, panelWidth, height), background);
         Bitmap logo;
-        try (InputStream input = getContext().getAssets().open("public/icon-192.png")) {
+        try (InputStream input = getContext().getAssets().open("public/watermark-logo.png")) {
             logo = BitmapFactory.decodeStream(input);
         }
-        if (logo == null) throw new IllegalStateException("تعذر قراءة شعار MADAR المضمّن في التطبيق.");
-        canvas.drawBitmap(logo, null, new RectF(padding, top + padding, padding + logoSize, top + padding + logoSize), new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG));
+        if (logo == null) throw new IllegalStateException("تعذر قراءة شعار A to Z المضمّن في التطبيق.");
+        float logoHeight = logoSize * logo.getHeight() / (float) logo.getWidth();
+        canvas.drawBitmap(logo, null, new RectF(padding, top + padding, padding + logoSize, top + padding + logoHeight), new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG));
         logo.recycle();
         Paint text = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.SUBPIXEL_TEXT_FLAG);
         text.setColor(Color.WHITE);
@@ -1019,7 +1084,7 @@ private JSONArray exportPhasePhotos(JSONArray entries, String phase, String visi
             catch (Exception ignoredAgain) { timestamp = new Date(); }
         }
         SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy/MM/dd", Locale.US);
-        SimpleDateFormat timeFormat = new SimpleDateFormat("HH:mm", Locale.US);
+        SimpleDateFormat timeFormat = new SimpleDateFormat("HH:mm:ss", Locale.US);
         TimeZone cairo = TimeZone.getTimeZone("Africa/Cairo");
         dateFormat.setTimeZone(cairo); timeFormat.setTimeZone(cairo);
         String gps = location == null ? "الموقع غير متاح"

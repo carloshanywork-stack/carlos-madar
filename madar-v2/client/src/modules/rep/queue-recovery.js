@@ -1,3 +1,4 @@
+import { validVisitPhotoCounts } from '../../../../shared/visit-photo-policy.js';
 export const REP_RECOVERY_PACKAGE_TYPE = 'madar-rep-recovery';
 export const REP_RECOVERY_SCHEMA_VERSION = 3;
 
@@ -102,9 +103,8 @@ for (const [index, visit] of recovery.visits.entries()) {
   ids.add(`visit:${visit.visitUuid.toLowerCase()}`);
   await validateIdentity(visit, 'visitUuid', label);
   if (!visit.payload || typeof visit.payload !== 'object' || Array.isArray(visit.payload)) throw new Error(`${label}: payload is invalid.`);
+    if (!Array.isArray(visit.beforePhotos) || !Array.isArray(visit.afterPhotos) || !validVisitPhotoCounts(visit.payload.photoPolicyVersion, visit.beforePhotos.length, visit.afterPhotos.length)) throw new Error(`${label}: photo counts are incomplete or malformed.`);
     for (const phase of ['beforePhotos', 'afterPhotos']) {
-      if (!Array.isArray(visit[phase]) || (phase === 'beforePhotos' && visit[phase].length !== 3)
-          || (phase === 'afterPhotos' && visit[phase].length > 3)) throw new Error(`${label}: ${phase} is incomplete or malformed.`);
     for (const [photoIndex, photo] of visit[phase].entries()) {
       accountedBytes += await validateFile(photo, `${label} ${phase}[${photoIndex + 1}]`, 3 * 1024 * 1024);
       const expectedHashes = phase === 'beforePhotos' ? visit.identity.beforeHashes : visit.identity.afterHashes;

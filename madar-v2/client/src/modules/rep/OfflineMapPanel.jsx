@@ -4,7 +4,6 @@ import { deleteOfflineMapPack, listOfflineMapPacks, listOfflineMapTileKeys, save
 import { OFFLINE_MAP_PACKS } from './map-utils.js';
 import { getNativeAuthorizationHeaders } from './native-session.js';
 import OfflineRouteMap from './OfflineRouteMap.jsx';
-import GoogleRouteMap from './GoogleRouteMap.jsx';
 
 function formatSize(bytes) {
   const value = Number(bytes) || 0;
@@ -75,13 +74,14 @@ export default function OfflineMapPanel({ route, gps, online, offlineOnly, onMac
   const [downloading, setDownloading] = useState(false);
   const [progress, setProgress] = useState({ completed: 0, total: 0 });
   const [error, setError] = useState('');
-  const [provider, setProvider] = useState(() => (online && !offlineOnly ? 'google' : 'offline'));
-  const [googleConfig, setGoogleConfig] = useState({ loaded: false, enabled: false, apiKey: null });
   const downloadController = useRef(null);
 
   const selectedDefinition = OFFLINE_MAP_PACKS.find((pack) => pack.id === selectedId) ?? OFFLINE_MAP_PACKS[0];
   const selectedCatalogPack = catalog.find((pack) => pack.id === selectedId);
   const selectedInstalledPack = installed.find((pack) => pack.packId === selectedId);
+  const selectedMapUnavailable = online && !offlineOnly && !catalogLoading && selectedCatalogPack && !selectedCatalogPack.available;
+  const mapPackageMissing = selectedMapUnavailable && /لا توجد حزمة MBTiles/.test(selectedCatalogPack.reason || '');
+  const mapRegionMissing = selectedMapUnavailable && /لا توجد بلاطات محلية ضمن نطاق/.test(selectedCatalogPack.reason || '');
   const routeMachines = useMemo(() => (route?.regions ?? []).flatMap((region) =>
     (region.machines ?? []).map((machine) => ({ ...machine, regionName: region.regionName }))), [route]);
 
@@ -112,27 +112,6 @@ export default function OfflineMapPanel({ route, gps, online, offlineOnly, onMac
       .then((result) => { if (active) setCatalog(result.packs ?? []); })
       .catch((caught) => { if (active) setError(caught.message || 'تعذر فحص حزم الخرائط على الخادم.'); })
       .finally(() => { if (active) setCatalogLoading(false); });
-    return () => { active = false; };
-  }, [offlineOnly, online]);
-
-  useEffect(() => {
-    if (!online || offlineOnly) setProvider('offline');
-  }, [offlineOnly, online]);
-
-  useEffect(() => {
-    if (!online || offlineOnly) return undefined;
-    let active = true;
-    fetchWithTimeout('/api/rep/map/google', { timeoutMs: 6000 })
-      .then((result) => {
-        if (active) setGoogleConfig({
-          loaded: true,
-          enabled: Boolean(result?.enabled),
-          apiKey: typeof result?.apiKey === 'string' && result.apiKey ? result.apiKey : null,
-        });
-      })
-      .catch(() => {
-        if (active) setGoogleConfig({ loaded: true, enabled: false, apiKey: null });
-      });
     return () => { active = false; };
   }, [offlineOnly, online]);
 
@@ -220,29 +199,11 @@ export default function OfflineMapPanel({ route, gps, online, offlineOnly, onMac
   return (
     <section className="rep-offline-map-panel" aria-label="خريطة ماكينات اليوم">
       <div className="rep-offline-map-panel-head">
-        <div><span className="rep-eyebrow">خريطة Google عند الاتصال · حزم MBTiles محفوظة بلا إنترنت</span><h3>خريطة الماكينات والمسار</h3></div>
-        <span className={`rep-map-network ${onlineNow ? 'online' : ''}`}>{onlineNow ? 'متصل · خريطة محدثة' : 'أوفلاين · الخريطة المحلية'}</span>
+        <div><span className="rep-eyebrow">خريطة التطبيق · نزّل حزم المناطق من خادم MADAR</span><h3>خريطة الماكينات والمسار</h3></div>
+        <span className={`rep-map-network ${onlineNow ? 'online' : ''}`}>{onlineNow
+          ? selectedCatalogPack?.available ? 'متصل · حزمة خريطة متاحة' : catalogLoading ? 'متصل · جارٍ فحص الخرائط' : catalog.length ? 'متصل · الخريطة غير مهيأة' : 'متصل · لم يُفحص توفر الخريطة'
+          : selectedInstalledPack?.status === 'ready' ? 'أوفلاين · خريطة محفوظة' : 'أوفلاين · لا توجد خريطة محفوظة'}</span>
       </div>
-      <div className="rep-map-provider-tabs" role="tablist" aria-label="مصدر الخريطة">
-        <button type="button" role="tab" aria-selected={provider === 'google'}
-          className={provider === 'google' ? 'active' : ''} disabled={!onlineNow}
-          onClick={() => setProvider('google')}
-          title={onlineNow ? 'خريطة Google المضمّنة داخل التطبيق' : 'خريطة Google تحتاج اتصالاً بالإنترنت'}>
-          <b>Google Maps</b>
-          <small>{googleConfig.enabled ? 'طبقة تفاعلية مضمّنة' : googleConfig.loaded ? 'عرض سريع مضمّن' : 'جارٍ التحقق…'}</small>
-        </button>
-        <button type="button" role="tab" aria-selected={provider === 'offline'}
-          className={provider === 'offline' ? 'active' : ''} onClick={() => setProvider('offline')}>
-          <b>الخريطة المحلية</b><small>تعمل دون إنترنت</small>
-        </button>
-      </div>
-      {provider === 'google' ? (onlineNow ? (
-        !googleConfig.loaded
-          ? <p className="rep-map-pack-summary" role="status">جارٍ التحقق من إعداد خريطة Google على الخادم…</p>
-          : <GoogleRouteMap apiKey={googleConfig.apiKey} machines={routeMachines} gps={gps} onMachineSelect={onMachineSelect} />
-      ) : (
-        <p className="rep-map-warning">خريطة Google تحتاج اتصالاً بالإنترنت؛ تم التحويل إلى الخريطة المحلية. نزّل حزمة المنطقة مسبقاً للعمل بلا اتصال.</p>
-      )) : <>
       <div className="rep-map-pack-row">
         <label>
           <span>اختر حزمة المنطقة</span>
@@ -272,6 +233,14 @@ export default function OfflineMapPanel({ route, gps, online, offlineOnly, onMac
                 ? 'جارٍ فحص الحزم المحلية على الخادم…'
                 : selectedCatalogPack?.reason || (online ? 'تعذر التحقق من حزمة المنطقة.' : 'لا توجد نسخة محلية من هذه المنطقة بعد؛ اتصل بالخادم لتنزيلها أولاً.')}
       </div>
+      {selectedMapUnavailable && <aside className="rep-map-warning rep-map-provisioning" role="status">
+        <strong>{mapPackageMissing ? 'بيانات الخريطة غير مهيأة على خادم MADAR' : mapRegionMissing ? 'حزمة الخريطة لا تغطي هذه المنطقة' : 'لا توجد حزمة قابلة للتنزيل لهذه المنطقة حالياً'}</strong>
+        <span>{mapPackageMissing
+          ? 'هذا نقص في ملف بيانات الخرائط أو إعداد الخادم، وليس عطلاً في زر التنزيل. يلزم مسؤول النظام توفير ملف MBTiles نقطي مرخّص بصيغة PNG/JPEG/WebP وإعداده على الخادم. مسارك المخزّن محلياً والزيارات أوفلاين يظلان متاحين.'
+          : mapRegionMissing
+            ? 'ملف MBTiles موجود، لكنه لا يحتوي بلاطات للمنطقة أو مستويات التكبير المطلوبة. يلزم تجهيز بيانات تغطي هذا النطاق؛ لن ينشئ التطبيق بلاطات مفقودة.'
+            : selectedCatalogPack.reason || 'تحقق من صيغة ملف MBTiles وحدود الحجم والتغطية.'}</span>
+      </aside>}
       {!catalog.length && !online && <p className="rep-map-warning">لا يمكن تنزيل خرائط جديدة أثناء انقطاع الاتصال. نزّل الحزمة المطلوبة مسبقاً عبر شبكة MADAR المحلية.</p>}
       {['ready', 'partial'].includes(selectedInstalledPack?.status) && <OfflineRouteMap
         pack={selectedInstalledPack}
@@ -280,8 +249,7 @@ export default function OfflineMapPanel({ route, gps, online, offlineOnly, onMac
         onMachineSelect={onMachineSelect}
       />}
       {error && <p className="rep-map-error" role="alert">{error}</p>}
-      </>}
-      <p className="rep-map-disclaimer">خريطة Google تُحمّل فقط عند وجود اتصال، وعند انقطاعه يتحوّل التطبيق إلى حزمة MBTiles المحفوظة على الهاتف. GPS يعمل بلا إنترنت، وإحداثيات المندوب لا تُرسل إلى مزوّد الخرائط في الوضع المحلي.</p>
+      <p className="rep-map-disclaimer">نزّل حزمة المنطقة من خادم MADAR قبل الخروج للعمل؛ تبقى الخريطة المحفوظة متاحة دون إنترنت. GPS يعمل بلا إنترنت، ولا تُرسل إحداثيات المندوب إلى مزوّد خرائط خارجي. الخريطة تعرض المواقع والمسار ولا تحسب اتجاهات القيادة.</p>
     </section>
   );
 }

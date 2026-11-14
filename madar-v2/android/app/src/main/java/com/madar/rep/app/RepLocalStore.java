@@ -18,7 +18,7 @@ import java.util.Set;
 /** Native SQLite cache and durable queue. Source photos live under filesDir/MADAR/uploads. */
 final class RepLocalStore extends SQLiteOpenHelper {
     private static final String DATABASE_NAME = "madar_rep_local.db";
-    private static final int DATABASE_VERSION = 4;
+    private static final int DATABASE_VERSION = 5;
 
     RepLocalStore(Context context) {
         super(context.getApplicationContext(), DATABASE_NAME, null, DATABASE_VERSION);
@@ -33,6 +33,7 @@ final class RepLocalStore extends SQLiteOpenHelper {
         database.execSQL("CREATE TABLE pending_visits (visit_uuid TEXT PRIMARY KEY, rep_id INTEGER NOT NULL, rep_username TEXT NOT NULL, payload_json TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL)");
         database.execSQL("CREATE INDEX pending_visits_by_rep_status_created ON pending_visits(rep_id, status, created_at)");
         database.execSQL("CREATE TABLE visit_photos (visit_uuid TEXT NOT NULL REFERENCES pending_visits(visit_uuid) ON DELETE CASCADE, phase TEXT NOT NULL, photo_index INTEGER NOT NULL, path TEXT NOT NULL, captured_at TEXT NOT NULL, PRIMARY KEY(visit_uuid, phase, photo_index))");
+        createVisitPhotoDrafts(database);
         createAttendanceQueue(database);
         createMachineActionQueue(database);
         createRecoveryImportLedger(database);
@@ -43,6 +44,17 @@ final class RepLocalStore extends SQLiteOpenHelper {
         if (oldVersion < 2) createAttendanceQueue(database);
         if (oldVersion < 3) createMachineActionQueue(database);
         if (oldVersion < 4) createRecoveryImportLedger(database);
+        if (oldVersion < 5) createVisitPhotoDrafts(database);
+    }
+
+    private static void createVisitPhotoDrafts(SQLiteDatabase database) {
+        database.execSQL("CREATE TABLE IF NOT EXISTS visit_photo_drafts ("
+            + "visit_uuid TEXT NOT NULL, rep_id INTEGER NOT NULL, phase TEXT NOT NULL CHECK (phase IN ('before','after')), "
+            + "photo_index INTEGER NOT NULL CHECK (photo_index >= 0 AND photo_index < 20), capture_id TEXT NOT NULL UNIQUE, "
+            + "source_path TEXT NOT NULL, processed_path TEXT NOT NULL DEFAULT '', captured_at TEXT NOT NULL, "
+            + "location_json TEXT, size_bytes INTEGER NOT NULL DEFAULT 0, "
+            + "PRIMARY KEY(visit_uuid, phase, photo_index))");
+        database.execSQL("CREATE INDEX IF NOT EXISTS visit_photo_drafts_by_owner ON visit_photo_drafts(rep_id, visit_uuid)");
     }
 
     private static void createAttendanceQueue(SQLiteDatabase database) {
@@ -173,6 +185,146 @@ final class RepLocalStore extends SQLiteOpenHelper {
         }
     }
 
+    synchronized void stageVisitPhoto(Context context, long repId, String visitUuid, String phase, int photoIndex,
+        String captureId, String sourcePath, String capturedAt, JSONObject location) throws Exception {
+        if (repId < 1 || !isVisitUuid(visitUuid) || !("before".equals(phase) || "after".equals(phase))
+            || photoIndex < 0 || photoIndex >= RepVisitPhotoPolicy.MAX_PER_PHASE || !isVisitUuid(captureId)
+            || capturedAt == null || !capturedAt.matches("^\\d{4}-\\d{2}-\\d{2}T.*(?:Z|[+-]\\d{2}:?\\d{2})$")) {
+            throw new IllegalArgumentException("Captured visit photo metadata is invalid.");
+        }
+        File root = new File(context.getFilesDir(), "visit-camera-captures").getCanonicalFile();
+        File source = new File(sourcePath).getCanonicalFile();
+        if (!source.isFile() || !source.getPath().startsWith(root.getPath() + File.separator)) {
+            throw new SecurityException("Captured photo must remain inside the app-private camera directory.");
+        }
+        ContentValues values = new ContentValues();
+        values.put("visit_uuid", visitUuid);
+        values.put("rep_id", repId);
+        values.put("phase", phase);
+        values.put("photo_index", photoIndex);
+        values.put("capture_id", captureId);
+        values.put("source_path", source.getAbsolutePath());
+        values.put("captured_at", capturedAt);
+        values.put("location_json", location == null ? null : location.toString());
+        getWritableDatabase().insertOrThrow("visit_photo_drafts", null, values);
+    }
+
+    synchronized JSONArray listStagedVisitPhotos(long repId, String visitUuid) throws Exception {
+        JSONArray result = new JSONArray();
+        try (Cursor cursor = getReadableDatabase().rawQuery(
+            "SELECT phase, photo_index, capture_id, source_path, processed_path, captured_at, location_json, size_bytes "
+                + "FROM visit_photo_drafts WHERE rep_id = ? AND visit_uuid = ? ORDER BY CASE phase WHEN 'before' THEN 0 ELSE 1 END, photo_index",
+            new String[] { String.valueOf(repId), visitUuid })) {
+            while (cursor.moveToNext()) {
+                JSONObject photo = new JSONObject();
+                photo.put("phase", cursor.getString(0));
+                photo.put("photoIndex", cursor.getInt(1));
+                photo.put("captureId", cursor.getString(2));
+                photo.put("sourceUri", android.net.Uri.fromFile(new File(cursor.getString(3))).toString());
+                photo.put("status", cursor.getString(4).isEmpty() ? "captured" : "processed");
+                if (!cursor.getString(4).isEmpty()) photo.put("path", cursor.getString(4));
+                photo.put("capturedAt", cursor.getString(5));
+                if (!cursor.isNull(6)) photo.put("location", new JSONObject(cursor.getString(6)));
+                else photo.put("location", JSONObject.NULL);
+                photo.put("sizeBytes", cursor.getLong(7));
+                result.put(photo);
+            }
+        }
+        return result;
+    }
+
+    synchronized JSONObject getStagedVisitPhoto(long repId, String visitUuid, String phase, int photoIndex,
+        String captureId, String sourceUri) throws Exception {
+        try (Cursor cursor = getReadableDatabase().rawQuery(
+            "SELECT source_path, processed_path, captured_at, location_json FROM visit_photo_drafts "
+                + "WHERE rep_id = ? AND visit_uuid = ? AND phase = ? AND photo_index = ? AND capture_id = ?",
+            new String[] { String.valueOf(repId), visitUuid, phase, String.valueOf(photoIndex), captureId })) {
+            if (!cursor.moveToFirst()) throw new IllegalStateException("صورة الكاميرا لم تعد ضمن مسودات هذه الزيارة.");
+            File expected = new File(cursor.getString(0)).getCanonicalFile();
+            File supplied = new File(android.net.Uri.parse(sourceUri).getPath()).getCanonicalFile();
+            if (!expected.equals(supplied) || !expected.isFile()) throw new SecurityException("مسار صورة الكاميرا لا يطابق النسخة المحلية المحفوظة.");
+            JSONObject result = new JSONObject();
+            result.put("sourcePath", expected.getAbsolutePath());
+            result.put("processedPath", cursor.getString(1));
+            result.put("capturedAt", cursor.getString(2));
+            result.put("location", cursor.isNull(3) ? JSONObject.NULL : new JSONObject(cursor.getString(3)));
+            return result;
+        }
+    }
+
+    synchronized String markStagedVisitPhotoProcessed(Context context, long repId, String visitUuid, String phase,
+        int photoIndex, String captureId, String sourcePath, String processedPath, long sizeBytes) throws Exception {
+        File uploadsRoot = new File(new File(context.getFilesDir(), "MADAR"), "uploads").getCanonicalFile();
+        File processed = new File(processedPath).getCanonicalFile();
+        if (!processed.isFile() || !processed.getPath().startsWith(uploadsRoot.getPath() + File.separator)
+            || sizeBytes < 1 || sizeBytes > 3L * 1024L * 1024L) {
+            throw new SecurityException("Processed visit photo is outside the allowed app storage.");
+        }
+        SQLiteDatabase database = getWritableDatabase();
+        String savedSource;
+        ContentValues values = new ContentValues();
+        values.put("processed_path", processed.getAbsolutePath());
+        values.put("size_bytes", sizeBytes);
+        database.beginTransaction();
+        try {
+            try (Cursor row = database.rawQuery("SELECT source_path FROM visit_photo_drafts WHERE rep_id = ? AND visit_uuid = ? AND phase = ? AND photo_index = ? AND capture_id = ?",
+                new String[] { String.valueOf(repId), visitUuid, phase, String.valueOf(photoIndex), captureId })) {
+                if (!row.moveToFirst()) throw new IllegalStateException("The staged camera photo is no longer owned by this visit.");
+                savedSource = row.getString(0);
+                File expected = new File(savedSource).getCanonicalFile();
+                if (!expected.equals(new File(sourcePath).getCanonicalFile())) throw new SecurityException("Staged camera source mismatch.");
+            }
+            int updated = database.update("visit_photo_drafts", values,
+                "rep_id = ? AND visit_uuid = ? AND phase = ? AND photo_index = ? AND capture_id = ?",
+                new String[] { String.valueOf(repId), visitUuid, phase, String.valueOf(photoIndex), captureId });
+            if (updated != 1) throw new IllegalStateException("Staged camera photo could not be marked processed.");
+            database.setTransactionSuccessful();
+        } finally { database.endTransaction(); }
+        File source = new File(savedSource).getCanonicalFile();
+        File capturesRoot = new File(context.getFilesDir(), "visit-camera-captures").getCanonicalFile();
+        if (source.getPath().startsWith(capturesRoot.getPath() + File.separator)) source.delete();
+        return processed.getAbsolutePath();
+    }
+
+    synchronized boolean deleteStagedVisitPhoto(Context context, long repId, String visitUuid, String phase,
+        int photoIndex, String captureId) throws Exception {
+        SQLiteDatabase database = getWritableDatabase();
+        String sourcePath;
+        String processedPath;
+        database.beginTransaction();
+        try (Cursor row = database.rawQuery("SELECT source_path, processed_path FROM visit_photo_drafts WHERE rep_id = ? AND visit_uuid = ? AND phase = ? AND photo_index = ? AND capture_id = ?",
+            new String[] { String.valueOf(repId), visitUuid, phase, String.valueOf(photoIndex), captureId })) {
+            if (!row.moveToFirst()) { database.setTransactionSuccessful(); return false; }
+            sourcePath = row.getString(0);
+            processedPath = row.getString(1);
+            database.delete("visit_photo_drafts", "rep_id = ? AND visit_uuid = ? AND phase = ? AND photo_index = ? AND capture_id = ?",
+                new String[] { String.valueOf(repId), visitUuid, phase, String.valueOf(photoIndex), captureId });
+            database.setTransactionSuccessful();
+        } finally { database.endTransaction(); }
+        deleteDraftFileIfOwned(context, sourcePath, "visit-camera-captures");
+        if (!processedPath.isEmpty()) deleteDraftProcessedFile(context, visitUuid, phase, photoIndex, processedPath);
+        return true;
+    }
+
+    private static void deleteDraftFileIfOwned(Context context, String path, String directoryName) throws Exception {
+        File root = new File(context.getFilesDir(), directoryName).getCanonicalFile();
+        File file = new File(path).getCanonicalFile();
+        if (file.getPath().startsWith(root.getPath() + File.separator) && file.isFile()) file.delete();
+    }
+
+    private static void deleteDraftProcessedFile(Context context, String visitUuid, String phase, int index, String path) throws Exception {
+        File root = new File(new File(context.getFilesDir(), "MADAR"), "uploads").getCanonicalFile();
+        File file = new File(path).getCanonicalFile();
+        String directory = "before".equals(phase) ? "Before" : "After";
+        String expected = visitUuid + "_" + String.format(java.util.Locale.US, "%04d", index + 1) + ".jpg";
+        if (file.getPath().startsWith(root.getPath() + File.separator) && directory.equals(file.getParentFile().getName())
+            && expected.equals(file.getName()) && file.isFile()) file.delete();
+    }
+
+    private static boolean isVisitUuid(String value) {
+        return value != null && value.matches("(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$");
+    }
+
     synchronized void enqueueVisit(Context context, JSONObject visit) throws Exception {
         String visitUuid = visit.getString("visitUuid");
         if (!visitUuid.matches("(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")) {
@@ -184,8 +336,8 @@ final class RepLocalStore extends SQLiteOpenHelper {
         JSONObject payload = visit.getJSONObject("payload");
         JSONArray before = visit.optJSONArray("beforePhotos");
         JSONArray after = visit.optJSONArray("afterPhotos");
-        if (before == null || before.length() != 3 || after == null || after.length() > 3) {
-            throw new IllegalArgumentException("Exactly three before photos and up to three optional after photos are allowed.");
+        if (before == null || after == null || !RepVisitPhotoPolicy.valid(payload, before.length(), after.length())) {
+            throw new IllegalArgumentException("Invalid photo count for the visit photo policy.");
         }
 
         List<Photo> photos = new ArrayList<>();
@@ -195,11 +347,19 @@ final class RepLocalStore extends SQLiteOpenHelper {
         SQLiteDatabase database = getWritableDatabase();
         database.beginTransaction();
         try {
+            try (Cursor unfinished = database.rawQuery("SELECT COUNT(*) FROM visit_photo_drafts WHERE visit_uuid = ? AND rep_id = ? AND processed_path = ''",
+                new String[] { visitUuid, String.valueOf(repId) })) {
+                if (unfinished.moveToFirst() && unfinished.getInt(0) > 0) {
+                    throw new IllegalStateException("Finish processing every captured photo before saving the visit.");
+                }
+            }
             try (Cursor existing = database.rawQuery("SELECT rep_id, payload_json FROM pending_visits WHERE visit_uuid = ?", new String[] { visitUuid })) {
                 if (existing.moveToFirst()) {
                     if (existing.getLong(0) != repId || !existing.getString(1).equals(payload.toString())) {
                         throw new IllegalStateException("This visit UUID already has different local data.");
                     }
+                    database.delete("visit_photo_drafts", "visit_uuid = ? AND rep_id = ?",
+                        new String[] { visitUuid, String.valueOf(repId) });
                     database.setTransactionSuccessful();
                     return;
                 }
@@ -221,6 +381,8 @@ final class RepLocalStore extends SQLiteOpenHelper {
                 values.put("captured_at", photo.capturedAt);
                 database.insertOrThrow("visit_photos", null, values);
             }
+            database.delete("visit_photo_drafts", "visit_uuid = ? AND rep_id = ?",
+                new String[] { visitUuid, String.valueOf(repId) });
             database.setTransactionSuccessful();
         } finally {
         database.endTransaction();
@@ -267,7 +429,7 @@ private static void collectPhotos(Context context, String visitUuid, String phas
             JSONObject entry = entries.getJSONObject(index);
             File photoFile = new File(entry.getString("path")).getCanonicalFile();
             boolean validNewFilename = false;
-            for (int slot = 1; slot <= 3; slot += 1) {
+            for (int slot = 1; slot <= RepVisitPhotoPolicy.MAX_PER_PHASE; slot += 1) {
                 String slotFilename = visitUuid + "_" + String.format(java.util.Locale.US, "%04d", slot) + ".jpg";
                 if (slotFilename.equals(photoFile.getName())) validNewFilename = true;
             }

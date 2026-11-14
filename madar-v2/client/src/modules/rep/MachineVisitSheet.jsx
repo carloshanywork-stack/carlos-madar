@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { MAX_VISIT_PHOTOS_PER_PHASE } from '../../../../shared/visit-photo-policy.js';
 import { compressAndWatermark, locationPayload } from './image-processing.js';
 import {
   captureNativeCameraPhotos,
@@ -6,8 +7,15 @@ import {
   isNativeRepApp,
   nativeFilePreviewUrl,
   processNativeVisitPhoto,
+  listNativeStagedVisitPhotos,
 } from './native-bridges.js';
 import QuantityModal from '../../components/ui/QuantityModal.jsx';
+import {
+  firstUnusedPhotoIndex,
+  isEligibleVisitGps,
+  mergeCapturedPhotoResults,
+  validateVisitPhotoCaptureLocation,
+} from './visit-photo-capture.js';
 
 function createDraftVisitUuid() {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
@@ -18,6 +26,24 @@ function createDraftVisitUuid() {
   bytes[8] = (bytes[8] & 0x3f) | 0x80;
   const hex = [...bytes].map((value) => value.toString(16).padStart(2, '0')).join('');
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+function getDraftVisitUuid(repId, cardId) {
+  const key = `madar-rep-visit-draft:${Number(repId)}:${Number(cardId)}`;
+  try {
+    const stored = window.localStorage.getItem(key);
+    if (stored && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(stored)) return stored;
+    const created = createDraftVisitUuid();
+    window.localStorage.setItem(key, created);
+    return created;
+  } catch { return createDraftVisitUuid(); }
+}
+
+function clearDraftVisitUuid(repId, cardId, visitUuid) {
+  try {
+    const key = `madar-rep-visit-draft:${Number(repId)}:${Number(cardId)}`;
+    if (window.localStorage.getItem(key) === visitUuid) window.localStorage.removeItem(key);
+  } catch { /* Local draft UUID remains harmless if storage is unavailable. */ }
 }
 
 function showLocation(location) {
@@ -34,9 +60,11 @@ function distanceMeters(first, second) {
   return 6371000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(Math.max(0, 1 - a)));
 }
 
-export default function MachineVisitSheet({ machine, repName = '', reasons, gps, gpsError, captureLocation, onStartWork, onStopWork, onClose, onSave, onConfirmLocation, onReportCorrection }) {
+export default function MachineVisitSheet({ machine, repId, repName = '', reasons, gps, gpsError, captureLocation, onStartWork, onStopWork, onClose, onSave, onConfirmLocation, onReportCorrection }) {
   const [notes, setNotes] = useState('');
   const [photos, setPhotos] = useState({ before: [], after: [] });
+  const [pendingCaptures, setPendingCaptures] = useState({ before: [], after: [] });
+  const [previewPhoto, setPreviewPhoto] = useState(null);
   const [selectedReasonIds, setSelectedReasonIds] = useState(() => {
     if (Array.isArray(machine?.reasonIds) && machine.reasonIds.length) return machine.reasonIds.map(Number);
     if (Array.isArray(machine?.reason_ids) && machine.reason_ids.length) return machine.reason_ids.map(Number);
@@ -67,13 +95,17 @@ export default function MachineVisitSheet({ machine, repName = '', reasons, gps,
   const beforeInput = useRef(null);
   const afterInput = useRef(null);
   const previewUrls = useRef(new Set());
-  const draftVisitUuid = useRef(createDraftVisitUuid()).current;
+  const draftVisitUuid = useRef(getDraftVisitUuid(repId, machine.cardId)).current;
   const draftCapturedAt = useRef(new Date().toISOString()).current;
   const draftSaved = useRef(false);
   const autoCameraOpened = useRef(false);
   const photosRef = useRef(photos);
   photosRef.current = photos;
+  const pendingCapturesRef = useRef(pendingCaptures);
+  pendingCapturesRef.current = pendingCaptures;
   const deletingPhotoRef = useRef(false);
+  const captureSessionRef = useRef(false);
+  const processingCapturesRef = useRef(false);
   const nativeApp = isNativeRepApp();
   const stopWorkRef = useRef(onStopWork);
   stopWorkRef.current = onStopWork;
@@ -101,13 +133,41 @@ export default function MachineVisitSheet({ machine, repName = '', reasons, gps,
     previewUrls.current.clear();
   }, []);
 
-  useEffect(() => () => {
-    if (!nativeApp || draftSaved.current) return;
-    for (const phase of ['before', 'after']) {
-      photosRef.current[phase].forEach((photo, index) => {
-        void deleteNativeVisitPhoto(draftVisitUuid, phase, photo.photoIndex ?? index, photo.path).catch(() => undefined);
+  useEffect(() => {
+    if (!nativeApp) return undefined;
+    let active = true;
+    void listNativeStagedVisitPhotos(draftVisitUuid).then((staged) => {
+      if (!active) return;
+      const recoveredPhotos = { before: [], after: [] };
+      const recoveredCaptures = { before: [], after: [] };
+      for (const entry of staged) {
+        if (!['before', 'after'].includes(entry.phase) || !Number.isInteger(entry.photoIndex)
+            || !entry.captureId || !entry.capturedAt) continue;
+        if (entry.status === 'processed' && entry.path) {
+          recoveredPhotos[entry.phase].push({
+            path: entry.path, sizeBytes: Number(entry.sizeBytes), capturedAt: entry.capturedAt,
+            photoIndex: entry.photoIndex, captureId: entry.captureId, previewUrl: nativeFilePreviewUrl(entry.path),
+          });
+        } else if (entry.status === 'captured' && entry.sourceUri) {
+          recoveredCaptures[entry.phase].push(entry);
+        }
+      }
+      setPhotos((current) => ({
+        before: [...current.before, ...recoveredPhotos.before.filter((photo) => !current.before.some((saved) => saved.captureId === photo.captureId))],
+        after: [...current.after, ...recoveredPhotos.after.filter((photo) => !current.after.some((saved) => saved.captureId === photo.captureId))],
+      }));
+      setPendingCaptures((current) => {
+        const next = {
+          before: mergeCapturedPhotoResults(current.before, recoveredCaptures.before, MAX_VISIT_PHOTOS_PER_PHASE),
+          after: mergeCapturedPhotoResults(current.after, recoveredCaptures.after, MAX_VISIT_PHOTOS_PER_PHASE),
+        };
+        pendingCapturesRef.current = next;
+        return next;
       });
-    }
+    }).catch((restoreError) => {
+      if (active) setError(restoreError.message || 'تعذر استعادة الصور المحفوظة لهذه الزيارة.');
+    });
+    return () => { active = false; };
   }, [draftVisitUuid, nativeApp]);
 
   useEffect(() => {
@@ -116,30 +176,33 @@ export default function MachineVisitSheet({ machine, repName = '', reasons, gps,
     return () => window.clearInterval(timer);
   }, [captureLocation]);
 
-  const activeMachine = confirmedPin && !machine.locationConfirmation ? { ...machine, ...confirmedPin } : machine;
+  const provisionalActionMatches = confirmedPin?.offlineProvisional
+    && confirmedPin.locationConfirmation?.actionUuid
+    && confirmedPin.locationConfirmation.actionUuid === machine.locationConfirmation?.actionUuid;
+  const activeMachine = confirmedPin && (!machine.locationConfirmation || provisionalActionMatches)
+    ? { ...machine, ...confirmedPin } : machine;
   const locationPending = activeMachine.locationConfirmationPending === true;
+  const offlineProvisionalLocation = activeMachine.offlineProvisional === true;
   const locationLocked = activeMachine.isLocationLocked === true;
   const hasMachinePin = Number.isFinite(activeMachine.latitude) && Number.isFinite(activeMachine.longitude);
-  const measuredDistance = gps && hasMachinePin
+  const gpsFresh = isEligibleVisitGps(gps);
+  const measuredDistance = gpsFresh && hasMachinePin
     ? distanceMeters(gps, { latitude: activeMachine.latitude, longitude: activeMachine.longitude })
     : null;
   const effectiveDistance = measuredDistance === null ? null : Math.max(0, measuredDistance - Number(gps.accuracy ?? 0));
   const radius = Math.max(1, Number(activeMachine.geofenceRadiusMeters) || 50);
   const withinGeofence = locationLocked && hasMachinePin && effectiveDistance !== null && effectiveDistance <= radius;
-  const canCapture = Boolean(gps) && withinGeofence && !correctionOpen && !locationPending && activeMachine.canVisit !== false;
+  const canAttemptCapture = locationLocked && hasMachinePin && !correctionOpen
+    && (!locationPending || offlineProvisionalLocation) && activeMachine.canVisit !== false;
 
   const confirmCurrentLocation = async () => {
     setError('');
     setConfirmingLocation(true);
     try {
       const location = await captureLocation?.();
-      const currentLocation = location ?? gps;
+      const currentLocation = location;
       if (!currentLocation) throw new Error('يلزم انتظار إشارة GPS قبل تثبيت موقع الماكينة.');
-      if (Number(currentLocation.accuracy) > 100) throw new Error('إشارة GPS غير دقيقة بما يكفي؛ انتظر تحسن الدقة إلى 100 متر أو أفضل.');
-      const ageMs = Date.now() - Date.parse(currentLocation.updatedAt ?? '');
-      if (!Number.isFinite(ageMs) || ageMs < -30000 || ageMs > 5 * 60 * 1000) {
-        throw new Error('إشارة GPS قديمة؛ انتظر تحديث الموقع ثم حاول تثبيته من جديد.');
-      }
+      if (!isEligibleVisitGps(currentLocation)) throw new Error('إشارة GPS قديمة أو غير دقيقة؛ انتظر تحديث الموقع ثم حاول تثبيته من جديد.');
       const pin = await onConfirmLocation(currentLocation);
       setConfirmedPin(pin);
     } catch (confirmationError) {
@@ -158,8 +221,9 @@ export default function MachineVisitSheet({ machine, repName = '', reasons, gps,
     setError('');
     try {
       const capturedLocation = await captureLocation?.();
-      const currentLocation = capturedLocation ?? gps;
+      const currentLocation = capturedLocation;
       if (!currentLocation) throw new Error('يلزم إرسال موقع GPS الحالي مع بلاغ التصحيح.');
+      if (!isEligibleVisitGps(currentLocation)) throw new Error('يلزم GPS حديث ودقيق لإرسال بلاغ التصحيح.');
       if (correctionEvidence && correctionEvidence.size > 4 * 1024 * 1024) {
         throw new Error('يجب ألا تتجاوز صورة الإثبات 4 ميغابايت.');
       }
@@ -179,107 +243,118 @@ export default function MachineVisitSheet({ machine, repName = '', reasons, gps,
     }
   };
 
-  const processCaptures = async (phase, files) => {
-    if (deletingPhotoRef.current) return;
-    const selectedFiles = Array.from(files ?? []).filter(Boolean);
-    if (!selectedFiles.length) return;
-    const remaining = 3 - photos[phase].length;
-    if (selectedFiles.length > remaining) {
-      setError(`يمكن حفظ 3 صور فقط لكل مرحلة؛ المتاح الآن ${remaining} صورة.`);
-      return;
-    }
-    setError('');
-    const capturedLocation = await captureLocation?.();
-    const currentLocation = capturedLocation;
-    if (!currentLocation) {
-      setError('يلزم تحديد موقع GPS قبل التقاط صور الزيارة.');
-      return;
-    }
-    if (!locationLocked || !hasMachinePin) {
-      setError('لم يتم تأكيد موقع هذه الماكينة بعد؛ أكّد وجودك عندها أو أرسل بلاغ ماكينة خاطئة قبل التصوير.');
-      return;
-    }
-    if (Math.max(0,
-      distanceMeters(currentLocation, { latitude: activeMachine.latitude, longitude: activeMachine.longitude })
-        - Number(currentLocation.accuracy ?? 0)) > radius) {
-      setError('أنت خارج نطاق الماكينة؛ اقترب منها لتفعيل التصوير.');
-      return;
-    }
+  const setPendingPhase = (phase, updater) => {
+    const next = { ...pendingCapturesRef.current, [phase]: updater(pendingCapturesRef.current[phase]) };
+    pendingCapturesRef.current = next;
+    setPendingCaptures(next);
+  };
+
+  const processCaptures = async (phase, incomingFiles = []) => {
+    if (deletingPhotoRef.current || processingCapturesRef.current) return;
+    processingCapturesRef.current = true;
+    setProcessingPhase(phase);
     try {
-      await onStartWork?.(machine.cardId, draftVisitUuid, locationPayload(currentLocation));
-    } catch (claimError) {
-      setError(claimError.message || 'بدأ مندوب آخر العمل على هذه الماكينة؛ حدّث المسار.');
-      return;
-    }
-    const preparedPhotos = [];
-    for (const [index, file] of selectedFiles.entries()) {
-      setProcessingPhase(phase);
-      try {
-        const capturedAt = file.capturedAt ? new Date(file.capturedAt) : new Date();
-        if (Number.isNaN(capturedAt.valueOf())) throw new Error('وقت التقاط الصورة غير صالح.');
-        const capturedGps = nativeApp && file.capturedAt
-          ? file.location
-          : await captureLocation?.() ?? currentLocation;
-        const geofenceGps = capturedGps ?? currentLocation;
-        if (!geofenceGps) throw new Error('لا توجد إشارة GPS متاحة للتحقق من نطاق الماكينة.');
-        if (Math.max(0,
-          distanceMeters(geofenceGps, { latitude: activeMachine.latitude, longitude: activeMachine.longitude })
-            - Number(geofenceGps.accuracy ?? 0)) > radius) {
-          throw new Error(`صورة ${index + 1}: إشارة GPS خارج نطاق الماكينة؛ لا يمكن إرفاقها بالزيارة.`);
-        }
-        if (nativeApp) {
-          const usedIndexes = new Set([...photos[phase], ...preparedPhotos].map((photo) => Number(photo.photoIndex)));
-          const photoIndex = [0, 1, 2].find((candidate) => !usedIndexes.has(candidate));
-          if (photoIndex === undefined) throw new Error('اكتملت الصور الثلاث لهذه المرحلة.');
-          const saved = await processNativeVisitPhoto({
-            visitUuid: draftVisitUuid,
-            phase,
-            index: photoIndex,
-            sourceUri: file.sourceUri,
-            watermark: {
+      const currentPhotos = photosRef.current[phase];
+      const existingPending = pendingCapturesRef.current[phase];
+      const merged = mergeCapturedPhotoResults(existingPending, Array.from(incomingFiles ?? []).filter(Boolean), MAX_VISIT_PHOTOS_PER_PHASE - currentPhotos.length);
+      setPendingPhase(phase, () => merged);
+      if (!merged.length) return;
+
+      const currentLocation = await captureLocation?.();
+      validateVisitPhotoCaptureLocation(currentLocation, activeMachine);
+      setError('');
+      try { await onStartWork?.(machine.cardId, draftVisitUuid, locationPayload(currentLocation)); }
+      catch (claimError) { throw new Error(claimError.message || 'بدأ مندوب آخر العمل على هذه الماكينة؛ حدّث المسار.'); }
+
+      for (let index = 0; index < merged.length; index += 1) {
+        const file = merged[index];
+        let capturedAt;
+        let photo = null;
+        try {
+          capturedAt = new Date(file.capturedAt ?? Date.now());
+          if (Number.isNaN(capturedAt.valueOf())) throw new Error('وقت التقاط الصورة غير صالح.');
+          const photoLocation = nativeApp ? file.location : await captureLocation?.();
+          validateVisitPhotoCaptureLocation(photoLocation, activeMachine);
+          if (nativeApp) {
+            const photoIndex = Number.isInteger(file.photoIndex) ? file.photoIndex : firstUnusedPhotoIndex(photosRef.current[phase], MAX_VISIT_PHOTOS_PER_PHASE);
+            if (photoIndex < 0) throw new Error('بلغت الحد التقني للصور لهذه المرحلة.');
+            const saved = await processNativeVisitPhoto({
+              visitUuid: draftVisitUuid,
+              phase,
+              index: photoIndex,
+              photoIndex,
+              captureId: file.captureId,
+              sourceUri: file.sourceUri,
+              watermark: {
+                machineCode: activeMachine.machineCode,
+                machineName: activeMachine.arabicName,
+                repName,
+                regionName: activeMachine.regionName,
+                areaName: activeMachine.areaName,
+                phase,
+                capturedAt: capturedAt.toISOString(),
+                visitCapturedAt: draftCapturedAt,
+                location: locationPayload(photoLocation),
+              },
+            });
+            photo = {
+              path: saved.path,
+              photoIndex,
+              captureId: file.captureId,
+              sizeBytes: Number(saved.sizeBytes),
+              previewUrl: nativeFilePreviewUrl(saved.path),
+              capturedAt: capturedAt.toISOString(),
+            };
+            if (saved.archiveWarning) setError(saved.archiveWarning);
+            else if (saved.archive?.pending > 0) setError('الصورة محفوظة داخل التطبيق؛ توجد صور بانتظار نسخها إلى المجلد المختار.');
+          } else {
+            const blob = await compressAndWatermark(file, {
               machineCode: activeMachine.machineCode,
               machineName: activeMachine.arabicName,
-              repName,
               regionName: activeMachine.regionName,
               areaName: activeMachine.areaName,
               phase,
-              capturedAt: capturedAt.toISOString(),
-              visitCapturedAt: draftCapturedAt,
-              location: locationPayload(capturedGps),
-            },
-          });
-          if (saved.archiveWarning) setError(saved.archiveWarning);
-          else if (saved.archive?.pending > 0) setError('الصورة محفوظة داخل التطبيق؛ توجد صور بانتظار نسخها إلى المجلد المختار.');
-          preparedPhotos.push({
-            path: saved.path,
-            photoIndex,
-            sizeBytes: Number(saved.sizeBytes),
-            previewUrl: nativeFilePreviewUrl(saved.path),
-            capturedAt: capturedAt.toISOString(),
-          });
-        } else {
-          const blob = await compressAndWatermark(file, {
-            machineCode: activeMachine.machineCode,
-            machineName: activeMachine.arabicName,
-            regionName: activeMachine.regionName,
-            areaName: activeMachine.areaName,
-            phase,
-            capturedAt,
-            location: locationPayload(capturedGps),
-          });
-          const previewUrl = URL.createObjectURL(blob);
-          previewUrls.current.add(previewUrl);
-          preparedPhotos.push({ blob, previewUrl, capturedAt: capturedAt.toISOString() });
+              capturedAt,
+              location: locationPayload(photoLocation),
+            });
+            const previewUrl = URL.createObjectURL(blob);
+            previewUrls.current.add(previewUrl);
+            photo = { blob, previewUrl, capturedAt: capturedAt.toISOString() };
+          }
+          if (!photosRef.current[phase].some((saved) => file.captureId && saved.captureId === file.captureId)) {
+            const next = { ...photosRef.current, [phase]: [...photosRef.current[phase], photo] };
+            photosRef.current = next;
+            setPhotos(next);
+          }
+          setPendingPhase(phase, (current) => current.filter((candidate) => candidate.captureId !== file.captureId && candidate !== file));
+        } catch (captureError) {
+          throw new Error(`الصورة ${index + 1} محفوظة محلياً ولم تُفقد. ${captureError.message || 'تعذرت معالجتها؛ أعد المحاولة.'}`);
         }
-      } catch (captureError) {
-        setError(captureError.message || `تعذر تجهيز الصورة ${index + 1}. حاول التقاطها مرة أخرى.`);
-        break;
-      } finally {
-        setProcessingPhase('');
       }
-    }
-    if (preparedPhotos.length) {
-      setPhotos((current) => ({ ...current, [phase]: [...current[phase], ...preparedPhotos] }));
+      setError('');
+    } catch (captureError) {
+      setError(captureError.message || 'تعذرت معالجة الصور؛ تبقى المجموعة محفوظة ويمكن إعادة المحاولة.');
+      if (nativeApp) {
+        try {
+          const staged = await listNativeStagedVisitPhotos(draftVisitUuid);
+          const processed = staged.filter((photo) => photo.phase === phase && photo.status === 'processed' && photo.path);
+          const nextPhotos = [...photosRef.current[phase]];
+          for (const entry of processed) {
+            if (nextPhotos.some((photo) => photo.captureId === entry.captureId)) continue;
+            nextPhotos.push({
+              path: entry.path, sizeBytes: Number(entry.sizeBytes), capturedAt: entry.capturedAt,
+              photoIndex: entry.photoIndex, captureId: entry.captureId, previewUrl: nativeFilePreviewUrl(entry.path),
+            });
+          }
+          const next = { ...photosRef.current, [phase]: nextPhotos };
+          photosRef.current = next;
+          setPhotos(next);
+          setPendingPhase(phase, () => staged.filter((photo) => photo.phase === phase && photo.status === 'captured'));
+        } catch { /* SQLite remains authoritative; the representative can reopen the visit to rehydrate it. */ }
+      }
+    } finally {
+      processingCapturesRef.current = false;
+      setProcessingPhase('');
     }
   };
 
@@ -290,34 +365,58 @@ export default function MachineVisitSheet({ machine, repName = '', reasons, gps,
   };
 
   const openCamera = (phase, inputRef) => async () => {
-    if (!nativeApp) {
-      inputRef.current?.click();
-      return;
-    }
+    if (captureSessionRef.current || processingCapturesRef.current || saving || !canAttemptCapture) return;
+    captureSessionRef.current = true;
+    setProcessingPhase(phase);
     try {
+      const freshLocation = await captureLocation?.();
+      validateVisitPhotoCaptureLocation(freshLocation, activeMachine);
+      const currentPhotos = photosRef.current[phase];
+      const staged = pendingCapturesRef.current[phase];
+      const remaining = MAX_VISIT_PHOTOS_PER_PHASE - currentPhotos.length - staged.length;
+      if (remaining <= 0) throw new Error('وصلت إلى الحد الأقصى للصور في هذه المرحلة. أعد معالجة الصور المحفوظة أولاً.');
+      if (!nativeApp) {
+        inputRef.current?.click();
+        return;
+      }
+      const allPhotos = [...currentPhotos, ...staged];
+      const startIndex = allPhotos.reduce((highest, photo) => Math.max(highest, Number(photo.photoIndex) + 1), 0);
+      if (startIndex < 0 || startIndex + remaining > MAX_VISIT_PHOTOS_PER_PHASE) {
+        throw new Error('تعذر تحديد ترتيب آمن لمجموعة الصور؛ أعد معالجة الصور المحفوظة أولاً.');
+      }
+      setProcessingPhase('camera');
       const captured = await captureNativeCameraPhotos({
-        maxPhotos: 3 - photos[phase].length,
+        visitUuid: draftVisitUuid,
+        repId,
+        cardId: machine.cardId,
+        phase,
+        startIndex,
+        fallbackLocation: locationPayload(freshLocation),
+        maxPhotos: remaining,
         phaseLabel: phase === 'before' ? 'قبل الصيانة' : 'بعد الصيانة',
       });
       await processCaptures(phase, captured);
     } catch (captureError) {
-      setError(captureError.message || 'تعذر فتح الكاميرا. تحقق من إذن الكاميرا وحاول مجدداً.');
+      setError(captureError.message || 'تعذر فتح الكاميرا. الصور التي حُفظت جزئياً ستظهر عند استعادة الزيارة.');
+      if (nativeApp) {
+        try {
+          const staged = await listNativeStagedVisitPhotos(draftVisitUuid);
+          const captured = staged.filter((photo) => photo.phase === phase && photo.status === 'captured');
+          setPendingPhase(phase, (current) => mergeCapturedPhotoResults(current, captured, MAX_VISIT_PHOTOS_PER_PHASE - photosRef.current[phase].length));
+        } catch { /* Existing staged photos remain in the native SQLite draft queue. */ }
+      }
+    } finally {
+      captureSessionRef.current = false;
+      setProcessingPhase('');
     }
   };
 
   useEffect(() => {
-    if (!nativeApp || activePhase !== 'before' || !canCapture || photos.before.length > 0
-        || autoCameraOpened.current || correctionOpen) return;
+    if (!nativeApp || activePhase !== 'before' || photos.before.length > 0 || pendingCaptures.before.length > 0
+        || autoCameraOpened.current || correctionOpen || !canAttemptCapture) return;
     autoCameraOpened.current = true;
-    void (async () => {
-      try {
-        const captured = await captureNativeCameraPhotos({ maxPhotos: 3, phaseLabel: 'قبل الصيانة' });
-        await processCaptures('before', captured);
-      } catch (captureError) {
-        setError(captureError.message || 'تعذر فتح الكاميرا تلقائياً؛ استخدم زر التقاط صورة قبل الصيانة.');
-      }
-    })();
-  }, [activePhase, canCapture, correctionOpen, nativeApp, photos.before.length]);
+    void openCamera('before', beforeInput);
+  }, [activePhase, canAttemptCapture, correctionOpen, nativeApp, openCamera, pendingCaptures.before.length, photos.before.length]);
 
   const removePhoto = async (phase, index) => {
     if (deletingPhotoRef.current) return;
@@ -328,17 +427,21 @@ export default function MachineVisitSheet({ machine, repName = '', reasons, gps,
     setError('');
     try {
       if (nativeApp) {
-        const result = await deleteNativeVisitPhoto(draftVisitUuid, phase, removed.photoIndex ?? index, removed.path);
+        const result = await deleteNativeVisitPhoto(draftVisitUuid, phase, removed.photoIndex ?? index, removed.path, removed);
         if (result?.deleted === false) throw new Error('تعذر حذف الصورة المحلية؛ بقيت ضمن الزيارة.');
       }
       if (removed.previewUrl) {
         URL.revokeObjectURL(removed.previewUrl);
         previewUrls.current.delete(removed.previewUrl);
       }
-      setPhotos((current) => ({
+      setPhotos((current) => {
+        const next = {
         ...current,
         [phase]: current[phase].filter((photo) => photo !== removed),
-      }));
+        };
+        photosRef.current = next;
+        return next;
+      });
     } catch (deleteError) {
       setError(deleteError.message || 'تعذر حذف الصورة من التخزين المحلي؛ لم تُزل من الزيارة.');
     } finally {
@@ -385,8 +488,12 @@ export default function MachineVisitSheet({ machine, repName = '', reasons, gps,
       setError('رُفضت الزيارة: أوقف تطبيق تزييف الموقع وأعد تشغيل الوردية قبل المتابعة.');
       return;
     }
-    if (photos.before.length !== 3 || photos.after.length > 3) {
-      setError('يلزم التقاط 3 صور قبل الصيانة؛ صور ما بعد الصيانة اختيارية وبحد أقصى 3 صور.');
+    if (pendingCaptures.before.length || pendingCaptures.after.length) {
+      setError('توجد صور محفوظة لم تكتمل معالجتها. أعد معالجتها قبل حفظ الزيارة؛ لن تحتاج إلى إعادة تصويرها.');
+      return;
+    }
+    if (photos.before.length < 1 || photos.after.length < 1) {
+      setError('يلزم تصوير صورة قبل الصيانة وصورة بعدها على الأقل.');
       return;
     }
     setError('');
@@ -395,6 +502,7 @@ export default function MachineVisitSheet({ machine, repName = '', reasons, gps,
       const capturedLocation = await captureLocation?.();
       const currentLocation = capturedLocation;
       if (!currentLocation) throw new Error('يلزم تحديد موقع GPS قبل حفظ الزيارة.');
+      validateVisitPhotoCaptureLocation(currentLocation, activeMachine);
       if (correctionOpen) throw new Error('أغلق بلاغ اختلاف الماكينة أو أرسله قبل متابعة الزيارة.');
       if (!locationLocked || !hasMachinePin) {
         throw new Error('لم يتم تأكيد موقع الماكينة بعد؛ أكّد موقعها الحالي قبل حفظ الزيارة.');
@@ -435,6 +543,7 @@ export default function MachineVisitSheet({ machine, repName = '', reasons, gps,
         capturedAt: draftCapturedAt,
         location: locationPayload(currentLocation),
       });
+      clearDraftVisitUuid(repId, machine.cardId, draftVisitUuid);
     } catch (saveError) {
       draftSaved.current = false;
       setError(saveError.message || 'تعذر حفظ الزيارة محلياً. لم تُحذف الصور؛ حاول مرة أخرى.');
@@ -445,6 +554,10 @@ export default function MachineVisitSheet({ machine, repName = '', reasons, gps,
 
   const photoField = (phase, phasePhotos, inputRef) => {
     const label = phase === 'before' ? 'قبل الصيانة' : 'بعد الصيانة';
+    const queuedCaptures = pendingCaptures[phase];
+    const captureAction = queuedCaptures.length
+      ? () => void processCaptures(phase, [])
+      : openCamera(phase, inputRef);
     return (
       <section className="rep-photo-card" aria-label={`صور ${label}`}>
         <div className="rep-photo-card-head">
@@ -452,26 +565,40 @@ export default function MachineVisitSheet({ machine, repName = '', reasons, gps,
             <span className="rep-eyebrow">{phase === 'before' ? '01 · BEFORE' : '02 · AFTER'}</span>
             <h3>{label}</h3>
           </div>
-          <span className={`rep-photo-state ${phasePhotos.length === 3 ? 'is-ready' : ''}`}>{phasePhotos.length} / 3 صور</span>
+          <span className={`rep-photo-state ${phasePhotos.length >= 1 ? 'is-ready' : ''}`}>{phasePhotos.length} معالجة{queuedCaptures.length ? ` · ${queuedCaptures.length} محفوظة لإعادة المعالجة` : ''} · صورة واحدة على الأقل</span>
         </div>
         {phasePhotos.length > 0 && <div className="rep-photo-preview-grid">
           {phasePhotos.map((photo, index) => <div className="rep-photo-preview" key={`${photo.capturedAt}-${index}`}>
-            <img src={photo.previewUrl} alt={`صورة ${label} رقم ${index + 1} للماكينة ${machine.machineCode}`} />
+            <button type="button" className="rep-button rep-button-light" onClick={() => setPreviewPhoto(photo.previewUrl)} aria-label="معاينة الصورة"><img src={photo.previewUrl} alt={`صورة ${label} رقم ${index + 1} للماكينة ${machine.machineCode}`} /></button>
             <small>{index + 1} · {Math.max(1, Math.round((photo.blob?.size ?? photo.sizeBytes ?? 1) / 1024))} KB · {new Intl.DateTimeFormat('ar-EG', { timeStyle: 'short' }).format(new Date(photo.capturedAt))}</small>
             <button type="button" className="rep-button rep-button-danger-light" onClick={() => void removePhoto(phase, index)} disabled={saving || Boolean(processingPhase)}>حذف الصورة</button>
           </div>)}
         </div>}
+        {queuedCaptures.length > 0 && <ul className="rep-captured-pending-list" aria-label={`صور ${label} بانتظار المعالجة`}>
+          {queuedCaptures.map((capture, index) => <li key={capture.captureId || capture.sourceUri || `${capture.name}-${capture.lastModified}`}>
+            <span>صورة محفوظة {index + 1} · {new Intl.DateTimeFormat('ar-EG', { timeStyle: 'short' }).format(new Date(capture.capturedAt || Date.now()))} · بانتظار GPS/المعالجة</span>
+            <button type="button" className="rep-button rep-button-danger-light" disabled={Boolean(processingPhase) || saving} onClick={async () => {
+              try {
+                if (nativeApp) {
+                  const result = await deleteNativeVisitPhoto(draftVisitUuid, phase, capture.photoIndex, capture.sourceUri, capture);
+                  if (result?.deleted === false) throw new Error('تعذر حذف الصورة المؤقتة؛ بقيت محفوظة للمحاولة التالية.');
+                }
+                setPendingPhase(phase, (current) => current.filter((item) => item !== capture && item.captureId !== capture.captureId));
+              } catch (deleteError) { setError(deleteError.message || 'تعذر حذف الصورة المؤقتة؛ بقيت محفوظة للمحاولة التالية.'); }
+            }}>حذف الصورة المحفوظة</button>
+          </li>)}
+        </ul>}
         <div className="rep-photo-capture-actions">
           <button
             type="button"
             className="rep-camera-button"
-            onClick={openCamera(phase, inputRef)}
-            disabled={Boolean(processingPhase) || saving || !canCapture || phasePhotos.length >= 3}
+            onClick={captureAction}
+            disabled={Boolean(processingPhase) || saving || (!queuedCaptures.length && !canAttemptCapture) || phasePhotos.length >= MAX_VISIT_PHOTOS_PER_PHASE}
           >
             <span className="rep-camera-icon" aria-hidden="true">⌖</span>
-            <span>{processingPhase === phase ? 'جارٍ تجهيز الصور...' : `${nativeApp ? `التقط حتى ${3 - phasePhotos.length} صور متتالية دون إغلاق الكاميرا` : 'أضف صوراً بالكاميرا'} · ${label}`}</span>
+            <span>{processingPhase === phase ? 'جارٍ تجهيز الصور...' : processingPhase === 'camera' ? 'الكاميرا مفتوحة…' : queuedCaptures.length ? `أعد معالجة ${queuedCaptures.length} صورة محفوظة · ${label}` : `${nativeApp ? `التقط حتى ${MAX_VISIT_PHOTOS_PER_PHASE - phasePhotos.length - queuedCaptures.length} صور متتالية دون إغلاق الكاميرا` : 'أضف صوراً بالكاميرا'} · ${label}`}</span>
           </button>
-          {!nativeApp && <button type="button" className="rep-button rep-button-light" onClick={() => inputRef.current?.click()} disabled={Boolean(processingPhase) || saving || !canCapture || phasePhotos.length >= 3}>اختيار الصور المتبقية</button>}
+          {!nativeApp && !queuedCaptures.length && <button type="button" className="rep-button rep-button-light" onClick={captureAction} disabled={Boolean(processingPhase) || saving || !canAttemptCapture || phasePhotos.length >= MAX_VISIT_PHOTOS_PER_PHASE}>اختيار الصور المتبقية</button>}
         </div>
         {!nativeApp && <input
           ref={inputRef}
@@ -490,6 +617,8 @@ export default function MachineVisitSheet({ machine, repName = '', reasons, gps,
   const visitBusy = saving || Boolean(processingPhase) || deletingPhotoRef.current;
 
   return (
+    <>
+    {previewPhoto && <div role="dialog" aria-modal="true" aria-label="معاينة الصورة" style={{position:"fixed",inset:0,zIndex:10000,background:"#000e",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}><button type="button" className="rep-button" onClick={() => setPreviewPhoto(null)}>إغلاق المعاينة</button><img src={previewPhoto} alt="الصورة المحفوظة بالواترمارك" style={{maxWidth:"100%",maxHeight:"85vh",objectFit:"contain"}} /></div>}
     <div className="rep-sheet-backdrop" role="presentation" onMouseDown={(event) => {
       if (event.target === event.currentTarget && !visitBusy) onClose();
     }}>
@@ -505,18 +634,18 @@ export default function MachineVisitSheet({ machine, repName = '', reasons, gps,
         </header>
 
         <div className="rep-sheet-content">
-          <div className={`rep-gps-strip ${gps ? 'has-fix' : ''}`}>
+          <div className={`rep-gps-strip ${gpsFresh ? 'has-fix' : ''}`}>
             <span className="rep-gps-pulse" aria-hidden="true" />
             <div>
-              <strong>{gps ? 'موقع الجهاز الحالي' : gpsError || 'جارٍ تحديد الموقع...'}</strong>
-              <small>{showLocation(gps)}</small>
+              <strong>{gpsFresh ? 'GPS حديث صالح للتصوير' : gps ? 'آخر موقع معروف — غير صالح للتصوير' : gpsError || 'جارٍ تحديد GPS حديث...'}</strong>
+              <small>{gps ? showLocation(gps) : 'لن تُستخدم الإحداثيات القديمة؛ حدّث GPS قبل التصوير أو الحفظ.'}</small>
             </div>
             <span className="rep-gps-label">GPS</span>
           </div>
 
-          <div className={`rep-geofence-status ${!gps || !withinGeofence ? 'outside' : 'inside'}`} role="status">
-            {!gps
-              ? 'جارٍ انتظار إشارة GPS؛ يلزم الموقع لتفعيل التصوير.'
+          <div className={`rep-geofence-status ${!gpsFresh || !withinGeofence ? 'outside' : 'inside'}`} role="status">
+            {!gpsFresh
+              ? 'يلزم الحصول على GPS حديث ودقيق؛ الإحداثيات السابقة لا تفعّل التصوير.'
               : !locationLocked || !hasMachinePin
                  ? 'تأكد من كود الماكينة ثم أرسل GPS الحالي؛ يُعتمد الموقع الأول فور مزامنته، أما تصحيح موقع موجود فيحتاج مراجعة الإدارة.'
                 : withinGeofence
@@ -537,13 +666,15 @@ export default function MachineVisitSheet({ machine, repName = '', reasons, gps,
               {activeMachine.locationConfirmation?.reviewNote && <small>{activeMachine.locationConfirmation.reviewNote}</small>}
             </div>
             <button type="button" className="rep-button rep-button-primary" onClick={() => void confirmCurrentLocation()}
-              disabled={locationPending || confirmingLocation || !gps || Number(gps.accuracy) > 100 || saving || correctionSaving || correctionOpen}>
+              disabled={locationPending || confirmingLocation || !gpsFresh || saving || correctionSaving || correctionOpen}>
               {confirmingLocation ? 'جارٍ حفظ ومزامنة الموقع…' : 'تثبيت الموقع الأول / إرسال التصحيح'}
             </button>
           </section> : <section className="rep-machine-verification verified">
             <div>
-              <strong>الموقع مؤكد ومقفل</strong>
-              <small>نطاق التصوير والزيارة: {radius} متر{activeMachine.locationConfirmationPending ? ' · بانتظار مزامنة الخادم' : ''}.</small>
+              <strong>{offlineProvisionalLocation ? 'الموقع مثبت مؤقتاً على هذا الهاتف' : 'الموقع مؤكد ومقفل'}</strong>
+              <small>{offlineProvisionalLocation
+                ? 'يمكنك استكمال الزيارة أوفلاين؛ سيُرسل اقتراح الموقع أولاً، ولن تُرفع الزيارة قبل إقرار الخادم له.'
+                : `نطاق التصوير والزيارة: ${radius} متر${activeMachine.locationConfirmationPending ? ' · بانتظار مزامنة الخادم' : ''}.`}</small>
             </div>
           </section>}
 
@@ -561,7 +692,7 @@ export default function MachineVisitSheet({ machine, repName = '', reasons, gps,
               <label><span>صورة إثبات اختيارية (JPEG / PNG / WebP · حتى 4 MB)</span><input type="file" accept="image/jpeg,image/png,image/webp" capture="environment" onChange={(event) => setCorrectionEvidence(event.target.files?.[0] ?? null)} /></label>
               {correctionEvidence && <small className="rep-correction-file">{correctionEvidence.name} · {Math.ceil(correctionEvidence.size / 1024)} KB</small>}
               <button type="button" className="rep-button rep-button-danger-light" onClick={() => void submitCorrection()}
-                disabled={correctionSaving || !gps || !correctionCode.trim() || !correctionName.trim()}>
+                disabled={correctionSaving || !gpsFresh || !correctionCode.trim() || !correctionName.trim()}>
                 {correctionSaving ? 'جارٍ حفظ البلاغ…' : 'إرسال بلاغ التصحيح للإدارة'}
               </button>
             </div>}
@@ -579,8 +710,8 @@ export default function MachineVisitSheet({ machine, repName = '', reasons, gps,
             </div>
             {activePhase === 'before' ? (
               <button type="button" className="rep-button rep-button-primary"
-                onClick={() => setActivePhase('after')} disabled={photos.before.length !== 3 || saving || Boolean(processingPhase)}>
-                {photos.before.length === 3 ? 'اعتماد صور قبل الصيانة · الانتقال إلى بعد الصيانة' : 'التقط 3 صور قبل الصيانة للمتابعة'}
+                onClick={() => setActivePhase('after')} disabled={photos.before.length < 1 || saving || Boolean(processingPhase)}>
+                {photos.before.length >= 1 ? 'اعتماد صور قبل الصيانة · الانتقال إلى بعد الصيانة' : 'التقط صورة قبل الصيانة على الأقل للمتابعة'}
               </button>
             ) : (
               <div className="rep-photo-capture-actions">
@@ -682,8 +813,8 @@ export default function MachineVisitSheet({ machine, repName = '', reasons, gps,
 
         <footer className="rep-sheet-footer">
           <button type="button" className="rep-button rep-button-light" onClick={onClose} disabled={visitBusy}>إلغاء</button>
-          <button type="button" className="rep-button rep-button-primary rep-save-visit" onClick={save} disabled={saving || !canCapture || photos.before.length !== 3 || photos.after.length > 3 || Boolean(processingPhase) || (nativeApp && /تزييف الموقع/.test(gpsError ?? ''))}>
-            {saving ? 'جارٍ تحديد الموقع وحفظ الزيارة…' : photos.after.length ? '💾 إنهاء الزيارة وحفظ الصور' : '💾 إنهاء الزيارة بصور قبل فقط'}
+          <button type="button" className="rep-button rep-button-primary rep-save-visit" onClick={save} disabled={saving || !canAttemptCapture || photos.before.length < 1 || photos.after.length < 1 || pendingCaptures.before.length > 0 || pendingCaptures.after.length > 0 || Boolean(processingPhase) || (nativeApp && /تزييف الموقع/.test(gpsError ?? ''))}>
+            {saving ? 'جارٍ تحديد الموقع وحفظ الزيارة…' : '💾 إنهاء الزيارة وحفظ صور قبل وبعد'}
           </button>
         </footer>
       </section>
@@ -695,5 +826,6 @@ export default function MachineVisitSheet({ machine, repName = '', reasons, gps,
         onConfirm={confirmReasonQuantity}
       />
     </div>
+    </>
   );
 }

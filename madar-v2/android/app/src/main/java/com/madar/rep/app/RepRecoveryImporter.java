@@ -52,6 +52,7 @@ if (store.assertVisitImportCompatible(repId, visit)) {
     duplicates++;
     continue;
 }
+if (!RepVisitPhotoPolicy.valid(visit.getJSONObject("payload"), visit.getJSONArray("beforePhotos").length(), visit.getJSONArray("afterPhotos").length())) throw new IllegalArgumentException("Invalid recovery visit photo counts.");
 JSONArray before = importVisitPhotos(context, visit.optJSONArray("beforePhotos"), uuid, "before");
 JSONArray after = importVisitPhotos(context, visit.optJSONArray("afterPhotos"), uuid, "after");
 JSONObject nativeVisit = new JSONObject();
@@ -154,8 +155,8 @@ private static JSONArray importVisitPhotos(Context context, JSONArray photos, St
             }
         entries.put(new JSONObject().put("path", target.getAbsolutePath()).put("capturedAt", photo.optString("capturedAt", "")));
     }
-    if ("before".equals(phase) && entries.length() != 3) throw new IllegalArgumentException("تتطلب الزيارة ثلاث صور قبل العمل.");
-    if ("after".equals(phase) && entries.length() > 3) throw new IllegalArgumentException("عدد صور ما بعد العمل يتجاوز الحد.");
+
+
     return entries;
 }
 

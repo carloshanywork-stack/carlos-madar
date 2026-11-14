@@ -39,7 +39,7 @@ import {
 const router = Router();
 const syncVisitUpload = diskUploadMany({
   maxBytes: 3 * 1024 * 1024,
-  files: 6,
+  files: 40,
   extensions: ['.jpg', '.jpeg', '.webp'],
   destination: () => ensureStorageDirectory('.incoming'),
 });

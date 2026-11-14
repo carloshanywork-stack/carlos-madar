@@ -167,8 +167,8 @@ public final class MadarSyncWorker extends Worker {
                     if ("before".equals(photo.phase)) expectedBeforeCount += 1;
                     else if ("after".equals(photo.phase)) expectedAfterCount += 1;
                 }
-                if (expectedBeforeCount != 3 || expectedAfterCount > 3 || visit.photos.size() != expectedBeforeCount + expectedAfterCount) {
-                    store.markBlocked(visit.visitUuid, "يلزم وجود 3 صور قبل الصيانة؛ صور بعد الصيانة اختيارية (حتى 3). لم تُحذف البيانات المحلية.");
+                if (!RepVisitPhotoPolicy.valid(visit.payload, expectedBeforeCount, expectedAfterCount) || visit.photos.size() != expectedBeforeCount + expectedAfterCount) {
+                    store.markBlocked(visit.visitUuid, "عدد الصور لا يطابق سياسة الزيارة؛ لم تُحذف البيانات المحلية.");
                     continue;
                 }
 
@@ -184,7 +184,7 @@ public final class MadarSyncWorker extends Worker {
                     if ("before".equals(photo.phase)) beforeCount += 1;
                     else if ("after".equals(photo.phase)) afterCount += 1;
                 }
-                if (beforeCount != 3 || afterCount > 3) {
+                if (!RepVisitPhotoPolicy.valid(visit.payload, beforeCount, afterCount)) {
                     store.markBlocked(visit.visitUuid, "ترتيب صور قبل/بعد غير صالح؛ لم تُحذف البيانات المحلية.");
                     continue;
                 }

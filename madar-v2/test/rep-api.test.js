@@ -740,6 +740,14 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
     for (let index = 0; index < afterCount; index += 1) form.append('afterPhoto', new Blob([afterBuffer], { type: 'image/jpeg' }), `after_${index}.jpg`);
     return form;
   };
+  for (const [photoPolicyVersion, beforeCount, afterCount] of [[2,1,0],[2,0,1],[3,1,1],[null,1,1],['2',1,1],[2,21,1]]) {
+    const rejected = await request('/api/rep/sync-visit', { method: 'POST', body: buildVisitForm({
+      ...visitPayload, visitUuid: randomUUID(), photoPolicyVersion,
+      beforeCapturedAt: Array.from({length:beforeCount},()=>visitPayload.capturedAt),
+      afterCapturedAt: Array.from({length:afterCount},()=>visitPayload.capturedAt),
+    }, beforeCount, afterCount) }, login.cookie);
+    assert.equal(rejected.response.status, 400, JSON.stringify(rejected.body));
+  }
   const legacyCountableVisit = await request('/api/rep/sync-visit', {
     method: 'POST', body: buildVisitForm({ ...visitPayload, visitUuid: randomUUID(), maintenanceLines: undefined }),
   }, login.cookie);
@@ -868,6 +876,10 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   // Model a visit queued with the shipped Android payload while offline, then
   // uploaded after reconnect. Retry the same immutable bundle and reload it
   // from the supervisor API; it must be durable and must not duplicate lines.
+  const changedPhotoPolicyReplay = await request('/api/rep/sync-visit', {
+    method: 'POST', body: buildVisitForm({ ...visitPayload, photoPolicyVersion: 2 }),
+  }, login.cookie);
+  assert.equal(changedPhotoPolicyReplay.response.status, 409, 'policy changes are immutable UUID content changes');
   const retriedQueuedVisit = await request('/api/rep/sync-visit', {
     method: 'POST', body: buildVisitForm(visitPayload),
   }, login.cookie);
@@ -1011,20 +1023,27 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   const universalVisitTime = Date.now();
   const universalVisitPayload = {
     ...visitPayload,
+    photoPolicyVersion: 2,
     visitUuid: randomUUID(),
     cardId: otherRegionCardId,
     machineCode: '2400',
     regionName: 'الرياض',
     capturedAt: new Date(universalVisitTime).toISOString(),
-    beforeCapturedAt: Array.from({ length: 3 }, (_, index) => new Date(universalVisitTime - (3 - index) * 60 * 1000).toISOString()),
-    afterCapturedAt: [],
+    beforeCapturedAt: Array.from({ length: 1 }, (_, index) => new Date(universalVisitTime - (3 - index) * 60 * 1000).toISOString()),
+    afterCapturedAt: [new Date(universalVisitTime).toISOString()],
     location: { ...visitPayload.location, updatedAt: new Date(universalVisitTime).toISOString() },
   };
   const universalVisit = await request('/api/rep/sync-visit', {
-    method: 'POST', body: buildVisitForm(universalVisitPayload, 3, 0),
+    method: 'POST', body: buildVisitForm(universalVisitPayload, 1, 1),
   }, universalLogin.cookie);
   assert.equal(universalVisit.response.status, 200, JSON.stringify(universalVisit.body));
   assert.equal(universalVisit.body.status, 'pending_review', 'universal representatives can submit visits for all regions on their assigned orders');
+  const flexibleReplay = await request('/api/rep/sync-visit', { method: 'POST', body: buildVisitForm(universalVisitPayload, 1, 1) }, universalLogin.cookie);
+  assert.equal(flexibleReplay.response.status, 200);
+  assert.equal(flexibleReplay.body.idempotent, true);
+  const flexibleChanged = await request('/api/rep/sync-visit', { method: 'POST', body: buildVisitForm({ ...universalVisitPayload, notes: 'changed content' }, 1, 1) }, universalLogin.cookie);
+  assert.equal(flexibleChanged.response.status, 409);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM rep_visit_photos WHERE visit_id = (SELECT id FROM rep_visits WHERE visit_uuid = ?)').get(universalVisitPayload.visitUuid).count, 2);
   const firstVisitId = db.prepare('SELECT id FROM rep_visits WHERE visit_uuid = ?').get(visitUuid).id;
   const reshoot = await request(`/api/supervisor/visits/${firstVisitId}/review`, jsonOptions('POST', {
     action: 'reshoot', note: 'الصورة مظلمة؛ أعد التصوير بإضاءة أوضح.',
@@ -1064,14 +1083,15 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
 
   const replacementPayload = {
     ...visitPayload,
+    photoPolicyVersion: 2,
     visitUuid: randomUUID(),
     notes: 'إعادة تصوير واضحة بعد ملاحظة المشرف',
     capturedAt: new Date().toISOString(),
-    beforeCapturedAt: Array.from({ length: 3 }, (_, index) => new Date(Date.now() - (4 - index) * 60 * 1000).toISOString()),
-    afterCapturedAt: Array.from({ length: 3 }, (_, index) => new Date(Date.now() - (3 - index) * 30 * 1000).toISOString()),
+    beforeCapturedAt: Array.from({ length: 4 }, (_, index) => new Date(Date.now() - (4 - index) * 60 * 1000).toISOString()),
+    afterCapturedAt: Array.from({ length: 4 }, (_, index) => new Date(Date.now() - (3 - index) * 30 * 1000).toISOString()),
   };
   const replacementSync = await request('/api/rep/sync-visit', {
-    method: 'POST', body: buildVisitForm(replacementPayload),
+    method: 'POST', body: buildVisitForm(replacementPayload, 4, 4),
   }, login.cookie);
   assert.equal(replacementSync.response.status, 200);
   assert.equal(replacementSync.body.status, 'pending_review');
@@ -1084,8 +1104,8 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   const approvedCard = db.prepare('SELECT before_photos_json, after_photos_json, reason_ids_json, notes, status FROM maintenance_cards WHERE id = ?')
     .get(missingAfterCardId);
   assert.equal(approvedCard.status, 'completed');
-  assert.equal(JSON.parse(approvedCard.before_photos_json).length, 4);
-  assert.equal(JSON.parse(approvedCard.after_photos_json).length, 3);
+  assert.equal(JSON.parse(approvedCard.before_photos_json).length, 5);
+  assert.equal(JSON.parse(approvedCard.after_photos_json).length, 4);
   assert.ok(JSON.parse(approvedCard.reason_ids_json).includes(faultReasons.body.reasons[0].id));
   assert.match(approvedCard.notes, /إعادة تصوير واضحة/);
   assert.equal(approvedCard.notes, replacementPayload.notes, 'approval must not append a duplicate visit note or replace the latest submitted comment');
@@ -1096,7 +1116,7 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   assert.equal(completedMachine.isCompleted, true, 'the route becomes complete only after supervisor approval');
 
   const idempotentRetry = await request('/api/rep/sync-visit', {
-    method: 'POST', body: buildVisitForm(replacementPayload),
+    method: 'POST', body: buildVisitForm(replacementPayload, 4, 4),
   }, login.cookie);
   assert.equal(idempotentRetry.response.status, 200);
   assert.equal(idempotentRetry.body.idempotent, true);

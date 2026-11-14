@@ -1,3 +1,4 @@
+import { validVisitPhotoCounts } from '../../../shared/visit-photo-policy.js';
 import { previousTrackingReceipt, persistTrackingPoint, trackingSessionForPoint } from './tracking-ledger.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
@@ -386,7 +387,7 @@ function normalizeVisitInput(input) {
   const body = requireObject(input, 'visit');
   allowOnlyKeys(body, [
     'visitUuid', 'cardId', 'machineCode', 'regionName', 'machineCondition', 'reasonIds', 'maintenanceLines', 'notes',
-    'capturedAt', 'beforeCapturedAt', 'afterCapturedAt', 'location',
+    'capturedAt', 'beforeCapturedAt', 'afterCapturedAt', 'location', 'photoPolicyVersion',
   ]);
   const visitUuid = requireText(body.visitUuid, 'visitUuid', { maxLength: 36 });
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(visitUuid)) {
@@ -440,6 +441,7 @@ function normalizeVisitInput(input) {
     : normalizeRepLocation(body.location);
 
   return {
+    ...(body.photoPolicyVersion === undefined ? {} : { photoPolicyVersion: body.photoPolicyVersion }),
     visitUuid: visitUuid.toLowerCase(),
     cardId,
     machineCode,
@@ -459,6 +461,7 @@ function parseCapturedTimestamps(value, fallback, field, { optional = false } = 
   const values = value === undefined || value === null || value === ''
     ? (optional ? [] : [fallback.toISOString()])
     : Array.isArray(value) ? value : [value];
+  if (values.length > 20) throw new HttpError(400, `${field} must contain no more than twenty timestamps.`);
   if (!values.length && !optional) throw new HttpError(400, `${field} must include a timestamp for every photo.`);
   return values.map((item, index) => {
     const text = requireText(item, `${field}[${index}]`, { maxLength: 64 });
@@ -1250,14 +1253,14 @@ function recordReceivedVisit(rep, visit, visitId, photoRows, database) {
   }).immediate();
 }
 
-/** Receive one immutable bundle with three required Before photos and optional After photos. */
+/** Receive an immutable versioned photo bundle; legacy queued contracts remain supported. */
 export async function syncRepVisit(rep, input, files, database = db) {
   if (rep?.role !== 'rep') throw new HttpError(403, 'Field representative access is required.');
   const visit = normalizeVisitInput(input);
   const beforeFiles = visitPhotoFiles(files, 'before');
   const afterFiles = visitPhotoFiles(files, 'after');
-  if (beforeFiles.length !== 3 || afterFiles.length > 3) {
-    throw new HttpError(400, 'A visit must contain exactly three before photos and no more than three optional after photos.');
+  if (!validVisitPhotoCounts(visit.photoPolicyVersion, beforeFiles.length, afterFiles.length)) {
+    throw new HttpError(400, 'Invalid visit photo counts: policy 2 requires 1–20 Before and 1–20 After photos; legacy visits require exactly three Before and up to three After.');
   }
   if (visit.beforeCapturedAt.length !== beforeFiles.length || visit.afterCapturedAt.length !== afterFiles.length) {
     throw new HttpError(400, 'Each uploaded photo must have a matching capture timestamp.');

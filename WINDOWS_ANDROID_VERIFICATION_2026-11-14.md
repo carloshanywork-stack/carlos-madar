@@ -2,7 +2,7 @@
 
 ## Result
 
-The Windows checkout was current with GitHub before testing. Automated V2 tests pass after fixing Windows file-flush failures. Physical-device acceptance is **not complete**: returning three camera photos to a visit fails when a fresh GPS lookup is unavailable, despite the screen displaying a prior accurate location. Offline street maps also lack their required server-side map package. Do not describe this run as proof that every feature works.
+The Windows checkout was current with GitHub before testing. Commit `564d70c17670f0ba0adddb8f81f36767eef01096` fixes Windows backup/event-outbox flush failures and test portability. Follow-up Linux source changes below address the camera/GPS failure and mobile presentation issues. Physical-device acceptance is **still not complete**: no handset was available for this implementation, and offline street maps still lack their required server-side map package. Do not describe this as device verification or proof that every feature works.
 
 ## Source and device identity
 
@@ -64,3 +64,32 @@ The long synthetic machine code overflowed the visit header; the search field ha
 - Real end-to-end six-photo save/upload/approval, offline queued-visit restart recovery, biometric attendance and sustained background tracking remain unverified on this device. The test-order location was changed by the owner during testing.
 - No production database/storage restore, customer-file modification, APK replacement, service restart, or signing-key change was performed. Tests used temporary SQLite/storage fixtures.
 - Local raw test/build logs and selected device screenshots are retained under ignored `madar-v2/logs/verification-20261114/`; they are not published to GitHub.
+
+## Implementation follow-up — Linux source and build validation
+
+No Android phone was connected or used for the source changes below. The Android 14 measurements above remain investigation leads only; no performance improvement is claimed without a repeatable handset benchmark.
+
+- Camera capture now checks fresh GPS eligibility and the existing locked-machine geofence before opening. A fresh fix is distinguished from a last-known/failed lookup. On lookup/processing failure, capture references, timestamps, and per-photo location evidence stay in app-private storage and SQLite; Before and After groups can be restored/retried without duplicate slots. The staged record is removed only on explicit deletion or after the visit queue takes ownership.
+- Camera open/capture/close ownership is posted to its HandlerThread. `onPause` no longer synchronously closes the camera or joins its thread on the UI path. Image processing and durable visit operations remain on the existing native I/O executor.
+- The visit header wraps long machine codes; the dark-theme search rule now overrides inherited input surface/text styles at higher specificity. Offline-map status distinguishes missing server data/configuration from app readiness while preserving cached route access.
+- **Full V2 suite (`npm test`): 201/201 passed on Linux.** Linux deployment tests remained enabled and passed; no tests were skipped in that run.
+- Focused photo/camera packaging regressions: **13/13 passed**, including both Before/After GPS failure and duplicate-retry paths, invalid GPS/geofence rejection, and malformed/duplicate bridge results.
+- Client production build and `npm run android:sync`: passed. Android asset synchronization copied the standalone web bundle and synchronized the five configured Capacitor plugins.
+- Android `:app:testDebugUnitTest` and `:app:assembleDebug`: passed using JDK 21 and Android SDK 36. The debug APK remains under Gradle's build output; it was not installed or published. No release signing or production artifact was changed.
+- `git diff --check`: passed. The package does not define an `npm run check` script.
+
+### Offline MBTiles provisioning
+
+The API defaults to `system/data/offline-maps.mbtiles`. Set `MADAR_V2_OFFLINE_MAP_PATH` in the server environment to select another local path. Provide a properly licensed **raster** MBTiles file with SQLite `metadata` and `tiles` tables and PNG/JPEG/WebP tile bytes; vector/PBF-only packages are not renderable. The configured path must be a regular file and pass the existing safe-path checks. No map dataset was present or downloaded for this work.
+
+1. Obtain an appropriately licensed MBTiles export for approved pack bounds and zoom levels through the organization's mapping-data process.
+2. Place it at `system/data/offline-maps.mbtiles` or set `MADAR_V2_OFFLINE_MAP_PATH` to its absolute local path; grant the API service account read access. Keep it outside customer storage.
+3. Restart the API, call the authenticated `GET /api/rep/map/packs`, and verify the intended pack reports `available` and `renderable` with expected bounds/zoom metadata.
+4. Request that pack's manifest and sample in-coverage tile URLs. Check raster responses and confirm out-of-coverage coordinates remain missing rather than being synthesized.
+5. Download the pack in Rep while online, disable network, and verify cached tiles and the stored route separately; restore network and verify ordinary sync.
+
+Until these steps pass with the approved dataset, offline street maps are **not provisioned or verified**. The “no MBTiles package” message identifies missing geographic data/configuration, not proof of a map-code defect. Cached routes do not depend on tile provisioning.
+
+### Future handset acceptance
+
+Before claiming device verification, use a supported Android handset to check fresh GPS and Before/After capture; GPS loss after partial and complete groups followed by retry without recapture/duplication; mock/stale/inaccurate/out-of-geofence rejection; back/cancel, background/foreground, activity recreation and process-restart evidence recovery; one local save and one sync with correct phase counts/timestamps; and camera/navigation lifecycle under a measured workload. Record device/build identity and actual frame/close measurements. No handset testing is a prerequisite for the source/build work reported above.

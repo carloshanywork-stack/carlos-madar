@@ -91,11 +91,12 @@ final class RepRecoveryValidator {
                 if (queue.equals("visits")) {
                     require(status.matches("queued|syncing|blocked"), "Invalid visit status.");
                     same(item.getJSONObject("payload"), identity.getJSONObject("payload"));
+                    require(RepVisitPhotoPolicy.valid(item.getJSONObject("payload"), item.getJSONArray("beforePhotos").length(), item.getJSONArray("afterPhotos").length()), "Invalid visit evidence count.");
                     for (String phase : new String[] {"before", "after"}) {
                         JSONArray photos = item.getJSONArray(phase + "Photos");
                         JSONArray hashes = identity.getJSONArray(phase + "Hashes");
                         JSONArray times = identity.getJSONArray(phase + "CapturedAt");
-                        require(phase.equals("before") ? photos.length() == 3 : photos.length() <= 3, "Invalid visit evidence count.");
+
                         require(hashes.length() == photos.length() && times.length() == photos.length(), "Evidence identity count mismatch.");
                         for (int k = 0; k < photos.length(); k++) {
                             JSONObject photo = photos.getJSONObject(k); file(photo, 3L * 1024 * 1024);

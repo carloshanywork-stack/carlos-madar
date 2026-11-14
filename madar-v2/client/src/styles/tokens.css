@@ -20,7 +20,13 @@
   --madar-warning: #ae741d;
   --madar-success: #27866d;
   --madar-shadow: 0 16px 42px rgba(24, 43, 69, 0.08);
+  --madar-page-gutter: clamp(14px, 2.5vw, 42px);
+  --madar-safe-top: env(safe-area-inset-top, 0px);
+  --madar-safe-right: env(safe-area-inset-right, 0px);
+  --madar-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --madar-safe-left: env(safe-area-inset-left, 0px);
   min-height: 100vh;
+  min-height: 100dvh;
   color: var(--madar-text);
   background: var(--madar-canvas);
 }

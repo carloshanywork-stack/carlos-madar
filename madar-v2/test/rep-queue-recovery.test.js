@@ -105,3 +105,20 @@ test('rejects a GPS capture time changed independently of its durable timestamp'
   recovery.pendingGpsPoints[0].capturedAt = '2026-01-01T00:00:00.000Z';
   await assert.rejects(validateRepRecoveryPackage(recovery, repId), /identity/);
 });
+
+test('flexible Before/After recovery preserves additional files and their versioned identity', async () => {
+  const recovery = await recoveryPackage();
+  const visit = recovery.visits[0];
+  visit.payload.photoPolicyVersion = 2;
+  const evidence = await file();
+  visit.beforePhotos = Array.from({length:4},()=>({...evidence}));
+  visit.afterPhotos = Array.from({length:4},()=>({...evidence}));
+  for (const phase of ['before','after']) {
+    visit.identity[`${phase}Hashes`] = visit[`${phase}Photos`].map(p=>p.sha256);
+    visit.identity[`${phase}CapturedAt`] = visit[`${phase}Photos`].map(()=> '');
+  }
+  visit.identityHash = await sha256Json(visit.identity);
+  assert.equal((await validateRepRecoveryPackage(recovery,repId)).visits[0].afterPhotos.length,4);
+  visit.afterPhotos = [];
+  await assert.rejects(validateRepRecoveryPackage(recovery,repId), /counts/);
+});

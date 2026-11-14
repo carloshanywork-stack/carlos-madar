@@ -11,8 +11,9 @@
   position: relative;
   display: flex;
   min-height: 100vh;
+  min-height: 100dvh;
   flex-direction: column;
-  padding: 26px clamp(20px, 6vw, 88px) 22px;
+  padding: max(26px, env(safe-area-inset-top, 0px)) max(clamp(20px, 6vw, 88px), env(safe-area-inset-right, 0px)) max(22px, env(safe-area-inset-bottom, 0px)) max(clamp(20px, 6vw, 88px), env(safe-area-inset-left, 0px));
   overflow: hidden;
   color: var(--auth-ink);
   background: var(--auth-canvas);
@@ -144,6 +145,12 @@
   #madar-app .auth-card-wrap { padding: 29px 21px 24px; }
   #madar-app .auth-card h2 { font-size: 25px; }
   #madar-app .auth-footer { font-size: 7px; }
+}
+
+@media (max-height: 520px) and (orientation: landscape) {
+  #madar-app .auth-screen { min-height: 100vh; min-height: 100dvh; overflow-y: auto; }
+  #madar-app .auth-story { min-height: 190px; }
+  #madar-app .auth-layout { margin-block: 10px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

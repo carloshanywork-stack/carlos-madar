@@ -50,6 +50,11 @@ public final class RepCameraSequenceActivity extends Activity {
     public static final String EXTRA_MAX_PHOTOS = "maxPhotos";
     public static final String EXTRA_PHASE_LABEL = "phaseLabel";
     public static final String EXTRA_PHOTOS = "photosJson";
+    public static final String EXTRA_VISIT_UUID = "visitUuid";
+    public static final String EXTRA_REP_ID = "repId";
+    public static final String EXTRA_PHASE = "phase";
+    public static final String EXTRA_START_INDEX = "startIndex";
+    public static final String EXTRA_FALLBACK_LOCATION = "fallbackLocation";
     private final ArrayList<JSONObject> photos = new ArrayList<>();
     private TextureView preview;
     private TextView counter;
@@ -62,19 +67,37 @@ public final class RepCameraSequenceActivity extends Activity {
     private Handler cameraHandler;
     private String cameraId;
     private int sensorOrientation;
-    private int maxPhotos = 3;
+    private int maxPhotos = RepVisitPhotoPolicy.MAX_PER_PHASE;
     private String phaseLabel = "الصور";
     private boolean captureInFlight;
     private String captureTimestamp;
     private JSONObject captureLocation;
-    private boolean completed;
-    private final ArrayList<File> temporaryFiles = new ArrayList<>();
+    private JSONObject fallbackLocation;
+    private String visitUuid;
+    private String phase;
+    private long repId;
+    private int startIndex;
+    private volatile boolean paused;
+    private boolean cameraOpening;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
-        maxPhotos = Math.max(1, Math.min(3, getIntent().getIntExtra(EXTRA_MAX_PHOTOS, 3)));
+        maxPhotos = Math.max(1, Math.min(RepVisitPhotoPolicy.MAX_PER_PHASE, getIntent().getIntExtra(EXTRA_MAX_PHOTOS, RepVisitPhotoPolicy.MAX_PER_PHASE)));
         phaseLabel = getIntent().getStringExtra(EXTRA_PHASE_LABEL);
         if (phaseLabel == null || phaseLabel.trim().isEmpty()) phaseLabel = "الصور";
+        visitUuid = getIntent().getStringExtra(EXTRA_VISIT_UUID);
+        phase = getIntent().getStringExtra(EXTRA_PHASE);
+        repId = getIntent().getLongExtra(EXTRA_REP_ID, 0L);
+        startIndex = getIntent().getIntExtra(EXTRA_START_INDEX, -1);
+        String fallback = getIntent().getStringExtra(EXTRA_FALLBACK_LOCATION);
+        try { if (fallback != null) fallbackLocation = new JSONObject(fallback); } catch (Exception ignored) { }
+        if (visitUuid == null || !visitUuid.matches("(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
+            || repId < 1L || !("before".equals(phase) || "after".equals(phase))
+            || startIndex < 0 || startIndex + maxPhotos > RepVisitPhotoPolicy.MAX_PER_PHASE) {
+            setResult(RESULT_CANCELED);
+            finish();
+            return;
+        }
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
             setResult(RESULT_CANCELED);
             finish();
@@ -132,40 +155,6 @@ public final class RepCameraSequenceActivity extends Activity {
         cameraHandler = new Handler(cameraThread.getLooper());
     }
 
-    private void openCamera() {
-        if (isFinishing() || camera != null) return;
-        try {
-            CameraManager manager = (CameraManager) getSystemService(Context.CAMERA_SERVICE);
-            for (String id : manager.getCameraIdList()) {
-                CameraCharacteristics characteristics = manager.getCameraCharacteristics(id);
-                if (characteristics.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_BACK) {
-                    cameraId = id;
-                    sensorOrientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION) == null
-                        ? 90 : characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION);
-                    StreamConfigurationMap map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
-                    android.util.Size[] sizes = map == null ? null : map.getOutputSizes(ImageFormat.JPEG);
-                    if (sizes == null || sizes.length == 0) throw new IllegalStateException("لا توجد دقة تصوير JPEG متاحة.");
-                    android.util.Size selected = Arrays.stream(sizes)
-                        .filter(size -> size.getWidth() <= 4000 && size.getHeight() <= 3000)
-                        .max(Comparator.comparingLong(size -> (long) size.getWidth() * size.getHeight()))
-                        .orElse(sizes[0]);
-                    imageReader = ImageReader.newInstance(selected.getWidth(), selected.getHeight(), ImageFormat.JPEG, 2);
-                    imageReader.setOnImageAvailableListener(reader -> saveCapturedImage(reader.acquireNextImage()), cameraHandler);
-                    if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) return;
-                    manager.openCamera(cameraId, new CameraDevice.StateCallback() {
-                        @Override public void onOpened(CameraDevice device) { camera = device; configurePreview(); }
-                        @Override public void onDisconnected(CameraDevice device) { device.close(); camera = null; }
-                        @Override public void onError(CameraDevice device, int error) { device.close(); camera = null; fail("تعذر تشغيل كاميرا الهاتف."); }
-                    }, cameraHandler);
-                    return;
-                }
-            }
-            fail("لا توجد كاميرا خلفية متاحة.");
-        } catch (Exception error) {
-            fail(error.getMessage() == null ? "تعذر فتح الكاميرا." : error.getMessage());
-        }
-    }
-
     private void configurePreview() {
         try {
             SurfaceTexture texture = preview.getSurfaceTexture();
@@ -191,34 +180,45 @@ public final class RepCameraSequenceActivity extends Activity {
         if (camera == null || session == null || captureInFlight || photos.size() >= maxPhotos) return;
         captureInFlight = true;
         doneButton.setEnabled(false);
-        captureTimestamp = isoTimestamp(System.currentTimeMillis());
-        captureLocation = currentGpsLocation();
         captureButton.setEnabled(false);
-        try {
-            CaptureRequest.Builder request = camera.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE);
-            request.addTarget(imageReader.getSurface());
-            request.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE);
-            int rotation = getWindowManager().getDefaultDisplay().getRotation();
-            int degrees = rotation == Surface.ROTATION_90 ? 90 : rotation == Surface.ROTATION_180 ? 180 : rotation == Surface.ROTATION_270 ? 270 : 0;
-            request.set(CaptureRequest.JPEG_ORIENTATION, (sensorOrientation - degrees + 360) % 360);
-            session.capture(request.build(), new CameraCaptureSession.CaptureCallback() { }, cameraHandler);
-        } catch (Exception error) {
-            captureInFlight = false;
-            captureButton.setEnabled(true);
-            doneButton.setEnabled(!photos.isEmpty());
-            fail("تعذر التقاط الصورة. حاول مرة أخرى.");
-        }
+        Handler handler = cameraHandler;
+        if (handler == null) { captureInFlight = false; fail("الكاميرا غير جاهزة؛ أعد المحاولة."); return; }
+        handler.post(() -> {
+            captureTimestamp = isoTimestamp(System.currentTimeMillis());
+            captureLocation = currentGpsLocation(fallbackLocation);
+            try {
+                CameraDevice activeCamera = camera;
+                CameraCaptureSession activeSession = session;
+                if (activeCamera == null || activeSession == null || paused) throw new IllegalStateException("Camera is not active.");
+                CaptureRequest.Builder request = activeCamera.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE);
+                request.addTarget(imageReader.getSurface());
+                request.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE);
+                int rotation = getWindowManager().getDefaultDisplay().getRotation();
+                int degrees = rotation == Surface.ROTATION_90 ? 90 : rotation == Surface.ROTATION_180 ? 180 : rotation == Surface.ROTATION_270 ? 270 : 0;
+                request.set(CaptureRequest.JPEG_ORIENTATION, (sensorOrientation - degrees + 360) % 360);
+                activeSession.capture(request.build(), new CameraCaptureSession.CaptureCallback() { }, cameraHandler);
+            } catch (Exception error) {
+                runOnUiThread(() -> {
+                    captureInFlight = false;
+                    captureButton.setEnabled(camera != null);
+                    doneButton.setEnabled(!photos.isEmpty());
+                    fail("تعذر التقاط الصورة. حاول مرة أخرى.");
+                });
+            }
+        });
     }
 
     private void saveCapturedImage(Image image) {
         if (image == null) return;
+        File output = null;
+        boolean staged = false;
         try (Image captured = image) {
             ByteBuffer buffer = captured.getPlanes()[0].getBuffer();
             byte[] bytes = new byte[buffer.remaining()];
             buffer.get(bytes);
             File directory = new File(getFilesDir(), "visit-camera-captures");
             if (!directory.exists() && !directory.mkdirs()) throw new IllegalStateException("تعذر حفظ الصورة محلياً.");
-            File output = new File(directory, "capture-" + java.util.UUID.randomUUID() + ".jpg");
+            output = new File(directory, "capture-" + java.util.UUID.randomUUID() + ".jpg");
             try (FileOutputStream stream = new FileOutputStream(output)) {
                 stream.write(bytes);
                 stream.flush();
@@ -228,21 +228,36 @@ public final class RepCameraSequenceActivity extends Activity {
             item.put("sourceUri", android.net.Uri.fromFile(output).toString());
             item.put("capturedAt", captureTimestamp);
             item.put("location", captureLocation == null ? JSONObject.NULL : captureLocation);
-            photos.add(item);
-            temporaryFiles.add(output);
+            int photoIndex;
+            int photoCount;
+            synchronized (photos) {
+                photoIndex = startIndex + photos.size();
+                item.put("photoIndex", photoIndex);
+                item.put("captureId", java.util.UUID.randomUUID().toString());
+                try (RepLocalStore store = new RepLocalStore(this)) {
+                    if (RepAuthStore.repId(this) != repId) throw new SecurityException("Representative changed during camera capture.");
+                    store.stageVisitPhoto(this, repId, visitUuid, phase, photoIndex, item.getString("captureId"),
+                        output.getAbsolutePath(), captureTimestamp, captureLocation);
+                }
+                staged = true;
+                photos.add(item);
+                photoCount = photos.size();
+            }
+            int countForUi = photoCount;
             runOnUiThread(() -> {
                 captureInFlight = false;
-                counter.setText("صور " + phaseLabel + " · " + photos.size() + " / " + maxPhotos);
-                doneButton.setEnabled(!photos.isEmpty());
-                captureButton.setEnabled(photos.size() < maxPhotos);
-                if (photos.size() == maxPhotos) captureButton.setText("اكتمل العدد المطلوب");
+                counter.setText("صور " + phaseLabel + " · " + countForUi + " / " + maxPhotos);
+                doneButton.setEnabled(countForUi > 0);
+                captureButton.setEnabled(countForUi < maxPhotos);
+                if (countForUi == maxPhotos) captureButton.setText("بلغت الحد التقني للمجموعة");
             });
         } catch (Exception error) {
+            if (!staged && output != null && output.exists()) output.delete();
             runOnUiThread(() -> { captureInFlight = false; captureButton.setEnabled(true); doneButton.setEnabled(!photos.isEmpty()); fail("تعذر حفظ الصورة على الهاتف؛ أعد التقاطها."); });
         }
     }
 
-    private JSONObject currentGpsLocation() {
+    private JSONObject currentGpsLocation(JSONObject fallback) {
         try {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED
                 && ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) return null;
@@ -252,32 +267,56 @@ public final class RepCameraSequenceActivity extends Activity {
                 Location candidate = manager.getLastKnownLocation(provider);
                 if (candidate != null && (best == null || candidate.getTime() > best.getTime())) best = candidate;
             }
-            if (best == null) return null;
-            long age = System.currentTimeMillis() - best.getTime();
-            if (age < -30_000L || age > 2 * 60_000L || !best.hasAccuracy() || best.getAccuracy() > 100f) return null;
-            JSONObject result = new JSONObject();
-            result.put("latitude", best.getLatitude());
-            result.put("longitude", best.getLongitude());
-            result.put("accuracy", best.getAccuracy());
-            result.put("updatedAt", isoTimestamp(best.getTime()));
-            return result;
+            long now = System.currentTimeMillis();
+            if (best != null) {
+                if (best.isMock()) return null;
+                long age = now - best.getTime();
+                if (age >= -30_000L && age <= 2 * 60_000L && best.hasAccuracy() && best.getAccuracy() <= 100f) {
+                    JSONObject result = new JSONObject();
+                    result.put("latitude", best.getLatitude());
+                    result.put("longitude", best.getLongitude());
+                    result.put("accuracy", best.getAccuracy());
+                    result.put("updatedAt", isoTimestamp(best.getTime()));
+                    return result;
+                }
+            }
+            if (fallback != null) {
+                if (fallback.optBoolean("mocked", false) || fallback.optBoolean("isMocked", false)) return null;
+                long fallbackTime = java.time.Instant.parse(fallback.getString("updatedAt")).toEpochMilli();
+                long age = now - fallbackTime;
+                double accuracy = fallback.getDouble("accuracy");
+                if (age >= -30_000L && age <= 5 * 60_000L && accuracy >= 0 && accuracy <= 100
+                    && fallback.getDouble("latitude") >= -90 && fallback.getDouble("latitude") <= 90
+                    && fallback.getDouble("longitude") >= -180 && fallback.getDouble("longitude") <= 180) return fallback;
+            }
+            return null;
         } catch (Exception ignored) { return null; }
     }
 
     private void finishWithPhotos() {
-        if (photos.isEmpty()) return;
+        if (captureInFlight) return;
+        ArrayList<JSONObject> resultCopy;
+        synchronized (photos) { resultCopy = new ArrayList<>(photos); }
+        if (resultCopy.isEmpty()) return;
         Intent result = new Intent();
         JSONArray resultPhotos = new JSONArray();
-        for (JSONObject photo : photos) resultPhotos.put(photo);
+        for (JSONObject photo : resultCopy) resultPhotos.put(photo);
         result.putExtra(EXTRA_PHOTOS, resultPhotos.toString());
-        completed = true;
         setResult(RESULT_OK, result);
         finish();
     }
 
     private void fail(String message) {
         if (isFinishing()) return;
-        android.widget.Toast.makeText(this, message, android.widget.Toast.LENGTH_LONG).show();
+        runOnUiThread(() -> {
+            if (!isFinishing()) android.widget.Toast.makeText(this, message, android.widget.Toast.LENGTH_LONG).show();
+        });
+    }
+
+    @Override public void onBackPressed() {
+        if (captureInFlight) return;
+        if (!photos.isEmpty()) finishWithPhotos();
+        else { setResult(RESULT_CANCELED); finish(); }
     }
 
     private static String isoTimestamp(long milliseconds) {
@@ -286,19 +325,94 @@ public final class RepCameraSequenceActivity extends Activity {
         return formatter.format(new Date(milliseconds));
     }
 
+    private void openCamera() {
+        Handler handler = cameraHandler;
+        if (handler != null) handler.post(this::openCameraOnThread);
+    }
+
+    private void openCameraOnThread() {
+        if (paused || isFinishing() || camera != null || cameraOpening) return;
+        cameraOpening = true;
+        if (session != null) { session.close(); session = null; }
+        try {
+            CameraManager manager = (CameraManager) getSystemService(Context.CAMERA_SERVICE);
+            for (String id : manager.getCameraIdList()) {
+                CameraCharacteristics characteristics = manager.getCameraCharacteristics(id);
+                if (characteristics.get(CameraCharacteristics.LENS_FACING) != CameraCharacteristics.LENS_FACING_BACK) continue;
+                cameraId = id;
+                sensorOrientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION) == null
+                    ? 90 : characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION);
+                StreamConfigurationMap map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
+                android.util.Size[] sizes = map == null ? null : map.getOutputSizes(ImageFormat.JPEG);
+                if (sizes == null || sizes.length == 0) throw new IllegalStateException("لا توجد دقة تصوير JPEG متاحة.");
+                android.util.Size selected = Arrays.stream(sizes)
+                    .filter(size -> size.getWidth() <= 4000 && size.getHeight() <= 3000)
+                    .max(Comparator.comparingLong(size -> (long) size.getWidth() * size.getHeight()))
+                    .orElse(sizes[0]);
+                imageReader = ImageReader.newInstance(selected.getWidth(), selected.getHeight(), ImageFormat.JPEG, 2);
+                imageReader.setOnImageAvailableListener(reader -> saveCapturedImage(reader.acquireNextImage()), cameraHandler);
+                if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+                    cameraOpening = false;
+                    fail("يلزم السماح للكاميرا من إعدادات التطبيق.");
+                    return;
+                }
+                manager.openCamera(cameraId, new CameraDevice.StateCallback() {
+                    @Override public void onOpened(CameraDevice device) {
+                        cameraOpening = false;
+                        if (paused || isFinishing()) { device.close(); return; }
+                        camera = device;
+                        configurePreview();
+                    }
+                    @Override public void onDisconnected(CameraDevice device) {
+                        cameraOpening = false;
+                        device.close();
+                        if (camera == device) camera = null;
+                    }
+                    @Override public void onError(CameraDevice device, int error) {
+                        cameraOpening = false;
+                        device.close();
+                        if (camera == device) camera = null;
+                        fail("تعذر تشغيل كاميرا الهاتف.");
+                    }
+                }, cameraHandler);
+                return;
+            }
+            cameraOpening = false;
+            fail("لا توجد كاميرا خلفية متاحة.");
+        } catch (Exception error) {
+            cameraOpening = false;
+            fail(error.getMessage() == null ? "تعذر فتح الكاميرا." : error.getMessage());
+        }
+    }
+
     private void closeCamera() {
         if (session != null) { session.close(); session = null; }
         if (camera != null) { camera.close(); camera = null; }
         if (imageReader != null) { imageReader.close(); imageReader = null; }
+        cameraOpening = false;
     }
 
-    @Override protected void onPause() { closeCamera(); super.onPause(); }
-    @Override protected void onResume() { super.onResume(); if (preview != null && preview.isAvailable() && camera == null) openCamera(); }
+    @Override protected void onPause() {
+        paused = true;
+        Handler handler = cameraHandler;
+        if (handler != null) handler.post(this::closeCamera);
+        super.onPause();
+    }
+    @Override protected void onResume() {
+        super.onResume();
+        paused = false;
+        if (preview != null && preview.isAvailable()) openCamera();
+    }
     @Override protected void onDestroy() {
-        closeCamera();
-        if (cameraThread != null) { cameraThread.quitSafely(); try { cameraThread.join(1000); } catch (InterruptedException ignored) { Thread.currentThread().interrupt(); } }
-        if (isFinishing() && !isChangingConfigurations() && !completed && photos.size() > 0) {
-            for (File file : temporaryFiles) if (file.exists()) file.delete();
+        paused = true;
+        Handler handler = cameraHandler;
+        if (handler != null) {
+            handler.post(() -> {
+                closeCamera();
+                if (cameraThread != null) cameraThread.quitSafely();
+            });
+        } else if (cameraThread != null) {
+            cameraThread.quitSafely();
         }
         super.onDestroy();
     }

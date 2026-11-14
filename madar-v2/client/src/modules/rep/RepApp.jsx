@@ -319,7 +319,8 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
   const [networkOnline, setNetworkOnline] = useState(navigator.onLine);
   const [serverState, setServerState] = useState('checking');
   const [routeLoading, setRouteLoading] = useState(false);
-  const [gps, setGps] = useState(null);
+  const [lastGps, setGps] = useState(null);
+  const [nativeGpsEnabled, setNativeGpsEnabled] = useState(null);
   const [gpsError, setGpsError] = useState('');
   const [onDuty, setOnDuty] = useState(false);
   const [showQueue, setShowQueue] = useState(false);
@@ -342,6 +343,10 @@ const routeRef = useRef(null);
   const nativeBackStateRef = useRef({});
   const userId = Number(user.id);
   const nativeApp = isNativeRepApp();
+  // Cached native fixes may survive provider shutdown; never expose them as a usable fix.
+  const gps = nativeApp && nativeGpsEnabled === false ? null : lastGps;
+  const visibleGpsError = nativeApp && nativeGpsEnabled === false
+    ? 'GPS مغلق على الهاتف؛ فعّله من الإعدادات قبل تسجيل الحضور أو التصوير.' : gpsError;
   const [photoArchive,setPhotoArchive] = useState(null);
   const [photoArchiveBusy,setPhotoArchiveBusy] = useState(false);
   useEffect(() => {
@@ -509,6 +514,7 @@ const routeRef = useRef(null);
       let location;
       if (nativeApp) {
         const availability = await getNativeGpsAvailability();
+        if (typeof availability?.enabled === 'boolean') setNativeGpsEnabled(availability.enabled);
         if (availability && !availability.enabled) throw new Error('GPS مغلق على الهاتف؛ فعّله من الإعدادات.');
         location = await getNativeGpsLocation();
       } else if (navigator.geolocation) {
@@ -527,6 +533,11 @@ const routeRef = useRef(null);
       } else {
         location = gpsRef.current;
       }
+      if (nativeApp) {
+        const currentAvailability = await getNativeGpsAvailability();
+        if (typeof currentAvailability?.enabled === 'boolean') setNativeGpsEnabled(currentAvailability.enabled);
+        if (currentAvailability?.enabled === false) throw new Error('GPS مغلق على الهاتف؛ فعّله من الإعدادات.');
+      }
       const timestamp = Date.parse(location?.updatedAt ?? '');
       if (!location || !Number.isFinite(location.latitude) || !Number.isFinite(location.longitude)
           || !Number.isFinite(location.accuracy) || location.accuracy > MAX_CLOCK_ACCURACY_METERS
@@ -541,7 +552,8 @@ const routeRef = useRef(null);
         void reportMockLocation(purpose);
       }
       setGpsError(error.message || 'تعذر تحديث GPS عند حفظ الزيارة.');
-      if (/GPS مغلق/.test(error.message ?? '')) setGps(null);
+      // Never leave a previous fix looking current after a failed fresh lookup.
+      setGps(null);
       return null;
     }
   }, [nativeApp, reportMockLocation]);
@@ -1695,6 +1707,7 @@ const finishTutorial = () => {
     const visitUuid = draftVisitUuid || createVisitUuid();
     const payload = {
       visitUuid,
+      photoPolicyVersion: 2,
       cardId: Number(selectedMachine.cardId),
       machineCode: selectedMachine.machineCode,
       regionName: selectedMachine.regionName,
@@ -2006,7 +2019,7 @@ try {
           </button>
           <div className={`rep-attendance-gps ${gps ? 'has-fix' : ''}`} role="status">
             <i aria-hidden="true" />
-            <span><b>GPS</b> · {gps ? formatGps(gps) : gpsError || 'سيُطلب الموقع عند تسجيل البصمة'}{pendingAttendanceActions.length ? ` · ${pendingAttendanceActions.length} تسجيل حضور بانتظار المزامنة` : ''}</span>
+            <span><b>GPS</b> · {gps ? formatGps(gps) : visibleGpsError || 'سيُطلب الموقع عند تسجيل البصمة'}{pendingAttendanceActions.length ? ` · ${pendingAttendanceActions.length} تسجيل حضور بانتظار المزامنة` : ''}</span>
           </div>
         </div>
         {(overtimeRequest || regularClosed) && (
@@ -2191,9 +2204,9 @@ try {
    {photoArchive?.error && <p role="alert">{photoArchive.error}</p>}
    <button type="button" className="rep-button rep-button-light" disabled={photoArchiveBusy} onClick={async()=>{setPhotoArchiveBusy(true);try{setPhotoArchive(await chooseNativePhotoArchiveFolder());}catch(error){setToast(error.message);}finally{setPhotoArchiveBusy(false);}}}>{photoArchiveBusy ? 'جارٍ اختيار المجلد…' : photoArchive?.configured ? 'تغيير مجلد الصور' : 'اختيار مجلد الصور'}</button>
  </section>}
- <footer className="rep-app-footer"><span>مَــدَارْ · تطبيق المندوب الميداني{appVersion ? ` · إصدار ${appVersion}` : ''}</span><span>{gps ? `آخر GPS: ${formatGps(gps)}` : onDuty ? gpsError : nativeApp ? 'فعّل الحضور لتسجيل GPS أثناء الوردية' : 'يُسجّل GPS مع الحضور والانصراف والزيارة'}</span></footer>
+ <footer className="rep-app-footer"><span>مَــدَارْ · تطبيق المندوب الميداني{appVersion ? ` · إصدار ${appVersion}` : ''}</span><span>{gps ? `آخر GPS: ${formatGps(gps)}` : visibleGpsError || (nativeApp ? 'فعّل الحضور لتسجيل GPS أثناء الوردية' : 'يُسجّل GPS مع الحضور والانصراف والزيارة')}</span></footer>
 
-        {selectedMachine && <MachineVisitSheet machine={{ ...selectedMachine, ...(route?.regions ?? []).flatMap((region) => region.machines).find((machine) => machine.cardId === selectedMachine.cardId) }} repName={user.fullName} reasons={reasons} gps={gps} gpsError={gpsError} captureLocation={captureVisitLocation} onStartWork={startMachineWork} onStopWork={stopMachineWork} onClose={() => setSelectedMachine(null)} onSave={saveVisit} onConfirmLocation={confirmSelectedMachineLocation} onReportCorrection={submitSelectedMachineCorrection} />}
+        {selectedMachine && <MachineVisitSheet machine={{ ...selectedMachine, ...(route?.regions ?? []).flatMap((region) => region.machines).find((machine) => machine.cardId === selectedMachine.cardId) }} repId={userId} repName={user.fullName} reasons={reasons} gps={gps} gpsError={visibleGpsError} captureLocation={captureVisitLocation} onStartWork={startMachineWork} onStopWork={stopMachineWork} onClose={() => setSelectedMachine(null)} onSave={saveVisit} onConfirmLocation={confirmSelectedMachineLocation} onReportCorrection={submitSelectedMachineCorrection} />}
       {tutorialOpen && <Tutorial nativeApp={nativeApp} onFinish={finishTutorial} />}
       {toast && <div className="rep-toast" role="status">✓ {toast}</div>}
     </main>
