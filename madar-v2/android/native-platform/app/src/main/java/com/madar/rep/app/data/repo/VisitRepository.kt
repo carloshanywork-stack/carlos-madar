@@ -47,6 +47,18 @@ class VisitRepository(
 
     suspend fun find(uuid: String): VisitEntity? = database.visits().find(uuid)
 
+    suspend fun confirmDraftMachineLocation(visitUuid: String, latitude: Double, longitude: Double) {
+        val visit = database.visits().find(visitUuid) ?: return
+        if (visit.state != VisitState.DRAFT || visit.locationLocked) return
+        database.visits().upsert(visit.copy(
+            machineLatitude = latitude,
+            machineLongitude = longitude,
+            locationLocked = true,
+            geofenceRadiusMeters = 50.0,
+            updatedAt = System.currentTimeMillis(),
+        ))
+    }
+
     fun observeVisit(uuid: String): Flow<VisitEntity?> = database.visits().observe(uuid)
 
     suspend fun photos(uuid: String): List<PhotoEntity> = database.photos().forVisit(uuid)

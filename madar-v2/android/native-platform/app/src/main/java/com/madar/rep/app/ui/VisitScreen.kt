@@ -99,6 +99,8 @@ fun VisitScreen(
     val location by vm.location.collectAsStateWithLifecycle()
     val busy by vm.visitBusy.collectAsStateWithLifecycle()
     val blockedCardId by vm.claimBlockedCardId.collectAsStateWithLifecycle()
+    val blockedMessage by vm.claimBlockedMessage.collectAsStateWithLifecycle()
+    val machineLocationApprovalBusyId by vm.machineLocationApprovalBusy.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
     var initialized by remember(visitUuid) { mutableStateOf(false) }
@@ -128,7 +130,8 @@ fun VisitScreen(
     ) { grants ->
         val granted = grants[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
             grants[Manifest.permission.ACCESS_COARSE_LOCATION] == true
-        if (granted) vm.refreshLocation() else vm.showMessage("يلزم إذن الموقع لاعتماد الزيارة.")
+        if (granted) visit?.let(vm::approveFirstMachineLocation)
+        else vm.showMessage("يلزم إذن الموقع لاعتماد الماكينة.")
     }
 
     val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -136,8 +139,6 @@ fun VisitScreen(
         if (error != null) {
             vm.showMessage(error)
         } else if (result.resultCode == android.app.Activity.RESULT_OK) {
-            val loaded = visit
-            if (loaded != null) vm.claimWork(loaded)
             vm.refreshLocation()
         }
     }
@@ -156,14 +157,11 @@ fun VisitScreen(
 
     LaunchedEffect(
         visit?.state,
-        detail?.before?.size,
-        detail?.after?.size,
+        visit?.locationLocked,
         location.point?.capturedAtMillis,
     ) {
         val loaded = visit
-        if (loaded != null && loaded.state == VisitState.DRAFT &&
-            ((detail?.before?.size ?: 0) + (detail?.after?.size ?: 0)) > 0
-        ) {
+        if (loaded != null && loaded.state == VisitState.DRAFT && loaded.locationLocked) {
             vm.claimWork(loaded, location.point)
         }
     }
@@ -247,10 +245,15 @@ fun VisitScreen(
             }
             if (claimBlocked) {
                 item {
-                    InlineMessage(
-                        "بدأ مندوب آخر العمل على هذه الماكينة. حدّث المسار قبل متابعة التصوير.",
-                        MessageTone.Error,
-                    )
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        InlineMessage(
+                            "تعذّر حجز الماكينة: ${blockedMessage ?: "يوجد تعارض على الماكينة أو تغيرت حالة المسار."} الصور التي التقطتها محفوظة. حدّث المسار أو اطلب من المشرف حل التعارض قبل استكمال التصوير.",
+                            MessageTone.Error,
+                        )
+                        TextButton(onClick = { vm.retryMachineClaim(detail!!.visit) }) {
+                            Text("تحديث المسار وإعادة التحقق")
+                        }
+                    }
                 }
             }
 
@@ -258,7 +261,15 @@ fun VisitScreen(
                 LocationCard(
                     location = location,
                     visit = detail!!.visit,
+                    approvingMachineLocation = machineLocationApprovalBusyId == detail!!.visit.cardId,
                     onRefresh = { vm.refreshLocation() },
+                    onApproveMachine = {
+                        if (vm.hasLocationPermission()) vm.approveFirstMachineLocation(detail!!.visit)
+                        else permissionLauncher.launch(arrayOf(
+                            Manifest.permission.ACCESS_FINE_LOCATION,
+                            Manifest.permission.ACCESS_COARSE_LOCATION,
+                        ))
+                    },
                     onRequestPermission = {
                         permissionLauncher.launch(
                             arrayOf(
@@ -593,75 +604,83 @@ private fun StatusExplanation(visit: VisitEntity) {
 private fun LocationCard(
     location: LocationUiState,
     visit: VisitEntity,
+    approvingMachineLocation: Boolean,
     onRefresh: () -> Unit,
+    onApproveMachine: () -> Unit,
     onRequestPermission: () -> Unit,
 ) {
     SectionCard(
-        title = "موقع الاعتماد",
-        subtitle = "يلزم موقع حديث بدقة 50 مترًا أو أفضل، مع احتساب هامش الدقة داخل نطاق الماكينة.",
+        title = if (visit.locationLocked) "موقع الاعتماد" else null,
+        subtitle = if (visit.locationLocked) "يلزم موقع حديث بدقة 50 مترًا أو أفضل، مع احتساب هامش الدقة داخل نطاق الماكينة." else null,
     ) {
-        val point = location.point
-        if (point == null) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Icon(Icons.Default.LocationOn, contentDescription = null, tint = MadarMuted)
-                Text("لا توجد إشارة موقع محفوظة.", style = MaterialTheme.typography.bodySmall, color = MadarMuted)
-            }
-        } else {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.LocationOn, contentDescription = null, tint = MadarTeal)
-                Spacer(Modifier.width(6.dp))
-                Text(
-                    "%.5f, %.5f · ±%d م".format(point.latitude, point.longitude, point.accuracyMeters.toInt()),
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.SemiBold,
-                )
-            }
-            Text(
-                "وقت الإشارة: ${MadarTime.displayTime(point.capturedAtMillis)} · المزود: ${point.provider ?: "غير معروف"}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MadarMuted,
-            )
-            val decision = GeoPolicy.evaluate(
-                point,
-                visit.machineLatitude,
-                visit.machineLongitude,
-                visit.geofenceRadiusMeters,
-            )
-            val (decisionText, tone) = when (decision) {
-                LocationDecision.Valid -> "الموقع صالح للاعتماد داخل نطاق الماكينة." to MessageTone.Success
-                LocationDecision.InvalidCoordinates -> "إحداثيات الموقع غير صالحة؛ حدّث GPS ولا تعتمد القراءة الحالية." to MessageTone.Error
-                LocationDecision.Missing -> "لا يوجد موقع." to MessageTone.Error
-                LocationDecision.Mocked -> "الموقع مزيف من النظام ولا يمكن اعتماده." to MessageTone.Error
-                is LocationDecision.Invalid -> decision.reason to MessageTone.Error
-                is LocationDecision.Stale -> "الإشارة قديمة (${decision.ageMillis / 1000} ثانية)." to MessageTone.Warning
-                is LocationDecision.Inaccurate -> "الدقة ${decision.accuracyMeters.toInt()} مترًا ولا تكفي." to MessageTone.Warning
-                is LocationDecision.Outside -> "خارج النطاق: المسافة الفعالة ${decision.effectiveDistanceMeters.toInt()} مترًا والمسموح ${decision.allowedRadiusMeters.toInt()}." to MessageTone.Error
-            }
-            InlineMessage(decisionText, tone)
-            if (point.accuracyMeters > GeoPolicy.MAX_ACCURACY_METERS) {
-                InlineMessage(
-                    "الموقع تقريبي ويُعرض للاسترشاد فقط؛ لن يُستخدم لاعتماد الزيارة.",
-                    MessageTone.Warning,
-                )
-            }
-        }
-        if (location.message != null) {
-            InlineMessage(location.message, if (location.permissionDenied || location.providersDisabled) MessageTone.Error else MessageTone.Info)
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = onRefresh, enabled = !location.busy) {
-                if (location.busy) {
-                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+        if (!visit.locationLocked) {
+            Button(
+                onClick = onApproveMachine,
+                enabled = !approvingMachineLocation,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                if (approvingMachineLocation) {
+                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                    Spacer(Modifier.width(8.dp))
+                    Text("جارٍ اعتماد الماكينة…")
                 } else {
-                    Text("تحديث الموقع")
+                    Text("اعتماد الماكينة")
                 }
             }
-            if (location.permissionDenied) {
-                Button(onClick = onRequestPermission) { Text("منح إذن الموقع") }
+        } else {
+            val point = location.point
+            if (point == null) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Icon(Icons.Default.LocationOn, contentDescription = null, tint = MadarMuted)
+                    Text("لا توجد إشارة موقع محفوظة.", style = MaterialTheme.typography.bodySmall, color = MadarMuted)
+                }
+            } else {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.LocationOn, contentDescription = null, tint = MadarTeal)
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        "%.5f, %.5f · ±%d م".format(point.latitude, point.longitude, point.accuracyMeters.toInt()),
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+                Text(
+                    "وقت الإشارة: ${MadarTime.displayTime(point.capturedAtMillis)} · المزود: ${point.provider ?: "غير معروف"}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MadarMuted,
+                )
+                val decision = GeoPolicy.evaluate(
+                    point,
+                    visit.machineLatitude,
+                    visit.machineLongitude,
+                    visit.geofenceRadiusMeters,
+                )
+                val (decisionText, tone) = when (decision) {
+                    LocationDecision.Valid -> "الموقع صالح للاعتماد داخل نطاق الماكينة." to MessageTone.Success
+                    LocationDecision.InvalidCoordinates -> "إحداثيات الموقع غير صالحة؛ حدّث GPS ولا تعتمد القراءة الحالية." to MessageTone.Error
+                    LocationDecision.Missing -> "لا يوجد موقع." to MessageTone.Error
+                    LocationDecision.Mocked -> "الموقع مزيف من النظام ولا يمكن اعتماده." to MessageTone.Error
+                    is LocationDecision.Invalid -> decision.reason to MessageTone.Error
+                    is LocationDecision.Stale -> "الإشارة قديمة (${decision.ageMillis / 1000} ثانية)." to MessageTone.Warning
+                    is LocationDecision.Inaccurate -> "الدقة ${decision.accuracyMeters.toInt()} مترًا ولا تكفي." to MessageTone.Warning
+                    is LocationDecision.Outside -> "خارج النطاق: المسافة الفعالة ${decision.effectiveDistanceMeters.toInt()} مترًا والمسموح ${decision.allowedRadiusMeters.toInt()}." to MessageTone.Error
+                }
+                InlineMessage(decisionText, tone)
+                if (point.accuracyMeters > GeoPolicy.MAX_ACCURACY_METERS) {
+                    InlineMessage("الموقع تقريبي ويُعرض للاسترشاد فقط؛ لن يُستخدم لاعتماد الزيارة.", MessageTone.Warning)
+                }
             }
-        }
-        if (location.providersDisabled) {
-            InlineMessage("افتح إعدادات الجهاز وشغّل خدمة الموقع ثم أعد المحاولة.", MessageTone.Warning)
+            if (location.message != null) {
+                InlineMessage(location.message, if (location.permissionDenied || location.providersDisabled) MessageTone.Error else MessageTone.Info)
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = onRefresh, enabled = !location.busy) {
+                    if (location.busy) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                    else Text("تحديث الموقع")
+                }
+                if (location.permissionDenied) Button(onClick = onRequestPermission) { Text("منح إذن الموقع") }
+            }
+            if (location.providersDisabled) InlineMessage("افتح إعدادات الجهاز وشغّل خدمة الموقع ثم أعد المحاولة.", MessageTone.Warning)
         }
     }
 }
@@ -790,7 +809,7 @@ private fun PhotoSection(
             }
         }
         if (blocked) {
-            Text("التصوير متوقف حتى يُحل تعارض الماكينة.", color = MadarDanger, style = MaterialTheme.typography.bodySmall)
+            Text("التصوير متوقف مؤقتًا بسبب تعارض حجز الماكينة. صورك الحالية لم تُحذف.", color = MadarDanger, style = MaterialTheme.typography.bodySmall)
         }
         if (photos.any { it.accuracy == null }) {
             InlineMessage("بعض الصور بلا موقع GPS؛ سيظل الاعتماد بحاجة إلى موقع زيارة صالح.", MessageTone.Warning)

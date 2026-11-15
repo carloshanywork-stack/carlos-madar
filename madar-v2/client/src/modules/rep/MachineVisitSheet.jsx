@@ -634,40 +634,29 @@ export default function MachineVisitSheet({ machine, repId, repName = '', reason
         </header>
 
         <div className="rep-sheet-content">
-          <div className={`rep-gps-strip ${gpsFresh ? 'has-fix' : ''}`}>
-            <span className="rep-gps-pulse" aria-hidden="true" />
-            <div>
-              <strong>{gpsFresh ? 'GPS حديث صالح للتصوير' : gps ? 'آخر موقع معروف — غير صالح للتصوير' : gpsError || 'جارٍ تحديد GPS حديث...'}</strong>
-              <small>{gps ? showLocation(gps) : 'لن تُستخدم الإحداثيات القديمة؛ حدّث GPS قبل التصوير أو الحفظ.'}</small>
+          {locationLocked && hasMachinePin && <>
+            <div className={`rep-gps-strip ${gpsFresh ? 'has-fix' : ''}`}>
+              <span className="rep-gps-pulse" aria-hidden="true" />
+              <div>
+                <strong>{gpsFresh ? 'GPS حديث صالح للتصوير' : gps ? 'آخر موقع معروف — غير صالح للتصوير' : gpsError || 'جارٍ تحديد GPS حديث...'}</strong>
+                <small>{gps ? showLocation(gps) : 'لن تُستخدم الإحداثيات القديمة؛ حدّث GPS قبل التصوير أو الحفظ.'}</small>
+              </div>
+              <span className="rep-gps-label">GPS</span>
             </div>
-            <span className="rep-gps-label">GPS</span>
-          </div>
 
-          <div className={`rep-geofence-status ${!gpsFresh || !withinGeofence ? 'outside' : 'inside'}`} role="status">
-            {!gpsFresh
-              ? 'يلزم الحصول على GPS حديث ودقيق؛ الإحداثيات السابقة لا تفعّل التصوير.'
-              : !locationLocked || !hasMachinePin
-                 ? 'تأكد من كود الماكينة ثم أرسل GPS الحالي؛ يُعتمد الموقع الأول فور مزامنته، أما تصحيح موقع موجود فيحتاج مراجعة الإدارة.'
+            <div className={`rep-geofence-status ${!gpsFresh || !withinGeofence ? 'outside' : 'inside'}`} role="status">
+              {!gpsFresh
+                ? 'يلزم الحصول على GPS حديث ودقيق؛ الإحداثيات السابقة لا تفعّل التصوير.'
                 : withinGeofence
                   ? `أنت داخل النطاق · المسافة ${Math.round(effectiveDistance)} متر (المسموح ${radius} متر).`
                   : `أنت خارج النطاق · المسافة الفعالة ${Math.round(effectiveDistance)} متر (المسموح ${radius} متر).`}
-          </div>
+            </div>
+          </>}
 
           {!locationLocked || !hasMachinePin ? <section className="rep-machine-verification">
-            <div>
-              <strong>تحقق من هوية وموقع الماكينة</strong>
-              <small>{locationPending
-                ? ['queued', 'syncing'].includes(activeMachine.locationReviewState)
-                  ? 'الموقع الأول محفوظ محلياً وبانتظار المزامنة؛ لا ينتظر اعتماد مدير بعد إقرار الخادم.'
-                  : activeMachine.locationReviewState === 'blocked'
-                    ? 'تعذر إرسال الموقع ويحتاج مراجعة من سجل المزامنة؛ التصوير متوقف.'
-                    : 'تصحيح الموقع بانتظار المراجعة الإدارية؛ التصوير متوقف حتى القرار.'
-                : 'يُعتمد الموقع الأول الصحيح فور استلام الخادم؛ وتصحيحات المواقع الموجودة تبقى تحت مراجعة الإدارة.'}</small>
-              {activeMachine.locationConfirmation?.reviewNote && <small>{activeMachine.locationConfirmation.reviewNote}</small>}
-            </div>
             <button type="button" className="rep-button rep-button-primary" onClick={() => void confirmCurrentLocation()}
-              disabled={locationPending || confirmingLocation || !gpsFresh || saving || correctionSaving || correctionOpen}>
-              {confirmingLocation ? 'جارٍ حفظ ومزامنة الموقع…' : 'تثبيت الموقع الأول / إرسال التصحيح'}
+              disabled={locationPending || confirmingLocation || saving || correctionSaving}>
+              {confirmingLocation ? 'جارٍ اعتماد الماكينة…' : locationPending ? 'الموقع محفوظ وبانتظار الاتصال' : 'اعتماد الماكينة'}
             </button>
           </section> : <section className="rep-machine-verification verified">
             <div>
@@ -678,7 +667,7 @@ export default function MachineVisitSheet({ machine, repId, repName = '', reason
             </div>
           </section>}
 
-          <section className="rep-wrong-machine-report">
+          {locationLocked && <section className="rep-wrong-machine-report">
             <button type="button" className="rep-button rep-button-light"
               onClick={() => { setCorrectionOpen((value) => !value); setError(''); }}
               aria-expanded={correctionOpen} disabled={correctionSaving || saving}>
@@ -696,7 +685,7 @@ export default function MachineVisitSheet({ machine, repId, repName = '', reason
                 {correctionSaving ? 'جارٍ حفظ البلاغ…' : 'إرسال بلاغ التصحيح للإدارة'}
               </button>
             </div>}
-          </section>
+          </section>}
 
           <section className="rep-form-section">
             <div className="rep-section-title">

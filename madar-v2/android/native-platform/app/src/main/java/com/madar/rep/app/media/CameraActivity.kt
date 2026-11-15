@@ -237,10 +237,15 @@ class CameraActivity : ComponentActivity() {
         LaunchedEffect(Unit) { while (kotlinx.coroutines.currentCoroutineContext().isActive) { clock=System.currentTimeMillis(); delay(1000) } }
         LaunchedEffect(Unit) {
             val container=(application as MadarApplication).container
+            livePoint = container.locationProvider.lastKnown()
             while(kotlinx.coroutines.currentCoroutineContext().isActive) {
-                val fix=container.locationProvider.currentFix(5000)
-                livePoint=(fix as? com.madar.rep.app.location.LocationResult.Success)?.point
-                delay(1000)
+                val fix=container.locationProvider.currentFix(3000)
+                val updated=(fix as? com.madar.rep.app.location.LocationResult.Success)?.point
+                if (updated != null) livePoint=updated
+                else if (livePoint?.isFresh(System.currentTimeMillis()) != true) {
+                    livePoint=container.locationProvider.lastKnown()
+                }
+                delay(12_000)
             }
         }
         LaunchedEffect(Unit) {

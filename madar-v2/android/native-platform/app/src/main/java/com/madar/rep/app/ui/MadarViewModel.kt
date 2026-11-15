@@ -16,6 +16,7 @@ import com.madar.rep.app.data.api.MaintenanceLine
 import com.madar.rep.app.data.api.RouteMachine
 import com.madar.rep.app.data.db.AttendanceActionEntity
 import com.madar.rep.app.data.db.MachineActionEntity
+import com.madar.rep.app.data.db.MachineActionState
 import com.madar.rep.app.data.db.MapPackEntity
 import com.madar.rep.app.data.db.NotificationEntity
 import com.madar.rep.app.data.db.PhotoEntity
@@ -42,6 +43,8 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.UUID
+import org.json.JSONObject
 
 data class LoginUiState(
     val busy: Boolean = false,
@@ -107,9 +110,14 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
 
     private val _claimBlockedCardId = MutableStateFlow<Long?>(null)
     val claimBlockedCardId: StateFlow<Long?> = _claimBlockedCardId.asStateFlow()
+    private val _claimBlockedMessage = MutableStateFlow<String?>(null)
+    val claimBlockedMessage: StateFlow<String?> = _claimBlockedMessage.asStateFlow()
 
     private val _visitBusy = MutableStateFlow(false)
     val visitBusy: StateFlow<Boolean> = _visitBusy.asStateFlow()
+
+    private val _machineLocationApprovalBusy = MutableStateFlow<Long?>(null)
+    val machineLocationApprovalBusy: StateFlow<Long?> = _machineLocationApprovalBusy.asStateFlow()
 
     val eventConnected: StateFlow<Boolean> = container.eventStream.connected
 
@@ -161,9 +169,33 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
                     _reasons.value = emptyList()
                     _routeError.value = null
                     _claimBlockedCardId.value = null
+                    _claimBlockedMessage.value = null
                 } else {
                     refreshAll(current)
                 }
+            }
+        }
+        viewModelScope.launch {
+            machineActions.collect { actions ->
+                val current = session.value ?: return@collect
+                var routeNeedsRefresh = false
+                for (action in actions) {
+                    if (action.ownerRepId != current.ownerScopeId || action.type != "confirm_location" ||
+                        action.state != MachineActionState.APPROVED
+                    ) continue
+                    val point = runCatching {
+                        JSONObject(action.payloadJson).getJSONObject("location")
+                    }.getOrNull() ?: continue
+                    val draft = container.database.visits().findDraft(action.ownerRepId, action.cardId) ?: continue
+                    if (draft.locationLocked) continue
+                    container.visitRepository.confirmDraftMachineLocation(
+                        draft.visitUuid,
+                        point.getDouble("latitude"),
+                        point.getDouble("longitude"),
+                    )
+                    routeNeedsRefresh = true
+                }
+                if (routeNeedsRefresh) refreshRoute(current)
             }
         }
     }
@@ -193,6 +225,91 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
 
     fun governorateFor(point: GeoPoint?): String? =
         point?.let { container.governorates.find(it.latitude, it.longitude)?.nameAr }
+
+    fun hasLocationPermission(): Boolean = container.locationProvider.hasPermission()
+
+    fun approveFirstMachineLocation(visit: VisitEntity) {
+        val current = session.value ?: return
+        if (visit.state != VisitState.DRAFT || visit.locationLocked || _machineLocationApprovalBusy.value != null) return
+        _machineLocationApprovalBusy.value = visit.cardId
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val machine = route.value?.route?.regions?.asSequence()?.flatMap { it.machines.asSequence() }
+                    ?.firstOrNull { it.cardId == visit.cardId }
+                    ?: throw MadarError.Validation("تعذر تحديد الماكينة من المسار الحالي؛ حدّث المسار وحاول مجددًا.")
+                if (machine.isLocationLocked) {
+                    container.routeRepository.refresh(current, container.apiFactory(current.serverUrl))
+                    throw MadarError.Conflict("موقع الماكينة تم اعتماده بالفعل. حدّث المسار للمتابعة.")
+                }
+
+                val activeAction = container.database.machineActions().listForOwner(current.ownerScopeId)
+                    .firstOrNull {
+                        it.machineId == machine.machineId && it.type == "confirm_location" &&
+                            it.state in setOf("queued", "syncing", "retry_wait", "needs_login")
+                    }
+                val action = if (activeAction != null) activeAction else {
+                    val result = container.locationProvider.currentFix(7_000)
+                    val point = (result as? LocationResult.Success)?.point ?: container.locationProvider.lastKnown()
+                        ?: throw MadarError.Validation("لم يصل الموقع بعد. تأكد من تشغيل GPS وحاول اعتماد الماكينة مرة أخرى.")
+                    val now = System.currentTimeMillis()
+                    val age = now - point.capturedAtMillis
+                    if (point.isMock || age !in 0..300_000L || point.accuracyMeters > 100f) {
+                        throw MadarError.Validation("يلزم موقع GPS حديث ودقيق (حتى 100 متر) لاعتماد الماكينة.")
+                    }
+                    val actionUuid = UUID.randomUUID().toString()
+                    val payload = JSONObject()
+                        .put("actionUuid", actionUuid)
+                        .put("cardId", machine.cardId)
+                        .put("location", JSONObject()
+                            .put("latitude", point.latitude)
+                            .put("longitude", point.longitude)
+                            .put("accuracy", point.accuracyMeters)
+                            .put("updatedAt", MadarTime.isoUtc(point.capturedAtMillis)))
+                        .toString()
+                    MachineActionEntity(
+                        actionUuid = actionUuid,
+                        ownerRepId = current.ownerScopeId,
+                        type = "confirm_location",
+                        machineId = machine.machineId,
+                        cardId = machine.cardId,
+                        payloadJson = payload,
+                        createdAt = now,
+                        updatedAt = now,
+                    ).also { container.database.machineActions().upsert(it) }
+                }
+
+                container.syncEngine.run()
+                val saved = container.database.machineActions().find(action.actionUuid)
+                when (saved?.state) {
+                    MachineActionState.APPROVED -> {
+                        val location = JSONObject(action.payloadJson).getJSONObject("location")
+                        val latitude = location.getDouble("latitude")
+                        val longitude = location.getDouble("longitude")
+                        container.visitRepository.confirmDraftMachineLocation(visit.visitUuid, latitude, longitude)
+                        applyLocationPoint(GeoPoint(
+                            latitude = latitude,
+                            longitude = longitude,
+                            accuracyMeters = location.getDouble("accuracy").toFloat(),
+                            capturedAtMillis = MadarTime.parseIso(location.getString("updatedAt")) ?: System.currentTimeMillis(),
+                            provider = "GPS",
+                            isMock = false,
+                        ), "تم اعتماد موقع الماكينة. يمكنك الآن استكمال الزيارة.")
+                        container.routeRepository.refresh(current, container.apiFactory(current.serverUrl))
+                        _messages.tryEmit("تم اعتماد موقع الماكينة بنجاح.")
+                    }
+                    MachineActionState.QUEUED, MachineActionState.RETRY_WAIT, MachineActionState.SYNCING -> {
+                        container.scheduler.enqueueNow()
+                        _messages.tryEmit("تم حفظ طلب اعتماد الماكينة على الهاتف؛ سيُرسل تلقائيًا عند توفر الاتصال.")
+                    }
+                    else -> _messages.tryEmit(saved?.lastError ?: "تعذر اعتماد موقع الماكينة. راجع حالة الإجراء في شاشة المزامنة.")
+                }
+            } catch (error: Exception) {
+                _messages.tryEmit(human(error))
+            } finally {
+                _machineLocationApprovalBusy.value = null
+            }
+        }
+    }
 
     fun logout() {
         viewModelScope.launch {
@@ -450,7 +567,7 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
             try {
                 _messages.tryEmit("جارٍ التحقق من موقع GPS…")
                 val fix = withContext(Dispatchers.IO) {
-                    when (val result = container.locationProvider.currentFix(15_000)) {
+                    when (val result = container.locationProvider.currentFix(7_000)) {
                         is LocationResult.Success -> result.point
                         else -> container.locationProvider.lastKnown()
                     }
@@ -502,7 +619,7 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
         if (_location.value.busy) return
         _location.value = _location.value.copy(busy = true, message = null, permissionDenied = false, providersDisabled = false)
         viewModelScope.launch {
-            val result = withContext(Dispatchers.IO) { container.locationProvider.currentFix(15_000) }
+            val result = withContext(Dispatchers.IO) { container.locationProvider.currentFix(7_000) }
             when (result) {
                 is LocationResult.Success -> applyLocationPoint(result.point)
                 LocationResult.PermissionDenied -> {
@@ -552,6 +669,7 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
 
     fun clearClaimBlock() {
         _claimBlockedCardId.value = null
+        _claimBlockedMessage.value = null
     }
 
     /**
@@ -559,14 +677,18 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
      * a real conflict blocks capture, while a network loss simply continues as an
      * offline draft because the server validates the visit again on sync.
      */
-    fun claimWork(visit: VisitEntity, location: GeoPoint? = _location.value.point) {
+    fun claimWork(
+        visit: VisitEntity,
+        location: GeoPoint? = _location.value.point,
+        forceRetry: Boolean = false,
+    ) {
         val current = session.value ?: return
-        if (visit.state != VisitState.DRAFT) return
+        if (visit.state != VisitState.DRAFT || !visit.locationLocked) return
         if (location == null) return
         val now = System.currentTimeMillis()
         val age = now - location.capturedAtMillis
         if (location.isMock || age !in 0..300_000L || location.accuracyMeters > 120f) return
-        if (_claimBlockedCardId.value == visit.cardId) return
+        if (!forceRetry && _claimBlockedCardId.value == visit.cardId) return
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 container.apiFactory(current.serverUrl).startWork(
@@ -581,9 +703,11 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
                     ),
                 )
                 _claimBlockedCardId.value = null
+                _claimBlockedMessage.value = null
             } catch (error: MadarError.Conflict) {
                 _claimBlockedCardId.value = visit.cardId
-                _messages.tryEmit(error.message ?: "بدأ مندوب آخر العمل على هذه الماكينة.")
+                _claimBlockedMessage.value = error.message ?: "يوجد تعارض يمنع حجز هذه الماكينة."
+                _messages.tryEmit(_claimBlockedMessage.value!!)
             } catch (_: MadarError.Network) {
                 // Offline is allowed: the visit is still a local draft.
             } catch (error: MadarError.SessionExpired) {
@@ -591,6 +715,25 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
             } catch (error: MadarError) {
                 _messages.tryEmit(error.message ?: "لم يُسجّل بدء العمل على الخادم.")
             }
+        }
+    }
+
+    fun retryMachineClaim(visit: VisitEntity) {
+        val current = session.value ?: return
+        if (visit.state != VisitState.DRAFT || !visit.locationLocked) return
+        viewModelScope.launch {
+            refreshRoute(current)
+            val point = withContext(Dispatchers.IO) {
+                when (val result = container.locationProvider.currentFix(5_000)) {
+                    is LocationResult.Success -> result.point
+                    else -> container.locationProvider.lastKnown()
+                }
+            }
+            if (point == null) {
+                _messages.tryEmit("تعذر إعادة التحقق: لا يوجد موقع متاح. شغّل GPS وحاول مجددًا.")
+                return@launch
+            }
+            claimWork(visit, point, forceRetry = true)
         }
     }
 

@@ -318,6 +318,8 @@
 #madar-app .rep-geofence-status { margin-top: 8px; padding: 10px 12px; border: 1px solid #abd2c0; border-radius: 10px; color: #145a47; background: #edf7f1; font-size: 11px; font-weight: 850; line-height: 1.6; }
 #madar-app .rep-geofence-status.outside { border-color: #e4b8b9; color: #8a3338; background: #fff0f0; }
 #madar-app .rep-machine-verification { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 9px; padding: 12px; border: 1px solid #e3c982; border-radius: 11px; background: #fff9e7; }
+#madar-app .rep-machine-verification:not(.verified) { justify-content: center; }
+#madar-app .rep-machine-verification:not(.verified) .rep-button { width: 100%; min-height: 48px; font-size: 15px; }
 #madar-app .rep-machine-verification > div { display: grid; gap: 4px; }
 #madar-app .rep-machine-verification strong { color: #634b14; font-size: 11px; }
 #madar-app .rep-machine-verification small { color: #5c5c4f; font-size: 10px; line-height: 1.5; }
