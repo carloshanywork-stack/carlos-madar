@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="madar_ink">#15243A</color>
+    <color name="madar_accent">#187B68</color>
+    <color name="madar_gold">#DCAA52</color>
+    <color name="madar_canvas">#F2F5F8</color>
+    <color name="black">#000000</color>
+</resources>

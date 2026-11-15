@@ -75,6 +75,7 @@ export function getOfflineMapStatus() {
     format,
     name: String(map.metadata.name ?? 'Offline map'),
     attribution: String(map.metadata.attribution ?? ''),
+    license: String(map.metadata.license ?? ''),
     minZoom: Number.isInteger(Number(map.metadata.minzoom)) ? Number(map.metadata.minzoom) : 0,
     maxZoom: Number.isInteger(Number(map.metadata.maxzoom)) ? Number(map.metadata.maxzoom) : 18,
     bounds: map.metadata.bounds ?? null,
@@ -167,6 +168,7 @@ function unavailablePack(pack, map, summary, reason) {
     maxZoom: summary?.maxZoom ?? pack.maxZoom,
     format: map?.format ?? null,
     attribution: map?.attribution ?? '',
+    license: map?.license ?? '',
     reason,
   };
 }

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Madar" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowBackground">@color/madar_canvas</item>
+        <item name="android:statusBarColor">@color/madar_ink</item>
+        <item name="android:navigationBarColor">@color/madar_canvas</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:colorAccent">@color/madar_accent</item>
+    </style>
+
+    <style name="Theme.Madar.Camera" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/black</item>
+        <item name="android:statusBarColor">@color/black</item>
+        <item name="android:navigationBarColor">@color/black</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>

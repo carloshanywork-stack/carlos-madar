@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">MADAR</string>
+    <string name="login_title">MADAR</string>
+    <string name="login_subtitle">تطبيق مندوب الصيانة</string>
+    <string name="username">اسم المستخدم</string>
+    <string name="password">كلمة المرور</string>
+    <string name="sign_in">تسجيل الدخول</string>
+    <string name="signing_in">جارٍ تسجيل الدخول…</string>
+    <string name="server_url">عنوان السيرفر</string>
+    <string name="error_invalid_credentials">اسم المستخدم أو كلمة المرور غير صحيحة.</string>
+    <string name="error_account_disabled">الحساب معطل. تواصل مع الإدارة.</string>
+    <string name="error_network">تعذر الاتصال بالسيرفر. تحقق من الشبكة.</string>
+    <string name="error_session_expired">انتهت الجلسة. سجّل الدخول من جديد.</string>
+    <string name="error_server">السيرفر غير متاح مؤقتًا.</string>
+    <string name="error_protocol">رد غير متوقع من السيرفر.</string>
+    <string name="nav_route">العمل</string>
+    <string name="nav_map">الخريطة</string>
+    <string name="nav_sync">المزامنة</string>
+    <string name="nav_notifications">الإشعارات</string>
+    <string name="search_machines">ابحث بكود أو اسم الماكينة</string>
+    <string name="no_machines">لا توجد ماكينات مطابقة.</string>
+    <string name="capture_before">تصوير قبل</string>
+    <string name="capture_after">تصوير بعد</string>
+    <string name="submit_visit">إنشاء الزيارة وإرسالها للمزامنة</string>
+    <string name="sync_now">مزامنة الآن</string>
+    <string name="retry">إعادة المحاولة</string>
+    <string name="login_required">سجّل الدخول لاستكمال المزامنة.</string>
+    <string name="location_unavailable">الموقع غير متاح. الصور محفوظة والزيارة تبقى مسودة.</string>
+    <string name="camera_permission_required">يلزم إذن الكاميرا للتصوير.</string>
+    <string name="location_permission_required">يلزم إذن الموقع لاعتماد الزيارة.</string>
+    <string name="map_not_installed">لم تُنزّل حزمة الخريطة بعد.</string>
+    <string name="map_download">تنزيل الخريطة</string>
+    <string name="notifications_empty">لا توجد إشعارات.</string>
+</resources>

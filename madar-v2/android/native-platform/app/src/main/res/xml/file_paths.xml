@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <files-path name="madar_files" path="." />
+    <cache-path name="madar_cache" path="." />
+    <external-files-path name="madar_external" path="." />
+</paths>

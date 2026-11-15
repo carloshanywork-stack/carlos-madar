@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MADAR migration bridge</title></head>
+<body>
+<script>
+(function () {
+  var DB_NAME = 'madar-rep-offline';
+  var MAX_TOTAL_BYTES = 96 * 1024 * 1024;
+  var usedBytes = 0;
+
+  function reply(value) {
+    var text = JSON.stringify(value);
+    if (window.MadarLegacyBridge && MadarLegacyBridge.onResult) MadarLegacyBridge.onResult(text);
+  }
+
+  function fail(error) {
+    reply({ ok: false, error: String((error && error.message) || error || 'unknown bridge error') });
+  }
+
+  function getAll(database, storeName) {
+    return new Promise(function (resolve, reject) {
+      if (!database.objectStoreNames.contains(storeName)) { resolve([]); return; }
+      var tx = database.transaction(storeName, 'readonly');
+      var request = tx.objectStore(storeName).getAll();
+      request.onsuccess = function () { resolve(request.result || []); };
+      request.onerror = function () { reject(request.error || new Error('read failed: ' + storeName)); };
+      tx.onerror = function () { reject(tx.error || new Error('transaction failed: ' + storeName)); };
+    });
+  }
+
+  function blobToBase64(blob) {
+    return new Promise(function (resolve, reject) {
+      if (!(blob instanceof Blob)) { resolve(null); return; }
+      if (usedBytes + blob.size > MAX_TOTAL_BYTES) { reject(new Error('legacy photo evidence exceeds the migration size limit')); return; }
+      usedBytes += blob.size;
+      var reader = new FileReader();
+      reader.onload = function () {
+        var value = String(reader.result || '');
+        var comma = value.indexOf(',');
+        resolve({ base64: comma >= 0 ? value.slice(comma + 1) : value, mimeType: blob.type || 'image/jpeg', sizeBytes: blob.size });
+      };
+      reader.onerror = function () { reject(reader.error || new Error('blob read failed')); };
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  async function serializePhoto(entry) {
+    var out = {
+      path: entry.path || null,
+      capturedAt: entry.capturedAt || null,
+      sizeBytes: Number(entry.sizeBytes) || 0,
+      sha256: entry.sha256 || null
+    };
+    var blob = entry.blob || entry.photo || entry.bytes || null;
+    if (blob instanceof Blob) {
+      var encoded = await blobToBase64(blob);
+      out.base64 = encoded.base64;
+      out.mimeType = encoded.mimeType;
+      out.sizeBytes = encoded.sizeBytes;
+    }
+    return out;
+  }
+
+  async function serializeMachineEvidence(entry) {
+    var out = {
+      path: entry.path || null,
+      evidenceMimeType: entry.evidenceMimeType || entry.mimeType || 'image/jpeg',
+      evidenceBase64: null
+    };
+    var blob = entry.evidence || entry.evidenceBlob || null;
+    if (blob instanceof Blob) {
+      var encoded = await blobToBase64(blob);
+      out.evidenceBase64 = encoded.base64;
+      out.evidenceMimeType = encoded.mimeType;
+    }
+    return out;
+  }
+
+  async function run() {
+    var databases = [];
+    if (indexedDB.databases) {
+      try { databases = await indexedDB.databases(); } catch (_) { databases = []; }
+      if (databases.length && !databases.some(function (item) { return item.name === DB_NAME; })) {
+        reply({ ok: true, empty: true, visits: [], machineActions: [], routeSnapshots: [], reasonSnapshots: [], attendanceSnapshots: [] });
+        return;
+      }
+    }
+    var database = await new Promise(function (resolve, reject) {
+      var request = indexedDB.open(DB_NAME);
+      request.onsuccess = function () { resolve(request.result); };
+      request.onerror = function () { reject(request.error || new Error('open failed')); };
+      request.onblocked = function () { reject(new Error('legacy database is blocked by another open web view')); };
+    });
+    try {
+      if (!database.objectStoreNames.contains('pending_visits')
+          && !database.objectStoreNames.contains('pending_machine_actions')
+          && !database.objectStoreNames.contains('route_snapshots')) {
+        reply({ ok: true, empty: true, visits: [], machineActions: [], routeSnapshots: [], reasonSnapshots: [], attendanceSnapshots: [] });
+        return;
+      }
+      var visits = [];
+      var rawVisits = await getAll(database, 'pending_visits');
+      for (var i = 0; i < rawVisits.length; i += 1) {
+        var visit = rawVisits[i];
+        var before = [];
+        var after = [];
+        var beforeSource = Array.isArray(visit.beforePhotos) ? visit.beforePhotos : [];
+        var afterSource = Array.isArray(visit.afterPhotos) ? visit.afterPhotos : [];
+        for (var b = 0; b < beforeSource.length; b += 1) before.push(await serializePhoto(beforeSource[b]));
+        for (var a = 0; a < afterSource.length; a += 1) after.push(await serializePhoto(afterSource[a]));
+        visits.push({
+          visitUuid: visit.visitUuid,
+          repId: Number(visit.repId),
+          repUsername: visit.repUsername || '',
+          createdAt: visit.createdAt || null,
+          payload: visit.payload || {},
+          beforePhotos: before,
+          afterPhotos: after,
+          status: visit.status || 'queued',
+          attempts: Number(visit.attempts) || 0,
+          lastError: visit.lastError || '',
+          nativeStoragePath: visit.nativeStoragePath || null
+        });
+      }
+      var actions = [];
+      var rawActions = await getAll(database, 'pending_machine_actions');
+      for (var m = 0; m < rawActions.length; m += 1) {
+        var action = rawActions[m];
+        var evidence = await serializeMachineEvidence(action);
+        actions.push({
+          actionUuid: action.actionUuid,
+          repId: Number(action.repId),
+          type: action.type,
+          machineId: Number(action.machineId),
+          cardId: Number((action.payload && action.payload.cardId) || action.cardId || 0),
+          payload: action.payload || {},
+          createdAt: action.createdAt || null,
+          status: action.status || 'queued',
+          attempts: Number(action.attempts) || 0,
+          lastError: action.lastError || '',
+          correctionId: action.correctionId == null ? null : Number(action.correctionId),
+          serverStatus: action.serverStatus || null,
+          evidenceBase64: evidence.evidenceBase64,
+          evidenceMimeType: evidence.evidenceMimeType
+        });
+      }
+      reply({
+        ok: true,
+        databaseVersion: database.version,
+        visits: visits,
+        machineActions: actions,
+        routeSnapshots: await getAll(database, 'route_snapshots'),
+        reasonSnapshots: await getAll(database, 'reason_snapshots'),
+        attendanceSnapshots: await getAll(database, 'attendance_snapshots'),
+        gpsSampleCount: (await getAll(database, 'gps_samples')).length,
+        offlineMapPackCount: (await getAll(database, 'offline_map_packs')).length
+      });
+    } finally {
+      database.close();
+    }
+  }
+
+  window.addEventListener('DOMContentLoaded', function () {
+    run().catch(fail);
+  });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,9 @@
+Egypt ADM1 governorate boundaries
+Source: geoBoundaries (https://www.geoboundaries.org), boundary EGY-ADM1
+Original source: OpenStreetMap contributors / Wambacher
+License: Open Data Commons Open Database License 1.0 (ODbL 1.0)
+License URL: https://opendatacommons.org/licenses/odbl/1-0/
+Downloaded: 2026-11-15
+File: geoBoundaries-EGY-ADM1_simplified.geojson (sha256 below)
+
+6f521038eaf80b2925677b05f1fcb65f5f976bfd61ebbe0aef369c85895336a2
