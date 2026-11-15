@@ -132,6 +132,72 @@ data class RepSupportReportEnvelope(
 )
 
 @Serializable
+data class ApkReleaseMetadata(
+    val sourceRevision: String,
+    val sourceTreeDirty: Boolean,
+    val builtAt: String,
+    val versionName: String,
+    val versionCode: Int,
+    val buildType: String,
+    val apkSha256: String,
+    val signerCertificateSha256: String,
+)
+
+@Serializable
+data class ApkStatusResponse(
+    val available: Boolean = false,
+    val artifactType: String = "missing",
+    val sizeBytes: Long? = null,
+    val modifiedAt: String? = null,
+    val releaseMetadata: ApkReleaseMetadata? = null,
+)
+
+@Serializable
+data class RepSupportReportsResponse(
+    val success: Boolean = false,
+    val reports: List<RepSupportReport> = emptyList(),
+)
+
+@Serializable
+data class LocationChangeRequestView(
+    val id: Long,
+    val actionUuid: String,
+    val machineId: Long,
+    val machineCode: String,
+    val machineName: String,
+    val cardId: Long,
+    val status: String,
+    val proposedLocation: ProposedLocation,
+    val note: String? = null,
+    val reviewNote: String? = null,
+    val createdAt: String,
+    val reviewedAt: String? = null,
+)
+
+@Serializable
+data class ProposedLocation(
+    val latitude: Double,
+    val longitude: Double,
+    val accuracy: Float = 0f,
+)
+
+@Serializable
+data class LocationChangeRequestsResponse(
+    val success: Boolean = false,
+    val requests: List<LocationChangeRequestView> = emptyList(),
+)
+
+@Serializable
+data class LocationChangeSubmitResponse(
+    val success: Boolean = false,
+    val idempotent: Boolean = false,
+    val requestId: Long? = null,
+    val status: String? = null,
+    val error: String? = null,
+    val message: String? = null,
+)
+
+@Serializable
 data class MaintenanceLine(val reasonId: Long, val quantity: Int)
 
 @Serializable

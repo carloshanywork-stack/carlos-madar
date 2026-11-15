@@ -177,6 +177,41 @@ export function listMyRepBugReports(repId, database = defaultDb) {
     .all(id).map((row) => reportView(row, database, { representative: true }));
 }
 
+function validExportDate(value, label) {
+  if (value === undefined || value === '') return undefined;
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    throw new HttpError(400, `${label} must be formatted YYYY-MM-DD.`);
+  }
+  const date = new Date(`${value}T12:00:00.000Z`);
+  if (Number.isNaN(date.valueOf()) || date.toISOString().slice(0, 10) !== value) {
+    throw new HttpError(400, `${label} must be a valid calendar date.`);
+  }
+  return value;
+}
+
+export function exportRepBugReports({ status = 'all', category, severity, from, to } = {}, database = defaultDb) {
+  if (status !== 'all' && !reportStatuses.has(status)) throw new HttpError(400, 'Invalid report status.');
+  if (category !== undefined && category !== 'all' && !categories.has(category)) throw new HttpError(400, 'Invalid report category.');
+  if (severity !== undefined && severity !== 'all' && !severities.has(severity)) throw new HttpError(400, 'Invalid report severity.');
+  const fromDate = validExportDate(from, 'from');
+  const toDate = validExportDate(to, 'to');
+  if (fromDate && toDate && fromDate > toDate) throw new HttpError(400, 'from must not be later than to.');
+  const clauses = [];
+  const parameters = [];
+  if (status !== 'all') { clauses.push('report.status = ?'); parameters.push(status); }
+  if (category && category !== 'all') { clauses.push('report.category = ?'); parameters.push(category); }
+  if (severity && severity !== 'all') { clauses.push('report.severity = ?'); parameters.push(severity); }
+  if (fromDate) { clauses.push("report.created_at >= ?"); parameters.push(`${fromDate} 00:00:00`); }
+  if (toDate) {
+    const nextDate = new Date(`${toDate}T00:00:00.000Z`);
+    nextDate.setUTCDate(nextDate.getUTCDate() + 1);
+    clauses.push('report.created_at < ?'); parameters.push(`${nextDate.toISOString().slice(0, 10)} 00:00:00`);
+  }
+  const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
+  return database.prepare(`${REPORT_SELECT} ${where} ORDER BY report.created_at DESC, report.id DESC LIMIT 50000`)
+    .all(...parameters).map((row) => reportView(row, database));
+}
+
 export function getRepBugReport(reportId, database = defaultDb) {
   const id = positiveId(reportId, 'reportId');
   const row = database.prepare(`${REPORT_SELECT} WHERE report.id = ?`).get(id);

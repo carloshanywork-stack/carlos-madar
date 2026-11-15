@@ -4,6 +4,7 @@ import com.madar.rep.app.core.MadarError
 import com.madar.rep.app.core.MadarTime
 import com.madar.rep.app.core.SyncPolicy
 import com.madar.rep.app.core.SyncSignal
+import com.madar.rep.app.core.SupportDiagnostics
 import com.madar.rep.app.data.api.ApiLocation
 import com.madar.rep.app.data.api.AttendanceActionRequest
 import com.madar.rep.app.data.api.MadarApi
@@ -16,6 +17,7 @@ import com.madar.rep.app.data.db.GpsPointState
 import com.madar.rep.app.data.db.MachineActionEntity
 import com.madar.rep.app.data.db.MachineActionState
 import com.madar.rep.app.data.db.MadarDatabase
+import com.madar.rep.app.data.db.SupportReportState
 import com.madar.rep.app.data.db.VisitEntity
 import com.madar.rep.app.data.db.VisitState
 import com.madar.rep.app.data.session.Session
@@ -82,6 +84,63 @@ class SyncEngine(
         }
 
         if (!needsLogin) {
+            val now = System.currentTimeMillis()
+            val pendingReports = database.supportReports().dueForSync(session.ownerScopeId, now)
+            pendingReports.forEach { report ->
+                database.supportReports().updateState(
+                    report.reportUuid, SupportReportState.SYNCING, null, report.attempts,
+                    report.nextAttemptAt, now,
+                )
+            }
+            val summary = flushSupportReportOutbox(
+                pendingReports.map { SupportReportQueueItem(it.reportUuid, it.payloadJson, it.attachmentPath, it.attempts) },
+                send = { item ->
+                    val attachment = item.attachmentPath?.let { path ->
+                        File(path).takeIf(File::isFile)
+                            ?: throw MadarError.Validation("صورة البلاغ المحلية مفقودة؛ احتُفظ بالبلاغ للمراجعة.")
+                    }
+                    api.submitSupportReport(session.token, item.payloadJson, attachment).reportUuid
+                },
+                markSent = { item ->
+                    val attempts = pendingReports.first { it.reportUuid == item.reportUuid }.attempts + 1
+                    database.supportReports().updateState(
+                        item.reportUuid, SupportReportState.SENT, null, attempts, 0, System.currentTimeMillis(),
+                    )
+                    item.attachmentPath?.let { File(it).delete() }
+                    SupportDiagnostics.record("support", "sent")
+                },
+                markRetry = { item, message ->
+                    val attempts = pendingReports.first { it.reportUuid == item.reportUuid }.attempts + 1
+                    val retryAt = System.currentTimeMillis() + SyncPolicy.retryDelayMillis(attempts)
+                    database.supportReports().updateState(
+                        item.reportUuid, SupportReportState.RETRY_WAIT, message.take(500), attempts, retryAt, System.currentTimeMillis(),
+                    )
+                    SupportDiagnostics.record("support", "retry_wait")
+                },
+                markNeedsReview = { item, message ->
+                    val attempts = pendingReports.first { it.reportUuid == item.reportUuid }.attempts + 1
+                    database.supportReports().updateState(
+                        item.reportUuid, SupportReportState.NEEDS_REVIEW, message.take(500), attempts, 0, System.currentTimeMillis(),
+                    )
+                    SupportDiagnostics.record("support", "needs_review")
+                },
+                markNeedsLogin = { item ->
+                    val attempts = pendingReports.first { it.reportUuid == item.reportUuid }.attempts + 1
+                    database.supportReports().updateState(
+                        item.reportUuid, SupportReportState.NEEDS_LOGIN,
+                        "انتهت الجلسة؛ سجّل الدخول لاستكمال إرسال البلاغ.", attempts, 0, System.currentTimeMillis(),
+                    )
+                    onSessionExpired()
+                },
+            )
+            attempted += pendingReports.size
+            acknowledged += summary.sent
+            transient += summary.retried
+            needsReview += summary.needsReview
+            if (summary.needsLogin) needsLogin = true
+        }
+
+        if (!needsLogin) {
             val visits = database.visits().dueForSync(session.ownerScopeId, System.currentTimeMillis())
             for (visit in visits) {
                 attempted += 1
@@ -101,7 +160,8 @@ class SyncEngine(
         val remaining = database.visits().countPending(session.ownerScopeId) +
             database.machineActions().countPending(session.ownerScopeId) +
             database.attendanceActions().dueForSync(session.ownerScopeId, Long.MAX_VALUE).size +
-            database.gpsPoints().countPending(session.repId)
+            database.gpsPoints().countPending(session.repId) +
+            database.supportReports().countPending(session.ownerScopeId)
         return SyncRunResult(
             attempted = attempted,
             acknowledged = acknowledged,

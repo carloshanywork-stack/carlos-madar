@@ -345,3 +345,21 @@ interface GpsPointDao {
     @Query("UPDATE gps_points SET state = 'queued', nextAttemptAt = 0, lastError = NULL WHERE clientPointId = :clientPointId AND repId = :repId AND state IN ('needs_login','needs_review','retry_wait')")
     suspend fun retryNow(clientPointId: String, repId: Long): Int
 }
+
+@Dao
+interface SupportReportDao {
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insert(report: SupportReportEntity)
+
+    @Query("SELECT * FROM support_reports WHERE ownerRepId = :repId ORDER BY createdAt DESC")
+    fun observeForOwner(repId: Long): Flow<List<SupportReportEntity>>
+
+    @Query("SELECT * FROM support_reports WHERE ownerRepId = :repId AND state IN ('queued','retry_wait','syncing','needs_login') AND nextAttemptAt <= :now ORDER BY createdAt LIMIT :limit")
+    suspend fun dueForSync(repId: Long, now: Long, limit: Int = 20): List<SupportReportEntity>
+
+    @Query("UPDATE support_reports SET state = :state, lastError = :error, attempts = :attempts, nextAttemptAt = :nextAttemptAt, updatedAt = :now WHERE reportUuid = :uuid")
+    suspend fun updateState(uuid: String, state: String, error: String?, attempts: Int, nextAttemptAt: Long, now: Long)
+
+    @Query("SELECT COUNT(*) FROM support_reports WHERE ownerRepId = :repId AND state IN ('queued','retry_wait','syncing','needs_login')")
+    suspend fun countPending(repId: Long): Int
+}

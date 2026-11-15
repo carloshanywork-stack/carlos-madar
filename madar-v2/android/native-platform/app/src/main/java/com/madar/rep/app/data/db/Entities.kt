@@ -59,6 +59,32 @@ object GpsPointState {
     const val ACKNOWLEDGED = "acknowledged"
 }
 
+object SupportReportState {
+    const val QUEUED = "queued"
+    const val SYNCING = "syncing"
+    const val RETRY_WAIT = "retry_wait"
+    const val NEEDS_LOGIN = "needs_login"
+    const val NEEDS_REVIEW = "needs_review"
+    const val SENT = "sent"
+}
+
+@Entity(
+    tableName = "support_reports",
+    indices = [Index("ownerRepId"), Index(value = ["ownerRepId", "state", "nextAttemptAt"])],
+)
+data class SupportReportEntity(
+    @PrimaryKey val reportUuid: String,
+    val ownerRepId: Long,
+    val payloadJson: String,
+    val attachmentPath: String? = null,
+    val state: String = SupportReportState.QUEUED,
+    val attempts: Int = 0,
+    val nextAttemptAt: Long = 0,
+    val lastError: String? = null,
+    val createdAt: Long,
+    val updatedAt: Long,
+)
+
 @Entity(
     tableName = "visits",
     indices = [Index("ownerRepId"), Index("state"), Index(value = ["ownerRepId", "state"])],

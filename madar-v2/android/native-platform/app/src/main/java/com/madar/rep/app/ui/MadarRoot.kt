@@ -13,6 +13,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AssignmentTurnedIn
+import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.Notifications
@@ -51,13 +52,11 @@ import kotlinx.coroutines.delay
 private object Tabs {
     const val ROUTE = "route"
     const val MAP = "map"
-    const val SYNC = "sync"
-    const val SUPPORT = "support"
 }
 
 /**
  * The signed-in shell. It keeps one ViewModel for the whole session, one snackbar
- * host for repository/service messages, and three top-level work areas. Visit,
+ * host for repository/service messages, and two top-level work areas. Visit,
  * attendance, and notification screens are layered above the tabs so a capture in
  * progress cannot be lost by an accidental tab switch.
  */
@@ -106,8 +105,7 @@ private fun SignedInShell(
 
     var tab by rememberSaveable { mutableStateOf(Tabs.ROUTE) }
     var visitUuid by rememberSaveable { mutableStateOf<String?>(null) }
-    var showAttendance by rememberSaveable { mutableStateOf(false) }
-    var showNotifications by rememberSaveable { mutableStateOf(false) }
+    var profilePage by rememberSaveable { mutableStateOf<String?>(null) }
 
     visitUuid?.let { uuid ->
         VisitScreen(
@@ -118,40 +116,63 @@ private fun SignedInShell(
         return
     }
 
-    if (showAttendance) {
-        AttendanceHost(
-            vm = vm,
-            onClose = { showAttendance = false },
-        )
-        return
-    }
-
-    if (showNotifications) {
-        BackHandler { showNotifications = false }
-        LaunchedEffect(Unit) { vm.refreshNotifications() }
-        NotificationsScreen(
-            notifications = notifications,
-            unreadCount = unread,
-            loading = false,
-            onBack = { showNotifications = false },
-            onRefresh = { vm.refreshNotifications() },
-            onMarkRead = vm::markNotificationRead,
-            onMarkAllRead = vm::markAllNotificationsRead,
-            onDismiss = vm::dismissNotification,
-        )
+    if (profilePage != null) {
+        if (profilePage != "attendance") {
+            BackHandler { profilePage = if (profilePage == "profile") null else "profile" }
+        }
+        when (profilePage) {
+            "profile" -> ProfileScreen(
+                vm = vm,
+                session = session,
+                onAttendance = { profilePage = "attendance" },
+                onNotifications = { profilePage = "notifications" },
+                onSync = { profilePage = "sync" },
+                onSupport = { profilePage = "support" },
+                onMigration = { context.startActivity(Intent(context, LegacyMigrationActivity::class.java)) },
+                onLogout = { vm.logout(); profilePage = null },
+            )
+            "attendance" -> AttendanceHost(vm = vm, onClose = { profilePage = "profile" })
+            "notifications" -> {
+                LaunchedEffect(Unit) { vm.refreshNotifications() }
+                NotificationsScreen(
+                    notifications = notifications,
+                    unreadCount = unread,
+                    loading = false,
+                    onBack = { profilePage = "profile" },
+                    onRefresh = { vm.refreshNotifications() },
+                    onMarkRead = vm::markNotificationRead,
+                    onMarkAllRead = vm::markAllNotificationsRead,
+                    onDismiss = vm::dismissNotification,
+                )
+            }
+            "sync" -> Scaffold(topBar = {
+                MadarTopBar(title = "المزامنة", subtitle = "قائمة الرفع وحالة الاتصال", onBack = { profilePage = "profile" }, actions = {
+                    IconButton(onClick = { vm.syncNow() }) { Icon(Icons.Default.Sync, contentDescription = "مزامنة الآن") }
+                })
+            }) { padding ->
+                Box(Modifier.fillMaxSize().padding(padding)) {
+                    SyncScreen(
+                        vm = vm,
+                        openVisits = openVisits,
+                        onOpenVisit = { visit -> visitUuid = visit.visitUuid },
+                        onOpenAttendance = { profilePage = "attendance" },
+                        onOpenMigration = { context.startActivity(Intent(context, LegacyMigrationActivity::class.java)) },
+                    )
+                }
+            }
+            "support" -> Scaffold(topBar = {
+                MadarTopBar(title = "الدعم", subtitle = "بلاغات التطبيق", onBack = { profilePage = "profile" })
+            }) { padding -> Box(Modifier.fillMaxSize().padding(padding)) { SupportScreen(vm) } }
+        }
         return
     }
 
     val title = when (tab) {
         Tabs.MAP -> "الخريطة"
-        Tabs.SYNC -> "المزامنة"
-        Tabs.SUPPORT -> "الدعم"
         else -> "مدار"
     }
     val subtitle = when (tab) {
         Tabs.MAP -> "بلاطات مرخصة بدون خدمات جوجل"
-        Tabs.SYNC -> "قائمة الرفع وحالة الاتصال"
-        Tabs.SUPPORT -> "إرسال بلاغ محفوظ محلياً على الخادم"
         else -> "${session.fullName?.takeIf { it.isNotBlank() } ?: session.username} · مسار اليوم"
     }
 
@@ -161,31 +182,14 @@ private fun SignedInShell(
                 title = title,
                 subtitle = subtitle,
                 actions = {
+                    IconButton(onClick = { profilePage = "profile" }) {
+                        Icon(Icons.Default.AccountCircle, contentDescription = "حسابي والإعدادات")
+                    }
                     when (tab) {
-                        Tabs.ROUTE -> {
-                            IconButton(onClick = { showNotifications = true }) {
-                                BadgedBox(
-                                    badge = {
-                                        if (unread > 0) {
-                                            Badge { Text(if (unread > 99) "99+" else unread.toString()) }
-                                        }
-                                    }
-                                ) {
-                                    Icon(Icons.Default.Notifications, contentDescription = "الإشعارات")
-                                }
-                            }
-                            IconButton(onClick = { showAttendance = true }) {
-                                Icon(Icons.Default.Fingerprint, contentDescription = "الحضور والانصراف")
-                            }
-                        }
+                        Tabs.ROUTE -> Unit
                         Tabs.MAP -> {
                             IconButton(onClick = { vm.refreshMapCatalog() }) {
                                 Icon(Icons.Default.Refresh, contentDescription = "تحديث حزم الخرائط")
-                            }
-                        }
-                        Tabs.SYNC -> {
-                            IconButton(onClick = { vm.syncNow() }) {
-                                Icon(Icons.Default.Sync, contentDescription = "مزامنة الآن")
                             }
                         }
                     }
@@ -206,25 +210,12 @@ private fun SignedInShell(
                     icon = { Icon(Icons.Default.Map, contentDescription = null) },
                     label = { Text("الخريطة") },
                 )
-                NavigationBarItem(
-                    selected = tab == Tabs.SYNC,
-                    onClick = { tab = Tabs.SYNC },
-                    icon = { Icon(Icons.Default.Sync, contentDescription = null) },
-                    label = { Text("المزامنة") },
-                )
-                NavigationBarItem(
-                    selected = tab == Tabs.SUPPORT,
-                    onClick = { tab = Tabs.SUPPORT },
-                    icon = { Text("؟") },
-                    label = { Text("الدعم") },
-                )
             }
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
             when (tab) {
-                Tabs.SUPPORT -> SupportScreen(vm)
                 Tabs.MAP -> MapScreen(
                     vm = vm,
                     mapRepository = container.mapRepository,
@@ -238,15 +229,6 @@ private fun SignedInShell(
                         } else {
                             vm.openMachine(machine) { visit -> visitUuid = visit.visitUuid }
                         }
-                    },
-                )
-                Tabs.SYNC -> SyncScreen(
-                    vm = vm,
-                    openVisits = openVisits,
-                    onOpenVisit = { visit -> visitUuid = visit.visitUuid },
-                    onOpenAttendance = { showAttendance = true },
-                    onOpenMigration = {
-                        context.startActivity(Intent(context, LegacyMigrationActivity::class.java))
                     },
                 )
                 else -> RouteScreen(
@@ -266,42 +248,6 @@ private fun SignedInShell(
                     onOpenVisit = { visit -> visitUuid = visit.visitUuid },
                 )
             }
-        }
-    }
-}
-
-@Composable
-private fun SupportScreen(vm: MadarViewModel) {
-    var description by rememberSaveable { mutableStateOf("") }
-    val busy = vm.supportBusy.collectAsStateWithLifecycle().value
-    val message = vm.supportMessage.collectAsStateWithLifecycle().value
-    Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
-    ) {
-        Text("إرسال بلاغ للدعم")
-        Spacer(Modifier.height(8.dp))
-        Text("سيُحفظ البلاغ على خادم MADAR المحلي. إنشاء تذكرة خارجية يتطلب إجراءً صريحاً من المدير.")
-        Spacer(Modifier.height(16.dp))
-        OutlinedTextField(
-            value = description,
-            onValueChange = { description = it.take(8000) },
-            modifier = Modifier.fillMaxWidth(),
-            label = { Text("وصف المشكلة") },
-            minLines = 5,
-            maxLines = 10,
-        )
-        Spacer(Modifier.height(12.dp))
-        Button(
-            onClick = { vm.submitSupportReport(description) },
-            enabled = !busy && description.trim().length >= 5,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            if (busy) CircularProgressIndicator()
-            else Text("حفظ وإرسال البلاغ")
-        }
-        if (!message.isNullOrBlank()) {
-            Spacer(Modifier.height(12.dp))
-            Text(message)
         }
     }
 }

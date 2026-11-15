@@ -5,6 +5,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test, { after } from 'node:test';
 import Database from 'better-sqlite3';
+import XLSX from 'xlsx';
+import { fromBufferPromise } from 'yauzl';
 
 const temporaryDirectory = mkdtempSync(join(tmpdir(), 'madar-v2-rep-'));
 process.env.MADAR_V2_DATABASE_PATH = join(temporaryDirectory, 'rep.sqlite');
@@ -481,6 +483,31 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   const adminSupportQueue = await request('/api/system/rep-support/reports?status=new', {}, adminCookie);
   assert.equal(adminSupportQueue.response.status, 200);
   assert.ok(adminSupportQueue.body.reports.some((report) => report.reportUuid === bugReportUuid));
+  const reportId = savedSupportBody.report.id;
+  db.prepare('UPDATE rep_bug_reports SET description = ? WHERE id = ?').run('=1+1', reportId);
+  const supportWorkbookResponse = await fetch(`${baseUrl}/api/system/rep-support/reports/export.xlsx?status=new&category=sync&severity=high`, { headers: { cookie: adminCookie } });
+  assert.equal(supportWorkbookResponse.status, 200);
+  assert.match(supportWorkbookResponse.headers.get('content-type'), /spreadsheetml\.sheet/);
+  const workbook = XLSX.read(Buffer.from(await supportWorkbookResponse.arrayBuffer()), { type: 'buffer' });
+  const supportSheet = XLSX.utils.sheet_to_json(workbook.Sheets['Bug reports'], { header: 1 });
+  assert.equal(supportSheet[0][0], 'id');
+  const exportedReportRow = supportSheet.find((row) => row[1] === bugReportUuid);
+  assert.equal(exportedReportRow[5], "'=1+1", 'Excel formula injection is neutralized');
+  const invalidExportResponse = await fetch(`${baseUrl}/api/system/rep-support/reports/export.xlsx?from=2026-02-31`, { headers: { cookie: adminCookie } });
+  assert.equal(invalidExportResponse.status, 400);
+  const supportZipResponse = await fetch(`${baseUrl}/api/system/rep-support/reports/${reportId}/package.zip`, { headers: { cookie: adminCookie } });
+  assert.equal(supportZipResponse.status, 200);
+  assert.equal(supportZipResponse.headers.get('content-type'), 'application/zip');
+  const zip = await fromBufferPromise(Buffer.from(await supportZipResponse.arrayBuffer()), { lazyEntries: true });
+  const zipNames = await new Promise((resolve, reject) => {
+    const names = [];
+    zip.on('error', reject);
+    zip.on('entry', (entry) => { names.push(entry.fileName); zip.readEntry(); });
+    zip.on('end', () => resolve(names));
+    zip.readEntry();
+  });
+  assert.deepEqual(zipNames.sort(), ['report.json', 'summary.txt']);
+  db.prepare('UPDATE rep_bug_reports SET description = ? WHERE id = ?').run('مشكلة مزامنة بعد حفظ الزيارة', reportId);
   const repCannotReadAdminSupportQueue = await request('/api/system/rep-support/reports', {}, login.cookie);
   assert.equal(repCannotReadAdminSupportQueue.response.status, 403);
   const adminStatusUpdate = await request(`/api/system/rep-support/reports/${savedSupportBody.report.id}`,
@@ -498,6 +525,7 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
     jsonOptions('POST', {}), adminCookie);
   assert.equal(requestedGithubIssue.response.status, 200);
   assert.equal(requestedGithubIssue.body.report.githubStatus, 'failed', 'GitHub failure must not prevent local report persistence');
+  assert.match(requestedGithubIssue.body.report.githubLastError, /not configured/i);
   assert.ok(requestedGithubIssue.body.report.description.includes('مشكلة مزامنة'));
 
   const nativeLogin = await request('/api/rep/login', {
@@ -847,6 +875,19 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   const attachmentDownload = await fetch(`${baseUrl}${attachment.downloadUrl}`, { headers: { cookie: login.cookie } });
   assert.equal(attachmentDownload.status, 200);
   assert.equal(attachmentDownload.headers.get('content-type'), 'image/jpeg');
+  const attachmentPackageResponse = await fetch(`${baseUrl}/api/system/rep-support/reports/${reportWithAttachment.report.id}/package.zip`, {
+    headers: { cookie: adminCookie },
+  });
+  assert.equal(attachmentPackageResponse.status, 200);
+  const attachmentZip = await fromBufferPromise(Buffer.from(await attachmentPackageResponse.arrayBuffer()), { lazyEntries: true });
+  const attachmentZipNames = await new Promise((resolve, reject) => {
+    const names = [];
+    attachmentZip.on('error', reject);
+    attachmentZip.on('entry', (entry) => { names.push(entry.fileName); attachmentZip.readEntry(); });
+    attachmentZip.on('end', () => resolve(names));
+    attachmentZip.readEntry();
+  });
+  assert.ok(attachmentZipNames.includes(`attachments/attachment-${attachment.id}.jpg`));
   db.prepare("UPDATE rep_bug_report_attachments SET created_at = datetime('now', '-181 days') WHERE id = ?").run(attachment.id);
   const attachmentPurge = await purgeExpiredRepBugAttachments(db, new Date());
   assert.equal(attachmentPurge.purged, 1);

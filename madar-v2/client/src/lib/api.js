@@ -127,6 +127,25 @@ export const api = {
     body: formData,
   }),
   uploadWithProgress,
+  download: async (path, filename) => {
+    const headers = new Headers({ 'Cache-Control': 'no-cache, no-store', Pragma: 'no-cache' });
+    const nativeHeaders = await getNativeAuthorizationHeaders();
+    for (const [name, value] of Object.entries(nativeHeaders)) headers.set(name, value);
+    const response = await fetch(apiUrl(path), { method: 'GET', credentials: 'include', cache: 'no-store', headers });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      notifyDisabledRep(payload);
+      throw new ApiError(payload?.message || payload?.error || `تعذر تنزيل الملف (${response.status})`, response.status, payload);
+    }
+    const objectUrl = URL.createObjectURL(await response.blob());
+    const anchor = document.createElement('a');
+    anchor.href = objectUrl;
+    anchor.download = filename;
+    document.body.append(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(objectUrl);
+  },
 };
 
 export function queryString(parameters) {

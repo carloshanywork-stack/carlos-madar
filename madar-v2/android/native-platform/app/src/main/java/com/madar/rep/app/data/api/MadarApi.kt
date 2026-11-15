@@ -2,6 +2,7 @@ package com.madar.rep.app.data.api
 
 import com.madar.rep.app.core.MadarError
 import java.io.File
+import java.io.FileOutputStream
 import java.io.IOException
 import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
@@ -56,6 +57,51 @@ class MadarApi(
         return parse(result.body, RouteResponse.serializer())
     }
 
+    fun getApkStatus(token: String): ApkStatusResponse {
+        val result = authorizedGet("/download/apk/status", token)
+        if (result.status !in 200..299) throw mapReadError(result)
+        return parse(result.body, ApkStatusResponse.serializer())
+    }
+
+    /** Streams the authenticated APK response into a sibling temporary file and atomically renames it. */
+    fun downloadApk(token: String, destination: File): Long {
+        val temporary = File(destination.parentFile, destination.name + ".part")
+        val request = Request.Builder()
+            .url("$baseUrl/download/apk")
+            .header("Authorization", "Bearer $token")
+            .get()
+            .build()
+        try {
+            destination.parentFile?.let { if (!it.exists() && !it.mkdirs()) throw IOException("Cannot create update directory") }
+            temporary.delete()
+            client.newCall(request).execute().use { response ->
+                if (response.code !in 200..299) {
+                    throw mapReadError(HttpResult(response.code, response.body?.string().orEmpty()))
+                }
+                val body = response.body ?: throw MadarError.Protocol("Empty APK response")
+                val output = FileOutputStream(temporary)
+                body.byteStream().use { input -> output.use { input.copyTo(it) } }
+                FileOutputStream(temporary, true).use { it.fd.sync() }
+                if (temporary.length() <= 0L) throw MadarError.Protocol("Empty APK response")
+                destination.delete()
+                if (!temporary.renameTo(destination)) throw IOException("Could not finalize APK download")
+                return destination.length()
+            }
+        } catch (error: MadarError) {
+            temporary.delete()
+            destination.delete()
+            throw error
+        } catch (error: IOException) {
+            temporary.delete()
+            destination.delete()
+            throw MadarError.Network("APK download failed", error)
+        } catch (error: Exception) {
+            temporary.delete()
+            destination.delete()
+            throw error
+        }
+    }
+
     fun startWork(token: String, cardId: Long, visitUuid: String, location: ApiLocation): StartWorkResponse {
         val body = json.encodeToString(StartWorkRequest.serializer(), StartWorkRequest(visitUuid, location))
         val result = execute(
@@ -91,12 +137,17 @@ class MadarApi(
         return parse(result.body, FaultReasonsResponse.serializer()).reasons
     }
 
-    fun submitSupportReport(token: String, payloadJson: String): RepSupportReport {
+    fun submitSupportReport(token: String, payloadJson: String, attachment: File? = null): RepSupportReport {
+        val builder = MultipartBody.Builder().setType(MultipartBody.FORM)
+            .addFormDataPart("report", payloadJson)
+        if (attachment != null) {
+            builder.addFormDataPart("attachment", attachment.name, attachment.asRequestBody("image/jpeg".toMediaType()))
+        }
         val result = execute(
             Request.Builder()
                 .url("$baseUrl/api/rep/support/reports")
                 .header("Authorization", "Bearer $token")
-                .post(payloadJson.toRequestBody(JSON_MEDIA))
+                .post(builder.build())
                 .build()
         )
         if (result.status == 401) throw MadarError.SessionExpired()
@@ -104,6 +155,36 @@ class MadarApi(
         if (result.status !in 200..299) throw mapReadError(result)
         return parse(result.body, RepSupportReportEnvelope.serializer()).report
             ?: throw MadarError.Network("لم يُرجع الخادم البلاغ المحفوظ.")
+    }
+
+    fun getLocationChangeRequests(token: String): List<LocationChangeRequestView> {
+        val result = authorizedGet("/api/rep/location-change-requests", token)
+        if (result.status !in 200..299) throw mapReadError(result)
+        return parse(result.body, LocationChangeRequestsResponse.serializer()).requests
+    }
+
+    fun submitLocationChangeRequest(
+        token: String,
+        machineId: Long,
+        payloadJson: String,
+        evidence: File?,
+    ): LocationChangeSubmitResponse {
+        val builder = MultipartBody.Builder().setType(MultipartBody.FORM)
+            .addFormDataPart("request", payloadJson)
+        if (evidence != null) {
+            builder.addFormDataPart("evidence", evidence.name, evidence.asRequestBody("image/jpeg".toMediaType()))
+        }
+        val result = execute(
+            Request.Builder()
+                .url("$baseUrl/api/rep/machines/$machineId/location-change-requests")
+                .header("Authorization", "Bearer $token")
+                .post(builder.build())
+                .build()
+        )
+        if (result.status == 401) throw MadarError.SessionExpired()
+        if (result.status == 403) throw MadarError.AccountDisabled(errorText(result))
+        if (result.status !in 200..299) throw mapReadError(result)
+        return parse(result.body, LocationChangeSubmitResponse.serializer())
     }
 
     fun syncVisit(token: String, visit: VisitUpload, photos: List<VisitPhotoFile>): VisitSyncOutcome {

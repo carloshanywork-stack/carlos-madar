@@ -22,8 +22,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         MapPackEntity::class,
         LegacyImportEntity::class,
         GpsPointEntity::class,
+        SupportReportEntity::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = true,
 )
 abstract class MadarDatabase : RoomDatabase() {
@@ -40,6 +41,7 @@ abstract class MadarDatabase : RoomDatabase() {
     abstract fun legacyImports(): LegacyImportDao
     abstract fun migration(): MigrationDao
     abstract fun gpsPoints(): GpsPointDao
+    abstract fun supportReports(): SupportReportDao
 
     companion object {
         @Volatile private var instance: MadarDatabase? = null
@@ -68,6 +70,25 @@ abstract class MadarDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("""CREATE TABLE IF NOT EXISTS support_reports (
+                    reportUuid TEXT NOT NULL PRIMARY KEY,
+                    ownerRepId INTEGER NOT NULL,
+                    payloadJson TEXT NOT NULL,
+                    attachmentPath TEXT,
+                    state TEXT NOT NULL,
+                    attempts INTEGER NOT NULL,
+                    nextAttemptAt INTEGER NOT NULL,
+                    lastError TEXT,
+                    createdAt INTEGER NOT NULL,
+                    updatedAt INTEGER NOT NULL
+                )""".trimIndent())
+                database.execSQL("CREATE INDEX IF NOT EXISTS index_support_reports_ownerRepId ON support_reports (ownerRepId)")
+                database.execSQL("CREATE INDEX IF NOT EXISTS index_support_reports_ownerRepId_state_nextAttemptAt ON support_reports (ownerRepId, state, nextAttemptAt)")
+            }
+        }
+
         fun get(context: Context): MadarDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(
                 context.applicationContext,
@@ -76,6 +97,7 @@ abstract class MadarDatabase : RoomDatabase() {
             )
                 .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
                 .addMigrations(MIGRATION_1_2)
+                .addMigrations(MIGRATION_2_3)
                 .build()
                 .also { instance = it }
         }

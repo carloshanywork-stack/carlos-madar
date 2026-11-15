@@ -15,6 +15,10 @@ const SEVERITY_LABELS = { low: 'منخفض', normal: 'عادي', high: 'مرتف
 export default function RepSupportAdminPage() {
   const [view, setView] = useState('reports');
   const [status, setStatus] = useState('all');
+  const [exportCategory, setExportCategory] = useState('all');
+  const [exportSeverity, setExportSeverity] = useState('all');
+  const [exportFrom, setExportFrom] = useState('');
+  const [exportTo, setExportTo] = useState('');
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   const [releaseNotes, setReleaseNotes] = useState('');
@@ -39,6 +43,25 @@ export default function RepSupportAdminPage() {
     setBusy(key); setError('');
     try { await api.post(`/api/system/rep-support/reports/${report.id}/github-issue`, {}); await reloadReports(); }
     catch (caught) { setError(errorMessage(caught)); }
+    finally { setBusy(''); }
+  }
+
+  async function exportWorkbook() {
+    setBusy('export-xlsx'); setError('');
+    try {
+      const query = new URLSearchParams({ status, category: exportCategory, severity: exportSeverity });
+      if (exportFrom) query.set('from', exportFrom);
+      if (exportTo) query.set('to', exportTo);
+      await api.download(`/api/system/rep-support/reports/export.xlsx?${query}`, 'rep-support-reports.xlsx');
+    } catch (caught) { setError(errorMessage(caught)); }
+    finally { setBusy(''); }
+  }
+
+  async function exportPackage(report) {
+    setBusy(`export-${report.id}`); setError('');
+    try {
+      await api.download(`/api/system/rep-support/reports/${report.id}/package.zip`, `rep-bug-report-${report.id}.zip`);
+    } catch (caught) { setError(errorMessage(caught)); }
     finally { setBusy(''); }
   }
 
@@ -81,7 +104,14 @@ export default function RepSupportAdminPage() {
       {view === 'reports' && <>
         <section className="madar-panel madar-section">
           <div className="madar-panel-header"><div><h2>بلاغات المندوبين</h2><p>تُحفظ البلاغات محلياً؛ إنشاء تذكرة GitHub يتم يدوياً عند طلب المدير فقط.</p></div>
-            <label>الحالة <select value={status} onChange={(event) => setStatus(event.target.value)}><option value="all">الكل</option><option value="new">جديد</option><option value="in_progress">قيد المعالجة</option><option value="resolved">تم الحل</option><option value="closed">مغلق</option></select></label>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <label>الحالة <select value={status} onChange={(event) => setStatus(event.target.value)}><option value="all">الكل</option><option value="new">جديد</option><option value="in_progress">قيد المعالجة</option><option value="resolved">تم الحل</option><option value="closed">مغلق</option></select></label>
+              <label>تصنيف التصدير <select value={exportCategory} onChange={(event) => setExportCategory(event.target.value)}><option value="all">الكل</option>{['bug', 'sync', 'location', 'camera', 'account', 'other'].map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
+              <label>الخطورة <select value={exportSeverity} onChange={(event) => setExportSeverity(event.target.value)}><option value="all">الكل</option>{['low', 'normal', 'high', 'critical'].map((value) => <option key={value} value={value}>{SEVERITY_LABELS[value]}</option>)}</select></label>
+              <label>من <input type="date" value={exportFrom} onChange={(event) => setExportFrom(event.target.value)} /></label>
+              <label>إلى <input type="date" value={exportTo} onChange={(event) => setExportTo(event.target.value)} /></label>
+              <Button variant="secondary" disabled={busy === 'export-xlsx'} onClick={exportWorkbook}>{busy === 'export-xlsx' ? 'جارٍ التصدير…' : 'تصدير Excel'}</Button>
+            </div>
           </div>
           {reportsError && <div className="madar-panel-body"><Alert tone="error">{reportsError}</Alert></div>}
           {reportsLoading ? <LoadingState label="جارٍ تحميل البلاغات" /> : reports.length ? <div className="madar-table-wrap"><table className="madar-table"><thead><tr><th>البلاغ</th><th>المندوب</th><th>التطبيق والجهاز</th><th>المرفقات</th><th>الحالة / GitHub</th><th>الإجراء</th></tr></thead><tbody>
@@ -90,10 +120,11 @@ export default function RepSupportAdminPage() {
               <td>{report.representativeName || report.username}</td>
               <td>{report.appVersion}<br />{report.deviceModel} · Android {report.androidVersion}</td>
               <td>{report.attachments.map((attachment) => attachment.downloadUrl ? <a key={attachment.id} href={attachment.downloadUrl} target="_blank" rel="noreferrer">صورة ({Math.ceil(attachment.byteSize / 1024)} KB)</a> : <span key={attachment.id}>انتهت مدة الاحتفاظ</span>)}</td>
-              <td><Badge>{STATUS_LABELS[report.status] ?? report.status}</Badge><p>{report.github_status === 'created' && report.github_issue_url ? <a href={report.github_issue_url} target="_blank" rel="noreferrer">تذكرة GitHub</a> : `GitHub: ${report.github_status}`}</p>{report.githubLastError && <small>{report.githubLastError}</small>}</td>
+              <td><Badge>{STATUS_LABELS[report.status] ?? report.status}</Badge><p>{report.githubStatus === 'created' && report.githubIssueUrl ? <a href={report.githubIssueUrl} target="_blank" rel="noreferrer">تذكرة GitHub</a> : `GitHub: ${report.githubStatus}`}</p>{report.githubLastError && <small>{report.githubLastError}</small>}</td>
               <td><div style={{ display: 'grid', gap: 6 }}>
+                <Button size="small" variant="secondary" disabled={busy === `export-${report.id}`} onClick={() => exportPackage(report)}>{busy === `export-${report.id}` ? 'جارٍ التجهيز…' : 'تنزيل ZIP'}</Button>
                 <select aria-label="تغيير حالة البلاغ" value={report.status} disabled={busy === `report-${report.id}`} onChange={(event) => updateReport(report, event.target.value)}>{Object.entries(STATUS_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
-                {report.github_status !== 'created' && <Button size="small" variant="secondary" disabled={busy === `github-${report.id}`} onClick={() => createIssue(report)}>{busy === `github-${report.id}` ? 'جارٍ الإرسال…' : 'إنشاء GitHub issue'}</Button>}
+                {report.githubStatus !== 'created' && <Button size="small" variant="secondary" disabled={busy === `github-${report.id}`} onClick={() => createIssue(report)}>{busy === `github-${report.id}` ? 'جارٍ الإرسال…' : 'إنشاء GitHub issue'}</Button>}
               </div></td>
             </tr>)}
           </tbody></table></div> : <EmptyState title="لا توجد بلاغات" description="ستظهر هنا البلاغات التي يرسلها مستخدمو التطبيق الميداني." />}

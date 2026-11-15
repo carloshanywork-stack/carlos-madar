@@ -4,13 +4,20 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.madar.rep.app.AppContainer
+import com.madar.rep.app.BuildConfig
+import com.madar.rep.app.core.SupportDiagnostics
 import com.madar.rep.app.core.GeoPoint
 import com.madar.rep.app.core.GeoPolicy
 import com.madar.rep.app.core.LocationDecision
 import com.madar.rep.app.core.MadarError
 import com.madar.rep.app.core.MadarTime
 import com.madar.rep.app.data.api.ApiLocation
+import com.madar.rep.app.data.api.ApkUpdateException
+import com.madar.rep.app.data.api.ApkUpdateFailure
+import com.madar.rep.app.data.api.ApkUpdateManager
+import com.madar.rep.app.data.api.DownloadedApk
 import com.madar.rep.app.data.api.FaultReason
+import com.madar.rep.app.data.api.LocationChangeRequestView
 import com.madar.rep.app.data.api.MadarApi
 import com.madar.rep.app.data.api.MaintenanceLine
 import com.madar.rep.app.data.api.RouteMachine
@@ -22,6 +29,8 @@ import com.madar.rep.app.data.db.NotificationEntity
 import com.madar.rep.app.data.db.PhotoEntity
 import com.madar.rep.app.data.db.VisitEntity
 import com.madar.rep.app.data.db.VisitState
+import com.madar.rep.app.data.db.SupportReportEntity
+import com.madar.rep.app.data.db.SupportReportState
 import com.madar.rep.app.data.repo.AttendanceView
 import com.madar.rep.app.data.repo.RouteView
 import com.madar.rep.app.data.repo.VisitForm
@@ -30,6 +39,7 @@ import com.madar.rep.app.data.session.Session
 import com.madar.rep.app.data.sync.SyncRunResult
 import com.madar.rep.app.location.LocationResult
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -44,6 +54,8 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.UUID
+import java.io.File
+import android.net.Uri
 import org.json.JSONObject
 import android.os.Build
 
@@ -79,6 +91,29 @@ data class VisitDetail(
     val visit: VisitEntity,
     val before: List<PhotoEntity>,
     val after: List<PhotoEntity>,
+)
+
+data class ApkUpdateUiState(
+    val currentVersion: String = "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
+    val availableVersion: String? = null,
+    val updateAvailable: Boolean = false,
+    val busy: Boolean = false,
+    val message: String? = null,
+    val downloadedApk: File? = null,
+)
+
+data class LocationChangeUiState(
+    val requests: List<LocationChangeRequestView> = emptyList(),
+    val busy: Boolean = false,
+    val loading: Boolean = false,
+    val message: String? = null,
+)
+
+private data class PendingLocationChange(
+    val machineId: Long,
+    val actionUuid: String,
+    val payloadJson: String,
+    val evidence: File?,
 )
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -125,6 +160,18 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
 
     private val _supportMessage = MutableStateFlow<String?>(null)
     val supportMessage: StateFlow<String?> = _supportMessage.asStateFlow()
+
+    private val _apkUpdate = MutableStateFlow(ApkUpdateUiState())
+    val apkUpdate: StateFlow<ApkUpdateUiState> = _apkUpdate.asStateFlow()
+    private val apkUpdateManager = ApkUpdateManager(container.appContext)
+
+    private val _locationChange = MutableStateFlow(LocationChangeUiState())
+    val locationChange: StateFlow<LocationChangeUiState> = _locationChange.asStateFlow()
+    private var pendingLocationChange: PendingLocationChange? = null
+
+    val supportReports: StateFlow<List<SupportReportEntity>> = session.flatMapLatest { current ->
+        if (current == null) flowOf(emptyList()) else container.database.supportReports().observeForOwner(current.ownerScopeId)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val eventConnected: StateFlow<Boolean> = container.eventStream.connected
 
@@ -228,6 +275,129 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
 
     fun showMessage(text: String) {
         _messages.tryEmit(text)
+    }
+
+    fun checkForApkUpdate() {
+        val current = session.value ?: return
+        if (_apkUpdate.value.busy) return
+        _apkUpdate.value = _apkUpdate.value.copy(busy = true, message = null, downloadedApk = null)
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val status = container.apiFactory(current.serverUrl).getApkStatus(current.token)
+                val metadata = status.releaseMetadata
+                if (!status.available || status.artifactType != "release" || metadata == null || metadata.buildType != "release") {
+                    _apkUpdate.value = _apkUpdate.value.copy(busy = false, availableVersion = null, updateAvailable = false, message = ApkUpdateFailure.NOT_CONFIGURED.userMessage)
+                } else {
+                    val newer = metadata.versionCode > BuildConfig.VERSION_CODE
+                    _apkUpdate.value = _apkUpdate.value.copy(
+                        busy = false,
+                        availableVersion = "${metadata.versionName} (${metadata.versionCode})",
+                        updateAvailable = newer,
+                        message = if (newer) "يتوفر تحديث جديد." else ApkUpdateFailure.NOT_NEWER.userMessage,
+                    )
+                }
+            } catch (error: Exception) {
+                _apkUpdate.value = _apkUpdate.value.copy(busy = false, message = human(error))
+            }
+        }
+    }
+
+    fun downloadApkUpdate() {
+        val current = session.value ?: return
+        if (_apkUpdate.value.busy) return
+        _apkUpdate.value = _apkUpdate.value.copy(busy = true, message = "جارٍ تنزيل APK والتحقق منه…", downloadedApk = null)
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val downloaded = apkUpdateManager.download(container.apiFactory(current.serverUrl), current.token)
+                _apkUpdate.value = _apkUpdate.value.copy(
+                    busy = false,
+                    availableVersion = "${downloaded.metadata.versionName} (${downloaded.metadata.versionCode})",
+                    updateAvailable = true,
+                    message = "اكتمل التنزيل والتحقق. اضغط تثبيت للمتابعة يدويًا.",
+                    downloadedApk = downloaded.file,
+                )
+            } catch (error: ApkUpdateException) {
+                _apkUpdate.value = _apkUpdate.value.copy(busy = false, message = error.failure.userMessage, downloadedApk = null)
+            } catch (error: Exception) {
+                _apkUpdate.value = _apkUpdate.value.copy(busy = false, message = human(error), downloadedApk = null)
+            }
+        }
+    }
+
+    fun clearDownloadedApk() { _apkUpdate.value = _apkUpdate.value.copy(downloadedApk = null) }
+
+    fun refreshLocationChangeRequests() {
+        val current = session.value ?: return
+        if (_locationChange.value.loading) return
+        _locationChange.value = _locationChange.value.copy(loading = true, message = null)
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val requests = container.apiFactory(current.serverUrl).getLocationChangeRequests(current.token)
+                _locationChange.value = _locationChange.value.copy(requests = requests, loading = false)
+            } catch (error: Exception) {
+                _locationChange.value = _locationChange.value.copy(loading = false, message = human(error))
+            }
+        }
+    }
+
+    fun submitLocationChangeRequest(cardId: Long, note: String, evidenceUri: Uri?) {
+        val current = session.value ?: return
+        if (_locationChange.value.busy) return
+        _locationChange.value = _locationChange.value.copy(busy = true, message = null)
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val machine = route.value?.route?.regions?.asSequence()?.flatMap { it.machines.asSequence() }
+                    ?.firstOrNull { it.cardId == cardId }
+                    ?: throw MadarError.Validation("تعذر تحديد الماكينة من المسار؛ حدّث المسار وحاول مجددًا.")
+                if (!machine.isLocationLocked || machine.latitude == null || machine.longitude == null) {
+                    throw MadarError.Conflict("لا يمكن طلب تغيير الموقع قبل تثبيت موقع الماكينة من الإدارة.")
+                }
+                var pending = pendingLocationChange?.takeIf { it.machineId == machine.machineId }
+                if (pending == null) {
+                    val result = container.locationProvider.currentFix(10_000)
+                    val point = (result as? LocationResult.Success)?.point
+                        ?: throw MadarError.Validation("تعذر الحصول على موقع GPS حديث؛ شغّل الموقع وحاول مجددًا.")
+                    val age = System.currentTimeMillis() - point.capturedAtMillis
+                    if (point.isMock || point.accuracyMeters !in 0f..100f || age !in 0..300_000L) {
+                        throw MadarError.Validation("يلزم موقع GPS غير محاكى بدقة 100 متر أو أفضل وحديث خلال خمس دقائق.")
+                    }
+                    val uuid = UUID.randomUUID().toString()
+                    val evidence = evidenceUri?.let { copySupportAttachment(it, "location-$uuid") }
+                    val payload = JSONObject()
+                        .put("actionUuid", uuid)
+                        .put("cardId", cardId)
+                        .put("location", JSONObject()
+                            .put("latitude", point.latitude)
+                            .put("longitude", point.longitude)
+                            .put("accuracy", point.accuracyMeters)
+                            .put("updatedAt", MadarTime.isoUtc(point.capturedAtMillis))
+                            .put("isMock", false))
+                        .put("note", note.trim().take(2000))
+                        .toString()
+                    pending = PendingLocationChange(machine.machineId, uuid, payload, evidence)
+                    pendingLocationChange = pending
+                }
+                val submission = pending
+                    ?: throw MadarError.Protocol("تعذر تجهيز طلب تغيير الموقع.")
+                val result = container.apiFactory(current.serverUrl).submitLocationChangeRequest(
+                    current.token, submission.machineId, submission.payloadJson, submission.evidence,
+                )
+                pendingLocationChange?.evidence?.delete()
+                pendingLocationChange = null
+                _locationChange.value = _locationChange.value.copy(
+                    busy = false,
+                    message = if (result.idempotent) "طلب تغيير الموقع محفوظ مسبقًا: ${result.status}." else "تم إرسال طلب تغيير الموقع: ${result.status}.",
+                )
+                refreshLocationChangeRequests()
+            } catch (error: Exception) {
+                val keepIdempotentRetry = error is MadarError.Network || error is MadarError.Server
+                if (!keepIdempotentRetry) {
+                    pendingLocationChange?.evidence?.delete()
+                    pendingLocationChange = null
+                }
+                _locationChange.value = _locationChange.value.copy(busy = false, message = human(error))
+            }
+        }
     }
 
     fun governorateFor(point: GeoPoint?): String? =
@@ -347,7 +517,14 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
         loadCachedPreview(active)
     }
 
-    fun submitSupportReport(description: String, category: String = "bug") {
+    fun submitSupportReport(
+        description: String,
+        category: String = "bug",
+        severity: String = "normal",
+        screenName: String = "profile/support",
+        includeDiagnostics: Boolean = false,
+        screenshotUri: Uri? = null,
+    ) {
         val current = session.value ?: return
         val text = description.trim()
         if (text.length < 5 || text.length > 8000) {
@@ -357,24 +534,68 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
         if (_supportBusy.value) return
         _supportBusy.value = true
         _supportMessage.value = null
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
+            var attachment: File? = null
+            var persisted = false
             try {
+                val uuid = UUID.randomUUID().toString()
+                if (screenshotUri != null) attachment = copySupportAttachment(screenshotUri, uuid)
                 val report = JSONObject()
-                    .put("reportUuid", UUID.randomUUID().toString())
+                    .put("reportUuid", uuid)
                     .put("category", category)
-                    .put("severity", "normal")
+                    .put("severity", severity)
                     .put("description", text)
-                    .put("screenName", "android-representative-app")
-                    .put("appVersion", "MADAR V2")
+                    .put("screenName", screenName.take(120))
+                    .put("appVersion", "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
                     .put("deviceModel", Build.MANUFACTURER + " " + Build.MODEL)
                     .put("androidVersion", Build.VERSION.RELEASE ?: "unknown")
-                    .put("logs", "")
-                withContext(Dispatchers.IO) { container.apiFactory(current.serverUrl).submitSupportReport(current.token, report.toString()) }
-                _supportMessage.value = "تم حفظ البلاغ على خادم MADAR المحلي."
+                    .put("logs", if (includeDiagnostics) SupportDiagnostics.recentLines() else "")
+                container.database.supportReports().insert(SupportReportEntity(
+                    reportUuid = uuid,
+                    ownerRepId = current.ownerScopeId,
+                    payloadJson = report.toString(),
+                    attachmentPath = attachment?.absolutePath,
+                    state = SupportReportState.QUEUED,
+                    createdAt = System.currentTimeMillis(),
+                    updatedAt = System.currentTimeMillis(),
+                ))
+                persisted = true
+                SupportDiagnostics.record("support", "queued")
+                _supportMessage.value = "تم حفظ البلاغ محليًا في قائمة المزامنة؛ سيُرسل عند توفر الاتصال."
+                container.scheduler.enqueueNow()
             } catch (error: Throwable) {
+                if (error is CancellationException) throw error
+                if (!persisted) attachment?.delete()
                 _supportMessage.value = human(error)
             } finally { _supportBusy.value = false }
         }
+    }
+
+    private fun copySupportAttachment(uri: Uri, uuid: String): File {
+        val resolver = container.appContext.contentResolver
+        if (resolver.getType(uri)?.startsWith("image/") != true) throw MadarError.Validation("اختر صورة صالحة للبلاغ.")
+        val directory = File(container.appContext.filesDir, "support-outbox").apply {
+            if (!exists() && !mkdirs()) throw MadarError.Validation("تعذر حفظ صورة البلاغ محليًا.")
+        }
+        val temporary = File(directory, "$uuid.jpg.part")
+        val destination = File(directory, "$uuid.jpg")
+        val input = resolver.openInputStream(uri) ?: throw MadarError.Validation("تعذر قراءة الصورة المختارة.")
+        input.use { source -> temporary.outputStream().use { output ->
+            val buffer = ByteArray(16 * 1024)
+            var total = 0L
+            while (true) {
+                val count = source.read(buffer)
+                if (count < 0) break
+                total += count
+                if (total > 4L * 1024 * 1024) throw MadarError.Validation("يجب ألا يتجاوز مرفق البلاغ 4 ميجابايت.")
+                output.write(buffer, 0, count)
+            }
+        } }
+        if (temporary.length() <= 0L || !temporary.renameTo(destination)) {
+            temporary.delete()
+            throw MadarError.Validation("تعذر تجهيز مرفق البلاغ.")
+        }
+        return destination
     }
 
     fun clearSupportMessage() { _supportMessage.value = null }

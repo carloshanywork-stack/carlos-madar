@@ -109,6 +109,7 @@ fun VisitScreen(
     var quantities by remember(visitUuid) { mutableStateOf<Map<Long, Int>>(emptyMap()) }
     var notes by remember(visitUuid) { mutableStateOf("") }
     var previewPhoto by remember(visitUuid) { mutableStateOf<PhotoEntity?>(null) }
+    var showLocationChange by rememberSaveable(visitUuid) { mutableStateOf(false) }
 
     val visit = detail?.visit
     val editable = visit?.state == VisitState.DRAFT
@@ -263,6 +264,7 @@ fun VisitScreen(
                     visit = detail!!.visit,
                     approvingMachineLocation = machineLocationApprovalBusyId == detail!!.visit.cardId,
                     onRefresh = { vm.refreshLocation() },
+                    onRequestLocationChange = { showLocationChange = true },
                     onApproveMachine = {
                         if (vm.hasLocationPermission()) vm.approveFirstMachineLocation(detail!!.visit)
                         else permissionLauncher.launch(arrayOf(
@@ -518,6 +520,9 @@ fun VisitScreen(
     previewPhoto?.let { photo ->
         PhotoPreviewDialog(photo = photo, onDismiss = { previewPhoto = null })
     }
+    if (showLocationChange && visit != null) {
+        LocationChangeDialog(vm = vm, visit = visit, onDismiss = { showLocationChange = false })
+    }
 }
 
 private fun cameraIntent(
@@ -606,6 +611,7 @@ private fun LocationCard(
     visit: VisitEntity,
     approvingMachineLocation: Boolean,
     onRefresh: () -> Unit,
+    onRequestLocationChange: () -> Unit,
     onApproveMachine: () -> Unit,
     onRequestPermission: () -> Unit,
 ) {
@@ -681,6 +687,11 @@ private fun LocationCard(
                 if (location.permissionDenied) Button(onClick = onRequestPermission) { Text("منح إذن الموقع") }
             }
             if (location.providersDisabled) InlineMessage("افتح إعدادات الجهاز وشغّل خدمة الموقع ثم أعد المحاولة.", MessageTone.Warning)
+            if (visit.machineLatitude != null && visit.machineLongitude != null) {
+                OutlinedButton(onClick = onRequestLocationChange, modifier = Modifier.fillMaxWidth()) {
+                    Text("طلب تغيير موقع الماكينة")
+                }
+            }
         }
     }
 }
