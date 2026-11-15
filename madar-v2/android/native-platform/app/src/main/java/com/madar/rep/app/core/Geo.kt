@@ -25,6 +25,7 @@ sealed interface LocationDecision {
     data object Valid : LocationDecision
     data object Missing : LocationDecision
     data object Mocked : LocationDecision
+    data class Invalid(val reason: String) : LocationDecision
     data class Stale(val ageMillis: Long) : LocationDecision
     data class Inaccurate(val accuracyMeters: Float) : LocationDecision
     data class Outside(
@@ -50,10 +51,27 @@ object GeoPolicy {
     ): LocationDecision {
         if (point == null) return LocationDecision.Missing
         if (point.isMock) return LocationDecision.Mocked
+        if (!validCoordinates(point.latitude, point.longitude)) {
+            return LocationDecision.Invalid("موقع GPS خارج النطاق الجغرافي الصحيح.")
+        }
+        if (!maxAccuracyMeters.isFinite() || maxAccuracyMeters <= 0f || maxAgeMillis <= 0L) {
+            return LocationDecision.Invalid("سياسة دقة/عمر الموقع غير صالحة.")
+        }
         val age = nowMillis - point.capturedAtMillis
         if (age < -60_000L || age > maxAgeMillis) return LocationDecision.Stale(age)
         if (!point.accuracyMeters.isFinite() || point.accuracyMeters < 0f || point.accuracyMeters > maxAccuracyMeters) {
             return LocationDecision.Inaccurate(point.accuracyMeters)
+        }
+        if ((machineLatitude == null) != (machineLongitude == null)) {
+            return LocationDecision.Invalid("إحداثيات الماكينة غير مكتملة.")
+        }
+        if (machineLatitude != null && machineLongitude != null &&
+            !validCoordinates(machineLatitude, machineLongitude)
+        ) {
+            return LocationDecision.Invalid("إحداثيات الماكينة غير صالحة.")
+        }
+        if (!radiusMeters.isFinite() || radiusMeters <= 0.0) {
+            return LocationDecision.Invalid("نطاق الماكينة غير صالح.")
         }
         if (machineLatitude != null && machineLongitude != null) {
             val distance = distanceMeters(point.latitude, point.longitude, machineLatitude, machineLongitude)
@@ -64,6 +82,9 @@ object GeoPolicy {
         }
         return LocationDecision.Valid
     }
+
+    private fun validCoordinates(latitude: Double, longitude: Double): Boolean =
+        latitude.isFinite() && longitude.isFinite() && latitude in -90.0..90.0 && longitude in -180.0..180.0
 
     /** Equirectangular approximation is not used; haversine matches the server. */
     fun distanceMeters(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {

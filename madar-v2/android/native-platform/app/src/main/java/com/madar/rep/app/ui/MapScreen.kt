@@ -258,7 +258,7 @@ fun MapScreen(
                                 pressed.size.toFloat()
                             val pan = centroid - lastCentroid
                             if (pressed.size >= 2) {
-                                val factor = calculateZoom(event)
+                                val factor = event.calculateZoom()
                                 if (factor.isFinite() && factor > 0f) zoomAccumulator *= factor
                                 if (zoomAccumulator > 1.3f) {
                                     zoom = (zoom + 1).coerceIn(minZoomState.value, maxZoomState.value)

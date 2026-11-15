@@ -67,6 +67,8 @@ class CameraActivity : ComponentActivity() {
     private var imageCapture: ImageCapture? = null
     private val executor = Executors.newSingleThreadExecutor()
     private var cameraPermissionGranted by mutableStateOf(false)
+    private var savedPhotoCount by mutableStateOf(0)
+    private var savedInThisSession = false
     private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         cameraPermissionGranted = granted
         if (!granted) {
@@ -86,6 +88,7 @@ class CameraActivity : ComponentActivity() {
         }
         cameraPermissionGranted =
             ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+        savedPhotoCount = intent.getIntExtra(EXTRA_EXISTING_COUNT, 0).coerceAtLeast(0)
         if (!cameraPermissionGranted) permissionLauncher.launch(Manifest.permission.CAMERA)
         setContent {
             if (cameraPermissionGranted) {
@@ -94,7 +97,7 @@ class CameraActivity : ComponentActivity() {
                     machineCode = intent.getStringExtra(EXTRA_MACHINE_CODE).orEmpty(),
                     machineName = intent.getStringExtra(EXTRA_MACHINE_NAME).orEmpty(),
                     existingCount = intent.getIntExtra(EXTRA_EXISTING_COUNT, 0),
-                    onClose = { finish() },
+                    onClose = { finishCaptureSession() },
                     onCapture = { onCapture(visitUuid, phase) },
                 )
             } else {
@@ -110,22 +113,29 @@ class CameraActivity : ComponentActivity() {
         super.onDestroy()
     }
 
+    private fun finishCaptureSession() {
+        if (savedInThisSession) {
+            setResult(RESULT_OK, Intent().putExtra("phase", intent.getStringExtra(EXTRA_PHASE)))
+        }
+        finish()
+    }
+
     private fun onCapture(visitUuid: String, phase: String) {
         val capture = imageCapture ?: run {
             Toast.makeText(this, "الكاميرا غير جاهزة", Toast.LENGTH_SHORT).show()
             return
         }
         capture.targetRotation = display?.rotation ?: Surface.ROTATION_0
+        val capturedAtMillis = System.currentTimeMillis()
         val container = (application as MadarApplication).container
         val state = CaptureUiState.busy
-        setCaptureState(state)
+        updateCaptureState(state)
         val captureFile = container.photoStore.newCaptureFile(visitUuid, phase)
         capture.takePicture(
             ImageCapture.OutputFileOptions.Builder(captureFile).build(),
             executor,
             object : ImageCapture.OnImageSavedCallback {
                 override fun onImageSaved(output: ImageCapture.OutputFileResults) {
-                    val capturedAt = System.currentTimeMillis()
                     executor.execute {
                         try {
                             val visit = kotlinx.coroutines.runBlocking { container.visitRepo.find(visitUuid) }
@@ -139,16 +149,24 @@ class CameraActivity : ComponentActivity() {
                             val usedPositions = existingPhotos.map { it.position }.toSet()
                             val position = (0 until PhotoPolicy.MAX_PER_PHASE).firstOrNull { it !in usedPositions }
                                 ?: throw MadarError.Validation("بلغت الحد التقني لصور هذه المرحلة")
-                            val location = when (val fix = kotlinx.coroutines.runBlocking { container.locationProvider.currentFix(7_000) }) {
+                            val candidateLocation = when (val fix = kotlinx.coroutines.runBlocking { container.locationProvider.currentFix(7_000) }) {
                                 is com.madar.rep.app.location.LocationResult.Success -> fix.point
                                 else -> container.locationProvider.lastKnown()
+                            }
+                            // A cached fix is useful only when it is still demonstrably fresh and valid.
+                            // Missing/stale GPS must not be stamped as the current capture location.
+                            val location = candidateLocation?.takeIf { point ->
+                                point.isFresh(capturedAtMillis) && !point.isMock &&
+                                    point.latitude.isFinite() && point.longitude.isFinite() &&
+                                    point.latitude in -90.0..90.0 && point.longitude in -180.0..180.0 &&
+                                    point.accuracyMeters.isFinite() && point.accuracyMeters >= 0f
                             }
                             val photo = container.photoStore.commit(
                                 visitUuid = visitUuid,
                                 phase = phase,
                                 position = position,
                                 capturedFile = captureFile,
-                                capturedAtMillis = capturedAt,
+                                capturedAtMillis = capturedAtMillis,
                                 location = location,
                                 machineCode = visit.machineCode,
                                 machineName = visit.machineName,
@@ -156,27 +174,24 @@ class CameraActivity : ComponentActivity() {
                                 areaName = visit.areaName,
                             )
                             kotlinx.coroutines.runBlocking { container.visitRepo.addPhoto(visitUuid, photo) }
+                            captureFile.delete()
                             runOnUiThread {
-                                setResult(
-                                    RESULT_OK,
-                                    Intent().putExtra("photoId", photo.id).putExtra("phase", phase)
-                                )
-                                finish()
+                                savedInThisSession = true
+                                savedPhotoCount = existingPhotos.size + 1
+                                updateCaptureState(CaptureUiState.saved)
                             }
                         } catch (error: Exception) {
-                            captureFile.delete()
                             val message = error.message ?: "تعذر حفظ الصورة"
                             runOnUiThread {
-                                setCaptureState(CaptureUiState.error(message))
+                                updateCaptureState(CaptureUiState.error(message))
                             }
                         }
                     }
                 }
 
                 override fun onError(exception: ImageCaptureException) {
-                    captureFile.delete()
                     runOnUiThread {
-                        setCaptureState(CaptureUiState.error(exception.message ?: "تعذر التصوير"))
+                        updateCaptureState(CaptureUiState.error(exception.message ?: "تعذر التصوير"))
                     }
                 }
             }
@@ -190,7 +205,7 @@ class CameraActivity : ComponentActivity() {
         else -> 0
     }
 
-    private fun setCaptureState(value: CaptureUiState) {
+    private fun updateCaptureState(value: CaptureUiState) {
         captureState = value
     }
 
@@ -207,6 +222,7 @@ class CameraActivity : ComponentActivity() {
     private sealed interface CaptureUiState {
         data object idle : CaptureUiState
         data object busy : CaptureUiState
+        data object saved : CaptureUiState
         data class error(val message: String) : CaptureUiState
     }
 
@@ -258,7 +274,7 @@ class CameraActivity : ComponentActivity() {
                             fontSize = 18.sp
                         )
                         Text(
-                            "$machineCode · ${machineName.ifBlank { "ماكينة" }} · ${existingCount}/${PhotoPolicy.MAX_PER_PHASE}",
+                            "$machineCode · ${machineName.ifBlank { "ماكينة" }} · ${savedPhotoCount}/${PhotoPolicy.MAX_PER_PHASE}",
                             color = Color.White.copy(alpha = 0.85f),
                             fontSize = 13.sp
                         )
@@ -278,18 +294,34 @@ class CameraActivity : ComponentActivity() {
                             modifier = Modifier.background(Color.Black.copy(alpha = 0.55f)).padding(10.dp)
                         )
                     }
-                    Button(
-                        onClick = onCapture,
-                        enabled = state !is CaptureUiState.busy,
-                        modifier = Modifier.size(84.dp),
-                        shape = CircleShape,
-                        colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black)
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        if (state is CaptureUiState.busy) {
-                            CircularProgressIndicator(color = Color.Black, modifier = Modifier.size(32.dp))
-                        } else {
-                            Box(Modifier.size(54.dp).background(Color(0xFFDCAA52), CircleShape))
+                        Button(
+                            onClick = onCapture,
+                            enabled = state !is CaptureUiState.busy && savedPhotoCount < PhotoPolicy.MAX_PER_PHASE,
+                            modifier = Modifier.size(84.dp),
+                            shape = CircleShape,
+                            colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black)
+                        ) {
+                            if (state is CaptureUiState.busy) {
+                                CircularProgressIndicator(color = Color.Black, modifier = Modifier.size(32.dp))
+                            } else {
+                                Box(Modifier.size(54.dp).background(Color(0xFFDCAA52), CircleShape))
+                            }
                         }
+                        Button(
+                            onClick = onClose,
+                            enabled = state !is CaptureUiState.busy,
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF187B68)),
+                        ) {
+                            Text(if (savedPhotoCount > 0) "إنهاء · $savedPhotoCount صورة" else "إغلاق")
+                        }
+                    }
+                    if (state == CaptureUiState.saved) {
+                        Text("تم حفظ الصورة. يمكنك التقاط صورة أخرى.", color = Color(0xFFC8E6C9), textAlign = TextAlign.Center)
                     }
                     Text(
                         "سيتم ختم التاريخ والوقت والماكينة والموقع على الصورة",

@@ -33,6 +33,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -63,7 +64,8 @@ fun LoginScreen(
 ) {
     var serverUrl by rememberSaveable { mutableStateOf(defaultServerUrl) }
     var username by rememberSaveable { mutableStateOf("") }
-    var password by rememberSaveable { mutableStateOf("") }
+    // Passwords must never enter saved-instance state or survive process death.
+    var password by remember { mutableStateOf("") }
     var passwordVisible by rememberSaveable { mutableStateOf(false) }
     var advanced by rememberSaveable { mutableStateOf(false) }
 
@@ -193,7 +195,11 @@ fun LoginScreen(
                     }
 
                     Button(
-                        onClick = { onLogin(serverUrl.trim(), username.trim(), password) },
+                        onClick = {
+                            val submittedPassword = password
+                            password = ""
+                            onLogin(serverUrl.trim(), username.trim(), submittedPassword)
+                        },
                         enabled = !state.busy && username.isNotBlank() && password.isNotEmpty() && serverUrl.isNotBlank(),
                         modifier = Modifier.fillMaxWidth().height(52.dp),
                         shape = RoundedCornerShape(14.dp),

@@ -45,6 +45,8 @@ class AppContainer(context: Context) {
     val notificationRepository = NotificationRepository(database)
     val attendanceRepository = AttendanceRepository(database)
     val visitRepository = VisitRepository(database, governorates)
+    /** Compatibility name used by CameraActivity; both names share one repository. */
+    val visitRepo: VisitRepository get() = visitRepository
     val mapRepository = MapRepository(appContext, database)
     val migrationManager = MigrationManager(appContext, database, governorates)
     val photoStore = PhotoStore(appContext, governorates)

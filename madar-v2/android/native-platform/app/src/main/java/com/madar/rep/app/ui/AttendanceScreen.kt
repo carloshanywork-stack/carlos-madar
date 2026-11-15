@@ -208,8 +208,8 @@ fun AttendanceScreen(
                 } else {
                     Text("لا توجد إشارة موقع.", style = MaterialTheme.typography.bodySmall, color = MadarMuted)
                 }
-                if (location.message != null) {
-                    InlineMessage(location.message, if (location.permissionDenied) MessageTone.Error else MessageTone.Info)
+                location.message?.let { message ->
+                    InlineMessage(message, if (location.permissionDenied) MessageTone.Error else MessageTone.Info)
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(onClick = { vm.refreshLocation() }, enabled = !location.busy) {

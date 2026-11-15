@@ -114,31 +114,31 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
     val eventConnected: StateFlow<Boolean> = container.eventStream.connected
 
     val route: StateFlow<RouteView?> = session.flatMapLatest { current ->
-        if (current == null) flowOf(null) else container.routeRepository.observe(current.repId)
+        if (current == null) flowOf(null) else container.routeRepository.observe(current.ownerScopeId)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     val openVisits: StateFlow<List<VisitEntity>> = session.flatMapLatest { current ->
-        if (current == null) flowOf(emptyList()) else container.visitRepository.observeOpen(current.repId)
+        if (current == null) flowOf(emptyList()) else container.visitRepository.observeOpen(current.ownerScopeId)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val notifications: StateFlow<List<NotificationEntity>> = session.flatMapLatest { current ->
-        if (current == null) flowOf(emptyList()) else container.notificationRepository.observe(current.repId)
+        if (current == null) flowOf(emptyList()) else container.notificationRepository.observe(current.ownerScopeId)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val unreadNotifications: StateFlow<Int> = session.flatMapLatest { current ->
-        if (current == null) flowOf(0) else container.notificationRepository.observeUnread(current.repId)
+        if (current == null) flowOf(0) else container.notificationRepository.observeUnread(current.ownerScopeId)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
 
     val attendance: StateFlow<AttendanceView?> = session.flatMapLatest { current ->
-        if (current == null) flowOf(null) else container.attendanceRepository.observe(current.repId)
+        if (current == null) flowOf(null) else container.attendanceRepository.observe(current.ownerScopeId)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     val attendanceActions: StateFlow<List<AttendanceActionEntity>> = session.flatMapLatest { current ->
-        if (current == null) flowOf(emptyList()) else container.attendanceRepository.observeActions(current.repId)
+        if (current == null) flowOf(emptyList()) else container.attendanceRepository.observeActions(current.ownerScopeId)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val machineActions: StateFlow<List<MachineActionEntity>> = session.flatMapLatest { current ->
-        if (current == null) flowOf(emptyList()) else container.database.machineActions().observeForOwner(current.repId)
+        if (current == null) flowOf(emptyList()) else container.database.machineActions().observeForOwner(current.ownerScopeId)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val mapPacks: StateFlow<List<MapPackEntity>> = container.mapRepository.observePacks()
@@ -217,7 +217,7 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
     private fun loadCachedPreview(current: Session) {
         viewModelScope.launch {
             if (_reasons.value.isEmpty()) {
-                _reasons.value = container.routeRepository.cachedFaultReasons(current.repId)
+                _reasons.value = container.routeRepository.cachedFaultReasons(current.ownerScopeId)
             }
         }
     }
@@ -258,7 +258,7 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
             _reasons.value = reasons
         } catch (error: Exception) {
             if (_reasons.value.isEmpty()) {
-                _reasons.value = container.routeRepository.cachedFaultReasons(current.repId)
+                _reasons.value = container.routeRepository.cachedFaultReasons(current.ownerScopeId)
             }
             if (error is MadarError.SessionExpired) container.sessions.expire()
         }
@@ -396,7 +396,7 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
             try {
                 val name = machine.arabicName?.takeIf { it.isNotBlank() } ?: machine.machineCode
                 val visit = withContext(Dispatchers.IO) {
-                    container.visitRepository.draftFor(current.repId, machine, name)
+                    container.visitRepository.draftFor(current.ownerScopeId, machine, name)
                 }
                 _claimBlockedCardId.value = null
                 onReady(visit)
@@ -616,7 +616,7 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
                 }
                 withContext(Dispatchers.IO) {
                     container.attendanceRepository.enqueue(
-                        repId = current.repId,
+                        repId = current.ownerScopeId,
                         action = action,
                         location = location,
                         biometricVerified = true,

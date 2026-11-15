@@ -4,5 +4,6 @@
     <color name="madar_accent">#187B68</color>
     <color name="madar_gold">#DCAA52</color>
     <color name="madar_canvas">#F2F5F8</color>
+    <color name="ic_launcher_background">#15243A</color>
     <color name="black">#000000</color>
 </resources>

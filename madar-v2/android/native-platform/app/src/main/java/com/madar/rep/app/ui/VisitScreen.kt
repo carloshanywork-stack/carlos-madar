@@ -631,6 +631,7 @@ private fun LocationCard(
                 LocationDecision.Valid -> "الموقع صالح للاعتماد داخل نطاق الماكينة." to MessageTone.Success
                 LocationDecision.Missing -> "لا يوجد موقع." to MessageTone.Error
                 LocationDecision.Mocked -> "الموقع مزيف من النظام ولا يمكن اعتماده." to MessageTone.Error
+                is LocationDecision.Invalid -> decision.reason to MessageTone.Error
                 is LocationDecision.Stale -> "الإشارة قديمة (${decision.ageMillis / 1000} ثانية)." to MessageTone.Warning
                 is LocationDecision.Inaccurate -> "الدقة ${decision.accuracyMeters.toInt()} مترًا ولا تكفي." to MessageTone.Warning
                 is LocationDecision.Outside -> "خارج النطاق: المسافة الفعالة ${decision.effectiveDistanceMeters.toInt()} مترًا والمسموح ${decision.allowedRadiusMeters.toInt()}." to MessageTone.Error

@@ -19,16 +19,17 @@ class PhotoStore(
     private val governorates: GovernorateIndex,
 ) {
     fun newCaptureFile(visitUuid: String, phase: String): File {
-        val directory = File(context.cacheDir, "camera-captures")
-        directory.mkdirs()
+        require(visitUuid.matches(Regex("[A-Za-z0-9_-]{1,100}"))) { "Invalid visit identifier" }
+        require(phase == "before" || phase == "after") { "Unsupported photo phase" }
+        val directory = File(context.filesDir, "pending-camera-captures").apply { mkdirs() }
         return File(directory, "${visitUuid}_${phase}_${UUID.randomUUID()}.jpg")
     }
 
-    fun originalFile(visitUuid: String, phase: String, position: Int): File =
-        File(visitDirectory(visitUuid, phase), originalName(position))
+    fun originalFile(visitUuid: String, phase: String, evidenceId: String): File =
+        File(evidenceDirectory(visitUuid, phase, evidenceId), "original.jpg")
 
-    fun processedFile(visitUuid: String, phase: String, position: Int): File =
-        File(visitDirectory(visitUuid, phase), processedName(position))
+    fun processedFile(visitUuid: String, phase: String, evidenceId: String): File =
+        File(evidenceDirectory(visitUuid, phase, evidenceId), "processed.jpg")
 
     fun commit(
         visitUuid: String,
@@ -43,9 +44,12 @@ class PhotoStore(
         areaName: String,
     ): PhotoEntity {
         require(phase == "before" || phase == "after") { "Unsupported photo phase" }
+        require(visitUuid.matches(Regex("[A-Za-z0-9_-]{1,100}"))) { "Invalid visit identifier" }
+        require(position >= 0) { "Invalid photo position" }
         require(capturedFile.isFile && capturedFile.length() > 0) { "الصورة الملتقطة فارغة أو مفقودة" }
-        val original = originalFile(visitUuid, phase, position)
-        val processed = processedFile(visitUuid, phase, position)
+        val evidenceId = UUID.randomUUID().toString()
+        val original = originalFile(visitUuid, phase, evidenceId)
+        val processed = processedFile(visitUuid, phase, evidenceId)
         original.parentFile?.mkdirs()
 
         copyDurably(capturedFile, original)
@@ -62,12 +66,11 @@ class PhotoStore(
         )
         val watermark = Watermarker.render(context, original, processed, input)
         if (!processed.isFile || processed.length() <= 0L) {
-            original.delete()
             throw IllegalStateException("تعذر حفظ الصورة المعالجة")
         }
         val hash = Hashing.sha256File(processed)
         val entity = PhotoEntity(
-            id = UUID.randomUUID().toString(),
+            id = evidenceId,
             visitUuid = visitUuid,
             phase = phase,
             position = position,
@@ -86,17 +89,15 @@ class PhotoStore(
             uploaded = false,
             createdAt = System.currentTimeMillis(),
         )
-        capturedFile.delete()
         return entity
     }
 
-    fun delete(photo: PhotoEntity) {
-        runCatching { File(photo.originalPath).delete() }
-        runCatching { File(photo.processedPath).delete() }
-    }
+    /** A user may remove evidence from a draft, but original bytes are immutable. */
+    fun delete(photo: PhotoEntity) = Unit
 
     private fun copyDurably(source: File, destination: File) {
-        val temporary = File(destination.parentFile, destination.name + ".part")
+        check(!destination.exists()) { "Evidence destination already exists" }
+        val temporary = File(destination.parentFile, destination.name + ".${UUID.randomUUID()}.part")
         try {
             source.inputStream().use { input ->
                 FileOutputStream(temporary).use { output ->
@@ -106,21 +107,17 @@ class PhotoStore(
                 }
             }
             if (temporary.length() != source.length()) throw IllegalStateException("نسخة الصورة غير مكتملة")
-            if (!temporary.renameTo(destination)) {
-                temporary.copyTo(destination, overwrite = true)
-                temporary.delete()
-            }
+            if (!temporary.renameTo(destination)) throw IllegalStateException("تعذر تثبيت ملف الدليل ذريًا")
         } catch (error: Exception) {
             temporary.delete()
-            destination.delete()
             throw error
         }
     }
 
-    private fun visitDirectory(visitUuid: String, phase: String): File =
-        File(File(context.filesDir, "visits"), "$visitUuid/${if (phase == "before") "before" else "after"}")
-
-    private fun originalName(position: Int): String = "IMG_${"%04d".format(position + 1)}_original.jpg"
-
-    private fun processedName(position: Int): String = "IMG_${"%04d".format(position + 1)}_processed.jpg"
+    private fun evidenceDirectory(visitUuid: String, phase: String, evidenceId: String): File {
+        require(phase == "before" || phase == "after") { "Unsupported photo phase" }
+        require(visitUuid.matches(Regex("[A-Za-z0-9_-]{1,100}"))) { "Invalid visit identifier" }
+        require(evidenceId.matches(Regex("[A-Za-z0-9-]{1,64}"))) { "Invalid evidence identifier" }
+        return File(File(context.filesDir, "visits/$visitUuid/$phase"), evidenceId)
+    }
 }

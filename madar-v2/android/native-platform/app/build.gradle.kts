@@ -9,6 +9,17 @@ plugins {
 }
 
 val releaseSigningPropertiesFile = rootProject.file("../key.properties")
+val versionPropertiesFile = rootProject.file("../version.properties")
+val versionProperties = Properties().apply {
+    if (!versionPropertiesFile.isFile) {
+        throw GradleException("Missing shared Android version file: ${versionPropertiesFile.absolutePath}")
+    }
+    versionPropertiesFile.inputStream().use(::load)
+}
+val appVersionCode = versionProperties.getProperty("versionCode")?.trim()?.toIntOrNull()
+    ?: throw GradleException("Android version.properties must contain a numeric versionCode")
+val appVersionName = versionProperties.getProperty("versionName")?.trim()?.takeIf(String::isNotEmpty)
+    ?: throw GradleException("Android version.properties must contain versionName")
 val releaseSigningProperties = Properties().apply {
     if (releaseSigningPropertiesFile.isFile) {
         releaseSigningPropertiesFile.inputStream().use(::load)
@@ -27,8 +38,8 @@ android {
         applicationId = "com.madar.rep.app"
         minSdk = 24
         targetSdk = 36
-        versionCode = 13
-        versionName = "2.2.0"
+        versionCode = appVersionCode
+        versionName = appVersionName
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         buildConfigField(
@@ -90,6 +101,15 @@ android {
     }
 }
 
+// Never let an unsigned release APK be mistaken for a publishable artifact.
+tasks.matching { it.name == "packageRelease" }.configureEach {
+    doFirst {
+        if (!releaseSigningConfigured) {
+            throw GradleException("Release signing is not configured; refusing to package a publishable APK.")
+        }
+    }
+}
+
 ksp {
     arg("room.schemaLocation", "$projectDir/schemas")
 }
@@ -102,6 +122,7 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.9.1")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.9.1")
     implementation("androidx.navigation:navigation-compose:2.9.0")
+    implementation("androidx.fragment:fragment-ktx:1.8.8")
 
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-graphics")
