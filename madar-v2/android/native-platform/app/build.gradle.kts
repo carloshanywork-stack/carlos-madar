@@ -1,4 +1,5 @@
 import java.util.Properties
+import java.io.File
 
 plugins {
     id("com.android.application")
@@ -9,26 +10,30 @@ plugins {
 }
 
 val releaseSigningPropertiesFile = rootProject.file("../key.properties")
-val versionPropertiesFile = rootProject.file("../version.properties")
-val versionProperties = Properties().apply {
-    if (!versionPropertiesFile.isFile) {
-        throw GradleException("Missing shared Android version file: ${versionPropertiesFile.absolutePath}")
-    }
-    versionPropertiesFile.inputStream().use(::load)
-}
-val appVersionCode = versionProperties.getProperty("versionCode")?.trim()?.toIntOrNull()
-    ?: throw GradleException("Android version.properties must contain a numeric versionCode")
-val appVersionName = versionProperties.getProperty("versionName")?.trim()?.takeIf(String::isNotEmpty)
-    ?: throw GradleException("Android version.properties must contain versionName")
 val releaseSigningProperties = Properties().apply {
     if (releaseSigningPropertiesFile.isFile) {
         releaseSigningPropertiesFile.inputStream().use(::load)
     }
 }
 val releaseStorePath = releaseSigningProperties.getProperty("storeFile")?.trim()
-val releaseStoreFile = releaseStorePath?.let { rootProject.file(it) }
+val releaseStoreFile = releaseStorePath?.let {
+    val configured = File(it)
+    if (configured.isAbsolute) configured else File(releaseSigningPropertiesFile.parentFile, it)
+}
 val releaseSigningConfigured = listOf("storePassword", "keyAlias", "keyPassword")
     .all { !releaseSigningProperties.getProperty(it).isNullOrBlank() } && releaseStoreFile?.isFile == true
+val versionPropertiesFile = rootProject.file("../version.properties")
+val versionProperties = Properties().apply {
+    if (versionPropertiesFile.isFile) versionPropertiesFile.inputStream().use(::load)
+}
+val representativeVersionCode = (System.getenv("MADAR_REP_VERSION_CODE")
+    ?: versionProperties.getProperty("versionCode") ?: "0").trim().toIntOrNull()
+    ?: throw GradleException("android/version.properties must define a valid versionCode.")
+val representativeVersionName = (System.getenv("MADAR_REP_VERSION_NAME")
+    ?: versionProperties.getProperty("versionName") ?: "").trim()
+if (representativeVersionCode < 1 || representativeVersionName.isBlank()) {
+    throw GradleException("android/version.properties must define a positive versionCode and versionName.")
+}
 
 android {
     namespace = "com.madar.rep.app"
@@ -38,8 +43,8 @@ android {
         applicationId = "com.madar.rep.app"
         minSdk = 24
         targetSdk = 36
-        versionCode = appVersionCode
-        versionName = appVersionName
+        versionCode = representativeVersionCode
+        versionName = representativeVersionName
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         buildConfigField(
@@ -99,14 +104,15 @@ android {
     testOptions {
         unitTests.isReturnDefaultValues = true
     }
+
+    sourceSets {
+        getByName("androidTest").assets.srcDir("$projectDir/schemas")
+    }
 }
 
-// Never let an unsigned release APK be mistaken for a publishable artifact.
-tasks.matching { it.name == "packageRelease" }.configureEach {
-    doFirst {
-        if (!releaseSigningConfigured) {
-            throw GradleException("Release signing is not configured; refusing to package a publishable APK.")
-        }
+gradle.taskGraph.whenReady {
+    if (allTasks.any { it.path.endsWith("Release") || it.path.contains("Release") } && !releaseSigningConfigured) {
+        throw GradleException("A signed MADAR release requires the configured approved keystore and credentials.")
     }
 }
 
@@ -122,7 +128,6 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.9.1")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.9.1")
     implementation("androidx.navigation:navigation-compose:2.9.0")
-    implementation("androidx.fragment:fragment-ktx:1.8.8")
 
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-graphics")
@@ -146,8 +151,15 @@ dependencies {
     implementation("androidx.camera:camera-view:1.4.2")
     implementation("androidx.exifinterface:exifinterface:1.4.1")
     implementation("androidx.biometric:biometric:1.1.0")
+    implementation("androidx.fragment:fragment-ktx:1.8.8")
     implementation("androidx.webkit:webkit:1.13.0")
 
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test:core:1.6.1")
+    androidTestImplementation("androidx.room:room-testing:2.7.2")
+    androidTestImplementation("androidx.sqlite:sqlite-framework:2.5.1")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
 }

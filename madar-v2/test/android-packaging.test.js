@@ -248,6 +248,7 @@ test('representative Android bundle stays local in standalone mode and lazy-load
 test('release signing credentials are loaded locally and missing signing blocks release builds', () => {
   const gradle = read('android/app/build.gradle');
   const buildScript = read('scripts/build-android.js');
+  const packageScripts = JSON.parse(read('package.json')).scripts;
   const ignore = read('.gitignore');
   const paths = read('server/config/paths.js');
   const keyTemplate = read('android/key.properties.example');
@@ -257,6 +258,9 @@ test('release signing credentials are loaded locally and missing signing blocks 
   assert.match(gradle, /gradle\.taskGraph\.whenReady/);
   assert.match(gradle, /Release signing is not configured/);
   assert.match(buildScript, /android\/key\.properties/);
+  assert.match(buildScript, /const nativePlatformBuild = process\.argv\.includes\('--native-platform'\)/);
+  assert.match(buildScript, /android\/native-platform\/app\/build\/outputs\/apk/);
+  assert.match(packageScripts['android:release'], /--native-platform/);
   assert.match(buildScript, /madar-rep-release\.apk/);
   assert.match(ignore, /^key\.properties$/m);
   assert.match(ignore, /^madar-rep-release\.apk$/m);

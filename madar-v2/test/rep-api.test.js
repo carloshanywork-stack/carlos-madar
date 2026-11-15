@@ -262,6 +262,7 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
     format: 'png',
     name: 'MADAR local test map',
     attribution: '',
+    license: '',
     minZoom: 1,
     maxZoom: 8,
     bounds: null,
@@ -656,6 +657,9 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
 
   const route = await request('/api/rep/today-route?username=rep-nour', {}, login.cookie);
   assert.equal(route.response.status, 200);
+  const nativeRoute = await request('/api/rep/today-route', {}, login.cookie);
+  assert.equal(nativeRoute.response.status, 200, JSON.stringify(nativeRoute.body));
+  assert.deepEqual(nativeRoute.body, route.body, 'the authenticated native session selects its own route without a redundant username query');
   assert.deepEqual(route.body.summary, { totalMachines: 3, completed: 1, pending: 2, pendingReview: 1, progress: 33 });
   assert.equal(route.body.regions.length, 1);
   assert.equal(route.body.regions[0].regionName, 'التجمع');
@@ -716,7 +720,10 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   assert.equal(cairoPack.minZoom, 8);
   const cairoManifest = await request('/api/rep/map/packs/greater-cairo/manifest', {}, login.cookie);
   assert.equal(cairoManifest.response.status, 200);
-  assert.deepEqual(cairoManifest.body.pack.tiles, [{ z: 8, x: 150, y: 105, sizeBytes: Buffer.byteLength('cairo-raster-tile') }]);
+  assert.deepEqual(cairoManifest.body.pack.tiles, [{
+    z: 8, x: 150, y: 105, sizeBytes: Buffer.byteLength('cairo-raster-tile'),
+    sha256: createHash('sha256').update('cairo-raster-tile').digest('hex'),
+  }]);
   const repMapTile = await fetch(`${baseUrl}/api/rep/map/tiles/greater-cairo/8/150/105`, { headers: { cookie: login.cookie } });
   assert.equal(repMapTile.status, 200);
   assert.equal(repMapTile.headers.get('content-type'), 'image/png');
@@ -749,6 +756,17 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   const structuredReasonId = Number(faultReasons.body.reasons[0].id);
   db.prepare(`UPDATE maintenance_reasons SET category = 'electrical_lighting', action_meaning = 'executed_work',
     is_countable = 1, unit = 'piece' WHERE id = ?`).run(structuredReasonId);
+  db.prepare(`INSERT INTO maintenance_card_lines
+    (card_id, reason_id, reason_label_snapshot, category_snapshot, action_meaning_snapshot,
+     quantity, unit_snapshot, quantity_provenance)
+    VALUES (?, ?, 'كمية تاريخية', 'electrical_lighting', 'executed_work', 2, 'piece', 'legacy_default')`)
+    .run(missingAfterCardId, structuredReasonId);
+  const routeWithHistoricalQuantity = await request('/api/rep/today-route', {}, login.cookie);
+  const routeMachineWithHistory = routeWithHistoricalQuantity.body.regions.flatMap((region) => region.machines)
+    .find((machine) => machine.cardId === missingAfterCardId);
+  assert.deepEqual(routeMachineWithHistory.maintenanceLines, [{
+    reasonId: structuredReasonId, label: 'كمية تاريخية', quantity: 2, unit: 'piece', quantityProvenance: 'legacy_default',
+  }], 'the route exposes the actual persisted historical/default quantity and provenance');
 
   const beforeBuffer = await sharp({ create: { width: 80, height: 60, channels: 3, background: '#b7c4ce' } }).jpeg().toBuffer();
   const afterBuffer = await sharp({ create: { width: 70, height: 60, channels: 3, background: '#87b99d' } }).jpeg().toBuffer();
@@ -849,6 +867,11 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   assert.equal(firstWorkClaim.response.status, 200, JSON.stringify(firstWorkClaim.body));
   assert.equal(firstWorkClaim.body.status, 'in_progress');
   assert.equal(firstWorkClaim.body.idempotent, false);
+  const ownerInProgressRoute = await request('/api/rep/today-route', {}, login.cookie);
+  const ownerInProgressMachine = ownerInProgressRoute.body.regions.flatMap((region) => region.machines)
+    .find((machine) => machine.cardId === missingAfterCardId);
+  assert.equal(ownerInProgressMachine.workVisitUuid, visitUuid, 'the owner can resume the same server-claimed visit after process recreation');
+  assert.equal(Date.parse(ownerInProgressMachine.workClaimExpiresAt), Date.parse(firstWorkClaim.body.expiresAt));
   const duplicateWorkClaim = await request(`/api/rep/machines/${missingAfterCardId}/start-work`, jsonOptions('POST', {
     visitUuid, location: visitPayload.location,
   }), login.cookie);

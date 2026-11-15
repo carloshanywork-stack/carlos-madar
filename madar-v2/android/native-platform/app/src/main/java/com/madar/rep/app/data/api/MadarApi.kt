@@ -319,6 +319,27 @@ class MadarApi(
         if (result.status !in 200..299) throw mapReadError(result)
     }
 
+    fun sendLocationPing(token: String, point: TrackingPoint): LocationPingEnvelope {
+        val payload = json.encodeToString(
+            LocationPingRequest.serializer(),
+            LocationPingRequest(onDuty = true, trail = listOf(point)),
+        )
+        val result = execute(
+            Request.Builder()
+                .url("$baseUrl/api/rep/location-ping")
+                .header("Authorization", "Bearer $token")
+                .post(payload.toRequestBody(JSON_MEDIA))
+                .build()
+        )
+        if (result.status == 401) throw MadarError.SessionExpired()
+        if (result.status == 403) throw MadarError.AccountDisabled(errorText(result))
+        if (result.status in 200..299) return parse(result.body, LocationPingEnvelope.serializer())
+        if (result.status == 400 || result.status == 409 || result.status == 422) {
+            throw MadarError.Validation(errorText(result))
+        }
+        throw mapReadError(result)
+    }
+
     private fun authorizedGet(path: String, token: String): HttpResult = execute(
         Request.Builder()
             .url("$baseUrl$path")

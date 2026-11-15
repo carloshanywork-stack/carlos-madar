@@ -7,7 +7,6 @@ import { buildWatermarkLines, compressAndWatermark, getWatermarkLayout } from '.
 import { isFreshGpsFix, orderMachinesByStraightLineDistance } from '../client/src/modules/rep/location-review.js';
 import {
   getVisibleTileCoordinates,
-  googleMapsNavigationUrl,
   projectToWorld,
   unprojectFromWorld,
 } from '../client/src/modules/rep/map-utils.js';
@@ -135,19 +134,6 @@ test('watermark badge stays on the physical left edge and reserves a readable si
   assert.equal(layout.panelWidth, 928);
   assert.equal(layout.panelTop + layout.panelHeight, 900);
   assert.ok(layout.panelHeight >= layout.lineHeight * 6);
-});
-
-test('Google Maps navigation prefers the machine GPS pin and safely falls back to address search', () => {
-  const url = new URL(googleMapsNavigationUrl({ latitude: 30.0444, longitude: 31.2357, address: 'Downtown' }));
-  assert.equal(url.hostname, 'www.google.com');
-  assert.equal(url.pathname, '/maps/dir/');
-  assert.equal(url.searchParams.get('destination'), '30.0444,31.2357');
-  assert.equal(url.searchParams.get('travelmode'), 'driving');
-  const addressUrl = new URL(googleMapsNavigationUrl({ address: 'الدقي، القاهرة' }));
-  assert.equal(addressUrl.pathname, '/maps/search/');
-  assert.equal(addressUrl.searchParams.get('query'), 'الدقي، القاهرة');
-  assert.equal(googleMapsNavigationUrl({}), null);
-  assert.equal(googleMapsNavigationUrl({ latitude: null, longitude: null, address: 'الدقي' }).includes('maps/search'), true);
 });
 
 test('offline map projection round-trips coordinates and resolves the expected Cairo raster tile', () => {

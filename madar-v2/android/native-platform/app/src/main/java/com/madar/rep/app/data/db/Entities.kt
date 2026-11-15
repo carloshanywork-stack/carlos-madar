@@ -50,6 +50,15 @@ object MapPackState {
     const val FAILED = "failed"
 }
 
+object GpsPointState {
+    const val QUEUED = "queued"
+    const val SYNCING = "syncing"
+    const val RETRY_WAIT = "retry_wait"
+    const val NEEDS_LOGIN = "needs_login"
+    const val NEEDS_REVIEW = "needs_review"
+    const val ACKNOWLEDGED = "acknowledged"
+}
+
 @Entity(
     tableName = "visits",
     indices = [Index("ownerRepId"), Index("state"), Index(value = ["ownerRepId", "state"])],
@@ -265,4 +274,24 @@ data class LegacyImportEntity(
     val itemId: String,
     val identityHash: String,
     val importedAt: Long,
+)
+
+@Entity(
+    tableName = "gps_points",
+    indices = [Index("repId"), Index(value = ["repId", "state", "updatedAt"])],
+)
+data class GpsPointEntity(
+    @PrimaryKey val clientPointId: String,
+    val repId: Long,
+    val latitude: Double,
+    val longitude: Double,
+    val accuracy: Double,
+    val speed: Double = 0.0,
+    val updatedAt: String,
+    val state: String = GpsPointState.QUEUED,
+    val contentHash: String,
+    val attempts: Int = 0,
+    val lastError: String? = null,
+    val nextAttemptAt: Long = 0,
+    val createdAt: Long = System.currentTimeMillis(),
 )

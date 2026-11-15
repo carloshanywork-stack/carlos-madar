@@ -544,7 +544,7 @@ test('overtime requests are approved once and open exactly one extra attendance 
   }
 });
 
-test('overtime approval endpoints let a representative use one extra session and expose map config', async () => {
+test('overtime approval endpoints let a representative use one extra session without exposing a Google map key', async () => {
   const adminLogin = await request('/api/auth/login', jsonOptions('POST', { username: 'root', password: '1234' }));
   assert.equal(adminLogin.response.status, 200);
   const adminCookie = adminLogin.cookie;
@@ -559,6 +559,10 @@ test('overtime approval endpoints let a representative use one extra session and
   const location = { latitude: 30.0444, longitude: 31.2357, accuracy: 10, updatedAt: new Date().toISOString() };
   const clockIn = await request('/api/rep/attendance/clock-in', jsonOptions('POST', { location, biometricVerified: true }), repCookie);
   assert.equal(clockIn.response.status, 201, JSON.stringify(clockIn.body));
+  const openShiftResponse = await request('/api/rep/attendance/today', {}, repCookie);
+  assert.equal(openShiftResponse.response.status, 200);
+  assert.equal(openShiftResponse.body.openAttendance.id, clockIn.body.attendance.id,
+    'the HTTP attendance response exposes the active regular shift for cross-date continuity');
   const clockOut = await request('/api/rep/attendance/clock-out', jsonOptions('POST', { location, biometricVerified: true }), repCookie);
   assert.equal(clockOut.response.status, 200, JSON.stringify(clockOut.body));
 
@@ -596,10 +600,43 @@ test('overtime approval endpoints let a representative use one extra session and
   assert.equal(thirdClockIn.response.status, 409);
 
   const mapConfig = await request('/api/rep/map/google', {}, repCookie);
-  assert.equal(mapConfig.response.status, 200, JSON.stringify(mapConfig.body));
-  assert.equal(mapConfig.body.success, true);
-  assert.equal(typeof mapConfig.body.enabled, 'boolean');
-  if (!mapConfig.body.enabled) assert.equal(mapConfig.body.apiKey, null);
+  assert.equal(mapConfig.response.status, 403, JSON.stringify(mapConfig.body));
+  assert.equal(Object.hasOwn(mapConfig.body, 'apiKey'), false);
+});
+
+test('an open representative shift survives Cairo midnight and can be closed against its original work date', () => {
+  const userId = Number(db.prepare(`INSERT INTO users (username, password_hash, full_name, role)
+    VALUES ('midnight-shift-rep', 'test-hash', 'Midnight Shift Rep', 'rep')`).run().lastInsertRowid);
+  const employeeId = Number(db.prepare(`INSERT INTO employees (name, department, user_id, can_login, active)
+    VALUES ('Midnight Shift Rep', 'Maintenance', ?, 1, 1)`).run(userId).lastInsertRowid);
+  const clockInTime = '2026-11-14T20:45:00.000Z';
+  const originalWorkDate = '2026-11-14';
+  const attendanceId = Number(db.prepare(`INSERT INTO employee_daily_attendance
+    (employee_id, work_date, status, overtime_hours, clock_in_time, clock_in_source,
+     total_hours, regular_hours, overtime_status)
+    VALUES (?, ?, 'present', 0, ?, 'app', 0, 0, 'none')`)
+    .run(employeeId, originalWorkDate, clockInTime).lastInsertRowid);
+  const afterCairoMidnight = new Date('2026-11-14T22:30:00.000Z'); // 00:30 on Nov 15 in Cairo.
+
+  const today = getTodayAttendanceForRep(userId, db, afterCairoMidnight);
+  assert.equal(today.date, '2026-11-15');
+  assert.equal(today.attendance, null, 'today remains the new Cairo business date');
+  assert.equal(today.openAttendance.id, attendanceId);
+  assert.equal(today.openAttendance.work_date, originalWorkDate);
+  assert.equal(today.openAttendance.clock_in_time, clockInTime);
+
+  const location = {
+    latitude: 30.0444, longitude: 31.2357, accuracy: 15,
+    updatedAt: afterCairoMidnight.toISOString(),
+  };
+  const closed = clockOutForRep(userId, { location, biometricVerified: true }, db, { now: afterCairoMidnight });
+  assert.equal(closed.id, attendanceId);
+  assert.equal(closed.work_date, originalWorkDate);
+  assert.equal(closed.clock_in_time, clockInTime);
+  assert.equal(closed.clock_out_time, afterCairoMidnight.toISOString());
+  assert.ok(closed.total_hours > 1.5 && closed.total_hours < 2);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM employee_daily_attendance WHERE employee_id = ?')
+    .get(employeeId).count, 1, 'midnight does not create a second attendance row or reset elapsed time');
 });
 
 test('user-to-employee migration backfills unlinked active and inactive accounts idempotently', () => {

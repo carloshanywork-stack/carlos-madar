@@ -12,8 +12,8 @@
     "test": "node --test --test-concurrency=1 test/*.test.js",
     "android:add": "npx cap add android",
     "android:sync": "node scripts/build-android.js --sync-only",
-    "android:debug": "node scripts/build-android.js",
-    "android:release": "node scripts/build-android.js --release",
+    "android:debug": "node scripts/build-android.js --native-platform",
+    "android:release": "node scripts/build-android.js --native-platform --release",
     "db:init": "node server/database/init.js",
     "db:migrate-v1": "node scripts/migrate-from-v1.js"
   },

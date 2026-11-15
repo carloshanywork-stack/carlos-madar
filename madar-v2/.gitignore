@@ -17,8 +17,13 @@ android/.idea/
 *.jks
 *.keystore
 key.properties
-data/
+/data/
 .env
 npm-debug.log*
 
 logs/
+
+# Keep nested Android module outputs out of source control.
+android/**/build/
+android/**/.gradle/
+scripts/__pycache__/

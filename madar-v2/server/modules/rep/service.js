@@ -180,6 +180,7 @@ export function getRepTodayRoute(rep, database = db) {
   const { start: dayStart, end: dayEnd } = getBusinessDayRange(database);
   const cards = database.prepare(`
     SELECT order_record.id AS order_id, order_record.order_code, order_record.status AS order_status,
+      order_record.archived_at,
       card.id AS card_id, card.status AS card_status, card.before_photos_json, card.after_photos_json,
       machine.id AS machine_id, machine.code AS machine_code,
       machine.name_ar AS machine_name_ar, machine.area AS region_name,
@@ -206,6 +207,8 @@ export function getRepTodayRoute(rep, database = db) {
     ORDER BY machine.area COLLATE NOCASE, machine.code COLLATE NOCASE,
       order_record.created_at DESC, order_record.id DESC, card.id DESC
   `).all(rep.id, dayStart, dayEnd);
+  const routeCardIds = [...new Set(cards.map((row) => Number(row.card_id)))];
+  const routeCardPlaceholders = routeCardIds.map(() => '?').join(',');
 
   const visitReviews = database.prepare(`
     SELECT visit.card_id, visit.rep_user_id, review.status AS review_status, review.review_note, visit.visit_uuid
@@ -214,6 +217,42 @@ export function getRepTodayRoute(rep, database = db) {
     WHERE visit.status = 'completed'
     ORDER BY datetime(visit.created_at) DESC, visit.id DESC
   `).all();
+  // Preserve distinguishable historical/default quantities for reshoots.
+  // Prefer the most recent representative visit snapshot, then existing card
+  // lines; do not create a client-side quantity when neither exists.
+  const latestVisitLines = routeCardIds.length ? database.prepare(`
+    SELECT visit.card_id, line.reason_id AS reasonId, line.reason_label_snapshot AS label,
+      line.quantity, line.unit_snapshot AS unit, line.quantity_provenance AS quantityProvenance
+    FROM rep_visits visit JOIN rep_visit_lines line ON line.visit_id = visit.id
+    WHERE visit.card_id IN (${routeCardPlaceholders}) AND visit.status = 'completed' AND visit.id = (
+      SELECT MAX(previous.id) FROM rep_visits previous
+      WHERE previous.card_id = visit.card_id AND previous.status = 'completed'
+    )
+    ORDER BY visit.card_id, line.id
+  `).all(...routeCardIds) : [];
+  const latestVisitLinesByCard = new Map();
+  for (const line of latestVisitLines) {
+    const cardId = Number(line.card_id);
+    if (!latestVisitLinesByCard.has(cardId)) latestVisitLinesByCard.set(cardId, []);
+    latestVisitLinesByCard.get(cardId).push({
+      reasonId: Number(line.reasonId), label: line.label, quantity: Number(line.quantity),
+      unit: line.unit, quantityProvenance: line.quantityProvenance,
+    });
+  }
+  const legacyCardLines = routeCardIds.length ? database.prepare(`
+    SELECT card_id, reason_id AS reasonId, reason_label_snapshot AS label,
+      quantity, unit_snapshot AS unit, quantity_provenance AS quantityProvenance
+    FROM maintenance_card_lines WHERE card_id IN (${routeCardPlaceholders}) ORDER BY card_id, id
+  `).all(...routeCardIds) : [];
+  const legacyLinesByCard = new Map();
+  for (const line of legacyCardLines) {
+    const cardId = Number(line.card_id);
+    if (!legacyLinesByCard.has(cardId)) legacyLinesByCard.set(cardId, []);
+    legacyLinesByCard.get(cardId).push({
+      reasonId: Number(line.reasonId), label: line.label, quantity: Number(line.quantity),
+      unit: line.unit, quantityProvenance: line.quantityProvenance,
+    });
+  }
   const reviewByCard = new Map();
   for (const visit of visitReviews) {
     if (!reviewByCard.has(Number(visit.card_id))) reviewByCard.set(Number(visit.card_id), visit);
@@ -224,7 +263,7 @@ export function getRepTodayRoute(rep, database = db) {
     SELECT DISTINCT machine_id FROM machine_correction_requests WHERE status = 'pending'
   `).all().map((row) => Number(row.machine_id)));
   const activeWorkByCard = new Map(database.prepare(`
-    SELECT card_id, rep_user_id, visit_uuid FROM rep_machine_work_leases
+    SELECT card_id, rep_user_id, visit_uuid, expires_at_ms FROM rep_machine_work_leases
     WHERE expires_at_ms > ?
   `).all(Date.now()).map((row) => [Number(row.card_id), row]));
 
@@ -263,13 +302,21 @@ export function getRepTodayRoute(rep, database = db) {
       arabicName: row.machine_name_ar,
       workOrderId: Number(row.order_id),
       workOrderCode: row.order_code,
+      workOrderStatus: row.order_status,
+      archivedAt: row.archived_at ?? null,
       clientName: row.client_name,
       address: row.client_address ?? '',
       areaName: row.area_name || row.region_name || 'المنطقة العامة',
+      maintenanceLines: latestVisitLinesByCard.get(Number(row.card_id))
+        ?? legacyLinesByCard.get(Number(row.card_id)) ?? [],
       isCompleted,
       isSubmitted,
       workStatus,
       workOwnerId: workStatus === 'in_progress' ? Number(activeWork.rep_user_id) : null,
+      workVisitUuid: workStatus === 'in_progress' && Number(activeWork.rep_user_id) === Number(rep.id)
+        ? activeWork.visit_uuid : null,
+      workClaimExpiresAt: workStatus === 'in_progress' && Number(activeWork.rep_user_id) === Number(rep.id)
+        ? new Date(Number(activeWork.expires_at_ms)).toISOString() : null,
       reviewStatus: reviewStatus ?? (isSubmitted && !isCompleted ? 'pending' : null),
       reviewNote: needsReshoot ? (manualReview?.review_note ?? latestVisit?.review_note) : null,
       correctionPending,

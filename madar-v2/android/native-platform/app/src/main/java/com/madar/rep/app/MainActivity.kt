@@ -32,7 +32,7 @@ class MainActivity : FragmentActivity() {
         lifecycleScope.launch {
             if (!container.migrationPrompted.compareAndSet(false, true)) return@launch
             if (!container.migrationManager.shouldRun()) return@launch
-            if (!container.migrationManager.legacyDatabaseExists()) return@launch
+            if (!container.migrationManager.legacyDatabaseExists() && !container.migrationManager.needsBrowserBridge()) return@launch
             startActivity(Intent(this@MainActivity, LegacyMigrationActivity::class.java))
         }
     }

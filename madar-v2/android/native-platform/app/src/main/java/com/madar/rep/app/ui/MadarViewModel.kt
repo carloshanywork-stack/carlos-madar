@@ -141,6 +141,10 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
         if (current == null) flowOf(emptyList()) else container.database.machineActions().observeForOwner(current.ownerScopeId)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    val gpsPoints = session.flatMapLatest { current ->
+        if (current == null) flowOf(emptyList()) else container.database.gpsPoints().observeForOwner(current.repId)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
     val mapPacks: StateFlow<List<MapPackEntity>> = container.mapRepository.observePacks()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
@@ -191,10 +195,15 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
         point?.let { container.governorates.find(it.latitude, it.longitude)?.nameAr }
 
     fun logout() {
-        container.sessions.logout()
-        _sync.value = SyncUiState()
-        _login.value = LoginUiState()
-        _location.value = LocationUiState()
+        viewModelScope.launch {
+            try {
+                com.madar.rep.app.location.GpsBreadcrumbService.stop(container.appContext)
+                withContext(Dispatchers.IO) { container.sessions.logout() }
+                _sync.value = SyncUiState()
+                _login.value = LoginUiState()
+                _location.value = LocationUiState()
+            } catch (error: Exception) { _messages.emit(human(error)) }
+        }
     }
 
     fun dismissMessageHint() {
@@ -622,6 +631,8 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
                         biometricVerified = true,
                     )
                 }
+                if (action == "in") com.madar.rep.app.location.GpsBreadcrumbService.start(container.appContext, current.repId)
+                else com.madar.rep.app.location.GpsBreadcrumbService.stop(container.appContext)
                 _messages.tryEmit(
                     if (action == "in") "سُجّل الحضور محليًا بالوقت الأصلي؛ ستُزامن مع الخادم."
                     else "سُجّل الانصراف محليًا بالوقت الأصلي؛ ستُزامن مع الخادم."
@@ -685,6 +696,14 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
     fun retryMachineAction(actionUuid: String) {
         viewModelScope.launch {
             container.database.machineActions().retryNow(actionUuid, System.currentTimeMillis())
+            syncNow()
+        }
+    }
+
+    fun retryGpsPoint(clientPointId: String) {
+        val owner = session.value?.repId ?: return
+        viewModelScope.launch {
+            container.database.gpsPoints().retryNow(clientPointId, owner)
             syncNow()
         }
     }

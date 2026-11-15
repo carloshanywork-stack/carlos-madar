@@ -53,6 +53,8 @@ import com.madar.rep.app.data.db.MachineActionEntity
 import com.madar.rep.app.data.db.MachineActionState
 import com.madar.rep.app.data.db.VisitEntity
 import com.madar.rep.app.data.db.VisitState
+import com.madar.rep.app.data.db.GpsPointEntity
+import com.madar.rep.app.data.db.GpsPointState
 import com.madar.rep.app.data.repo.AttendanceView
 import com.madar.rep.app.ui.theme.MadarDanger
 import com.madar.rep.app.ui.theme.MadarGold
@@ -78,6 +80,7 @@ fun SyncScreen(
     val migration by vm.migration.collectAsStateWithLifecycle()
     val machineActions by vm.machineActions.collectAsStateWithLifecycle()
     val attendanceActions by vm.attendanceActions.collectAsStateWithLifecycle()
+    val gpsPoints by vm.gpsPoints.collectAsStateWithLifecycle()
     val attendance by vm.attendance.collectAsStateWithLifecycle()
     var confirmLogout by remember { mutableStateOf(false) }
 
@@ -178,6 +181,12 @@ fun SyncScreen(
             }
         }
 
+        item { SyncSectionTitle("نقاط الموقع المحفوظة", "تُرسل بعد الحضور وبمعرّف ثابت؛ لا تفتح الوردية") }
+        if (gpsPoints.isEmpty()) item { InlineMessage("لا توجد نقاط موقع معلّقة.", MessageTone.Info) }
+        else items(gpsPoints, key = { it.clientPointId }) { point ->
+            GpsPointCard(point) { vm.retryGpsPoint(point.clientPointId) }
+        }
+
         item {
             AttendanceQueueCard(
                 attendance = attendance,
@@ -230,6 +239,23 @@ fun SyncScreen(
                 TextButton(onClick = { confirmLogout = false }) { Text("إلغاء") }
             },
         )
+    }
+}
+
+@Composable
+private fun GpsPointCard(point: GpsPointEntity, onRetry: () -> Unit) {
+    val retryable = point.state in setOf(GpsPointState.NEEDS_LOGIN, GpsPointState.NEEDS_REVIEW, GpsPointState.RETRY_WAIT)
+    Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surface, tonalElevation = 1.dp, modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+            Text("${point.updatedAt} · دقة ${point.accuracy.toInt()}م", fontWeight = FontWeight.SemiBold)
+            Text("${point.latitude}, ${point.longitude}", style = MaterialTheme.typography.bodySmall, color = MadarMuted)
+            Text(point.lastError ?: when (point.state) {
+                GpsPointState.QUEUED, GpsPointState.SYNCING, GpsPointState.RETRY_WAIT -> "النقطة محفوظة محليًا بانتظار الإقرار النهائي."
+                GpsPointState.NEEDS_LOGIN -> "يلزم تسجيل الدخول لإعادة المحاولة."
+                else -> "رفض الخادم النقطة؛ بقيت محفوظة للمراجعة."
+            }, style = MaterialTheme.typography.bodySmall, color = if (point.state == GpsPointState.NEEDS_REVIEW) MadarWarning else MadarMuted)
+            if (retryable) OutlinedButton(onClick = onRetry) { Icon(Icons.Default.Refresh, contentDescription = null); Spacer(Modifier.size(6.dp)); Text("إعادة المحاولة") }
+        }
     }
 }
 

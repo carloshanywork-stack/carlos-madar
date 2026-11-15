@@ -1,123 +1,81 @@
 package com.madar.rep.app.media
 
 import android.content.Context
-import com.madar.rep.app.core.GeoPoint
-import com.madar.rep.app.core.GovernorateIndex
-import com.madar.rep.app.core.Hashing
+import com.madar.rep.app.core.*
 import com.madar.rep.app.data.db.PhotoEntity
 import java.io.File
 import java.io.FileOutputStream
 import java.util.UUID
+import org.json.JSONObject
 
-/**
- * A photo only becomes a PhotoEntity after both the untouched original and the
- * watermarked derivative are durable, non-empty, and hashed. Partial writes are
- * renamed or deleted; they never leave a reference in Room.
- */
-class PhotoStore(
-    private val context: Context,
-    private val governorates: GovernorateIndex,
-) {
-    fun newCaptureFile(visitUuid: String, phase: String): File {
-        require(visitUuid.matches(Regex("[A-Za-z0-9_-]{1,100}"))) { "Invalid visit identifier" }
-        require(phase == "before" || phase == "after") { "Unsupported photo phase" }
-        val directory = File(context.filesDir, "pending-camera-captures").apply { mkdirs() }
-        return File(directory, "${visitUuid}_${phase}_${UUID.randomUUID()}.jpg")
+/** Durable, immutable evidence. Failed processing leaves originals and a recovery journal. */
+class PhotoStore(private val context:Context,private val governorates:GovernorateIndex) {
+    private val root=File(context.filesDir,"visits").apply { check(mkdirs()||isDirectory) }
+    fun newCaptureFile(visitUuid:String,phase:String):File {
+        UUID.fromString(visitUuid);require(phase in listOf("before","after"))
+        val d=File(root,"$visitUuid/$phase/raw").apply { check(mkdirs()||isDirectory) }
+        return File(d,"${UUID.randomUUID()}.capture.jpg")
     }
-
-    fun originalFile(visitUuid: String, phase: String, evidenceId: String): File =
-        File(evidenceDirectory(visitUuid, phase, evidenceId), "original.jpg")
-
-    fun processedFile(visitUuid: String, phase: String, evidenceId: String): File =
-        File(evidenceDirectory(visitUuid, phase, evidenceId), "processed.jpg")
-
-    fun commit(
-        visitUuid: String,
-        phase: String,
-        position: Int,
-        capturedFile: File,
-        capturedAtMillis: Long,
-        location: GeoPoint?,
-        machineCode: String,
-        machineName: String,
-        regionName: String,
-        areaName: String,
-    ): PhotoEntity {
-        require(phase == "before" || phase == "after") { "Unsupported photo phase" }
-        require(visitUuid.matches(Regex("[A-Za-z0-9_-]{1,100}"))) { "Invalid visit identifier" }
-        require(position >= 0) { "Invalid photo position" }
-        require(capturedFile.isFile && capturedFile.length() > 0) { "الصورة الملتقطة فارغة أو مفقودة" }
-        val evidenceId = UUID.randomUUID().toString()
-        val original = originalFile(visitUuid, phase, evidenceId)
-        val processed = processedFile(visitUuid, phase, evidenceId)
-        original.parentFile?.mkdirs()
-
-        copyDurably(capturedFile, original)
-        val governorate = location?.let { governorates.find(it.latitude, it.longitude)?.nameAr }
-        val input = WatermarkInput(
-            machineCode = machineCode,
-            machineName = machineName,
-            regionName = regionName,
-            areaName = areaName,
-            governorate = governorate,
-            phase = phase,
-            capturedAtMillis = capturedAtMillis,
-            location = location,
-        )
-        val watermark = Watermarker.render(context, original, processed, input)
-        if (!processed.isFile || processed.length() <= 0L) {
-            throw IllegalStateException("تعذر حفظ الصورة المعالجة")
-        }
-        val hash = Hashing.sha256File(processed)
-        val entity = PhotoEntity(
-            id = evidenceId,
-            visitUuid = visitUuid,
-            phase = phase,
-            position = position,
-            originalPath = original.absolutePath,
-            processedPath = processed.absolutePath,
-            capturedAt = capturedAtMillis,
-            latitude = location?.latitude,
-            longitude = location?.longitude,
-            accuracy = location?.accuracyMeters,
-            provider = location?.provider,
-            governorate = governorate,
-            watermarkText = watermark.text,
-            sha256 = hash,
-            sizeBytes = processed.length(),
-            mimeType = "image/jpeg",
-            uploaded = false,
-            createdAt = System.currentTimeMillis(),
-        )
-        return entity
+    fun originalFile(visitUuid:String,phase:String,position:Int)=File(root,"$visitUuid/$phase/IMG_${position+1}_original.jpg")
+    fun processedFile(visitUuid:String,phase:String,position:Int)=File(root,"$visitUuid/$phase/IMG_${position+1}_processed.jpg")
+    @Synchronized fun commit(visitUuid:String,phase:String,position:Int,capturedFile:File,capturedAtMillis:Long,location:GeoPoint?,machineCode:String,machineName:String,regionName:String,areaName:String):PhotoEntity {
+        UUID.fromString(visitUuid);require(phase in listOf("before","after") && position>=0)
+        require(capturedFile.isFile && capturedFile.length()>0)
+        val id=UUID.randomUUID().toString()
+        val d=File(root,"$visitUuid/$phase/$id").apply { check(mkdirs()||isDirectory) }
+        val j=JSONObject().put("id",id).put("visitUuid",visitUuid).put("phase",phase).put("position",position)
+            .put("capturedAt",capturedAtMillis).put("capturePath",capturedFile.absolutePath)
+            .put("machineCode",machineCode).put("machineName",machineName)
+            .put("regionName",regionName).put("areaName",areaName)
+        location?.let { j.put("latitude",it.latitude).put("longitude",it.longitude).put("accuracy",it.accuracyMeters).put("provider",it.provider) }
+        write(File(d,"capture.json"),j.toString().toByteArray())
+        copyDurably(capturedFile,File(d,"original.jpg"))
+        val result=finish(d,j)
+        // Removing the staging capture is safe only after the immutable pair and journal exist.
+        if(capturedFile.canonicalPath.startsWith(root.canonicalPath+File.separator))capturedFile.delete()
+        return result
     }
-
-    /** A user may remove evidence from a draft, but original bytes are immutable. */
-    fun delete(photo: PhotoEntity) = Unit
-
-    private fun copyDurably(source: File, destination: File) {
-        check(!destination.exists()) { "Evidence destination already exists" }
-        val temporary = File(destination.parentFile, destination.name + ".${UUID.randomUUID()}.part")
-        try {
-            source.inputStream().use { input ->
-                FileOutputStream(temporary).use { output ->
-                    input.copyTo(output, 128 * 1024)
-                    output.flush()
-                    output.fd.sync()
-                }
+    private fun finish(d:File,j:JSONObject):PhotoEntity {
+        val original=File(d,"original.jpg")
+        if (!original.isFile) {
+            val capturePath=j.optString("capturePath")
+            val capture=File(capturePath)
+            require(capturePath.isNotBlank() && capture.canonicalPath.startsWith(root.canonicalPath+File.separator)
+                && capture.isFile && !java.nio.file.Files.isSymbolicLink(capture.toPath())) {
+                "ملف الالتقاط المؤقت غير متاح؛ بقي سجل الاستعادة محفوظًا"
             }
-            if (temporary.length() != source.length()) throw IllegalStateException("نسخة الصورة غير مكتملة")
-            if (!temporary.renameTo(destination)) throw IllegalStateException("تعذر تثبيت ملف الدليل ذريًا")
-        } catch (error: Exception) {
-            temporary.delete()
-            throw error
+            copyDurably(capture,original)
         }
+        require(original.length() in 1..12L*1024*1024)
+        val total=File(root,j.getString("visitUuid")).walkTopDown().filter{it.isFile}.sumOf{it.length()}
+        require(total<=240L*1024*1024){"حجم أدلة الزيارة تجاوز الحد الآمن؛ الصور محفوظة للاستعادة"}
+        val location=if(j.has("latitude")) GeoPoint(j.getDouble("latitude"),j.getDouble("longitude"),j.getDouble("accuracy").toFloat(),j.getLong("capturedAt"),j.optString("provider")) else null
+        val capturedAt=j.getLong("capturedAt")
+        val input=WatermarkInput(j.getString("machineCode"),j.getString("machineName"),j.getString("regionName"),j.getString("areaName"),
+            location?.let{governorates.find(it.latitude,it.longitude)?.nameAr},j.getString("phase"),capturedAt,location)
+        val processed=File(d,"processed.jpg")
+        val text=if(processed.isFile && File(d,"watermark.txt").isFile)File(d,"watermark.txt").readText() else {
+            val candidate=File(d,"processed.part.jpg")
+            val rendered=Watermarker.render(context,original,candidate,input)
+            require(candidate.isFile && candidate.length() in 1..3L*1024*1024){"تعذر تجهيز الصورة؛ الأصل محفوظ"}
+            FileOutputStream(candidate,true).use{it.fd.sync()};check(candidate.renameTo(processed))
+            write(File(d,"watermark.txt"),rendered.text.toByteArray());rendered.text
+        }
+        return PhotoEntity(id=j.getString("id"),visitUuid=j.getString("visitUuid"),phase=j.getString("phase"),position=j.getInt("position"),
+            originalPath=original.path,processedPath=processed.path,capturedAt=capturedAt,latitude=location?.latitude,longitude=location?.longitude,
+            accuracy=location?.accuracyMeters,provider=location?.provider,governorate=input.governorate,watermarkText=text,
+            sha256=Hashing.sha256File(processed),sizeBytes=processed.length(),mimeType="image/jpeg",uploaded=false,createdAt=capturedAt)
     }
-
-    private fun evidenceDirectory(visitUuid: String, phase: String, evidenceId: String): File {
-        require(phase == "before" || phase == "after") { "Unsupported photo phase" }
-        require(visitUuid.matches(Regex("[A-Za-z0-9_-]{1,100}"))) { "Invalid visit identifier" }
-        require(evidenceId.matches(Regex("[A-Za-z0-9-]{1,64}"))) { "Invalid evidence identifier" }
-        return File(File(context.filesDir, "visits/$visitUuid/$phase"), evidenceId)
+    /** Returns only complete immutable pairs. The caller verifies the owning visit before Room registration. */
+    @Synchronized fun recoverPending():List<PhotoEntity> = root.walkTopDown().filter{it.isFile && it.name=="capture.json"}.mapNotNull { journal ->
+        val d=journal.parentFile!!
+        if(File(d,"excluded").exists())null else runCatching{finish(d,JSONObject(journal.readText()))}.getOrNull()
+    }.toList()
+    fun delete(photo:PhotoEntity) {
+        val d=File(photo.originalPath).parentFile?:return
+        require(d.canonicalPath.startsWith(root.canonicalPath+File.separator))
+        write(File(d,"excluded"),"excluded by owner; original retained".toByteArray())
     }
+    private fun copyDurably(source:File,dest:File) { source.inputStream().use{input->val part=File(dest.parentFile,dest.name+".part");FileOutputStream(part).use{out->input.copyTo(out);out.fd.sync()};check(part.length()==source.length());check(part.renameTo(dest))} }
+    private fun write(file:File,bytes:ByteArray) { val part=File(file.parentFile,file.name+".part");FileOutputStream(part).use{it.write(bytes);it.fd.sync()};check(part.renameTo(file)) }
 }

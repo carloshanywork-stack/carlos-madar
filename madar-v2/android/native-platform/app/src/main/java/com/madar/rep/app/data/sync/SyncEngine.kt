@@ -12,6 +12,7 @@ import com.madar.rep.app.data.api.VisitPhotoFile
 import com.madar.rep.app.data.api.VisitUpload
 import com.madar.rep.app.data.db.AttendanceActionEntity
 import com.madar.rep.app.data.db.AttendanceActionState
+import com.madar.rep.app.data.db.GpsPointState
 import com.madar.rep.app.data.db.MachineActionEntity
 import com.madar.rep.app.data.db.MachineActionState
 import com.madar.rep.app.data.db.MadarDatabase
@@ -75,6 +76,10 @@ class SyncEngine(
             .onFailure { if (it is MadarError.SessionExpired) needsLogin = true }
         runCatching { syncMachineActions(session, api) }
             .onFailure { if (it is MadarError.SessionExpired) needsLogin = true }
+        if (!needsLogin) {
+            runCatching { syncGpsPoints(session, api) }
+                .onFailure { if (it is MadarError.SessionExpired) needsLogin = true }
+        }
 
         if (!needsLogin) {
             val visits = database.visits().dueForSync(session.ownerScopeId, System.currentTimeMillis())
@@ -95,7 +100,8 @@ class SyncEngine(
 
         val remaining = database.visits().countPending(session.ownerScopeId) +
             database.machineActions().countPending(session.ownerScopeId) +
-            database.attendanceActions().dueForSync(session.ownerScopeId, Long.MAX_VALUE).size
+            database.attendanceActions().dueForSync(session.ownerScopeId, Long.MAX_VALUE).size +
+            database.gpsPoints().countPending(session.repId)
         return SyncRunResult(
             attempted = attempted,
             acknowledged = acknowledged,
@@ -335,6 +341,76 @@ class SyncEngine(
         }
     }
 
+    private suspend fun syncGpsPoints(session: Session, api: MadarApi) {
+        val now = System.currentTimeMillis()
+        val points = database.gpsPoints().pending(session.repId, now)
+        for (point in points) {
+            if (sessionGateway.current()?.repId != session.repId) return
+            val capturedAt = MadarTime.parseIso(point.updatedAt)
+            if (capturedAt == null || now - capturedAt > GPS_RETENTION_MS) {
+                database.gpsPoints().update(point.copy(
+                    state = GpsPointState.NEEDS_REVIEW,
+                    attempts = point.attempts + 1,
+                    lastError = "نقطة الموقع قديمة أو وقتها غير صالح؛ احتُفظ بها للمراجعة.",
+                    nextAttemptAt = 0,
+                ))
+                continue
+            }
+            val sending = point.copy(
+                state = GpsPointState.SYNCING,
+                attempts = point.attempts + 1,
+                lastError = null,
+            )
+            database.gpsPoints().update(sending)
+            val result = try {
+                val ack = api.sendLocationPing(
+                    session.token,
+                    com.madar.rep.app.data.api.TrackingPoint(
+                        clientPointId = point.clientPointId,
+                        latitude = point.latitude,
+                        longitude = point.longitude,
+                        accuracy = point.accuracy,
+                        speed = point.speed,
+                        updatedAt = point.updatedAt,
+                    ),
+                )
+                val receipt = ack.points.firstOrNull { it.clientPointId == point.clientPointId }
+                when (receipt?.status) {
+                    "accepted", "duplicate" -> GpsPointState.ACKNOWLEDGED to null
+                    "rejected" -> GpsPointState.NEEDS_REVIEW to (receipt.reason ?: "رفض الخادم نقطة الموقع.")
+                    else -> GpsPointState.NEEDS_REVIEW to "لم يصل إقرار مطابق من الخادم؛ احتُفظ بالنقطة للمراجعة."
+                }
+            } catch (error: MadarError.SessionExpired) {
+                database.gpsPoints().update(sending.copy(
+                    state = GpsPointState.NEEDS_LOGIN,
+                    lastError = "انتهت الجلسة؛ سجّل الدخول لاستكمال مزامنة الموقع.",
+                    nextAttemptAt = 0,
+                ))
+                onSessionExpired()
+                throw error
+            } catch (error: MadarError) {
+                when (error) {
+                    is MadarError.Network, is MadarError.Server -> {
+                        val attempt = sending.attempts
+                        val terminal = attempt >= SyncPolicy.MAX_ATTEMPTS
+                        (if (terminal) GpsPointState.NEEDS_REVIEW else GpsPointState.RETRY_WAIT) to
+                            (error.message ?: "تعذرت مزامنة نقطة الموقع.")
+                    }
+                    else -> GpsPointState.NEEDS_REVIEW to (error.message ?: "تعذر قبول نقطة الموقع.")
+                }
+            }
+            val state = result.first
+            val attempt = sending.attempts
+            database.gpsPoints().update(sending.copy(
+                state = state,
+                lastError = result.second,
+                nextAttemptAt = if (state == GpsPointState.RETRY_WAIT) {
+                    System.currentTimeMillis() + SyncPolicy.retryDelayMillis(attempt)
+                } else 0,
+            ))
+        }
+    }
+
     private fun VisitEntity.toUpload(
         before: List<com.madar.rep.app.data.db.PhotoEntity>,
         after: List<com.madar.rep.app.data.db.PhotoEntity>,
@@ -367,5 +443,9 @@ class SyncEngine(
             },
             photoPolicyVersion = photoPolicyVersion,
         )
+    }
+
+    companion object {
+        private const val GPS_RETENTION_MS = 90L * 24 * 60 * 60 * 1000
     }
 }

@@ -6,7 +6,7 @@ import { diskUploadMany, memoryUpload } from '../upload.js';
 import { ensureStorageDirectory, removeStorageFile } from '../storage.js';
 import { getOperationsReplayCursor, getOperationsEventsAfter, publishOperationsEvent, subscribeOperationsEvents } from '../operations-events.js';
 import { loginRateLimiter } from '../auth/login-rate-limit.js';
-import { getOfflineMapPackCatalog, getOfflineMapPackManifest, readOfflineMapPackTile } from '../supervisor/offline-tiles.js';
+import { getOfflineMapPackCatalog, getOfflineMapPackManifest, readOfflineMapPackTile } from '../supervisor/offline-map-packs.js';
 import {
   clockInForRep,
   clockOutForRep,
@@ -225,7 +225,10 @@ router.post('/attendance/mock-location', (req, res, next) => {
 
 router.get('/today-route', (req, res, next) => {
   try {
-    requireRepUsername(req.query.username, req.user.username);
+    // Native clients already authenticate this request with the active rep
+    // session. Keep the legacy query parameter optional for older web clients,
+    // but never let it select another user's route.
+    if (req.query.username !== undefined) requireRepUsername(req.query.username, req.user.username);
     res.set({ 'Cache-Control': 'private, no-store', Pragma: 'no-cache' });
     res.json(getRepTodayRoute(req.user));
   } catch (error) {
@@ -300,15 +303,6 @@ router.get('/fault-reasons', (_req, res) => {
 router.get('/map/packs', (_req, res) => {
   res.set({ 'Cache-Control': 'private, no-store', Pragma: 'no-cache' });
   res.json({ success: true, packs: getOfflineMapPackCatalog() });
-});
-
-router.get('/map/google', (_req, res) => {
-  res.set({ 'Cache-Control': 'private, max-age=300' });
-  res.json({
-    success: true,
-    enabled: Boolean(env.googleMapsApiKey),
-    apiKey: env.googleMapsApiKey || null,
-  });
 });
 
 router.get('/map/packs/:packId/manifest', (req, res, next) => {

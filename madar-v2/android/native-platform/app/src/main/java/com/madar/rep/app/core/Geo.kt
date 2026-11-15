@@ -23,6 +23,7 @@ data class GeoPoint(
 
 sealed interface LocationDecision {
     data object Valid : LocationDecision
+    data object InvalidCoordinates : LocationDecision
     data object Missing : LocationDecision
     data object Mocked : LocationDecision
     data class Invalid(val reason: String) : LocationDecision
@@ -50,6 +51,13 @@ object GeoPolicy {
         maxAccuracyMeters: Float = MAX_ACCURACY_METERS,
     ): LocationDecision {
         if (point == null) return LocationDecision.Missing
+        if (!point.latitude.isFinite() || point.latitude !in -90.0..90.0 ||
+            !point.longitude.isFinite() || point.longitude !in -180.0..180.0 ||
+            (machineLatitude == null) != (machineLongitude == null) ||
+            (machineLatitude != null && (!machineLatitude.isFinite() || machineLatitude !in -90.0..90.0)) ||
+            (machineLongitude != null && (!machineLongitude.isFinite() || machineLongitude !in -180.0..180.0)) ||
+            !radiusMeters.isFinite() || radiusMeters < 0 || maxAgeMillis < 0 ||
+            !maxAccuracyMeters.isFinite() || maxAccuracyMeters <= 0f) return LocationDecision.InvalidCoordinates
         if (point.isMock) return LocationDecision.Mocked
         if (!validCoordinates(point.latitude, point.longitude)) {
             return LocationDecision.Invalid("موقع GPS خارج النطاق الجغرافي الصحيح.")

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import Database from 'better-sqlite3';
 import { lstatSync } from 'node:fs';
 import { offlineMapPath } from '../../config/paths.js';
@@ -122,7 +123,7 @@ function listPackTiles(pack, map, { includeTiles = false } = {}) {
   let availableMinZoom = null;
   let availableMaxZoom = null;
   const select = map.database.prepare(`
-    SELECT tile_column, tile_row, length(tile_data) AS size_bytes
+    SELECT tile_column, tile_row, length(tile_data) AS size_bytes${includeTiles ? ', tile_data' : ''}
     FROM tiles
     WHERE zoom_level = ? AND tile_column BETWEEN ? AND ? AND tile_row BETWEEN ? AND ?
     ORDER BY tile_column, tile_row
@@ -137,7 +138,13 @@ function listPackTiles(pack, map, { includeTiles = false } = {}) {
       availableMaxZoom = zoom;
       const tileSize = Number(row.size_bytes) || 0;
       sizeBytes += tileSize;
-      if (includeTiles) rows.push({ z: zoom, x: Number(row.tile_column), y: count - 1 - Number(row.tile_row), sizeBytes: tileSize });
+      if (includeTiles) rows.push({
+        z: zoom,
+        x: Number(row.tile_column),
+        y: count - 1 - Number(row.tile_row),
+        sizeBytes: tileSize,
+        sha256: createHash('sha256').update(row.tile_data).digest('hex'),
+      });
       else rows.push(null);
       if (rows.length > MAX_PACK_TILES || sizeBytes > MAX_PACK_BYTES) {
         return {
@@ -193,6 +200,9 @@ export function getOfflineMapPackCatalog() {
       format: status.format,
       attribution: status.attribution,
       sourceName: status.name,
+      source: map.metadata.source ?? status.name,
+      license: status.license,
+      version: map.metadata.version ?? `${map.metadata.name ?? 'map'}:${status.minZoom}-${status.maxZoom}`,
     };
   });
 }

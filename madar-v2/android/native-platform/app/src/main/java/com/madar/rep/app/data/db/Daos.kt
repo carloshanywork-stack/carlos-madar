@@ -321,3 +321,27 @@ interface MigrationDao {
     @Query("SELECT * FROM migration_state")
     suspend fun all(): List<MigrationEntity>
 }
+
+@Dao
+interface GpsPointDao {
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insert(point: GpsPointEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(point: GpsPointEntity)
+
+    @Query("SELECT * FROM gps_points WHERE repId = :repId AND state != 'acknowledged' ORDER BY updatedAt")
+    fun observeForOwner(repId: Long): Flow<List<GpsPointEntity>>
+
+    @Query("SELECT * FROM gps_points WHERE repId = :repId AND state IN ('queued','syncing','retry_wait','needs_login') AND nextAttemptAt <= :now ORDER BY updatedAt LIMIT :limit")
+    suspend fun pending(repId: Long, now: Long, limit: Int = 25): List<GpsPointEntity>
+
+    @Update
+    suspend fun update(point: GpsPointEntity)
+
+    @Query("SELECT COUNT(*) FROM gps_points WHERE repId = :repId AND state IN ('queued','syncing','retry_wait','needs_login')")
+    suspend fun countPending(repId: Long): Int
+
+    @Query("UPDATE gps_points SET state = 'queued', nextAttemptAt = 0, lastError = NULL WHERE clientPointId = :clientPointId AND repId = :repId AND state IN ('needs_login','needs_review','retry_wait')")
+    suspend fun retryNow(clientPointId: String, repId: Long): Int
+}

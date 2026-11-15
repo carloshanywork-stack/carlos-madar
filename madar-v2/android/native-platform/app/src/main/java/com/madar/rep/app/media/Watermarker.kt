@@ -53,16 +53,11 @@ object Watermarker {
                 val panel = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(210, 7, 19, 31) }
                 canvas.drawRect(0f, layout.panelTop.toFloat(), layout.panelWidth.toFloat(), oriented.height.toFloat(), panel)
 
-                val logo = ContextCompat.getDrawable(context, R.drawable.ic_madar_mark)
-                if (logo != null) {
-                    logo.setBounds(
-                        layout.padding,
-                        layout.panelTop + layout.padding,
-                        layout.padding + layout.logoSize,
-                        layout.panelTop + layout.padding + layout.logoSize,
-                    )
-                    logo.draw(canvas)
-                }
+                val logo=context.assets.open("watermark-logo.png").use { android.graphics.BitmapFactory.decodeStream(it) }
+                require(logo != null) { "شعار A to Z غير متاح؛ الأصل محفوظ" }
+                val ratio=logo.height.toFloat()/logo.width
+                canvas.drawBitmap(logo,null,android.graphics.RectF(layout.padding.toFloat(),(layout.panelTop+layout.padding).toFloat(),(layout.padding+layout.logoSize).toFloat(),layout.panelTop+layout.padding+layout.logoSize*ratio),null)
+                logo.recycle()
 
                 val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                     color = Color.WHITE

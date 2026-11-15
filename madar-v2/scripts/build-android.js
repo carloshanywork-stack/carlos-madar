@@ -10,6 +10,7 @@ const syncOnly = process.argv.includes('--sync-only');
 const releaseBuild = process.argv.includes('--release');
 const artifactOnly = process.argv.includes('--artifact-only');
 const liveReloadBuild = process.argv.includes('--live-reload');
+const nativePlatformBuild = process.argv.includes('--native-platform');
 const isWindows = process.platform === 'win32';
 const versionProperties = Object.fromEntries(
   readFileSync(resolve(projectRoot, 'android/version.properties'), 'utf8')
@@ -81,13 +82,15 @@ function assertAndroidToolchain() {
   }
 }
 
-const viteEntrypoint = resolve(projectRoot, 'client/node_modules/vite/bin/vite.js');
-const clientDirectory = resolve(projectRoot, 'client');
-run(process.execPath, [viteEntrypoint, 'build'], { cwd: clientDirectory });
-run(process.execPath, [viteEntrypoint, 'build', '--mode', 'capacitor'], { cwd: clientDirectory });
-run(process.execPath, [resolve(projectRoot, 'node_modules/@capacitor/cli/bin/capacitor'), 'sync', 'android']);
+if (!nativePlatformBuild) {
+  const viteEntrypoint = resolve(projectRoot, 'client/node_modules/vite/bin/vite.js');
+  const clientDirectory = resolve(projectRoot, 'client');
+  run(process.execPath, [viteEntrypoint, 'build'], { cwd: clientDirectory });
+  run(process.execPath, [viteEntrypoint, 'build', '--mode', 'capacitor'], { cwd: clientDirectory });
+  run(process.execPath, [resolve(projectRoot, 'node_modules/@capacitor/cli/bin/capacitor'), 'sync', 'android']);
+}
 
-if (!liveReloadBuild) {
+if (!liveReloadBuild && !nativePlatformBuild) {
   const capacitorConfigPath = resolve(projectRoot, 'android/app/src/main/assets/capacitor.config.json');
   const capacitorConfig = JSON.parse(readFileSync(capacitorConfigPath, 'utf8'));
   if (capacitorConfig.server?.url) {
@@ -103,7 +106,7 @@ if (!liveReloadBuild) {
 }
 
 if (!syncOnly) {
-  const androidDirectory = resolve(projectRoot, 'android');
+  const androidDirectory = resolve(projectRoot, nativePlatformBuild ? 'android/native-platform' : 'android');
   assertAndroidToolchain();
   const gradleWrapperJar = resolve(androidDirectory, 'gradle/wrapper/gradle-wrapper.jar');
   if (!existsSync(gradleWrapperJar)) throw new Error(`Gradle wrapper is missing: ${gradleWrapperJar}`);
@@ -113,7 +116,12 @@ if (!syncOnly) {
   const buildType = releaseBuild ? 'release' : 'debug';
   const task = `:app:assemble${releaseBuild ? 'Release' : 'Debug'}`;
   run(java, ['-classpath', gradleWrapperJar, 'org.gradle.wrapper.GradleWrapperMain', task, '--no-daemon', '--max-workers=1', '-Dorg.gradle.jvmargs=-Xmx1024m'], { cwd: androidDirectory });
-  const builtApk = resolve(projectRoot, `android/app/build/outputs/apk/${buildType}/app-${buildType}.apk`);
+  const builtApk = resolve(
+    projectRoot,
+    nativePlatformBuild
+      ? `android/native-platform/app/build/outputs/apk/${buildType}/app-${buildType}.apk`
+      : `android/app/build/outputs/apk/${buildType}/app-${buildType}.apk`,
+  );
   if (!existsSync(builtApk)) throw new Error(`Gradle reported success but the APK is missing: ${builtApk}`);
   const androidSdk = process.env.ANDROID_HOME || process.env.ANDROID_SDK_ROOT;
   const buildTools = readdirSync(join(androidSdk, 'build-tools')).filter((version) => /^36\./.test(version)).sort().at(-1);

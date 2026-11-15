@@ -189,7 +189,8 @@ test('Phase 4 finance lifecycle keeps integer-cents, stock, custody, billing, an
   ]);
   assert.equal(partialPurchasePayment.response.status, 201, JSON.stringify(partialPurchasePayment.body));
   assert.equal(concurrentPaymentRetry.response.status, 201, JSON.stringify(concurrentPaymentRetry.body));
-  assert.equal(concurrentPaymentRetry.body.idempotent, true);
+  assert.equal([partialPurchasePayment, concurrentPaymentRetry].filter((result) => result.body.idempotent === true).length, 1);
+  assert.equal([partialPurchasePayment, concurrentPaymentRetry].filter((result) => result.body.idempotent !== true).length, 1);
   assert.equal(concurrentPaymentRetry.body.treasuryEntry.id, partialPurchasePayment.body.treasuryEntry.id);
   const committedPaymentRetry = await request(
     `/api/finance/invoices/${purchase.body.id}/payment`, jsonOptions('POST', firstPaymentPayload),

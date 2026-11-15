@@ -4,6 +4,8 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [
@@ -19,8 +21,9 @@ import androidx.room.RoomDatabase
         AttendanceSnapshotEntity::class,
         MapPackEntity::class,
         LegacyImportEntity::class,
+        GpsPointEntity::class,
     ],
-    version = 1,
+    version = 2,
     exportSchema = true,
 )
 abstract class MadarDatabase : RoomDatabase() {
@@ -36,9 +39,34 @@ abstract class MadarDatabase : RoomDatabase() {
     abstract fun mapPacks(): MapPackDao
     abstract fun legacyImports(): LegacyImportDao
     abstract fun migration(): MigrationDao
+    abstract fun gpsPoints(): GpsPointDao
 
     companion object {
         @Volatile private var instance: MadarDatabase? = null
+
+        private val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(
+                    """CREATE TABLE IF NOT EXISTS gps_points (
+                        clientPointId TEXT NOT NULL PRIMARY KEY,
+                        repId INTEGER NOT NULL,
+                        latitude REAL NOT NULL,
+                        longitude REAL NOT NULL,
+                        accuracy REAL NOT NULL,
+                        speed REAL NOT NULL,
+                        updatedAt TEXT NOT NULL,
+                        state TEXT NOT NULL,
+                        contentHash TEXT NOT NULL,
+                        attempts INTEGER NOT NULL,
+                        lastError TEXT,
+                        nextAttemptAt INTEGER NOT NULL,
+                        createdAt INTEGER NOT NULL
+                    )""".trimIndent()
+                )
+                database.execSQL("CREATE INDEX IF NOT EXISTS index_gps_points_repId ON gps_points (repId)")
+                database.execSQL("CREATE INDEX IF NOT EXISTS index_gps_points_repId_state_updatedAt ON gps_points (repId, state, updatedAt)")
+            }
+        }
 
         fun get(context: Context): MadarDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(
@@ -47,6 +75,7 @@ abstract class MadarDatabase : RoomDatabase() {
                 "madar-native.db"
             )
                 .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
+                .addMigrations(MIGRATION_1_2)
                 .build()
                 .also { instance = it }
         }

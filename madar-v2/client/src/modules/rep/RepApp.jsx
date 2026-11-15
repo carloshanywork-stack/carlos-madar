@@ -10,7 +10,6 @@ import {
   locationReviewLabel,
 } from './location-review.js';
 import { groupRouteMachinesByRegion } from './route-folders.js';
-import { googleMapsNavigationUrl } from './map-utils.js';
 import {
   addPendingVisit,
   addPendingMachineAction,
@@ -726,7 +725,7 @@ const loadLocalSnapshots = useCallback(async () => {
       if (result?.success) {
         const pendingActions = nativeApp ? await listNativeAttendanceActions(userId) : [];
         setPendingAttendanceActions(pendingActions);
-        const currentAttendance = applyPendingAttendance(result.attendance ?? null, pendingActions);
+        const currentAttendance = applyPendingAttendance(result.openAttendance ?? result.attendance ?? null, pendingActions);
         setAttendance(currentAttendance);
         setOvertimeRequest(result.overtimeRequest ?? null);
         setOnDuty(hasOpenAttendanceSession(currentAttendance));
@@ -2139,7 +2138,6 @@ try {
                            {machine.reviewNote && <small className="rep-review-note">ملاحظة المشرف: {machine.reviewNote}</small>}
                            <span className="rep-machine-open">{machine.isCompleted ? 'تم اعتماد الزيارة' : machine.reviewStatus === 'pending' ? 'بانتظار مراجعة الصور · تابع إلى ماكينة أخرى' : machine.reviewStatus === 'reshoot' ? 'افتح لإعادة التصوير' : machine.canVisit === false ? 'للعرض فقط' : 'ابدأ الزيارة'} <b aria-hidden="true">←</b></span>
                         </button>
-                        {googleMapsNavigationUrl(machine) && <a className="rep-machine-directions" href={googleMapsNavigationUrl(machine)} target="_blank" rel="noopener noreferrer" aria-label={`افتح اتجاهات ماكينة ${machine.machineCode} على الخريطة`}>⌖ الاتجاهات للماكينة</a>}
                       </article>
                     ))}
                   </div>

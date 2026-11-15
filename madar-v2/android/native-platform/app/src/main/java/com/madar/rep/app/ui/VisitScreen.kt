@@ -555,9 +555,9 @@ private fun MachineHeader(visit: VisitEntity, badge: PillStyle) {
             if (visit.address.isNotBlank()) {
                 Text(visit.address, style = MaterialTheme.typography.bodySmall, color = MadarMuted)
             }
-            if (visit.contentHash.isNotBlank()) {
+            if (!visit.contentHash.isNullOrBlank()) {
                 Text(
-                    "بصمة المحتوى: ${visit.contentHash.take(16)}…",
+                    "بصمة المحتوى: ${visit.contentHash.orEmpty().take(16)}…",
                     style = MaterialTheme.typography.bodySmall,
                     color = MadarMuted,
                 )
@@ -629,6 +629,7 @@ private fun LocationCard(
             )
             val (decisionText, tone) = when (decision) {
                 LocationDecision.Valid -> "الموقع صالح للاعتماد داخل نطاق الماكينة." to MessageTone.Success
+                LocationDecision.InvalidCoordinates -> "إحداثيات الموقع غير صالحة؛ حدّث GPS ولا تعتمد القراءة الحالية." to MessageTone.Error
                 LocationDecision.Missing -> "لا يوجد موقع." to MessageTone.Error
                 LocationDecision.Mocked -> "الموقع مزيف من النظام ولا يمكن اعتماده." to MessageTone.Error
                 is LocationDecision.Invalid -> decision.reason to MessageTone.Error

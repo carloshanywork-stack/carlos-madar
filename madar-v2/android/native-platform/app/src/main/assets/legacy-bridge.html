@@ -94,7 +94,8 @@
     try {
       if (!database.objectStoreNames.contains('pending_visits')
           && !database.objectStoreNames.contains('pending_machine_actions')
-          && !database.objectStoreNames.contains('route_snapshots')) {
+          && !database.objectStoreNames.contains('route_snapshots')
+          && !database.objectStoreNames.contains('gps_samples')) {
         reply({ ok: true, empty: true, visits: [], machineActions: [], routeSnapshots: [], reasonSnapshots: [], attendanceSnapshots: [] });
         return;
       }
@@ -144,6 +145,7 @@
           evidenceMimeType: evidence.evidenceMimeType
         });
       }
+      var gpsSamples = await getAll(database, 'gps_samples');
       reply({
         ok: true,
         databaseVersion: database.version,
@@ -152,7 +154,8 @@
         routeSnapshots: await getAll(database, 'route_snapshots'),
         reasonSnapshots: await getAll(database, 'reason_snapshots'),
         attendanceSnapshots: await getAll(database, 'attendance_snapshots'),
-        gpsSampleCount: (await getAll(database, 'gps_samples')).length,
+        gpsSampleCount: gpsSamples.length,
+        gpsSamples: gpsSamples,
         offlineMapPackCount: (await getAll(database, 'offline_map_packs')).length
       });
     } finally {

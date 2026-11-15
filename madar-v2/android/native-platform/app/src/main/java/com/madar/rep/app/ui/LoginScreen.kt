@@ -64,7 +64,7 @@ fun LoginScreen(
 ) {
     var serverUrl by rememberSaveable { mutableStateOf(defaultServerUrl) }
     var username by rememberSaveable { mutableStateOf("") }
-    // Passwords must never enter saved-instance state or survive process death.
+    // Passwords must never enter saved-instance state or a restoration bundle.
     var password by remember { mutableStateOf("") }
     var passwordVisible by rememberSaveable { mutableStateOf(false) }
     var advanced by rememberSaveable { mutableStateOf(false) }

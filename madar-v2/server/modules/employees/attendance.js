@@ -779,9 +779,25 @@ export function recordRepMockLocationAttempt(userIdValue, input, database = db) 
 export function getTodayAttendanceForRep(userId, database = db, now = new Date()) {
   const employee = employeeForRep(positiveId(userId, 'userId'), database);
   const date = localDate(now, getTimeZone(database));
+  const active = openAttendance(employee.id, database);
+  const activeOvertime = openOvertimeSession(employee.id, database);
+  const openRecord = active
+    ? {
+      ...getAttendanceRecord(employee.id, active.work_date, database),
+      activeShiftKind: 'regular', activeClockInTime: active.clock_in_time, activeClockOutTime: null,
+    }
+    : activeOvertime ? {
+      ...getAttendanceRecord(employee.id, activeOvertime.work_date, database),
+      activeShiftKind: 'overtime', activeClockInTime: activeOvertime.clock_in_time,
+      activeClockOutTime: activeOvertime.clock_out_time ?? null,
+    } : null;
   return {
     date,
     attendance: getAttendanceRecord(employee.id, date, database) ?? null,
+    // A shift can legitimately span the business-date boundary. Keep today's
+    // row for backward compatibility and expose the active row separately so
+    // the client can compute elapsed time from its original clock-in.
+    openAttendance: openRecord,
     overtimeRequest: latestOvertimeRequest(employee.id, date, database) ?? null,
   };
 }

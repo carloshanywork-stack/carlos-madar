@@ -1,5 +1,12 @@
 package com.madar.rep.app.media
 
+import androidx.compose.foundation.Image
+import androidx.compose.ui.graphics.asImageBitmap
+import com.madar.rep.app.core.GeoPoint
+import com.madar.rep.app.core.MadarTime
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -67,8 +74,6 @@ class CameraActivity : ComponentActivity() {
     private var imageCapture: ImageCapture? = null
     private val executor = Executors.newSingleThreadExecutor()
     private var cameraPermissionGranted by mutableStateOf(false)
-    private var savedPhotoCount by mutableStateOf(0)
-    private var savedInThisSession = false
     private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         cameraPermissionGranted = granted
         if (!granted) {
@@ -88,7 +93,6 @@ class CameraActivity : ComponentActivity() {
         }
         cameraPermissionGranted =
             ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
-        savedPhotoCount = intent.getIntExtra(EXTRA_EXISTING_COUNT, 0).coerceAtLeast(0)
         if (!cameraPermissionGranted) permissionLauncher.launch(Manifest.permission.CAMERA)
         setContent {
             if (cameraPermissionGranted) {
@@ -96,8 +100,8 @@ class CameraActivity : ComponentActivity() {
                     phase = phase,
                     machineCode = intent.getStringExtra(EXTRA_MACHINE_CODE).orEmpty(),
                     machineName = intent.getStringExtra(EXTRA_MACHINE_NAME).orEmpty(),
-                    existingCount = intent.getIntExtra(EXTRA_EXISTING_COUNT, 0),
-                    onClose = { finishCaptureSession() },
+                    existingCount = intent.getIntExtra(EXTRA_EXISTING_COUNT, 0) + capturedCount,
+                    onClose = { if(capturedCount > 0) setResult(RESULT_OK); finish() },
                     onCapture = { onCapture(visitUuid, phase) },
                 )
             } else {
@@ -113,23 +117,17 @@ class CameraActivity : ComponentActivity() {
         super.onDestroy()
     }
 
-    private fun finishCaptureSession() {
-        if (savedInThisSession) {
-            setResult(RESULT_OK, Intent().putExtra("phase", intent.getStringExtra(EXTRA_PHASE)))
-        }
-        finish()
-    }
-
     private fun onCapture(visitUuid: String, phase: String) {
         val capture = imageCapture ?: run {
             Toast.makeText(this, "الكاميرا غير جاهزة", Toast.LENGTH_SHORT).show()
             return
         }
         capture.targetRotation = display?.rotation ?: Surface.ROTATION_0
-        val capturedAtMillis = System.currentTimeMillis()
         val container = (application as MadarApplication).container
         val state = CaptureUiState.busy
-        updateCaptureState(state)
+        assignCaptureState(state)
+        val capturedAt = System.currentTimeMillis()
+        val frozenLocation = livePoint?.takeIf { it.isFresh(capturedAt) && !it.isMock }
         val captureFile = container.photoStore.newCaptureFile(visitUuid, phase)
         capture.takePicture(
             ImageCapture.OutputFileOptions.Builder(captureFile).build(),
@@ -149,24 +147,13 @@ class CameraActivity : ComponentActivity() {
                             val usedPositions = existingPhotos.map { it.position }.toSet()
                             val position = (0 until PhotoPolicy.MAX_PER_PHASE).firstOrNull { it !in usedPositions }
                                 ?: throw MadarError.Validation("بلغت الحد التقني لصور هذه المرحلة")
-                            val candidateLocation = when (val fix = kotlinx.coroutines.runBlocking { container.locationProvider.currentFix(7_000) }) {
-                                is com.madar.rep.app.location.LocationResult.Success -> fix.point
-                                else -> container.locationProvider.lastKnown()
-                            }
-                            // A cached fix is useful only when it is still demonstrably fresh and valid.
-                            // Missing/stale GPS must not be stamped as the current capture location.
-                            val location = candidateLocation?.takeIf { point ->
-                                point.isFresh(capturedAtMillis) && !point.isMock &&
-                                    point.latitude.isFinite() && point.longitude.isFinite() &&
-                                    point.latitude in -90.0..90.0 && point.longitude in -180.0..180.0 &&
-                                    point.accuracyMeters.isFinite() && point.accuracyMeters >= 0f
-                            }
+                            val location = frozenLocation
                             val photo = container.photoStore.commit(
                                 visitUuid = visitUuid,
                                 phase = phase,
                                 position = position,
                                 capturedFile = captureFile,
-                                capturedAtMillis = capturedAtMillis,
+                                capturedAtMillis = capturedAt,
                                 location = location,
                                 machineCode = visit.machineCode,
                                 machineName = visit.machineName,
@@ -174,24 +161,29 @@ class CameraActivity : ComponentActivity() {
                                 areaName = visit.areaName,
                             )
                             kotlinx.coroutines.runBlocking { container.visitRepo.addPhoto(visitUuid, photo) }
-                            captureFile.delete()
                             runOnUiThread {
-                                savedInThisSession = true
-                                savedPhotoCount = existingPhotos.size + 1
-                                updateCaptureState(CaptureUiState.saved)
+                                setResult(
+                                    RESULT_OK,
+                                    Intent().putExtra("photoId", photo.id).putExtra("phase", phase)
+                                )
+                                capturedCount += 1
+                                previewPath = photo.processedPath
+                                assignCaptureState(CaptureUiState.idle)
                             }
                         } catch (error: Exception) {
+                            // The raw capture remains durable for recovery on processing failure.
                             val message = error.message ?: "تعذر حفظ الصورة"
                             runOnUiThread {
-                                updateCaptureState(CaptureUiState.error(message))
+                                assignCaptureState(CaptureUiState.error(message))
                             }
                         }
                     }
                 }
 
                 override fun onError(exception: ImageCaptureException) {
+                    captureFile.delete()
                     runOnUiThread {
-                        updateCaptureState(CaptureUiState.error(exception.message ?: "تعذر التصوير"))
+                        assignCaptureState(CaptureUiState.error(exception.message ?: "تعذر التصوير"))
                     }
                 }
             }
@@ -205,7 +197,7 @@ class CameraActivity : ComponentActivity() {
         else -> 0
     }
 
-    private fun updateCaptureState(value: CaptureUiState) {
+    private fun assignCaptureState(value: CaptureUiState) {
         captureState = value
     }
 
@@ -217,12 +209,14 @@ class CameraActivity : ComponentActivity() {
         const val EXTRA_EXISTING_COUNT = "existingCount"
     }
 
+    private var capturedCount by mutableStateOf(0)
+    private var previewPath by mutableStateOf<String?>(null)
+    private var livePoint by mutableStateOf<GeoPoint?>(null)
     private var captureState by mutableStateOf<CaptureUiState>(CaptureUiState.idle)
 
     private sealed interface CaptureUiState {
         data object idle : CaptureUiState
         data object busy : CaptureUiState
-        data object saved : CaptureUiState
         data class error(val message: String) : CaptureUiState
     }
 
@@ -239,6 +233,16 @@ class CameraActivity : ComponentActivity() {
         val lifecycleOwner = LocalLifecycleOwner.current
         val previewView = remember { PreviewView(context).apply { scaleType = PreviewView.ScaleType.FILL_CENTER } }
         val state = captureState
+        var clock by remember { mutableStateOf(System.currentTimeMillis()) }
+        LaunchedEffect(Unit) { while (kotlinx.coroutines.currentCoroutineContext().isActive) { clock=System.currentTimeMillis(); delay(1000) } }
+        LaunchedEffect(Unit) {
+            val container=(application as MadarApplication).container
+            while(kotlinx.coroutines.currentCoroutineContext().isActive) {
+                val fix=container.locationProvider.currentFix(5000)
+                livePoint=(fix as? com.madar.rep.app.location.LocationResult.Success)?.point
+                delay(1000)
+            }
+        }
         LaunchedEffect(Unit) {
             val future = ProcessCameraProvider.getInstance(context)
             future.addListener({
@@ -274,7 +278,7 @@ class CameraActivity : ComponentActivity() {
                             fontSize = 18.sp
                         )
                         Text(
-                            "$machineCode · ${machineName.ifBlank { "ماكينة" }} · ${savedPhotoCount}/${PhotoPolicy.MAX_PER_PHASE}",
+                            "$machineCode · ${machineName.ifBlank { "ماكينة" }} · ${existingCount}/${PhotoPolicy.MAX_PER_PHASE}",
                             color = Color.White.copy(alpha = 0.85f),
                             fontSize = 13.sp
                         )
@@ -286,6 +290,19 @@ class CameraActivity : ComponentActivity() {
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
+                    val stampPoint=livePoint?.takeIf { it.isFresh(clock) && !it.isMock }
+                    Column(Modifier.fillMaxWidth().background(Color.Black.copy(alpha=0.7f)).padding(8.dp)) {
+                        val brand=remember { runCatching { assets.open("watermark-logo.png").use(android.graphics.BitmapFactory::decodeStream) }.getOrNull() }
+                        brand?.let { Image(it.asImageBitmap(),contentDescription="A to Z",modifier=Modifier.height(40.dp)) }
+                        Text("A to Z · $machineCode · ${MadarTime.watermark(clock).time}",color=Color.White)
+                        Text(stampPoint?.let { "GPS ${it.latitude}, ${it.longitude} ±${it.accuracyMeters.toInt()}م" } ?: "الموقع غير متاح · الصورة ستظل محفوظة",color=Color.White)
+                        stampPoint?.let { (application as MadarApplication).container.governorates.find(it.latitude,it.longitude)?.nameAr }?.let { Text("المحافظة: $it",color=Color.White) }
+                    }
+                    previewPath?.let { path ->
+                        val bitmap=remember(path) { android.graphics.BitmapFactory.decodeFile(path) }
+                        bitmap?.let { Image(it.asImageBitmap(), contentDescription="آخر صورة محفوظة بالواترمارك",modifier=Modifier.height(100.dp)) }
+                    }
+                    if (capturedCount > 0) Button(onClick=onClose) { Text("تم · الرجوع للصور المحفوظة") }
                     if (state is CaptureUiState.error) {
                         Text(
                             state.message,
@@ -294,34 +311,18 @@ class CameraActivity : ComponentActivity() {
                             modifier = Modifier.background(Color.Black.copy(alpha = 0.55f)).padding(10.dp)
                         )
                     }
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceEvenly,
-                        verticalAlignment = Alignment.CenterVertically,
+                    Button(
+                        onClick = onCapture,
+                        enabled = state !is CaptureUiState.busy && existingCount < PhotoPolicy.MAX_PER_PHASE,
+                        modifier = Modifier.size(84.dp),
+                        shape = CircleShape,
+                        colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black)
                     ) {
-                        Button(
-                            onClick = onCapture,
-                            enabled = state !is CaptureUiState.busy && savedPhotoCount < PhotoPolicy.MAX_PER_PHASE,
-                            modifier = Modifier.size(84.dp),
-                            shape = CircleShape,
-                            colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black)
-                        ) {
-                            if (state is CaptureUiState.busy) {
-                                CircularProgressIndicator(color = Color.Black, modifier = Modifier.size(32.dp))
-                            } else {
-                                Box(Modifier.size(54.dp).background(Color(0xFFDCAA52), CircleShape))
-                            }
+                        if (state is CaptureUiState.busy) {
+                            CircularProgressIndicator(color = Color.Black, modifier = Modifier.size(32.dp))
+                        } else {
+                            Box(Modifier.size(54.dp).background(Color(0xFFDCAA52), CircleShape))
                         }
-                        Button(
-                            onClick = onClose,
-                            enabled = state !is CaptureUiState.busy,
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF187B68)),
-                        ) {
-                            Text(if (savedPhotoCount > 0) "إنهاء · $savedPhotoCount صورة" else "إغلاق")
-                        }
-                    }
-                    if (state == CaptureUiState.saved) {
-                        Text("تم حفظ الصورة. يمكنك التقاط صورة أخرى.", color = Color(0xFFC8E6C9), textAlign = TextAlign.Center)
                     }
                     Text(
                         "سيتم ختم التاريخ والوقت والماكينة والموقع على الصورة",

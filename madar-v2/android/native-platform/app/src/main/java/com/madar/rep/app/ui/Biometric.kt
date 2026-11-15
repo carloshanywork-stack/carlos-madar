@@ -21,7 +21,7 @@ import androidx.fragment.app.FragmentActivity
 fun rememberBiometricGate(onResult: (Boolean, String?) -> Unit): (String, String) -> Unit {
     val context = LocalContext.current
     val activity = remember(context) { context.findFragmentActivity() }
-    val callback by rememberUpdatedState(onResult)
+    val callback = rememberUpdatedState(onResult).value
     return remember(activity) {
         { title, subtitle ->
             if (activity == null) {

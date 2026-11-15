@@ -290,3 +290,38 @@ data class MachineActionResponse(
     val error: String? = null,
     val message: String? = null,
 )
+
+@Serializable
+data class TrackingPoint(
+    val clientPointId: String,
+    val latitude: Double,
+    val longitude: Double,
+    val accuracy: Double,
+    val speed: Double = 0.0,
+    val updatedAt: String,
+)
+
+@Serializable
+data class LocationPingRequest(
+    val onDuty: Boolean = true,
+    val trail: List<TrackingPoint> = emptyList(),
+)
+
+@Serializable
+data class LocationPingAck(
+    val clientPointId: String? = null,
+    val status: String = "",
+    val reason: String? = null,
+)
+
+@Serializable
+data class LocationPingEnvelope(
+    val success: Boolean = false,
+    val onDuty: Boolean = false,
+    val acceptedPoints: Int = 0,
+    val duplicatePoints: Int = 0,
+    val rejectedPoints: Int = 0,
+    val points: List<LocationPingAck> = emptyList(),
+    val error: String? = null,
+    val message: String? = null,
+)
