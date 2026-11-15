@@ -20,7 +20,7 @@ The native Android project currently compiles, its unit tests pass, and release 
 
 ## Code work in this checkout
 
-- Restored native data/API/Room/repository/session/map/migration/sync source files were ignored by the broad `data/` ignore rule. They have been force-added to the Git index so they will not silently disappear from a future commit. No commit was created.
+- Restored native data/API/Room/repository/session/map/migration/sync source files were ignored by the broad `data/` ignore rule. They were force-added to Git and pushed as part of commit `ad1e22ea74e9e0158c584dc4aa0f4be628bde5f6` on `origin/main`.
 - Added GPS-coordinate and policy validation, memory-only login password handling, eight core safety tests, shared version loading, and a release packaging guard against unsigned APKs.
 - Camera now stays open for consecutive captures. Photo originals are written beneath app-private durable storage, use unique evidence directories, and are not deleted by the photo-removal path. Captures with missing/stale/mock/invalid GPS are not labelled with a current GPS fix.
 - These camera/evidence changes have compile coverage only; they have not been exercised on an emulator. A complete interruption journal/recovery flow and immediate processed-photo preview remain unverified/incomplete.
@@ -30,6 +30,8 @@ The native Android project currently compiles, its unit tests pass, and release 
 - No approved keystore or signing properties were available; no release APK, upgrade signature comparison, or installed-version upgrade test exists.
 - No emulator/device was attached, so camera, migration, lifecycle, GPS, and offline behavior were not acceptance-tested. Physical-phone acceptance was explicitly waived; this is a waiver, not a pass.
 - The staged map-download/rendering artifacts, PBF, generator scripts, and generated MBTiles described in the handoff were not present in this Windows checkout. The existing server catalog is not proof of nationwide coverage. No Egyptian map package was verified or published.
-- Ubuntu/WSL and server access were not available here. No server backup, commit, push, PM2 restart, health verification, APK publication, or authenticated download-hash check was performed.
+- Push verification: `origin/main` points to `ad1e22ea74e9e0158c584dc4aa0f4be628bde5f6`.
+- Live `GET /api/health` still reported `sourceRevision=0cb7ceca1027e52a3102e092c7df01fa3ffc2060` and `sourceDirty=true` after the push. Thus the running service did **not** show the pushed revision at check time.
+- Tailscale can see the Ubuntu host, but SSH to its `madar` account was rejected (`Permission denied (publickey,password)`). No server backup, pull/restart, APK publication, or authenticated download-hash check was performed.
 - Migration ownership binding and legacy-backlog visibility still need review before enabling production sync; legacy owner IDs must not be silently mapped to a server-scoped local owner namespace.
 - There is no verified application release link. The debug APK above is a local engineering artifact only.
