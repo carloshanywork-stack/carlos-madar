@@ -520,6 +520,28 @@
   #madar-app .rep-tutorial-back { font-size: 9px; }
 }
 
+#madar-app .rep-support-backdrop { position: fixed; z-index: 1200; inset: 0; display: grid; place-items: center; overflow-y: auto; padding: 16px; background: rgb(7 18 28 / 66%); }
+#madar-app .rep-support-dialog { width: min(100%, 600px); max-height: min(92dvh, 900px); overflow-y: auto; padding: 22px; border: 1px solid #d9e2e6; border-radius: 20px; background: #fff; color: #182d38; box-shadow: 0 24px 80px rgb(0 0 0 / 28%); }
+#madar-app .rep-support-dialog > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+#madar-app .rep-support-dialog h2 { margin: 3px 0; font-size: 22px; }
+#madar-app .rep-support-dialog > header button { width: 40px; height: 40px; border: 0; border-radius: 12px; background: #eef3f4; font-size: 24px; cursor: pointer; }
+#madar-app .rep-support-dialog > p { color: #5b6c74; font-size: 13px; line-height: 1.8; }
+#madar-app .rep-support-dialog form { display: grid; gap: 13px; }
+#madar-app .rep-support-dialog label { display: grid; gap: 6px; font-size: 12px; font-weight: 700; }
+#madar-app .rep-support-dialog input, #madar-app .rep-support-dialog select, #madar-app .rep-support-dialog textarea { width: 100%; min-height: 42px; padding: 10px; border: 1px solid #cdd8dc; border-radius: 10px; background: #fff; color: #182d38; font: inherit; }
+#madar-app .rep-support-dialog textarea { resize: vertical; }
+#madar-app .rep-support-actions { display: flex; gap: 8px; justify-content: flex-start; }
+#madar-app .rep-support-actions button { min-height: 42px; padding: 0 15px; border: 1px solid #cdd8dc; border-radius: 10px; background: #eef3f4; font: inherit; font-weight: 700; cursor: pointer; }
+#madar-app .rep-support-actions button[type="submit"] { border-color: #087968; background: #087968; color: #fff; }
+#madar-app .rep-support-actions button:disabled { opacity: .55; }
+#madar-app .rep-support-error { color: #a52f2f; }
+#madar-app .rep-support-success { color: #087968; }
+#madar-app .rep-support-history { margin-top: 18px; padding-top: 12px; border-top: 1px solid #e1e8ea; }
+#madar-app .rep-support-history h3 { margin: 0 0 8px; font-size: 14px; }
+#madar-app .rep-support-history ul { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }
+#madar-app .rep-support-history li { display: flex; justify-content: space-between; gap: 12px; font-size: 11px; }
+#madar-app .rep-support-history li span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 @media (max-width: 390px) {
   #madar-app .rep-connect-status { max-width: 145px; overflow: hidden; text-overflow: ellipsis; }
   #madar-app .rep-user-info { max-width: 43%; }

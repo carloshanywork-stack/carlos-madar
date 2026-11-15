@@ -45,7 +45,8 @@ function profileInput(input, { partial = false } = {}) {
     delete normalized[camel];
   }
   const allowed = ['classification', 'name', 'department', 'job_title', 'phone', 'national_id', 'hire_date',
-    'monthly_salary_cents', 'daily_rate_cents', 'active', 'enableLogin', 'username', 'password', 'role', 'assignedRegions'];
+    'monthly_salary_cents', 'daily_rate_cents', 'active', 'enableLogin', 'username', 'password', 'role', 'assignedRegions',
+    'canSelfApproveVisits'];
   allowOnlyKeys(normalized, allowed);
   const result = {};
   if (!partial || normalized.name !== undefined) result.name = requireText(normalized.name, 'name', { minLength: 2, maxLength: 160 });
@@ -84,6 +85,10 @@ function profileInput(input, { partial = false } = {}) {
   }
   if (normalized.role !== undefined) result.role = normalized.role;
   if (normalized.assignedRegions !== undefined) result.assignedRegions = normalizeRegions(normalized.assignedRegions);
+  if (normalized.canSelfApproveVisits !== undefined) {
+    if (typeof normalized.canSelfApproveVisits !== 'boolean') throw new HttpError(400, 'canSelfApproveVisits must be a boolean.');
+    result.canSelfApproveVisits = normalized.canSelfApproveVisits;
+  }
   return result;
 }
 
@@ -115,12 +120,13 @@ function mapStaff(row) {
     role,
     login_active: row.login_active === null ? null : Number(row.login_active),
     assignedRegions: regionsFor(row),
+    canSelfApproveVisits: Number(row.can_self_approve_visits) === 1,
     created_at: row.created_at,
   };
 }
 
 const STAFF_SELECT = `SELECT employee.*, user.username, user.role AS user_role,
-  user.active AS login_active, user.assigned_regions_json
+  user.active AS login_active, user.assigned_regions_json, user.can_self_approve_visits
   FROM employees employee LEFT JOIN users user ON user.id = employee.user_id`;
 
 export function listStaff(category, database = db, { includeInactive = true } = {}) {
@@ -155,7 +161,7 @@ export async function createStaffMember(input, actorId = null, database = db) {
     throw new HttpError(400, 'classification must be representative, worker, or system.');
   }
   const withLogin = value.classification !== 'worker';
-  if (!withLogin && (value.username !== undefined || value.password !== undefined || value.role !== undefined || value.assignedRegions !== undefined)) {
+  if (!withLogin && (value.username !== undefined || value.password !== undefined || value.role !== undefined || value.assignedRegions !== undefined || value.canSelfApproveVisits !== undefined)) {
     throw new HttpError(400, 'Workers do not have login credentials or assigned user roles.');
   }
   if (withLogin && (!value.username || !value.password)) throw new HttpError(400, 'Login staff require a username and a password of at least 4 characters.');
@@ -173,8 +179,9 @@ export async function createStaffMember(input, actorId = null, database = db) {
       let userId = null;
       if (withLogin) {
         const createdUser = database.prepare(`INSERT INTO users
-          (username, password_hash, full_name, role, active, assigned_regions_json)
-          VALUES (?, ?, ?, ?, ?, ?)`).run(value.username, passwordHash, value.name, role, active, JSON.stringify(regions));
+          (username, password_hash, full_name, role, active, assigned_regions_json, can_self_approve_visits)
+          VALUES (?, ?, ?, ?, ?, ?, ?)`).run(value.username, passwordHash, value.name, role, active, JSON.stringify(regions),
+          role === 'rep' && value.canSelfApproveVisits === true ? 1 : 0);
         userId = Number(createdUser.lastInsertRowid);
       }
       const department = withLogin ? cleanDepartment(value.department) : cleanDepartment(value.department);
@@ -196,7 +203,8 @@ export async function createStaffMember(input, actorId = null, database = db) {
           value.phone, value.national_id, value.hire_date, value.monthly_salary_cents,
           value.daily_rate_cents, active, id);
         recordAudit({ database, actorId, action: 'create', entityType: 'user', entityId: userId,
-          newValues: { username: value.username, full_name: value.name, role, active, assigned_regions: regions } });
+          newValues: { username: value.username, full_name: value.name, role, active, assigned_regions: regions,
+          can_self_approve_visits: role === 'rep' && value.canSelfApproveVisits === true } });
       }
       recordAudit({ database, actorId, action: 'create', entityType: 'employee', entityId: id,
         newValues: { ...value, password: undefined, can_login: withLogin ? 1 : 0, user_id: userId, active } });
@@ -235,7 +243,7 @@ export async function updateStaffMember(employeeIdValue, input, actorId = null, 
   if (!Object.keys(changes).length) throw new HttpError(400, 'At least one staff field must be provided.');
   const current = database.prepare(`SELECT employee.*, user.username, user.role AS user_role, user.active AS login_active,
       user.is_online AS login_online,
-      user.deleted_at AS login_deleted_at, user.assigned_regions_json
+      user.deleted_at AS login_deleted_at, user.assigned_regions_json, user.can_self_approve_visits
     FROM employees employee LEFT JOIN users user ON user.id = employee.user_id
     WHERE employee.id = ? AND employee.deleted_at IS NULL`).get(employeeId);
   if (!current) throw new HttpError(404, 'Staff member was not found.');
@@ -260,6 +268,12 @@ export async function updateStaffMember(employeeIdValue, input, actorId = null, 
   let regions = changes.assignedRegions ?? regionsFor(current);
   if (requestedRole !== 'rep') regions = [];
   else if (!regions.length) regions = ['*'];
+  if (changes.canSelfApproveVisits !== undefined && requestedRole !== 'rep') {
+    throw new HttpError(400, 'canSelfApproveVisits can only be set for a representative.');
+  }
+  const nextSelfApproval = requestedRole === 'rep'
+    ? changes.canSelfApproveVisits ?? (Number(current.can_self_approve_visits) === 1)
+    : false;
   const passwordHash = changes.password === undefined ? null : await bcrypt.hash(changes.password, 12);
   const next = {
     name: changes.name ?? current.name,
@@ -286,22 +300,24 @@ export async function updateStaffMember(employeeIdValue, input, actorId = null, 
           throw new HttpError(400, 'Enabling login requires a username and a password of at least 4 characters.');
         }
         if (userId !== null) {
-          const beforeUser = database.prepare('SELECT username, full_name, role, active FROM users WHERE id = ?').get(userId);
+          const beforeUser = database.prepare('SELECT username, full_name, role, active, can_self_approve_visits FROM users WHERE id = ?').get(userId);
           database.prepare(`UPDATE users SET username = ?, password_hash = ?, full_name = ?, role = ?, active = ?,
-            is_online = 0, deleted_at = NULL, assigned_regions_json = ? WHERE id = ?`)
-            .run(changes.username, passwordHash, next.name, requestedRole, next.active, JSON.stringify(regions), userId);
+            is_online = 0, deleted_at = NULL, assigned_regions_json = ?, can_self_approve_visits = ? WHERE id = ?`)
+            .run(changes.username, passwordHash, next.name, requestedRole, next.active, JSON.stringify(regions), nextSelfApproval ? 1 : 0, userId);
           database.prepare('UPDATE sessions SET revoked_at = CURRENT_TIMESTAMP WHERE user_id = ? AND revoked_at IS NULL').run(userId);
           recordAudit({ database, actorId, action: 'staff_login_reenabled', entityType: 'user', entityId: userId,
             oldValues: beforeUser,
-            newValues: { username: changes.username, full_name: next.name, role: requestedRole, active: next.active, assigned_regions: regions } });
+            newValues: { username: changes.username, full_name: next.name, role: requestedRole, active: next.active, assigned_regions: regions,
+              can_self_approve_visits: nextSelfApproval } });
         } else {
           const result = database.prepare(`INSERT INTO users
-            (username, password_hash, full_name, role, active, assigned_regions_json)
-            VALUES (?, ?, ?, ?, ?, ?)`).run(changes.username, passwordHash, next.name, requestedRole,
-            next.active, JSON.stringify(regions));
+            (username, password_hash, full_name, role, active, assigned_regions_json, can_self_approve_visits)
+            VALUES (?, ?, ?, ?, ?, ?, ?)`).run(changes.username, passwordHash, next.name, requestedRole,
+            next.active, JSON.stringify(regions), nextSelfApproval ? 1 : 0);
           userId = Number(result.lastInsertRowid);
           recordAudit({ database, actorId, action: 'create_from_staff', entityType: 'user', entityId: userId,
-            newValues: { username: changes.username, full_name: next.name, role: requestedRole, active: next.active, assigned_regions: regions } });
+            newValues: { username: changes.username, full_name: next.name, role: requestedRole, active: next.active, assigned_regions: regions,
+              can_self_approve_visits: nextSelfApproval } });
         }
       } else if (current.user_id !== null && Number(current.can_login) === 1) {
         const nextUsername = changes.username ?? current.username;
@@ -316,19 +332,20 @@ export async function updateStaffMember(employeeIdValue, input, actorId = null, 
           throw new HttpError(409, 'You cannot deactivate or demote your own administrator account.');
         }
         database.prepare(`UPDATE users SET username = ?, full_name = ?, role = ?, active = ?, is_online = ?,
-          password_hash = COALESCE(?, password_hash), assigned_regions_json = ? WHERE id = ?`)
+          password_hash = COALESCE(?, password_hash), assigned_regions_json = ?, can_self_approve_visits = ? WHERE id = ?`)
           .run(nextUsername, next.name, requestedRole, nextUserActive,
             requestedRole === 'rep' && nextUserActive === 1 && !identityChanged ? current.login_online : 0,
-            passwordHash, JSON.stringify(regions), current.user_id);
+            passwordHash, JSON.stringify(regions), nextSelfApproval ? 1 : 0, current.user_id);
         if (next.active === 0 || identityChanged) {
           database.prepare('UPDATE sessions SET revoked_at = CURRENT_TIMESTAMP WHERE user_id = ? AND revoked_at IS NULL').run(current.user_id);
         }
         if (next.active === 0) database.prepare(`UPDATE rep_duty_sessions SET ended_at = CURRENT_TIMESTAMP,
           updated_at = CURRENT_TIMESTAMP WHERE rep_user_id = ? AND ended_at IS NULL`).run(current.user_id);
         recordAudit({ database, actorId, action: 'update', entityType: 'user', entityId: current.user_id,
-          oldValues: { username: current.username, full_name: current.name, role: currentRole, active: current.login_active },
+          oldValues: { username: current.username, full_name: current.name, role: currentRole, active: current.login_active,
+            can_self_approve_visits: Number(current.can_self_approve_visits) === 1 },
           newValues: { username: nextUsername, full_name: next.name, role: requestedRole, active: nextUserActive,
-            assigned_regions: regions, password_changed: Boolean(passwordHash) } });
+            assigned_regions: regions, can_self_approve_visits: nextSelfApproval, password_changed: Boolean(passwordHash) } });
       } else if (current.user_id !== null) {
         database.prepare('UPDATE users SET full_name = ?, active = 0, is_online = 0 WHERE id = ?')
           .run(next.name, current.user_id);

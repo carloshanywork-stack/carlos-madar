@@ -22,6 +22,7 @@ data class VisitSyncOutcome(
     val status: String?,
     val message: String?,
     val retryAfterMs: Long?,
+    val reasonCodes: List<String> = emptyList(),
 )
 
 data class VisitPhotoFile(
@@ -90,6 +91,21 @@ class MadarApi(
         return parse(result.body, FaultReasonsResponse.serializer()).reasons
     }
 
+    fun submitSupportReport(token: String, payloadJson: String): RepSupportReport {
+        val result = execute(
+            Request.Builder()
+                .url("$baseUrl/api/rep/support/reports")
+                .header("Authorization", "Bearer $token")
+                .post(payloadJson.toRequestBody(JSON_MEDIA))
+                .build()
+        )
+        if (result.status == 401) throw MadarError.SessionExpired()
+        if (result.status == 403) throw MadarError.AccountDisabled(errorText(result))
+        if (result.status !in 200..299) throw mapReadError(result)
+        return parse(result.body, RepSupportReportEnvelope.serializer()).report
+            ?: throw MadarError.Network("لم يُرجع الخادم البلاغ المحفوظ.")
+    }
+
     fun syncVisit(token: String, visit: VisitUpload, photos: List<VisitPhotoFile>): VisitSyncOutcome {
         val visitJson = json.encodeToString(VisitUpload.serializer(), visit)
         val builder = MultipartBody.Builder().setType(MultipartBody.FORM)
@@ -118,6 +134,7 @@ class MadarApi(
             status = parsed.status,
             message = parsed.error ?: parsed.message,
             retryAfterMs = parsed.retryAfterMs,
+            reasonCodes = parsed.reasonCodes,
         )
     }
 
@@ -429,4 +446,5 @@ private data class VisitSyncEnvelope(
     val error: String? = null,
     val message: String? = null,
     val retryAfterMs: Long? = null,
+    val reasonCodes: List<String> = emptyList(),
 )

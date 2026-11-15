@@ -60,7 +60,7 @@ function distanceMeters(first, second) {
   return 6371000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(Math.max(0, 1 - a)));
 }
 
-export default function MachineVisitSheet({ machine, repId, repName = '', reasons, gps, gpsError, captureLocation, onStartWork, onStopWork, onClose, onSave, onConfirmLocation, onReportCorrection }) {
+export default function MachineVisitSheet({ machine, repId, repName = '', reasons, gps, gpsError, captureLocation, onStartWork, onStopWork, onClose, onSave, onConfirmLocation, onReportCorrection, onRequestLocationChange }) {
   const [notes, setNotes] = useState('');
   const [photos, setPhotos] = useState({ before: [], after: [] });
   const [pendingCaptures, setPendingCaptures] = useState({ before: [], after: [] });
@@ -92,6 +92,10 @@ export default function MachineVisitSheet({ machine, repId, repName = '', reason
   const [correctionName, setCorrectionName] = useState('');
   const [correctionNote, setCorrectionNote] = useState('');
   const [correctionEvidence, setCorrectionEvidence] = useState(null);
+  const [locationChangeOpen, setLocationChangeOpen] = useState(false);
+  const [locationChangeSaving, setLocationChangeSaving] = useState(false);
+  const [locationChangeNote, setLocationChangeNote] = useState('');
+  const [locationChangeEvidence, setLocationChangeEvidence] = useState(null);
   const beforeInput = useRef(null);
   const afterInput = useRef(null);
   const previewUrls = useRef(new Set());
@@ -241,6 +245,28 @@ export default function MachineVisitSheet({ machine, repId, repName = '', reason
     } finally {
       setCorrectionSaving(false);
     }
+  };
+
+  const submitLocationChange = async () => {
+    setLocationChangeSaving(true);
+    setError('');
+    try {
+      const currentLocation = await captureLocation?.();
+      if (!currentLocation) throw new Error('يلزم الحصول على GPS حديث قبل طلب تغيير الموقع.');
+      if (!isEligibleVisitGps(currentLocation)) throw new Error('إشارة GPS قديمة أو غير دقيقة؛ حدّث الموقع ثم حاول مجدداً.');
+      if (currentLocation.isMock === true) throw new Error('لا يمكن إرسال موقع تم الإبلاغ عنه كموقع تجريبي.');
+      if (locationChangeEvidence && locationChangeEvidence.size > 4 * 1024 * 1024) throw new Error('يجب ألا تتجاوز صورة الإثبات 4 ميغابايت.');
+      await onRequestLocationChange({
+        note: locationChangeNote.trim(), evidence: locationChangeEvidence,
+        location: { latitude: currentLocation.latitude, longitude: currentLocation.longitude,
+          accuracy: currentLocation.accuracy, updatedAt: currentLocation.updatedAt, isMock: currentLocation.isMock === true },
+      });
+      setLocationChangeOpen(false);
+      setLocationChangeNote('');
+      setLocationChangeEvidence(null);
+      setError('تم إرسال طلب تغيير الموقع للمراجعة الإدارية. سيظل الموقع الحالي فعالاً حتى اعتماده.');
+    } catch (caught) { setError(caught.message || 'تعذر إرسال طلب تغيير الموقع.'); }
+    finally { setLocationChangeSaving(false); }
   };
 
   const setPendingPhase = (phase, updater) => {
@@ -684,6 +710,22 @@ export default function MachineVisitSheet({ machine, repId, repName = '', reason
                 disabled={correctionSaving || !gpsFresh || !correctionCode.trim() || !correctionName.trim()}>
                 {correctionSaving ? 'جارٍ حفظ البلاغ…' : 'إرسال بلاغ التصحيح للإدارة'}
               </button>
+            </div>}
+          </section>}
+
+          {locationLocked && onRequestLocationChange && <section className="rep-wrong-machine-report">
+            <button type="button" className="rep-button rep-button-light"
+              onClick={() => { setLocationChangeOpen((value) => !value); setError(''); }}
+              aria-expanded={locationChangeOpen} disabled={locationChangeSaving || saving}>
+              {locationChangeOpen ? 'إخفاء طلب تغيير الموقع' : 'تغيير موقع الماكينة · يتطلب اعتماد الإدارة'}
+            </button>
+            {locationChangeOpen && <div className="rep-correction-form">
+              <p>سيُرفق طلبك بإحداثيات GPS الحالية. لن يتغير الموقع المثبت أو نطاق الزيارة قبل اعتماد المدير.</p>
+              <label><span>سبب التغيير (اختياري)</span><textarea value={locationChangeNote} onChange={(event) => setLocationChangeNote(event.target.value)} maxLength={2000} rows={2} /></label>
+              <label><span>صورة إثبات اختيارية (JPEG / PNG / WebP · حتى 4 MB)</span><input type="file" accept="image/jpeg,image/png,image/webp" capture="environment" onChange={(event) => setLocationChangeEvidence(event.target.files?.[0] ?? null)} /></label>
+              {locationChangeEvidence && <small className="rep-correction-file">{locationChangeEvidence.name} · {Math.ceil(locationChangeEvidence.size / 1024)} KB</small>}
+              <button type="button" className="rep-button rep-button-primary" onClick={() => void submitLocationChange()}
+                disabled={locationChangeSaving || !gpsFresh}>{locationChangeSaving ? 'جارٍ إرسال الطلب…' : 'إرسال طلب التغيير للموافقة'}</button>
             </div>}
           </section>}
 

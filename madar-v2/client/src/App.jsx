@@ -9,6 +9,7 @@ import NativePermissionGate from './NativePermissionGate.jsx';
 
 const RepApp = lazy(() => import('./modules/rep/RepApp.jsx'));
 const SupervisorRadarPage = lazy(() => import('./modules/supervisor/SupervisorRadarPage.jsx'));
+const RepSupportAdminPage = lazy(() => import('./modules/system/RepSupportAdminPage.jsx'));
 
 const DashboardPage = lazy(() => import('./modules/dashboard/OverviewPage.jsx'));
 const ClientsPage = lazy(() => import('./modules/clients/ClientsPage.jsx'));
@@ -70,6 +71,7 @@ function BusinessRoutes({ user }) {
         <Route path="/finance" element={canViewFinance ? <FinancePage /> : <Navigate to="/" replace />} />
         <Route path="/accounting" element={canViewFinance ? <AccountingPage isAdmin={role === 'admin'} canViewPayroll /> : <Navigate to="/" replace />} />
         <Route path="/staff" element={user?.role === 'admin' ? <StaffDirectoryPage /> : <Navigate to="/" replace />} />
+        <Route path="/rep-support" element={user?.role === 'admin' ? <RepSupportAdminPage /> : <Navigate to="/" replace />} />
         <Route path="/archive" element={<ArchivePage isAdmin={role === 'admin'} />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />

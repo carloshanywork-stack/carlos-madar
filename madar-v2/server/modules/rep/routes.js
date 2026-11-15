@@ -29,12 +29,15 @@ import {
   getRepTodayRoute,
   confirmRepMachineLocation,
   listLocationConfirmations,
+  submitRepMachineLocationChange,
+  listRepMachineLocationChangeRequests,
   requireRepUsername,
   submitRepMachineCorrection,
   syncRepLocationPing,
   syncRepTracking,
   syncRepVisit,
 } from './service.js';
+import { createRepBugReport, downloadRepBugAttachment, listMyRepBugReports } from './support.js';
 
 const router = Router();
 const syncVisitUpload = diskUploadMany({
@@ -47,6 +50,10 @@ const machineCorrectionUpload = memoryUpload({
   maxBytes: 4 * 1024 * 1024,
   extensions: ['.jpg', '.jpeg', '.png', '.webp'],
 }).single('evidence');
+const supportReportUpload = memoryUpload({
+  maxBytes: 4 * 1024 * 1024,
+  extensions: ['.jpg', '.jpeg', '.png', '.webp'],
+}).single('attachment');
 
 function setSessionCookie(req, res, token) {
   res.cookie(env.authCookieName, token, {
@@ -256,6 +263,44 @@ router.get('/location-confirmations', (req, res) => {
   res.set({ 'Cache-Control': 'private, no-store' });
   res.json({ success: true, requests: listLocationConfirmations({ repId: req.user.id, status: 'all' }) });
 });
+
+router.get('/location-change-requests', (req, res) => {
+  res.set({ 'Cache-Control': 'private, no-store', Pragma: 'no-cache' });
+  res.json({ success: true, requests: listRepMachineLocationChangeRequests({ repId: req.user.id, status: 'all' }) });
+});
+
+router.post('/machines/:machineId/location-change-requests', machineCorrectionUpload, asyncHandler(async (req, res) => {
+  let input;
+  try { input = JSON.parse(req.body?.request ?? ''); }
+  catch { throw new HttpError(400, 'request must contain valid JSON.'); }
+  const result = await submitRepMachineLocationChange(req.user, req.params.machineId, input, req.file);
+  res.set({ 'Cache-Control': 'private, no-store', Pragma: 'no-cache' });
+  res.status(result.idempotent ? 200 : 201).json(result);
+}));
+
+router.get('/support/reports', (req, res) => {
+  res.set({ 'Cache-Control': 'private, no-store', Pragma: 'no-cache' });
+  res.json({ success: true, reports: listMyRepBugReports(req.user.id) });
+});
+
+router.get('/support/reports/:reportId/attachments/:attachmentId', asyncHandler(async (req, res) => {
+  const file = await downloadRepBugAttachment(req.params.reportId, req.params.attachmentId, db, req.user.id);
+  res.set({
+    'Cache-Control': 'private, no-store',
+    'X-Content-Type-Options': 'nosniff',
+    'Content-Type': file.content_type,
+    'Content-Length': String(file.byte_size),
+  }).attachment(file.original_name).sendFile(file.absolutePath);
+}));
+
+router.post('/support/reports', supportReportUpload, asyncHandler(async (req, res) => {
+  let report;
+  try { report = typeof req.body?.report === 'string' ? JSON.parse(req.body.report) : req.body; }
+  catch { throw new HttpError(400, 'report must contain valid JSON.'); }
+  const result = await createRepBugReport(req.user, report, req.file);
+  res.set({ 'Cache-Control': 'private, no-store', Pragma: 'no-cache' });
+  res.status(result.idempotent ? 200 : 201).json({ success: true, report: result });
+}));
 
 router.post('/machines/:machineId/confirm-location', (req, res, next) => {
   try {

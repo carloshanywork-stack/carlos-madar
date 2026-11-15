@@ -81,6 +81,7 @@ data class ApiLocation(
     val longitude: Double,
     val accuracy: Float,
     val updatedAt: String,
+    val isMock: Boolean? = null,
 )
 
 @Serializable
@@ -112,6 +113,23 @@ data class FaultReason(
 
 @Serializable
 data class FaultReasonsResponse(val success: Boolean = false, val reasons: List<FaultReason> = emptyList())
+
+@Serializable
+data class RepSupportReport(
+    val id: Long,
+    val reportUuid: String,
+    val category: String,
+    val severity: String,
+    val description: String,
+    val status: String,
+    val createdAt: String,
+)
+
+@Serializable
+data class RepSupportReportEnvelope(
+    val success: Boolean = false,
+    val report: RepSupportReport? = null,
+)
 
 @Serializable
 data class MaintenanceLine(val reasonId: Long, val quantity: Int)

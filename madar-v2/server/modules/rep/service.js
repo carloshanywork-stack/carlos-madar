@@ -57,7 +57,7 @@ function actionUuid(value, label = 'actionUuid') {
 
 function normalizeRepLocation(value, label = 'location') {
   const point = requireObject(value, label);
-  allowOnlyKeys(point, ['latitude', 'longitude', 'accuracy', 'updatedAt']);
+  allowOnlyKeys(point, ['latitude', 'longitude', 'accuracy', 'updatedAt', 'isMock']);
   const { latitude, longitude, accuracy } = point;
   if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90
       || !Number.isFinite(longitude) || longitude < -180 || longitude > 180
@@ -67,7 +67,16 @@ function normalizeRepLocation(value, label = 'location') {
   const updatedAt = requireText(point.updatedAt, `${label}.updatedAt`, { maxLength: 64 });
   const captured = new Date(updatedAt);
   if (Number.isNaN(captured.valueOf())) throw new HttpError(400, `${label}.updatedAt must be a valid date and time.`);
-  return { latitude, longitude, accuracy, updatedAt: captured.toISOString() };
+  if (point.isMock !== undefined && typeof point.isMock !== 'boolean') {
+    throw new HttpError(400, `${label}.isMock must be a boolean when provided.`);
+  }
+  return {
+    latitude,
+    longitude,
+    accuracy,
+    updatedAt: captured.toISOString(),
+    ...(point.isMock === undefined ? {} : { isMock: point.isMock }),
+  };
 }
 
 function safeStorageSegment(value, fallback = 'unknown') {
@@ -365,7 +374,7 @@ export function claimRepMachineWork(rep, cardIdValue, input, database = db) {
   const visitUuid = actionUuid(body.visitUuid, 'visitUuid');
   const location = normalizeRepLocation(body.location);
   const locationAgeMs = Date.now() - Date.parse(location.updatedAt);
-  if (locationAgeMs > 5 * 60 * 1000 || locationAgeMs < -60 * 1000 || location.accuracy > 120) {
+  if (location.isMock === true || locationAgeMs > 5 * 60 * 1000 || locationAgeMs < -60 * 1000 || location.accuracy > 120) {
     throw new HttpError(400, 'A recent accurate GPS position is required to start work.');
   }
   const result = database.transaction(() => {
@@ -567,7 +576,14 @@ function visitResult(row, database = db, { idempotent = false, processing = fals
   if (processing) {
     return { success: false, status: 'processing', visitUuid: row.visit_uuid, retryAfterMs: 1500 };
   }
-  const reviewStatus = database.prepare('SELECT status FROM rep_visit_reviews WHERE visit_id = ?').get(row.id)?.status ?? 'pending';
+  const review = database.prepare(`SELECT status, review_source, reason_codes_json
+    FROM rep_visit_reviews WHERE visit_id = ?`).get(row.id);
+  const reviewStatus = review?.status ?? 'pending';
+  let reasonCodes = [];
+  try {
+    const parsed = JSON.parse(review?.reason_codes_json ?? '[]');
+    if (Array.isArray(parsed)) reasonCodes = parsed.filter((value) => typeof value === 'string');
+  } catch { /* Legacy rows may not have a reason-code payload. */ }
   const photoCounts = database.prepare(`
     SELECT phase, COUNT(*) AS count FROM rep_visit_photos WHERE visit_id = ? GROUP BY phase
   `).all(row.id);
@@ -586,6 +602,8 @@ function visitResult(row, database = db, { idempotent = false, processing = fals
     cardId: Number(row.card_id),
     workOrderId: Number(row.order_id),
     machineCode: row.machine_code,
+    reviewSource: review?.review_source ?? 'supervisor',
+    reasonCodes,
     beforePhotoCount: counts.before ?? 0,
     afterPhotoCount: counts.after ?? 0,
     maintenanceLines,
@@ -680,8 +698,46 @@ function findRepVisitCard(rep, visit, database) {
         { apiCode: visit.maintenanceLines.length ? 'MAINTENANCE_QUANTITY_REQUIRED' : 'MAINTENANCE_STRUCTURED_LINES_REQUIRED' });
     }
   }
-  validateMachineGeofence(card, visit.location);
+  if (Number(card.is_location_locked) !== 1
+      || !Number.isFinite(card.latitude) || !Number.isFinite(card.longitude)) {
+    throw new HttpError(409, 'يلزم تثبيت موقع الماكينة قبل رفع صور الزيارة.');
+  }
   return card;
+}
+
+function evaluateSelfApproval(repId, visit, machine, beforePhotos, afterPhotos, database) {
+  const reasons = [];
+  const representative = database.prepare(`SELECT can_self_approve_visits FROM users
+    WHERE id = ? AND role = 'rep' AND active = 1 AND deleted_at IS NULL`).get(repId);
+  if (Number(representative?.can_self_approve_visits) !== 1) reasons.push('PERMISSION_DISABLED');
+
+  if (Number(machine.is_location_locked) !== 1
+      || !Number.isFinite(machine.latitude) || !Number.isFinite(machine.longitude)) {
+    reasons.push('MACHINE_LOCATION_NOT_CONFIRMED');
+  }
+
+  const location = visit.location;
+  if (!location) {
+    reasons.push('GPS_UNAVAILABLE');
+  } else {
+    const ageMs = Date.now() - Date.parse(location.updatedAt);
+    if (ageMs > 5 * 60 * 1000 || ageMs < -60 * 1000) reasons.push('STALE_FIX');
+    if (location.accuracy > MAX_FIELD_CONFIRMATION_ACCURACY_METERS) reasons.push('GPS_INACCURATE');
+    // This is a conservative client-reported signal, not Android hardware attestation.
+    if (location.isMock === true) reasons.push('MOCK_LOCATION');
+    if (Number(machine.is_location_locked) === 1
+        && Number.isFinite(machine.latitude) && Number.isFinite(machine.longitude)) {
+      const distance = calculateDistanceMeters(location.latitude, location.longitude, machine.latitude, machine.longitude);
+      const effectiveDistance = Math.max(0, distance - location.accuracy);
+      const radius = Math.max(1, Number(machine.geofence_radius_meters) || 50);
+      if (effectiveDistance > radius) reasons.push('OUTSIDE_GEOFENCE');
+    }
+  }
+
+  if (!validVisitPhotoCounts(visit.photoPolicyVersion, beforePhotos.length, afterPhotos.length)) {
+    reasons.push('REQUIRED_PHOTOS_MISSING');
+  }
+  return [...new Set(reasons)];
 }
 
 function findAssignedRepMachine(rep, machineId, cardId, database) {
@@ -764,6 +820,7 @@ export function confirmRepMachineLocation(rep, machineId, input, database = db) 
   const uuid = actionUuid(body.actionUuid);
   const cardId = positiveId(body.cardId, 'cardId');
   const location = normalizeRepLocation(body.location);
+  if (location.isMock === true) throw new HttpError(400, 'Mocked GPS locations cannot confirm a machine position.');
   if (location.accuracy > MAX_FIELD_CONFIRMATION_ACCURACY_METERS) {
     throw new HttpError(400, `GPS accuracy must be ${MAX_FIELD_CONFIRMATION_ACCURACY_METERS} metres or better before confirming a machine location.`);
   }
@@ -894,6 +951,165 @@ export function listLocationConfirmations({ repId = null, status = 'pending' } =
     approvedLocation: row.is_location_locked === 1 && row.latitude !== null && row.longitude !== null
       ? { latitude: row.latitude, longitude: row.longitude } : null,
   }));
+}
+
+/** Submit a correction to a previously approved machine position. Changes only take effect after Admin review. */
+export async function submitRepMachineLocationChange(rep, machineId, input, evidenceFile, database = db) {
+  if (rep?.role !== 'rep') throw new HttpError(403, 'Field representative access is required.');
+  const body = requireObject(input, 'location change request');
+  allowOnlyKeys(body, ['actionUuid', 'cardId', 'location', 'note']);
+  const uuid = actionUuid(body.actionUuid);
+  const cardId = positiveId(body.cardId, 'cardId');
+  const id = positiveId(machineId, 'machineId');
+  const location = normalizeRepLocation(body.location);
+  if (location.isMock === true) throw new HttpError(400, 'Mocked GPS locations cannot request a machine location change.');
+  if (location.accuracy > MAX_FIELD_CONFIRMATION_ACCURACY_METERS) {
+    throw new HttpError(400, `GPS accuracy must be ${MAX_FIELD_CONFIRMATION_ACCURACY_METERS} metres or better.`);
+  }
+  const ageMs = Date.now() - Date.parse(location.updatedAt);
+  if (ageMs > 5 * 60 * 1000 || ageMs < -60 * 1000) throw new HttpError(400, 'A current GPS reading is required.');
+  const note = optionalText(body.note, 'note', { maxLength: 2000 });
+  const machine = findAssignedRepMachine(rep, id, cardId, database);
+  if (Number(machine.is_location_locked) !== 1
+      || !Number.isFinite(machine.latitude) || !Number.isFinite(machine.longitude)) {
+    throw new HttpError(409, 'Only a previously confirmed machine position can be changed through this approval workflow.');
+  }
+
+  let evidence = null;
+  if (evidenceFile) {
+    try { evidence = await compressFieldImage(evidenceFile.buffer, { width: 1600, height: 1600, quality: 78 }); }
+    catch { throw new HttpError(400, 'Location evidence must be a valid JPEG, PNG, or WebP image.'); }
+  }
+  const payloadHash = actionPayloadHash({
+    repId: Number(rep.id), machineId: id, cardId, location, note,
+    evidenceSha256: evidence ? createHash('sha256').update(evidence.buffer).digest('hex') : null,
+  });
+  const existing = database.prepare(`SELECT id, action_uuid, rep_user_id, machine_id, payload_sha256
+    FROM rep_machine_location_change_requests WHERE action_uuid = ?`).get(uuid);
+  if (existing) {
+    if (Number(existing.rep_user_id) !== Number(rep.id) || Number(existing.machine_id) !== id || existing.payload_sha256 !== payloadHash) {
+      throw new HttpError(409, 'This action UUID was already used with different content.');
+    }
+    return { success: true, idempotent: true, requestId: Number(existing.id), status: database.prepare('SELECT status FROM rep_machine_location_change_requests WHERE id = ?').get(existing.id).status };
+  }
+
+  const evidencePath = evidence ? storageDirectory('rep-support', 'location-evidence', `${uuid}.jpg`) : null;
+  if (evidence) await writeStorageFile(evidencePath, evidence.buffer);
+  try {
+    const requestId = database.transaction(() => {
+      const current = database.prepare(`SELECT latitude, longitude, is_location_locked FROM machines
+        WHERE id = ? AND active = 1 AND deleted_at IS NULL`).get(id);
+      if (!current || Number(current.is_location_locked) !== 1
+          || current.latitude !== machine.latitude || current.longitude !== machine.longitude) {
+        throw new HttpError(409, 'The machine location changed; refresh and submit a new request.');
+      }
+      if (database.prepare(`SELECT 1 FROM rep_machine_location_change_requests
+        WHERE machine_id = ? AND status = 'pending' LIMIT 1`).get(id)) {
+        throw new HttpError(409, 'A location change request is already awaiting administrator review.');
+      }
+      const result = database.prepare(`INSERT INTO rep_machine_location_change_requests
+        (action_uuid, payload_sha256, rep_user_id, machine_id, card_id, old_latitude, old_longitude,
+         proposed_latitude, proposed_longitude, gps_accuracy, distance_meters, captured_at, note,
+         evidence_path, evidence_content_type)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(uuid, payloadHash, rep.id, id, cardId, machine.latitude, machine.longitude,
+          location.latitude, location.longitude, location.accuracy,
+          calculateDistanceMeters(location.latitude, location.longitude, machine.latitude, machine.longitude),
+          location.updatedAt, note, evidencePath, evidence ? 'image/jpeg' : null);
+      const insertedId = Number(result.lastInsertRowid);
+      recordAudit({ database, actorId: rep.id, action: 'created', entityType: 'rep_machine_location_change', entityId: insertedId,
+        newValues: { machine_id: id, card_id: cardId, old_latitude: machine.latitude, old_longitude: machine.longitude,
+          proposed_latitude: location.latitude, proposed_longitude: location.longitude, gps_accuracy: location.accuracy,
+          distance_meters: calculateDistanceMeters(location.latitude, location.longitude, machine.latitude, machine.longitude),
+          evidence_attached: Boolean(evidencePath), status: 'pending' } });
+      return insertedId;
+    }).immediate();
+    publishOperationsEvent('rep.machine.location-change-requested', { userId: rep.id, machineId: id, requestId });
+    return { success: true, idempotent: false, requestId, status: 'pending' };
+  } catch (error) {
+    if (evidencePath) {
+      try { await removeStorageFile(await resolveStorageFile(evidencePath)); } catch { /* Ignore cleanup failure; the request itself is rolled back. */ }
+    }
+    throw error;
+  }
+}
+
+export function listRepMachineLocationChangeRequests({ status = 'pending', repId = null } = {}, database = db) {
+  if (!['pending', 'approved', 'rejected', 'all'].includes(status)) throw new HttpError(400, 'Invalid request status.');
+  const clauses = [];
+  const parameters = [];
+  if (status !== 'all') { clauses.push('request.status = ?'); parameters.push(status); }
+  if (repId !== null) { clauses.push('request.rep_user_id = ?'); parameters.push(positiveId(repId, 'repId')); }
+  const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
+  return database.prepare(`SELECT request.*, machine.code AS machine_code, machine.name_ar AS machine_name,
+      representative.full_name AS representative_name, reviewer.full_name AS reviewer_name,
+      order_record.order_code
+    FROM rep_machine_location_change_requests request
+    JOIN machines machine ON machine.id = request.machine_id
+    JOIN users representative ON representative.id = request.rep_user_id
+    JOIN maintenance_cards card ON card.id = request.card_id
+    JOIN maintenance_orders order_record ON order_record.id = card.order_id
+    LEFT JOIN users reviewer ON reviewer.id = request.reviewer_user_id
+    ${where} ORDER BY request.id DESC`).all(...parameters).map((row) => ({
+    id: Number(row.id), requestId: Number(row.id), actionUuid: row.action_uuid,
+    representativeId: Number(row.rep_user_id), representativeName: row.representative_name,
+    machineId: Number(row.machine_id), machineCode: row.machine_code, machineName: row.machine_name,
+    cardId: Number(row.card_id), orderCode: row.order_code, status: row.status,
+    oldLocation: row.old_latitude === null || row.old_longitude === null ? null : { latitude: row.old_latitude, longitude: row.old_longitude },
+    proposedLocation: { latitude: row.proposed_latitude, longitude: row.proposed_longitude, accuracy: row.gps_accuracy },
+    distanceMeters: row.distance_meters, capturedAt: row.captured_at, note: row.note,
+    hasEvidence: Boolean(row.evidence_path), reviewerName: row.reviewer_name, reviewNote: row.review_note,
+    createdAt: row.created_at, reviewedAt: row.reviewed_at,
+  }));
+}
+
+export async function reviewRepMachineLocationChange(requestIdValue, input, actorId, decision, database = db) {
+  const requestId = positiveId(requestIdValue, 'requestId');
+  const actor = positiveId(actorId, 'actorId');
+  if (!['approved', 'rejected'].includes(decision)) throw new HttpError(400, 'Invalid location change decision.');
+  const body = requireObject(input ?? {});
+  allowOnlyKeys(body, ['note']);
+  const note = optionalText(body.note, 'note', { maxLength: 2000 });
+  const outcome = database.transaction(() => {
+    const reviewer = database.prepare(`SELECT role FROM users WHERE id = ? AND active = 1 AND deleted_at IS NULL`).get(actor);
+    if (reviewer?.role !== 'admin') throw new HttpError(403, 'Administrator access is required.');
+    const request = database.prepare('SELECT * FROM rep_machine_location_change_requests WHERE id = ?').get(requestId);
+    if (!request) throw new HttpError(404, 'Location change request was not found.');
+    if (request.status !== 'pending') throw new HttpError(409, 'This location change request has already been reviewed.');
+    const machine = database.prepare(`SELECT id, latitude, longitude, is_location_locked, geofence_radius_meters
+      FROM machines WHERE id = ? AND active = 1 AND deleted_at IS NULL`).get(request.machine_id);
+    if (!machine) throw new HttpError(409, 'The machine is no longer active.');
+    if (decision === 'approved') {
+      if (Number(machine.is_location_locked) !== 1 || machine.latitude !== request.old_latitude || machine.longitude !== request.old_longitude) {
+        throw new HttpError(409, 'The machine location changed since this request was submitted.');
+      }
+      const changed = database.prepare(`UPDATE machines SET latitude = ?, longitude = ?, is_location_locked = 1
+        WHERE id = ? AND is_location_locked = 1 AND latitude = ? AND longitude = ? AND active = 1 AND deleted_at IS NULL`)
+        .run(request.proposed_latitude, request.proposed_longitude, request.machine_id, request.old_latitude, request.old_longitude);
+      if (changed.changes !== 1) throw new HttpError(409, 'The machine location changed before approval could be applied.');
+    }
+    database.prepare(`UPDATE rep_machine_location_change_requests SET status = ?, reviewer_user_id = ?,
+      review_note = ?, reviewed_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'pending'`)
+      .run(decision, actor, note, requestId);
+    recordAudit({ database, actorId: actor, action: `location_change_${decision}`, entityType: 'machine', entityId: request.machine_id,
+      oldValues: { latitude: request.old_latitude, longitude: request.old_longitude, request_status: request.status },
+      newValues: { latitude: decision === 'approved' ? request.proposed_latitude : machine.latitude,
+        longitude: decision === 'approved' ? request.proposed_longitude : machine.longitude,
+        request_status: decision, request_id: requestId, review_note: note } });
+    return { repId: Number(request.rep_user_id), machineId: Number(request.machine_id), requestId, status: decision };
+  }).immediate();
+  publishOperationsEvent('rep.machine.location-change-reviewed', {
+    userId: outcome.repId, machineId: outcome.machineId, requestId: outcome.requestId, status: outcome.status,
+  });
+  return outcome;
+}
+
+export async function getRepMachineLocationChangeEvidence(requestIdValue, database = db) {
+  const id = positiveId(requestIdValue, 'requestId');
+  const row = database.prepare(`SELECT evidence_path, evidence_content_type FROM rep_machine_location_change_requests
+    WHERE id = ? AND evidence_path IS NOT NULL`).get(id);
+  if (!row) throw new HttpError(404, 'Location evidence was not found.');
+  return { absolutePath: await resolveStorageFile(row.evidence_path), contentType: row.evidence_content_type };
 }
 
 export function approveRepMachineLocationCorrection(correctionId, input, actorId, database = db) {
@@ -1195,7 +1411,6 @@ function recordReceivedVisit(rep, visit, visitId, photoRows, database) {
       database.prepare('SELECT machine_id FROM rep_visits WHERE id = ?').get(visitId)?.machine_id,
     );
     if (!machine) throw new HttpError(409, 'The machine was removed while the visit was uploading.');
-    validateMachineGeofence(machine, visit.location);
     const beforePhotos = photoRows.filter((photo) => photo.phase === 'before');
     const afterPhotos = photoRows.filter((photo) => photo.phase === 'after');
     const beforePath = beforePhotos[0]?.storedPath ?? null;
@@ -1213,12 +1428,23 @@ function recordReceivedVisit(rep, visit, visitId, photoRows, database) {
     for (const photo of photoRows) {
       insertPhoto.run(visitId, photo.phase, photo.ordinal, photo.storedPath, photo.capturedAt);
     }
+    const approvalReasons = evaluateSelfApproval(rep.id, visit, machine, beforePhotos, afterPhotos, database);
+    const reviewStatus = approvalReasons.length ? 'pending' : 'approved';
     database.prepare(`
-      INSERT INTO rep_visit_reviews (visit_id, status)
-      VALUES (?, 'pending')
-      ON CONFLICT(visit_id) DO UPDATE SET status = 'pending', review_note = NULL,
-        reviewed_by = NULL, reviewed_at = NULL
-    `).run(visitId);
+      INSERT INTO rep_visit_reviews
+        (visit_id, status, review_source, reason_codes_json, reviewed_by, reviewed_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(visit_id) DO UPDATE SET status = excluded.status, review_note = NULL,
+        review_source = excluded.review_source, reason_codes_json = excluded.reason_codes_json,
+        reviewed_by = excluded.reviewed_by, reviewed_at = excluded.reviewed_at
+    `).run(
+      visitId,
+      reviewStatus,
+      reviewStatus === 'approved' ? 'self_approval' : 'supervisor',
+      JSON.stringify(approvalReasons),
+      reviewStatus === 'approved' ? rep.id : null,
+      reviewStatus === 'approved' ? new Date().toISOString() : null,
+    );
     database.prepare('DELETE FROM rep_machine_work_leases WHERE card_id = ?').run(visit.cardId);
     database.prepare("UPDATE maintenance_card_photo_reviews SET status = 'superseded' WHERE card_id = ? AND status IN ('reshoot', 'empty')").run(visit.cardId);
     recordAudit({
@@ -1241,7 +1467,9 @@ function recordReceivedVisit(rep, visit, visitId, photoRows, database) {
         before_photo_count: beforePhotos.length,
         after_photo_count: afterPhotos.length,
         location: visit.location,
-        review_status: 'pending',
+        review_status: reviewStatus,
+        review_source: reviewStatus === 'approved' ? 'self_approval' : 'supervisor',
+        reason_codes: approvalReasons,
       },
     });
     const receivedVisit = findVisit(visit.visitUuid, database);
@@ -1291,11 +1519,19 @@ function recordReceivedVisit(rep, visit, visitId, photoRows, database) {
         rep_user_id: rep.id,
         before: beforePhotos.map(({ storedPath, capturedAt }) => ({ path: storedPath, captured_at: capturedAt })),
         after: afterPhotos.map(({ storedPath, capturedAt }) => ({ path: storedPath, captured_at: capturedAt })),
-        review_status: 'pending',
+        review_status: reviewStatus,
+        review_source: reviewStatus === 'approved' ? 'self_approval' : 'supervisor',
+        reason_codes: approvalReasons,
       },
     });
     const recipientUserIds = database.prepare('SELECT user_id FROM maintenance_order_reps WHERE order_id=?').all(receivedVisit.order_id).map(row => Number(row.user_id));
-    enqueueOperationsEvent('rep.visit.submitted', {userId: rep.id, visitUuid: visit.visitUuid, status: 'pending_review', recipientUserIds}, database);
+    enqueueOperationsEvent('rep.visit.submitted', {
+      userId: rep.id,
+      visitUuid: visit.visitUuid,
+      status: reviewStatus === 'approved' ? 'approved' : 'pending_review',
+      reasonCodes: approvalReasons,
+      recipientUserIds,
+    }, database);
     return findVisit(visit.visitUuid, database);
   }).immediate();
 }

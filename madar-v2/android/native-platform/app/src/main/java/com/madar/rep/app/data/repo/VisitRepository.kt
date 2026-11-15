@@ -1,7 +1,6 @@
 package com.madar.rep.app.data.repo
 
 import com.madar.rep.app.core.GeoPoint
-import com.madar.rep.app.core.GeoPolicy
 import com.madar.rep.app.core.Hashing
 import com.madar.rep.app.core.LocationDecision
 import com.madar.rep.app.core.MadarError
@@ -145,9 +144,9 @@ class VisitRepository(
     }
 
     /**
-     * Queueing is the only place where a visit becomes eligible for upload. The
-     * location decision is re-evaluated against the machine's approved point; a
-     * stale, inaccurate, missing, or out-of-range fix never becomes a queued visit.
+     * Queueing is the only place where a visit becomes eligible for upload. Safety
+     * failures are preserved and sent for server-side supervisor review rather
+     * than silently blocking evidence upload.
      */
     suspend fun queue(visitUuid: String, location: GeoPoint?, now: Long = System.currentTimeMillis()): QueueResult {
         val visit = database.visits().find(visitUuid) ?: return QueueResult.Blocked("الزيارة غير موجودة", null)
@@ -167,48 +166,13 @@ class VisitRepository(
         if (!visit.locationLocked) {
             return QueueResult.Blocked("موقع الماكينة غير مثبت من الإدارة؛ لا يمكن اعتماد الزيارة.", null)
         }
-        val decision = GeoPolicy.evaluate(
-            point = location,
-            machineLatitude = visit.machineLatitude,
-            machineLongitude = visit.machineLongitude,
-            radiusMeters = visit.geofenceRadiusMeters,
-            nowMillis = now,
-        )
-        if (decision !is LocationDecision.Valid) {
-            val message = when (decision) {
-                LocationDecision.Missing -> "يلزم تشغيل GPS والتقاط موقع حديث قبل اعتماد الزيارة."
-                is LocationDecision.Stale -> "إشارة GPS قديمة (${decision.ageMillis / 1000} ثانية). انتظر تحديث الموقع."
-                is LocationDecision.Inaccurate -> "دقة الموقع ${decision.accuracyMeters.toInt()} متر ولا تكفي (الحد 50 مترًا)."
-                is LocationDecision.Outside -> "أنت خارج نطاق الماكينة (المسافة الفعالة ${decision.effectiveDistanceMeters.toInt()} متر، المسموح ${decision.allowedRadiusMeters.toInt()})."
-                else -> "الموقع غير صالح."
-            }
-            // Draft fields still receive the latest fix so the rep can retry without
-            // losing the captured evidence.
-            if (location != null) {
-                database.visits().upsert(
-                    visit.copy(
-                        latitude = location.latitude,
-                        longitude = location.longitude,
-                        locationAccuracy = location.accuracyMeters,
-                        locationCapturedAt = location.capturedAtMillis,
-                        locationProvider = location.provider,
-                        governorate = governorates.find(location.latitude, location.longitude)?.nameAr,
-                        lastError = message,
-                        updatedAt = now,
-                    )
-                )
-            } else {
-                database.visits().setError(visitUuid, message, now)
-            }
-            return QueueResult.Blocked(message, decision)
-        }
         val fingerprint = fingerprint(visit, photos, location)
         val queued = visit.copy(
             latitude = location?.latitude,
             longitude = location?.longitude,
             locationAccuracy = location?.accuracyMeters,
             locationCapturedAt = location?.capturedAtMillis,
-            locationProvider = location?.provider,
+            locationProvider = if (location?.isMock == true) "mock" else location?.provider,
             governorate = location?.let { governorates.find(it.latitude, it.longitude)?.nameAr },
             capturedAt = now,
             beforeCapturedAtCsv = before.joinToString(",") { it.capturedAt.toString() },
@@ -243,7 +207,7 @@ class VisitRepository(
             after = entries("after"),
         )
         val locationPart = location?.let {
-            "|${it.latitude}|${it.longitude}|${it.accuracyMeters}|${it.capturedAtMillis}"
+            "|${it.latitude}|${it.longitude}|${it.accuracyMeters}|${it.capturedAtMillis}|mock=${it.isMock}"
         }.orEmpty()
         return Hashing.sha256Hex((base + locationPart).toByteArray(Charsets.UTF_8))
     }

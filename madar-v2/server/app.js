@@ -14,6 +14,8 @@ import authRouter from './modules/auth/routes.js';
 import usersRouter from './modules/auth/users.js';
 import systemRouter from './modules/system/backup.js';
 import auditRouter from './modules/system/audit-routes.js';
+import repSupportRouter from './modules/system/rep-support-routes.js';
+import repReleaseRouter from './modules/system/rep-release-routes.js';
 import { requestLogger } from './middleware/request-logger.js';
 import clientsRouter from './modules/clients/routes.js';
 import maintenanceRouter from './modules/maintenance/routes.js';
@@ -133,7 +135,9 @@ function readVerifiedApkMetadata(apkPath, apkDescriptor, { required = false } = 
       || !/^([0-9a-f]{40}|[0-9a-f]{64})$/i.test(manifest.sourceRevision ?? '')
       || !Number.isFinite(Date.parse(manifest.builtAt ?? ''))
       || !/^[0-9a-f]{64}$/i.test(manifest.apkSha256 ?? '') || manifest.apkSha256.toLowerCase() !== apkSha256
-      || !/^[0-9a-f]{64}$/i.test(manifest.signerCertificateSha256 ?? '')) {
+      || !/^[0-9a-f]{64}$/i.test(manifest.signerCertificateSha256 ?? '')
+      || (required && (!env.repSignerCertificateSha256
+        || manifest.signerCertificateSha256.toLowerCase() !== env.repSignerCertificateSha256))) {
     throw Object.assign(new Error('The release APK metadata does not match a verified clean release artifact.'), { code: 'EAPKMETADATA' });
   }
   return {
@@ -250,6 +254,8 @@ app.use('/api', (req, res, next) => {
 app.use('/api/users', usersRouter);
 app.use('/api/auth/users', usersRouter);
 app.use('/api/system', auditRouter);
+app.use('/api/system', repSupportRouter);
+app.use('/api/system', repReleaseRouter);
 app.use('/api/system', systemRouter);
 app.use('/api/clients', clientsRouter);
 app.use('/api/maintenance', maintenanceRouter);

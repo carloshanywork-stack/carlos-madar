@@ -179,8 +179,12 @@ class SyncEngine(
                     "reshoot_requested" -> VisitState.RESHOOT
                     else -> VisitState.PENDING_REVIEW
                 }
+                val reviewMessage = if (state == VisitState.PENDING_REVIEW) {
+                    result.reasonCodes.mapNotNull(::reviewReasonLabel).distinct().joinToString(" ")
+                        .ifBlank { null }
+                } else null
                 database.visits().updateSyncState(
-                    visit.visitUuid, state, null, visit.attempts + 1, 0, serverStatus, now
+                    visit.visitUuid, state, reviewMessage, visit.attempts + 1, 0, serverStatus, now
                 )
                 database.photos().markUploaded(visit.visitUuid)
                 SyncSignal.ACK
@@ -341,6 +345,18 @@ class SyncEngine(
         }
     }
 
+    private fun reviewReasonLabel(code: String): String? = when (code) {
+        "PERMISSION_DISABLED" -> "بانتظار المشرف: الاعتماد الذاتي غير مفعّل لهذا الحساب."
+        "STALE_FIX" -> "بانتظار المشرف: إشارة GPS أقدم من خمس دقائق."
+        "GPS_INACCURATE" -> "بانتظار المشرف: دقة GPS تتجاوز 100 متر."
+        "MOCK_LOCATION" -> "بانتظار المشرف: الجهاز أبلغ عن موقع محاكى."
+        "OUTSIDE_GEOFENCE" -> "بانتظار المشرف: الموقع خارج نطاق الماكينة."
+        "MACHINE_LOCATION_NOT_CONFIRMED" -> "بانتظار المشرف: موقع الماكينة غير مثبت على الخادم."
+        "GPS_UNAVAILABLE" -> "بانتظار المشرف: لا توجد قراءة GPS للزيارة."
+        "REQUIRED_PHOTOS_MISSING" -> "بانتظار المشرف: صور الزيارة المطلوبة غير مكتملة."
+        else -> null
+    }
+
     private suspend fun syncGpsPoints(session: Session, api: MadarApi) {
         val now = System.currentTimeMillis()
         val points = database.gpsPoints().pending(session.repId, now)
@@ -439,6 +455,7 @@ class SyncEngine(
                     longitude = longitude ?: 0.0,
                     accuracy = locationAccuracy ?: 0f,
                     updatedAt = MadarTime.isoUtc(captured),
+                    isMock = (locationProvider == "mock").takeIf { it },
                 )
             },
             photoPolicyVersion = photoPolicyVersion,

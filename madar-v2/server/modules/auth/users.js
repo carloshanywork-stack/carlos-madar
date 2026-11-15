@@ -72,12 +72,19 @@ function serializeUser(row) {
   return {
     ...user,
     assignedRegions: parseAssignedRegions(row.assigned_regions_json),
+    canSelfApproveVisits: Number(row.can_self_approve_visits) === 1,
     isOnline: Boolean(row.is_online),
     lastLocation,
   };
 }
 
 function normalizeActive(value, label = 'isActive') {
+  if (value === true || value === 1) return 1;
+  if (value === false || value === 0) return 0;
+  throw new HttpError(400, `${label} must be true, false, 1, or 0.`);
+}
+
+function normalizeBooleanPermission(value, label) {
   if (value === true || value === 1) return 1;
   if (value === false || value === 0) return 0;
   throw new HttpError(400, `${label} must be true, false, 1, or 0.`);
@@ -93,19 +100,24 @@ function normalizeUsername(value) {
 
 router.get('/', (req, res) => {
   res.json(db.prepare(`SELECT id, username, full_name, role, active, created_at,
-      assigned_regions_json, is_online, last_location_json FROM users
+      assigned_regions_json, is_online, last_location_json, can_self_approve_visits FROM users
     WHERE deleted_at IS NULL ORDER BY active DESC, username COLLATE NOCASE, id`).all().map(serializeUser));
 });
 
 router.post('/', asyncHandler(async (req, res) => {
   const body = requireObject(req.body);
-  allowOnlyKeys(body, ['username', 'full_name', 'fullName', 'role', 'password', 'assignedRegions', 'active', 'isActive']);
+  allowOnlyKeys(body, ['username', 'full_name', 'fullName', 'role', 'password', 'assignedRegions', 'active', 'isActive', 'canSelfApproveVisits']);
   if (body.active !== undefined && body.isActive !== undefined) throw new HttpError(400, 'Provide either active or isActive, not both.');
   const username = normalizeUsername(body.username);
   const fullName = requireText(body.full_name ?? body.fullName, 'full_name', { minLength: 2, maxLength: 120 });
   const role = body.role ?? (req.baseUrl === '/api/users' ? 'rep' : undefined);
   if (!USER_ROLES.includes(role)) throw new HttpError(400, `role must be one of: ${USER_ROLES.join(', ')}.`);
   const assignedRegions = normalizeAssignedRegions(body.assignedRegions ?? []);
+  if (body.canSelfApproveVisits !== undefined && role !== 'rep') {
+    throw new HttpError(400, 'canSelfApproveVisits can only be set for rep users.');
+  }
+  const canSelfApproveVisits = body.canSelfApproveVisits === undefined
+    ? 0 : normalizeBooleanPermission(body.canSelfApproveVisits, 'canSelfApproveVisits');
   const active = body.isActive === undefined && body.active === undefined
     ? 1
     : normalizeActive(body.isActive ?? body.active);
@@ -117,16 +129,17 @@ router.post('/', asyncHandler(async (req, res) => {
   try {
     const created = db.transaction(() => {
       const result = db.prepare(`INSERT INTO users
-        (username, password_hash, full_name, role, active, assigned_regions_json)
-        VALUES (?, ?, ?, ?, ?, ?)`)
-        .run(username, passwordHash, fullName, role, active, JSON.stringify(assignedRegions));
+        (username, password_hash, full_name, role, active, assigned_regions_json, can_self_approve_visits)
+        VALUES (?, ?, ?, ?, ?, ?, ?)`)
+        .run(username, passwordHash, fullName, role, active, JSON.stringify(assignedRegions), canSelfApproveVisits);
       const id = Number(result.lastInsertRowid);
       const user = db.prepare(`SELECT id, full_name, role, active, deleted_at, created_at FROM users WHERE id = ?`).get(id);
       syncEmployeeForUser(db, user, { actorId: requestActorId(req), audit: true });
       recordAudit({ database: db, actorId: requestActorId(req), action: 'create', entityType: 'user', entityId: id,
-        newValues: { username, full_name: fullName, role, active, assigned_regions: assignedRegions } });
+        newValues: { username, full_name: fullName, role, active, assigned_regions: assignedRegions,
+          can_self_approve_visits: Boolean(canSelfApproveVisits) } });
       return db.prepare(`SELECT id, username, full_name, role, active, created_at,
-        assigned_regions_json, is_online, last_location_json FROM users WHERE id = ?`).get(id);
+        assigned_regions_json, is_online, last_location_json, can_self_approve_visits FROM users WHERE id = ?`).get(id);
     }).immediate();
     res.status(201).json(serializeUser(created));
   } catch (error) {
@@ -139,11 +152,11 @@ const updateUser = asyncHandler(async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isSafeInteger(id) || id < 1) throw new HttpError(400, 'id must be a positive integer.');
   const body = requireObject(req.body);
-  allowOnlyKeys(body, ['username', 'full_name', 'fullName', 'role', 'password', 'active', 'isActive', 'assignedRegions']);
+  allowOnlyKeys(body, ['username', 'full_name', 'fullName', 'role', 'password', 'active', 'isActive', 'assignedRegions', 'canSelfApproveVisits']);
   if (body.active !== undefined && body.isActive !== undefined) throw new HttpError(400, 'Provide either active or isActive, not both.');
   if (!Object.keys(body).length) throw new HttpError(400, 'At least one user field must be provided.');
   const current = db.prepare(`SELECT id, username, full_name, role, active, created_at,
-    assigned_regions_json, is_online, last_location_json FROM users WHERE id = ? AND deleted_at IS NULL`).get(id);
+    assigned_regions_json, is_online, last_location_json, can_self_approve_visits FROM users WHERE id = ? AND deleted_at IS NULL`).get(id);
   if (!current) throw new HttpError(404, 'User was not found.');
   if (body.role !== undefined && !USER_ROLES.includes(body.role)) throw new HttpError(400, `role must be one of: ${USER_ROLES.join(', ')}.`);
   const requestedRegions = body.assignedRegions === undefined ? null : normalizeAssignedRegions(body.assignedRegions);
@@ -157,6 +170,12 @@ const updateUser = asyncHandler(async (req, res) => {
     throw new HttpError(400, 'يجب أن تتكون كلمة المرور من 4 خانات على الأقل وألا تتجاوز 72 بايتاً.');
   }
   const nextRole = body.role ?? current.role;
+  if (body.canSelfApproveVisits !== undefined && nextRole !== 'rep') {
+    throw new HttpError(400, 'canSelfApproveVisits can only be set for rep users.');
+  }
+  const nextCanSelfApproveVisits = nextRole !== 'rep' ? 0
+    : body.canSelfApproveVisits === undefined ? Number(current.can_self_approve_visits)
+      : normalizeBooleanPermission(body.canSelfApproveVisits, 'canSelfApproveVisits');
   const nextActive = requestedActive === undefined ? current.active : normalizeActive(requestedActive, body.isActive !== undefined ? 'isActive' : 'active');
   if (nextRole !== 'rep' && requestedRegions?.length) throw new HttpError(400, 'assignedRegions can only be set for rep users.');
   const nextRegions = nextRole === 'rep'
@@ -176,8 +195,8 @@ const updateUser = asyncHandler(async (req, res) => {
   const passwordHash = body.password === undefined ? null : await bcrypt.hash(body.password, 12);
   db.transaction(() => {
     db.prepare(`UPDATE users SET username = ?, full_name = ?, role = ?, active = ?, password_hash = COALESCE(?, password_hash),
-      assigned_regions_json = ?, is_online = ? WHERE id = ?`)
-      .run(nextUsername, nextFullName, nextRole, nextActive, passwordHash, JSON.stringify(nextRegions), nextOnline, id);
+      assigned_regions_json = ?, is_online = ?, can_self_approve_visits = ? WHERE id = ?`)
+      .run(nextUsername, nextFullName, nextRole, nextActive, passwordHash, JSON.stringify(nextRegions), nextOnline, nextCanSelfApproveVisits, id);
     const updatedUser = db.prepare(`SELECT id, full_name, role, active, deleted_at, created_at FROM users WHERE id = ?`).get(id);
     syncEmployeeForUser(db, updatedUser, { actorId: requestActorId(req), audit: true });
     if (nextActive === 0 || identityChanged) {
@@ -188,11 +207,11 @@ const updateUser = asyncHandler(async (req, res) => {
         WHERE rep_user_id = ? AND ended_at IS NULL`).run(id);
     }
     recordAudit({ database: db, actorId: requestActorId(req), action: 'update', entityType: 'user', entityId: id,
-      oldValues: { username: current.username, full_name: current.full_name, role: current.role, active: current.active, assigned_regions: parseAssignedRegions(current.assigned_regions_json), is_online: Boolean(current.is_online) },
-      newValues: { username: nextUsername, full_name: nextFullName, role: nextRole, active: nextActive, assigned_regions: nextRegions, is_online: Boolean(nextOnline), password_changed: Boolean(passwordHash) } });
+      oldValues: { username: current.username, full_name: current.full_name, role: current.role, active: current.active, assigned_regions: parseAssignedRegions(current.assigned_regions_json), is_online: Boolean(current.is_online), can_self_approve_visits: Number(current.can_self_approve_visits) === 1 },
+      newValues: { username: nextUsername, full_name: nextFullName, role: nextRole, active: nextActive, assigned_regions: nextRegions, is_online: Boolean(nextOnline), can_self_approve_visits: Boolean(nextCanSelfApproveVisits), password_changed: Boolean(passwordHash) } });
   }).immediate();
   res.json(serializeUser(db.prepare(`SELECT id, username, full_name, role, active, created_at,
-    assigned_regions_json, is_online, last_location_json FROM users WHERE id = ?`).get(id)));
+    assigned_regions_json, is_online, last_location_json, can_self_approve_visits FROM users WHERE id = ?`).get(id)));
 });
 
 router.patch('/:id', updateUser);

@@ -202,6 +202,12 @@ test('unified staff directory, salary advances, adjustments, Friday pay, treasur
   assert.equal(representative.response.status, 201, JSON.stringify(representative.body));
   assert.equal(representative.body.role, 'rep');
   assert.equal(representative.body.can_login, 1);
+  assert.equal(representative.body.canSelfApproveVisits, false, 'representative self-approval is disabled by default');
+  const selfApprovalEnabled = await request(`/api/staff/${representative.body.id}`, jsonOptions('PATCH', {
+    canSelfApproveVisits: true,
+  }), adminCookie);
+  assert.equal(selfApprovalEnabled.response.status, 200, JSON.stringify(selfApprovalEnabled.body));
+  assert.equal(selfApprovalEnabled.body.canSelfApproveVisits, true, 'only an administrator can enable the account-level permission');
   const universalRepresentative = await request('/api/staff', jsonOptions('POST', {
     classification: 'representative', name: 'Universal Region Representative', department: 'Maintenance',
     username: 'universal-staff-rep', password: 'rep4',
@@ -233,6 +239,7 @@ test('unified staff directory, salary advances, adjustments, Friday pay, treasur
   assert.equal(reenabledLogin.response.status, 200, JSON.stringify(reenabledLogin.body));
   assert.equal(reenabledLogin.body.can_login, 1);
   assert.equal(reenabledLogin.body.user_id, representative.body.user_id, 'reenabling login restores the same user rather than duplicating it');
+  assert.equal(reenabledLogin.body.canSelfApproveVisits, true, 'the audited permission persists when credentials are reenabled');
   const reenabledRepLogin = await request('/api/rep/login', jsonOptions('POST', { username: 'unified-rep', password: 'rep5' }));
   assert.equal(reenabledRepLogin.response.status, 200);
   const inactiveStaff = await request(`/api/staff/${representative.body.id}`, jsonOptions('PATCH', { active: false }), adminCookie);

@@ -3,8 +3,14 @@ package com.madar.rep.app.ui
 import android.content.Intent
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AssignmentTurnedIn
 import androidx.compose.material.icons.filled.Fingerprint
@@ -21,6 +27,9 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -30,6 +39,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -42,6 +52,7 @@ private object Tabs {
     const val ROUTE = "route"
     const val MAP = "map"
     const val SYNC = "sync"
+    const val SUPPORT = "support"
 }
 
 /**
@@ -134,11 +145,13 @@ private fun SignedInShell(
     val title = when (tab) {
         Tabs.MAP -> "الخريطة"
         Tabs.SYNC -> "المزامنة"
+        Tabs.SUPPORT -> "الدعم"
         else -> "مدار"
     }
     val subtitle = when (tab) {
         Tabs.MAP -> "بلاطات مرخصة بدون خدمات جوجل"
         Tabs.SYNC -> "قائمة الرفع وحالة الاتصال"
+        Tabs.SUPPORT -> "إرسال بلاغ محفوظ محلياً على الخادم"
         else -> "${session.fullName?.takeIf { it.isNotBlank() } ?: session.username} · مسار اليوم"
     }
 
@@ -199,12 +212,19 @@ private fun SignedInShell(
                     icon = { Icon(Icons.Default.Sync, contentDescription = null) },
                     label = { Text("المزامنة") },
                 )
+                NavigationBarItem(
+                    selected = tab == Tabs.SUPPORT,
+                    onClick = { tab = Tabs.SUPPORT },
+                    icon = { Text("؟") },
+                    label = { Text("الدعم") },
+                )
             }
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
             when (tab) {
+                Tabs.SUPPORT -> SupportScreen(vm)
                 Tabs.MAP -> MapScreen(
                     vm = vm,
                     mapRepository = container.mapRepository,
@@ -246,6 +266,42 @@ private fun SignedInShell(
                     onOpenVisit = { visit -> visitUuid = visit.visitUuid },
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun SupportScreen(vm: MadarViewModel) {
+    var description by rememberSaveable { mutableStateOf("") }
+    val busy = vm.supportBusy.collectAsStateWithLifecycle().value
+    val message = vm.supportMessage.collectAsStateWithLifecycle().value
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
+    ) {
+        Text("إرسال بلاغ للدعم")
+        Spacer(Modifier.height(8.dp))
+        Text("سيُحفظ البلاغ على خادم MADAR المحلي. إنشاء تذكرة خارجية يتطلب إجراءً صريحاً من المدير.")
+        Spacer(Modifier.height(16.dp))
+        OutlinedTextField(
+            value = description,
+            onValueChange = { description = it.take(8000) },
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("وصف المشكلة") },
+            minLines = 5,
+            maxLines = 10,
+        )
+        Spacer(Modifier.height(12.dp))
+        Button(
+            onClick = { vm.submitSupportReport(description) },
+            enabled = !busy && description.trim().length >= 5,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            if (busy) CircularProgressIndicator()
+            else Text("حفظ وإرسال البلاغ")
+        }
+        if (!message.isNullOrBlank()) {
+            Spacer(Modifier.height(12.dp))
+            Text(message)
         }
     }
 }

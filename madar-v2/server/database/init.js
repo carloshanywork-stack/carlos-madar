@@ -64,6 +64,7 @@ const machineUpdatedAtMigration = '20261111-machine-updated-at';
 const machineVerificationCorrectionsMigration = '20261104-machine-verification-corrections';
 const machineLocationConfirmationReviewMigration = '20261110-machine-location-confirmation-review';
 const machineCorrectionRenameRecoveryMigration = '20261104-machine-correction-rename-recovery';
+const repNativeSupportWorkflowsMigration = '20261115-rep-native-support-workflows';
 const clientProfileCrudMigration = '20261105-client-profile-crud';
 const financeAccountRolesMigration = '20261105-finance-account-roles';
 
@@ -1556,6 +1557,132 @@ export function migrateMachineCorrectionRenameRecovery(database) {
   migrate.immediate();
 }
 
+/** Add representative support, self-approval, location-change, and release metadata tables. */
+export function migrateRepNativeSupportWorkflows(database) {
+  const migrate = database.transaction(() => {
+    if (database.prepare('SELECT 1 FROM schema_migrations WHERE version = ?')
+      .get(repNativeSupportWorkflowsMigration)) return;
+
+    const userColumns = new Set(database.pragma('table_info(users)').map((column) => column.name));
+    if (!userColumns.has('can_self_approve_visits')) {
+      database.exec(`ALTER TABLE users ADD COLUMN can_self_approve_visits INTEGER NOT NULL DEFAULT 0
+        CHECK (can_self_approve_visits IN (0, 1))`);
+    }
+    const reviewColumns = new Set(database.pragma('table_info(rep_visit_reviews)').map((column) => column.name));
+    if (!reviewColumns.has('review_source')) {
+      database.exec(`ALTER TABLE rep_visit_reviews ADD COLUMN review_source TEXT NOT NULL DEFAULT 'supervisor'
+        CHECK (review_source IN ('supervisor', 'self_approval'))`);
+    }
+    if (!reviewColumns.has('reason_codes_json')) {
+      database.exec(`ALTER TABLE rep_visit_reviews ADD COLUMN reason_codes_json TEXT NOT NULL DEFAULT '[]'
+        CHECK (json_valid(reason_codes_json))`);
+    }
+
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS rep_bug_reports (
+        id INTEGER PRIMARY KEY,
+        report_uuid TEXT NOT NULL UNIQUE,
+        rep_user_id INTEGER NOT NULL REFERENCES users(id),
+        category TEXT NOT NULL CHECK (category IN ('bug', 'sync', 'location', 'camera', 'account', 'other')),
+        severity TEXT NOT NULL CHECK (severity IN ('low', 'normal', 'high', 'critical')),
+        description TEXT NOT NULL,
+        screen_name TEXT NOT NULL,
+        app_version TEXT NOT NULL,
+        device_model TEXT NOT NULL,
+        android_version TEXT NOT NULL,
+        sanitized_logs TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'new' CHECK (status IN ('new', 'in_progress', 'resolved', 'closed')),
+        github_status TEXT NOT NULL DEFAULT 'not_requested'
+          CHECK (github_status IN ('not_requested', 'queued', 'created', 'failed')),
+        github_issue_url TEXT,
+        github_last_error TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_rep_bug_reports_owner_created
+        ON rep_bug_reports(rep_user_id, created_at DESC, id DESC);
+      CREATE INDEX IF NOT EXISTS idx_rep_bug_reports_status_created
+        ON rep_bug_reports(status, created_at DESC, id DESC);
+
+      CREATE TABLE IF NOT EXISTS rep_bug_report_attachments (
+        id INTEGER PRIMARY KEY,
+        report_id INTEGER NOT NULL REFERENCES rep_bug_reports(id) ON DELETE CASCADE,
+        stored_path TEXT NOT NULL UNIQUE,
+        original_name TEXT NOT NULL,
+        content_type TEXT NOT NULL CHECK (content_type IN ('image/jpeg', 'image/png', 'image/webp')),
+        byte_size INTEGER NOT NULL CHECK (byte_size > 0),
+        sha256 TEXT NOT NULL CHECK (length(sha256) = 64),
+        purged_at TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_rep_bug_attachments_report
+        ON rep_bug_report_attachments(report_id, id);
+
+      CREATE TABLE IF NOT EXISTS rep_bug_report_events (
+        id INTEGER PRIMARY KEY,
+        report_id INTEGER NOT NULL REFERENCES rep_bug_reports(id) ON DELETE CASCADE,
+        actor_user_id INTEGER REFERENCES users(id),
+        event_type TEXT NOT NULL CHECK (event_type IN ('created', 'status_changed', 'note_added', 'github_requested', 'github_created', 'github_failed', 'attachments_purged')),
+        old_values_json TEXT CHECK (old_values_json IS NULL OR json_valid(old_values_json)),
+        new_values_json TEXT CHECK (new_values_json IS NULL OR json_valid(new_values_json)),
+        note TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_rep_bug_report_events_report
+        ON rep_bug_report_events(report_id, id);
+
+      CREATE TABLE IF NOT EXISTS rep_machine_location_change_requests (
+        id INTEGER PRIMARY KEY,
+        action_uuid TEXT NOT NULL UNIQUE,
+        payload_sha256 TEXT NOT NULL CHECK (length(payload_sha256) = 64),
+        rep_user_id INTEGER NOT NULL REFERENCES users(id),
+        machine_id INTEGER NOT NULL REFERENCES machines(id),
+        card_id INTEGER NOT NULL REFERENCES maintenance_cards(id),
+        old_latitude REAL,
+        old_longitude REAL,
+        proposed_latitude REAL NOT NULL CHECK (proposed_latitude BETWEEN -90 AND 90),
+        proposed_longitude REAL NOT NULL CHECK (proposed_longitude BETWEEN -180 AND 180),
+        gps_accuracy REAL NOT NULL CHECK (gps_accuracy >= 0 AND gps_accuracy <= 100000),
+        distance_meters REAL NOT NULL CHECK (distance_meters >= 0),
+        captured_at TEXT NOT NULL,
+        note TEXT,
+        evidence_path TEXT,
+        evidence_content_type TEXT CHECK (evidence_content_type IS NULL OR evidence_content_type IN ('image/jpeg', 'image/png', 'image/webp')),
+        status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+        reviewer_user_id INTEGER REFERENCES users(id),
+        review_note TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        reviewed_at TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_rep_location_change_status_created
+        ON rep_machine_location_change_requests(status, created_at DESC, id DESC);
+      CREATE INDEX IF NOT EXISTS idx_rep_location_change_machine_status
+        ON rep_machine_location_change_requests(machine_id, status, created_at DESC, id DESC);
+
+      CREATE TABLE IF NOT EXISTS apk_releases (
+        id INTEGER PRIMARY KEY,
+        version_code INTEGER NOT NULL UNIQUE CHECK (version_code > 0),
+        version_name TEXT NOT NULL,
+        source_revision TEXT NOT NULL,
+        source_tree_dirty INTEGER NOT NULL CHECK (source_tree_dirty IN (0, 1)),
+        apk_sha256 TEXT NOT NULL CHECK (length(apk_sha256) = 64),
+        signer_certificate_sha256 TEXT NOT NULL CHECK (length(signer_certificate_sha256) = 64),
+        artifact_path TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'available' CHECK (status IN ('available', 'retained', 'withdrawn')),
+        published_by INTEGER REFERENCES users(id),
+        published_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        notes TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_apk_releases_status_version
+        ON apk_releases(status, version_code DESC);
+    `);
+
+    database.prepare('INSERT INTO schema_migrations (version) VALUES (?)')
+      .run(repNativeSupportWorkflowsMigration);
+  });
+  migrate.immediate();
+}
+
 /** Add persistent per-account lockout fields without rebuilding users or changing IDs. */
 export function migrateAccountLoginProtection(database) {
   const migrate = database.transaction(() => {
@@ -2023,6 +2150,7 @@ export function initializeDatabase({ database = db, initialAdminPassword = env.i
     migrateMachineVerificationAndCorrections(database);
     migrateMachineLocationConfirmationReview(database);
     migrateMachineCorrectionRenameRecovery(database);
+    migrateRepNativeSupportWorkflows(database);
     migrateGpsRetentionIndex(database);
     migrateStaffPayrollRules(database);
     migrateRepVisitMachineCondition(database);

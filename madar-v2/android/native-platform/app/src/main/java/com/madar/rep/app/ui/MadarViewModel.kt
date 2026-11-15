@@ -45,6 +45,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.UUID
 import org.json.JSONObject
+import android.os.Build
 
 data class LoginUiState(
     val busy: Boolean = false,
@@ -118,6 +119,12 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
 
     private val _machineLocationApprovalBusy = MutableStateFlow<Long?>(null)
     val machineLocationApprovalBusy: StateFlow<Long?> = _machineLocationApprovalBusy.asStateFlow()
+
+    private val _supportBusy = MutableStateFlow(false)
+    val supportBusy: StateFlow<Boolean> = _supportBusy.asStateFlow()
+
+    private val _supportMessage = MutableStateFlow<String?>(null)
+    val supportMessage: StateFlow<String?> = _supportMessage.asStateFlow()
 
     val eventConnected: StateFlow<Boolean> = container.eventStream.connected
 
@@ -339,6 +346,38 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
         container.scheduler.enqueueNow()
         loadCachedPreview(active)
     }
+
+    fun submitSupportReport(description: String, category: String = "bug") {
+        val current = session.value ?: return
+        val text = description.trim()
+        if (text.length < 5 || text.length > 8000) {
+            _supportMessage.value = "اكتب وصفاً من 5 إلى 8000 حرف."
+            return
+        }
+        if (_supportBusy.value) return
+        _supportBusy.value = true
+        _supportMessage.value = null
+        viewModelScope.launch {
+            try {
+                val report = JSONObject()
+                    .put("reportUuid", UUID.randomUUID().toString())
+                    .put("category", category)
+                    .put("severity", "normal")
+                    .put("description", text)
+                    .put("screenName", "android-representative-app")
+                    .put("appVersion", "MADAR V2")
+                    .put("deviceModel", Build.MANUFACTURER + " " + Build.MODEL)
+                    .put("androidVersion", Build.VERSION.RELEASE ?: "unknown")
+                    .put("logs", "")
+                withContext(Dispatchers.IO) { container.apiFactory(current.serverUrl).submitSupportReport(current.token, report.toString()) }
+                _supportMessage.value = "تم حفظ البلاغ على خادم MADAR المحلي."
+            } catch (error: Throwable) {
+                _supportMessage.value = human(error)
+            } finally { _supportBusy.value = false }
+        }
+    }
+
+    fun clearSupportMessage() { _supportMessage.value = null }
 
     private fun loadCachedPreview(current: Session) {
         viewModelScope.launch {
@@ -700,6 +739,7 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
                         longitude = location.longitude,
                         accuracy = location.accuracyMeters,
                         updatedAt = MadarTime.isoUtc(location.capturedAtMillis),
+                        isMock = location.isMock,
                     ),
                 )
                 _claimBlockedCardId.value = null

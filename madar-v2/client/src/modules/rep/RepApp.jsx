@@ -1,4 +1,5 @@
 import { usableNativeGpsSnapshot } from './native-gps-state.js';
+import RepSupportPanel from './RepSupportPanel.jsx';
 import { getNativePhotoArchiveStatus, chooseNativePhotoArchiveFolder } from './native-bridges.js';
 import { subscribeNativeOperations } from './native-bridges.js';
 import { lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -324,6 +325,7 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
   const [gpsError, setGpsError] = useState('');
   const [onDuty, setOnDuty] = useState(false);
   const [showQueue, setShowQueue] = useState(false);
+  const [supportPanelOpen, setSupportPanelOpen] = useState(false);
   const [showOfflineMap, setShowOfflineMap] = useState(false);
   const [assignmentNotice, setAssignmentNotice] = useState(null);
   const [toast, setToast] = useState('');
@@ -1918,6 +1920,22 @@ try {
     }
   };
 
+  const submitSelectedMachineLocationChange = async ({ note, evidence, location }) => {
+    const form = new FormData();
+    form.append('request', JSON.stringify({
+      actionUuid: crypto.randomUUID(),
+      cardId: selectedMachine.cardId,
+      location: {
+        latitude: location.latitude, longitude: location.longitude, accuracy: location.accuracy,
+        updatedAt: location.updatedAt, isMock: location.isMock === true,
+      },
+      note,
+    }));
+    if (evidence) form.append('evidence', evidence);
+    const result = await api.upload(`/api/rep/machines/${selectedMachine.machineId}/location-change-requests`, form);
+    return result;
+  };
+
   const serverLabel = serverState === 'checking'
     ? 'جارٍ فحص الخادم'
     : serverState === 'online' && networkOnline
@@ -1966,6 +1984,7 @@ try {
             <span>⏳</span><b>{pendingQueueCount}</b><small>معلق</small>
           </button>
           <NotificationBell user={user} online={serverState === 'online' && networkOnline && !offlineOnly} variant="rep" />
+          <button className="rep-icon-button" type="button" onClick={() => setSupportPanelOpen(true)} aria-label="إرسال بلاغ للدعم" title="إرسال بلاغ">؟</button>
           <button className="rep-icon-button rep-refresh-button" type="button" onClick={() => { void checkServer(); void refreshData(); void refreshAttendance(); }} disabled={routeLoading} aria-label="تحديث مسار اليوم" title="تحديث المسار">
             <span className={routeLoading ? 'rep-spinning' : ''}>↻</span>
           </button>
@@ -1981,6 +2000,7 @@ try {
       )}
 
       {offlineOnly && <div className="rep-offline-banner" role="status">أنت في وضع العمل المحلي. لا تُرسل أي بيانات حتى تتم إعادة التحقق من الجلسة مع الخادم.</div>}
+      {supportPanelOpen && <RepSupportPanel onClose={() => setSupportPanelOpen(false)} />}
 
       <section className="rep-attendance-card" aria-label="الحضور والانصراف">
         <div className="rep-attendance-summary">
@@ -2196,7 +2216,7 @@ try {
  </section>}
  <footer className="rep-app-footer"><span>مَــدَارْ · تطبيق المندوب الميداني{appVersion ? ` · إصدار ${appVersion}` : ''}</span><span>{gps ? `آخر GPS: ${formatGps(gps)}` : visibleGpsError || (nativeApp ? 'فعّل الحضور لتسجيل GPS أثناء الوردية' : 'يُسجّل GPS مع الحضور والانصراف والزيارة')}</span></footer>
 
-        {selectedMachine && <MachineVisitSheet machine={{ ...selectedMachine, ...(route?.regions ?? []).flatMap((region) => region.machines).find((machine) => machine.cardId === selectedMachine.cardId) }} repId={userId} repName={user.fullName} reasons={reasons} gps={gps} gpsError={visibleGpsError} captureLocation={captureVisitLocation} onStartWork={startMachineWork} onStopWork={stopMachineWork} onClose={() => setSelectedMachine(null)} onSave={saveVisit} onConfirmLocation={confirmSelectedMachineLocation} onReportCorrection={submitSelectedMachineCorrection} />}
+        {selectedMachine && <MachineVisitSheet machine={{ ...selectedMachine, ...(route?.regions ?? []).flatMap((region) => region.machines).find((machine) => machine.cardId === selectedMachine.cardId) }} repId={userId} repName={user.fullName} reasons={reasons} gps={gps} gpsError={visibleGpsError} captureLocation={captureVisitLocation} onStartWork={startMachineWork} onStopWork={stopMachineWork} onClose={() => setSelectedMachine(null)} onSave={saveVisit} onConfirmLocation={confirmSelectedMachineLocation} onReportCorrection={submitSelectedMachineCorrection} onRequestLocationChange={submitSelectedMachineLocationChange} />}
       {tutorialOpen && <Tutorial nativeApp={nativeApp} onFinish={finishTutorial} />}
       {toast && <div className="rep-toast" role="status">✓ {toast}</div>}
     </main>

@@ -137,5 +137,6 @@ export function locationPayload(location) {
     longitude: location.longitude,
     accuracy: location.accuracy,
     updatedAt: location.updatedAt,
+    ...(typeof location.isMock === 'boolean' ? { isMock: location.isMock } : {}),
   };
 }

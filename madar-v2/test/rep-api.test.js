@@ -10,12 +10,16 @@ const temporaryDirectory = mkdtempSync(join(tmpdir(), 'madar-v2-rep-'));
 process.env.MADAR_V2_DATABASE_PATH = join(temporaryDirectory, 'rep.sqlite');
 process.env.MADAR_V2_STORAGE_ROOT = join(temporaryDirectory, 'storage');
 process.env.MADAR_V2_OFFLINE_MAP_PATH = join(temporaryDirectory, 'local-map.mbtiles');
+// Do not let the developer's .env map-download path leak into this isolated integration test.
+process.env.MADAR_V2_OFFLINE_MAPS_DIR = '';
 process.env.MADAR_REP_APK_PATH = join(temporaryDirectory, 'madar-rep.apk');
 process.env.MADAR_REP_TRANSITION_APK_PATH = join(temporaryDirectory, 'madar-rep-transition.apk');
 process.env.REP_ATTENDANCE_MAX_OFFLINE_AGE_HOURS = '24';
 process.env.STORAGE_MOUNT_PATH = '';
 process.env.NODE_ENV = 'test';
 process.env.COOKIE_SECURE = 'false';
+process.env.MADAR_GITHUB_ISSUES_TOKEN = '';
+process.env.MADAR_GITHUB_ISSUES_REPOSITORY = '';
 
 const [
   { app },
@@ -34,6 +38,7 @@ const [
   { recoverMachineCorrectionRenames },
   { closeOfflineMap },
   { env },
+  { purgeExpiredRepBugAttachments },
 ] = await Promise.all([
   import('../server/app.js'),
   import('../server/database/connection.js'),
@@ -44,6 +49,7 @@ const [
   import('../server/modules/maintenance/service.js'),
   import('../server/modules/supervisor/offline-tiles.js'),
   import('../server/config/env.js'),
+  import('../server/modules/rep/support.js'),
 ]);
 
 initializeDatabase({ initialAdminPassword: '' });
@@ -439,6 +445,61 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
     updatedAt: '2026-11-02T08:30:00.000Z',
   });
   assert.ok(login.cookie.startsWith('madar_token='));
+
+  const bugReportUuid = randomUUID();
+  const supportForm = new FormData();
+  supportForm.set('report', JSON.stringify({
+    reportUuid: bugReportUuid,
+    category: 'sync',
+    severity: 'high',
+    description: 'مشكلة مزامنة بعد حفظ الزيارة',
+    screenName: 'مسار اليوم',
+    appVersion: '2.1.0',
+    deviceModel: 'Android test device',
+    androidVersion: '16',
+    logs: 'token=private-value user=test@example.com',
+  }));
+  const savedSupportReport = await fetch(`${baseUrl}/api/rep/support/reports`, {
+    method: 'POST', headers: { cookie: login.cookie }, body: supportForm,
+  });
+  assert.equal(savedSupportReport.status, 201);
+  const savedSupportBody = await savedSupportReport.json();
+  assert.equal(savedSupportBody.report.reportUuid, bugReportUuid);
+  assert.doesNotMatch(savedSupportBody.report.sanitizedLogs, /private-value|test@example\.com/);
+  const repeatedSupportForm = new FormData();
+  repeatedSupportForm.set('report', JSON.stringify({
+    reportUuid: bugReportUuid, category: 'sync', severity: 'high',
+    description: 'مشكلة مزامنة بعد حفظ الزيارة', screenName: 'مسار اليوم', appVersion: '2.1.0',
+    deviceModel: 'Android test device', androidVersion: '16', logs: 'token=private-value user=test@example.com',
+  }));
+  const repeatedSupportReport = await fetch(`${baseUrl}/api/rep/support/reports`, {
+    method: 'POST', headers: { cookie: login.cookie }, body: repeatedSupportForm,
+  });
+  assert.equal(repeatedSupportReport.status, 200, 'report submission retries are idempotent');
+  const repSupportHistory = await request('/api/rep/support/reports', {}, login.cookie);
+  assert.equal(repSupportHistory.body.reports.filter((report) => report.reportUuid === bugReportUuid).length, 1);
+  const adminSupportQueue = await request('/api/system/rep-support/reports?status=new', {}, adminCookie);
+  assert.equal(adminSupportQueue.response.status, 200);
+  assert.ok(adminSupportQueue.body.reports.some((report) => report.reportUuid === bugReportUuid));
+  const repCannotReadAdminSupportQueue = await request('/api/system/rep-support/reports', {}, login.cookie);
+  assert.equal(repCannotReadAdminSupportQueue.response.status, 403);
+  const adminStatusUpdate = await request(`/api/system/rep-support/reports/${savedSupportBody.report.id}`,
+    jsonOptions('PATCH', { status: 'in_progress', note: 'تمت المراجعة' }), adminCookie);
+  assert.equal(adminStatusUpdate.response.status, 200);
+  assert.equal(adminStatusUpdate.body.report.status, 'in_progress');
+  const releaseHistory = await request('/api/system/rep-releases', {}, adminCookie);
+  assert.equal(releaseHistory.response.status, 200);
+  assert.deepEqual(releaseHistory.body.releases, []);
+  const fallbackReleasePublish = await request('/api/system/rep-releases/publish', jsonOptions('POST', { notes: 'لن ينشر APK تجريبي.' }), adminCookie);
+  assert.equal(fallbackReleasePublish.response.status, 409, 'fallback/debug artifacts cannot be recorded as signed releases');
+  const repCannotReadReleaseHistory = await request('/api/system/rep-releases', {}, login.cookie);
+  assert.equal(repCannotReadReleaseHistory.response.status, 403);
+  const requestedGithubIssue = await request(`/api/system/rep-support/reports/${savedSupportBody.report.id}/github-issue`,
+    jsonOptions('POST', {}), adminCookie);
+  assert.equal(requestedGithubIssue.response.status, 200);
+  assert.equal(requestedGithubIssue.body.report.githubStatus, 'failed', 'GitHub failure must not prevent local report persistence');
+  assert.ok(requestedGithubIssue.body.report.description.includes('مشكلة مزامنة'));
+
   const nativeLogin = await request('/api/rep/login', {
     ...jsonOptions('POST', { username: 'rep-nour', password: 'Rep-Nour-Password-2026!' }),
     headers: { 'content-type': 'application/json', 'x-madar-native-client': 'android' },
@@ -770,6 +831,27 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
 
   const beforeBuffer = await sharp({ create: { width: 80, height: 60, channels: 3, background: '#b7c4ce' } }).jpeg().toBuffer();
   const afterBuffer = await sharp({ create: { width: 70, height: 60, channels: 3, background: '#87b99d' } }).jpeg().toBuffer();
+  const attachmentForm = new FormData();
+  attachmentForm.set('report', JSON.stringify({
+    reportUuid: randomUUID(), category: 'camera', severity: 'normal', description: 'اختبار الاحتفاظ بصورة البلاغ',
+    screenName: 'camera', appVersion: '2.1.0', deviceModel: 'test', androidVersion: '16', logs: '',
+  }));
+  attachmentForm.append('attachment', new Blob([beforeBuffer], { type: 'image/jpeg' }), 'evidence.jpg');
+  const reportWithAttachmentResponse = await fetch(`${baseUrl}/api/rep/support/reports`, {
+    method: 'POST', headers: { cookie: login.cookie }, body: attachmentForm,
+  });
+  assert.equal(reportWithAttachmentResponse.status, 201);
+  const reportWithAttachment = await reportWithAttachmentResponse.json();
+  const attachment = reportWithAttachment.report.attachments[0];
+  assert.equal(attachment.content_type, 'image/jpeg');
+  const attachmentDownload = await fetch(`${baseUrl}${attachment.downloadUrl}`, { headers: { cookie: login.cookie } });
+  assert.equal(attachmentDownload.status, 200);
+  assert.equal(attachmentDownload.headers.get('content-type'), 'image/jpeg');
+  db.prepare("UPDATE rep_bug_report_attachments SET created_at = datetime('now', '-181 days') WHERE id = ?").run(attachment.id);
+  const attachmentPurge = await purgeExpiredRepBugAttachments(db, new Date());
+  assert.equal(attachmentPurge.purged, 1);
+  const purgedAttachmentDownload = await fetch(`${baseUrl}${attachment.downloadUrl}`, { headers: { cookie: login.cookie } });
+  assert.equal(purgedAttachmentDownload.status, 404);
   const visitUuid = randomUUID();
   const currentTime = Date.now();
   const visitPayload = {
@@ -924,6 +1006,8 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   assert.equal(visitSync.response.status, 200);
   assert.equal(visitSync.body.success, true);
   assert.equal(visitSync.body.status, 'pending_review');
+  assert.deepEqual(visitSync.body.reasonCodes, ['PERMISSION_DISABLED']);
+  assert.equal(visitSync.body.reviewSource, 'supervisor');
   assert.equal(db.prepare('SELECT 1 FROM rep_machine_work_leases WHERE card_id = ?').get(missingAfterCardId), undefined);
   const otherRepDone = await request('/api/rep/today-route?username=rep-all-regions', {}, universalLogin.cookie);
   const doneCard = otherRepDone.body.regions.flatMap((region) => region.machines)
@@ -1029,8 +1113,8 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
       },
     }),
   }, login.cookie);
-  assert.equal(outsideFence.response.status, 403);
-  assert.match(outsideFence.body.error, /خارج نطاق الماكينة/);
+  assert.equal(outsideFence.response.status, 409, 'a second submission for an already submitted card remains blocked');
+  assert.match(outsideFence.body.error, /already submitted/);
   db.prepare("UPDATE rep_visits SET created_at = datetime('now', '-1 day') WHERE visit_uuid = ?").run(visitUuid);
 
   const pendingRoute = await request('/api/rep/today-route?username=rep-nour', {}, login.cookie);
@@ -1099,11 +1183,18 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
     afterCapturedAt: [new Date(universalVisitTime).toISOString()],
     location: { ...visitPayload.location, updatedAt: new Date(universalVisitTime).toISOString() },
   };
+  const enableUniversalSelfApproval = await request(`/api/users/${universalRepId}`, jsonOptions('PATCH', {
+    canSelfApproveVisits: true,
+  }), adminCookie);
+  assert.equal(enableUniversalSelfApproval.response.status, 200);
+  assert.equal(enableUniversalSelfApproval.body.canSelfApproveVisits, true);
   const universalVisit = await request('/api/rep/sync-visit', {
     method: 'POST', body: buildVisitForm(universalVisitPayload, 1, 1),
   }, universalLogin.cookie);
   assert.equal(universalVisit.response.status, 200, JSON.stringify(universalVisit.body));
-  assert.equal(universalVisit.body.status, 'pending_review', 'universal representatives can submit visits for all regions on their assigned orders');
+  assert.equal(universalVisit.body.status, 'approved', 'an explicitly enabled representative self-approves an eligible visit');
+  assert.equal(universalVisit.body.reviewSource, 'self_approval');
+  assert.deepEqual(universalVisit.body.reasonCodes, []);
   const flexibleReplay = await request('/api/rep/sync-visit', { method: 'POST', body: buildVisitForm(universalVisitPayload, 1, 1) }, universalLogin.cookie);
   assert.equal(flexibleReplay.response.status, 200);
   assert.equal(flexibleReplay.body.idempotent, true);
@@ -1701,6 +1792,37 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   const noAfterMachineRoute = routeAfterNoAfterApproval.body.regions.flatMap((region) => region.machines)
     .find((machine) => machine.cardId === optionalAfterCardId);
   assert.equal(noAfterMachineRoute.isCompleted, true, 'an approved visit does not require an After photo to complete the route');
+
+  const locationChangePayload = {
+    actionUuid: randomUUID(), cardId: optionalAfterCardId,
+    location: { latitude: visitPayload.location.latitude + 0.0002, longitude: visitPayload.location.longitude + 0.0002,
+      accuracy: 9, updatedAt: new Date().toISOString(), isMock: false },
+    note: 'أعيد تركيب الماكينة في موضع قريب.',
+  };
+  const locationChangeForm = new FormData();
+  locationChangeForm.set('request', JSON.stringify(locationChangePayload));
+  locationChangeForm.append('evidence', new Blob([afterBuffer], { type: 'image/jpeg' }), 'location-proof.jpg');
+  const locationChangeSubmission = await request(`/api/rep/machines/${optionalAfterMachineId}/location-change-requests`, {
+    method: 'POST', body: locationChangeForm,
+  }, login.cookie);
+  assert.equal(locationChangeSubmission.response.status, 201, JSON.stringify(locationChangeSubmission.body));
+  const locationChangeId = locationChangeSubmission.body.requestId;
+  assert.equal(locationChangeSubmission.body.status, 'pending');
+  const locationChangeQueue = await request('/api/system/rep-location-changes?status=pending', {}, adminCookie);
+  assert.equal(locationChangeQueue.response.status, 200);
+  assert.ok(locationChangeQueue.body.requests.some((item) => item.id === locationChangeId && item.hasEvidence));
+  const locationEvidenceResponse = await fetch(`${baseUrl}/api/system/rep-location-changes/${locationChangeId}/evidence`, {
+    headers: { cookie: adminCookie },
+  });
+  assert.equal(locationEvidenceResponse.status, 200);
+  assert.equal(locationEvidenceResponse.headers.get('content-type'), 'image/jpeg');
+  const approvedLocationChange = await request(`/api/system/rep-location-changes/${locationChangeId}/approved`,
+    jsonOptions('POST', { note: 'تم التحقق ميدانياً.' }), adminCookie);
+  assert.equal(approvedLocationChange.response.status, 200, JSON.stringify(approvedLocationChange.body));
+  assert.equal(approvedLocationChange.body.status, 'approved', JSON.stringify(approvedLocationChange.body));
+  const movedMachine = db.prepare('SELECT latitude, longitude FROM machines WHERE id = ?').get(optionalAfterMachineId);
+  assert.equal(movedMachine.latitude, locationChangePayload.location.latitude);
+  assert.equal(movedMachine.longitude, locationChangePayload.location.longitude);
 
   const disabledRep = await request(`/api/users/${repId}`, jsonOptions('PUT', { isActive: 0 }), adminCookie);
   assert.equal(disabledRep.response.status, 200);

@@ -103,6 +103,9 @@ export default function StaffDirectoryPage() {
         if (form.get('password')) payload.password = form.get('password');
         payload.role = classification === 'representative' ? 'rep' : form.get('role');
         payload.assignedRegions = classification === 'representative' ? ['*'] : [];
+        if (classification === 'representative') {
+          payload.canSelfApproveVisits = form.get('canSelfApproveVisits') === 'on';
+        }
       } else if (editing?.can_login) {
         payload.enableLogin = false;
       }
@@ -190,9 +193,16 @@ export default function StaffDirectoryPage() {
                 <Input label="اسم المستخدم *" name="username" required={!editing?.can_login} defaultValue={editing?.username ?? ''} minLength={3} maxLength={64} />
                 <Input label={editing?.can_login ? 'كلمة مرور جديدة (اختياري)' : 'كلمة المرور * (4 خانات على الأقل)'} name="password" type="password" required={!editing?.can_login} minLength={4} maxLength={72} autoComplete="new-password" />
                 {classification === 'representative' ? (
-                  <div className="madar-callout-info" style={{ padding: '10px 14px', borderRadius: '8px', background: 'rgba(56, 189, 248, 0.08)', border: '1px solid rgba(56, 189, 248, 0.2)', color: '#38bdf8', fontSize: '13px', marginTop: '6px' }}>
-                    ✓ <strong>تغطية شاملة:</strong> المندوب الميداني لديه صلاحية وصول تلقائية لكافة المناطق الميدانية المسندة لأوامر التشغيل.
-                  </div>
+                  <>
+                    <div className="madar-callout-info" style={{ padding: '10px 14px', borderRadius: '8px', background: 'rgba(56, 189, 248, 0.08)', border: '1px solid rgba(56, 189, 248, 0.2)', color: '#38bdf8', fontSize: '13px', marginTop: '6px' }}>
+                      ✓ <strong>تغطية شاملة:</strong> المندوب الميداني لديه صلاحية وصول تلقائية لكافة المناطق الميدانية المسندة لأوامر التشغيل.
+                    </div>
+                    <label className="madar-checkbox">
+                      <input type="checkbox" name="canSelfApproveVisits" defaultChecked={Boolean(editing?.canSelfApproveVisits)} />
+                      <span>السماح بالاعتماد الذاتي للزيارات المؤهلة فقط</span>
+                    </label>
+                    <p className="madar-small madar-muted">يتطلب GPS حديثاً (≤5 دقائق)، دقة ≤100 م، داخل النطاق الجغرافي، وموقع ماكينة مثبتاً؛ وإلا تُرسل الزيارة للمراجعة.</p>
+                  </>
                 ) : (
                   <Select label="الدور *" name="role" required defaultValue={editing?.role && editing.role !== 'rep' ? editing.role : 'operations'}>
                     {systemRoles.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}

@@ -17,6 +17,7 @@ const {
   migrateClientProfileCrud,
   migrateFinanceAccountRoles,
   migrateOptionalOffcutMaterial,
+  migrateRepNativeSupportWorkflows,
 } = await import('../server/database/init.js');
 
 after(() => {
@@ -161,6 +162,28 @@ test('initializer can seed a bcrypt-hashed admin with an explicit password and r
     db.prepare("SELECT password_hash FROM users WHERE username = 'admin'").get().password_hash,
     admin.password_hash,
   );
+});
+
+test('representative release workflow migration defaults self-approval off and is idempotent', () => {
+  const migrationVersion = '20261115-rep-native-support-workflows';
+  db.prepare('DELETE FROM schema_migrations WHERE version = ?').run(migrationVersion);
+
+  migrateRepNativeSupportWorkflows(db);
+  const userPermission = db.prepare('PRAGMA table_info(users)').all()
+    .find((column) => column.name === 'can_self_approve_visits');
+  const reviewColumns = new Set(db.prepare('PRAGMA table_info(rep_visit_reviews)').all().map(({ name }) => name));
+  assert.ok(userPermission);
+  assert.equal(userPermission.dflt_value, '0');
+  assert.ok(reviewColumns.has('review_source'));
+  assert.ok(reviewColumns.has('reason_codes_json'));
+  assert.ok(db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'rep_bug_reports'`).get());
+  assert.ok(db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'rep_machine_location_change_requests'`).get());
+  assert.ok(db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'apk_releases'`).get());
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM schema_migrations WHERE version = ?').get(migrationVersion).count, 1);
+
+  migrateRepNativeSupportWorkflows(db);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM schema_migrations WHERE version = ?').get(migrationVersion).count, 1);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM users WHERE can_self_approve_visits != 0').get().count, 0);
 });
 
 test('fresh initialization leaves administrator setup to the first-run screen by default', () => {
