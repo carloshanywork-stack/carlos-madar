@@ -51,3 +51,15 @@ deploymentTest('a zero-test successful command is rejected rather than recorded 
  assert.doesNotMatch(readFileSync(f.callLog,'utf8'),/pm2/);
  assert.equal(existsSync(join(f.repo,'madar-v2/logs/.auto-pull/deployed-revision')),false);
 });
+
+deploymentTest('fetch failure diagnostics are throttled with their summary',()=>{
+ const f=fixture('fetch-failure');
+ run('git',['remote','set-url','origin',join(f.base,'missing.git')],f.repo);
+ assert.equal(f.run().status,0);
+ const log=join(f.repo,'madar-v2/logs/auto-pull.log');
+ const first=readFileSync(log,'utf8');
+ assert.match(first,/fetch failed \(GitHub auth\/network\)/);
+ assert.match(first,/fatal:/);
+ assert.equal(f.run().status,0);
+ assert.equal(readFileSync(log,'utf8'),first,'retries inside the throttle window must not append repeated fetch errors');
+});

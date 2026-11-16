@@ -35,7 +35,10 @@ log_throttled() {
   stamp="$STATE_DIR/last-$key"
   now="$(date +%s)"
   last="$(cat "$stamp" 2>/dev/null || echo 0)"
-  [ $((now - last)) -ge 600 ] || return 0
+  # Return non-zero when suppressed so callers can also suppress diagnostic
+  # detail, not just the summary line. Otherwise a persistent fetch outage
+  # still appends its full error output every 30 seconds and grows the log.
+  [ $((now - last)) -ge 600 ] || return 1
   printf '%s' "$now" >"$stamp"
   log "$@"
 }
@@ -47,8 +50,9 @@ REMOTE_REF="origin/$BRANCH"
 FETCH_ERR="$(mktemp)"
 if ! GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND='ssh -o BatchMode=yes -o ConnectTimeout=15' \
      timeout 45 git fetch --quiet origin "$BRANCH" 2>"$FETCH_ERR"; then
-  log_throttled fetch-failure "fetch failed (GitHub auth/network); will retry every 30s"
-  sed 's/^/  /' "$FETCH_ERR" >>"$LOG_FILE"
+  if log_throttled fetch-failure "fetch failed (GitHub auth/network); will retry every 30s"; then
+    sed 's/^/  /' "$FETCH_ERR" >>"$LOG_FILE"
+  fi
   rm -f "$FETCH_ERR"
   exit 0
 fi
