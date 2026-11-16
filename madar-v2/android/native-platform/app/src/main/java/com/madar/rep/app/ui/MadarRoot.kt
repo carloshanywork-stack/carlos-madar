@@ -1,5 +1,6 @@
 package com.madar.rep.app.ui
 
+import android.app.Activity
 import android.content.Intent
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Box
@@ -32,6 +33,8 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
+import androidx.compose.material3.Surface
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -42,10 +45,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.Alignment
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.madar.rep.app.AppContainer
 import com.madar.rep.app.data.session.Session
+import com.madar.rep.app.data.api.ApkUpdateManager
 import com.madar.rep.app.migration.LegacyMigrationActivity
 import kotlinx.coroutines.delay
 
@@ -62,8 +67,10 @@ private object Tabs {
  */
 @Composable
 fun MadarRoot(container: AppContainer) {
+    FirstLaunchPermissions()
     val vm: MadarViewModel = viewModel(factory = MadarViewModel.factory(container))
     val session by vm.session.collectAsStateWithLifecycle()
+    val mandatoryUpdate by vm.mandatoryUpdate.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
 
     LaunchedEffect(vm) {
@@ -71,12 +78,16 @@ fun MadarRoot(container: AppContainer) {
     }
 
     val current = session
+    LaunchedEffect(current?.ownerScopeId) {
+        if (current != null) vm.checkMandatoryUpdate()
+    }
     if (current == null) {
         val login by vm.login.collectAsStateWithLifecycle()
         LoginScreen(
             state = login,
-            defaultServerUrl = container.defaultServerUrl(),
-            onLogin = vm::login,
+            onLogin = { username, password ->
+                vm.login(container.defaultServerUrl(), username, password)
+            },
             onClearError = vm::clearLoginError,
         )
         return
@@ -86,6 +97,7 @@ fun MadarRoot(container: AppContainer) {
         vm = vm,
         container = container,
         session = current,
+        mandatoryUpdate = mandatoryUpdate,
         snackbarHostState = snackbarHostState,
     )
 }
@@ -95,6 +107,7 @@ private fun SignedInShell(
     vm: MadarViewModel,
     container: AppContainer,
     session: Session,
+    mandatoryUpdate: Boolean,
     snackbarHostState: SnackbarHostState,
 ) {
     val route by vm.route.collectAsStateWithLifecycle()
@@ -102,6 +115,11 @@ private fun SignedInShell(
     val notifications by vm.notifications.collectAsStateWithLifecycle()
     val unread by vm.unreadNotifications.collectAsStateWithLifecycle()
     val context = LocalContext.current
+
+    if (mandatoryUpdate) {
+        ForcedUpdateScreen(vm)
+        return
+    }
 
     var tab by rememberSaveable { mutableStateOf(Tabs.ROUTE) }
     var visitUuid by rememberSaveable { mutableStateOf<String?>(null) }
@@ -188,7 +206,7 @@ private fun SignedInShell(
                     when (tab) {
                         Tabs.ROUTE -> Unit
                         Tabs.MAP -> {
-                            IconButton(onClick = { vm.refreshMapCatalog() }) {
+                            IconButton(onClick = { vm.refreshMapCatalog(); vm.refreshMapPoints() }) {
                                 Icon(Icons.Default.Refresh, contentDescription = "تحديث حزم الخرائط")
                             }
                         }
@@ -247,6 +265,46 @@ private fun SignedInShell(
                     },
                     onOpenVisit = { visit -> visitUuid = visit.visitUuid },
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ForcedUpdateScreen(vm: MadarViewModel) {
+    val context = LocalContext.current
+    val update by vm.apkUpdate.collectAsStateWithLifecycle()
+    BackHandler(enabled = true) { }
+    Surface(color = MaterialTheme.colorScheme.background) {
+        Column(
+            Modifier.fillMaxSize().padding(28.dp),
+            verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text("يلزم تحديث التطبيق", style = MaterialTheme.typography.headlineSmall)
+            Spacer(Modifier.height(12.dp))
+            Text("هذا الإصدار لم يعد مدعومًا. حدّث التطبيق للعودة إلى العمل. لن تُرسل البيانات من هذا الإصدار.")
+            Spacer(Modifier.height(12.dp))
+            update.availableVersion?.let { Text("الإصدار المطلوب: $it") }
+            update.message?.let { Text(it) }
+            if (update.busy) {
+                Spacer(Modifier.height(12.dp))
+                CircularProgressIndicator()
+            }
+            Spacer(Modifier.height(16.dp))
+            when {
+                update.downloadedApk != null -> Button(onClick = {
+                    val activity = context as? Activity
+                    if (activity == null) vm.showMessage("تعذر فتح مثبت Android.")
+                    else runCatching { ApkUpdateManager(context).install(activity, update.downloadedApk!!) }
+                        .onSuccess { opened ->
+                            if (!opened) vm.showMessage("اسمح بتثبيت تطبيقات غير معروفة لهذا التطبيق، ثم ارجع واضغط التثبيت مرة أخرى.")
+                        }
+                        .onFailure { vm.showMessage("تعذر فتح مثبت Android: ${it.message ?: "خطأ غير معروف"}") }
+                }, enabled = !update.busy) { Text("تثبيت التحديث") }
+                else -> Button(onClick = vm::downloadApkUpdate, enabled = !update.busy) {
+                    Text("تنزيل التحديث والتحقق منه")
+                }
             }
         }
     }

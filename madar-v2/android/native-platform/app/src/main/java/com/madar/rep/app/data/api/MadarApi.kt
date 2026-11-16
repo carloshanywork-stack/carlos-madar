@@ -14,6 +14,8 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.Interceptor
+import com.madar.rep.app.BuildConfig
 
 data class HttpResult(val status: Int, val body: String)
 
@@ -61,6 +63,12 @@ class MadarApi(
         val result = authorizedGet("/download/apk/status", token)
         if (result.status !in 200..299) throw mapReadError(result)
         return parse(result.body, ApkStatusResponse.serializer())
+    }
+
+    fun getAppVersion(): AppVersionResponse {
+        val result = execute(Request.Builder().url("$baseUrl/api/app-version").get().build())
+        if (result.status !in 200..299) throw mapReadError(result)
+        return parse(result.body, AppVersionResponse.serializer())
     }
 
     /** Streams the authenticated APK response into a sibling temporary file and atomically renames it. */
@@ -308,6 +316,12 @@ class MadarApi(
         return parse(result.body, MapPacksResponse.serializer()).packs
     }
 
+    fun getMapPoints(token: String): List<ServerMapPoint> {
+        val result = authorizedGet("/api/rep/map/points", token)
+        if (result.status !in 200..299) throw mapReadError(result)
+        return parse(result.body, ServerMapPointsResponse.serializer()).points
+    }
+
     fun getMapManifest(token: String, packId: String): MapManifest? {
         val result = authorizedGet("/api/rep/map/packs/$packId/manifest", token)
         if (result.status == 404) return null
@@ -497,6 +511,14 @@ class MadarApi(
         private val JSON_MEDIA = "application/json; charset=utf-8".toMediaType()
 
         fun defaultClient(): OkHttpClient = OkHttpClient.Builder()
+            .addInterceptor(Interceptor { chain ->
+                val request = chain.request().newBuilder()
+                    .header("X-App-Version-Code", BuildConfig.VERSION_CODE.toString())
+                    .build()
+                chain.proceed(request).also { response ->
+                    if (response.code == 426) VersionGate.requireUpdate()
+                }
+            })
             .connectTimeout(20, TimeUnit.SECONDS)
             .readTimeout(60, TimeUnit.SECONDS)
             .writeTimeout(120, TimeUnit.SECONDS)

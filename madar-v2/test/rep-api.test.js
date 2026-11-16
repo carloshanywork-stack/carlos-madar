@@ -804,6 +804,12 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   const repMapCatalog = await request('/api/rep/map/packs', {}, login.cookie);
   assert.equal(repMapCatalog.response.status, 200);
   assert.equal(repMapCatalog.body.success, true);
+  const repMapPoints = await request('/api/rep/map/points', {}, login.cookie);
+  assert.equal(repMapPoints.response.status, 200);
+  assert.equal(repMapPoints.body.success, true);
+  assert.ok(Array.isArray(repMapPoints.body.points));
+  assert.ok(repMapPoints.body.points.every((point) =>
+    Number.isFinite(point.latitude) && Number.isFinite(point.longitude) && Number.isSafeInteger(point.cardId)));
   const cairoPack = repMapCatalog.body.packs.find((pack) => pack.id === 'greater-cairo');
   assert.equal(cairoPack.available, true);
   assert.equal(cairoPack.tileCount, 1);

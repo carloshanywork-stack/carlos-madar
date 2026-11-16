@@ -25,6 +25,14 @@ function readTrustProxyHops(value) {
   return hops;
 }
 
+function readRepMinSupportedVersionCode(value) {
+  const versionCode = Number(value ?? 0);
+  if (!Number.isSafeInteger(versionCode) || versionCode < 0) {
+    throw new Error('MADAR_REP_MIN_SUPPORTED_VERSION_CODE must be a non-negative integer.');
+  }
+  return versionCode;
+}
+
 export function readRepAttendanceMaxOfflineAgeHours(value) {
   if (value === undefined) return 24;
   const hours = Number(value);
@@ -86,6 +94,7 @@ export const env = Object.freeze({
   githubToken: process.env.MADAR_GITHUB_ISSUES_TOKEN?.trim() || undefined,
   githubRepository: process.env.MADAR_GITHUB_ISSUES_REPOSITORY?.trim() || undefined,
   repSignerCertificateSha256: process.env.MADAR_REP_SIGNER_CERT_SHA256?.trim().toLowerCase() || undefined,
+  repMinSupportedVersionCode: readRepMinSupportedVersionCode(process.env.MADAR_REP_MIN_SUPPORTED_VERSION_CODE),
   initialAdminPassword: process.env.MADAR_INITIAL_ADMIN_PASSWORD ?? '',
   jwtSecret,
   authCookieName: 'madar_token',

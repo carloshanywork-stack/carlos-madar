@@ -50,7 +50,7 @@ android {
         buildConfigField(
             "String",
             "REP_SERVER_URL",
-            "\"${(System.getenv("MADAR_REP_SERVER_URL") ?: "https://carlos-pc.tail852ef0.ts.net").replace("\\", "\\\\").replace("\"", "\\\"")}\""
+            "\"https://carlos-pc.tail852ef0.ts.net\""
         )
     }
 

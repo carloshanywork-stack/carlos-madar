@@ -19,6 +19,8 @@ import com.madar.rep.app.data.api.DownloadedApk
 import com.madar.rep.app.data.api.FaultReason
 import com.madar.rep.app.data.api.LocationChangeRequestView
 import com.madar.rep.app.data.api.MadarApi
+import com.madar.rep.app.data.api.ServerMapPoint
+import com.madar.rep.app.data.api.VersionGate
 import com.madar.rep.app.data.api.MaintenanceLine
 import com.madar.rep.app.data.api.RouteMachine
 import com.madar.rep.app.data.db.AttendanceActionEntity
@@ -210,6 +212,10 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
     val mapPacks: StateFlow<List<MapPackEntity>> = container.mapRepository.observePacks()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    private val _mapPoints = MutableStateFlow<List<ServerMapPoint>>(emptyList())
+    val mapPoints: StateFlow<List<ServerMapPoint>> = _mapPoints.asStateFlow()
+    val mandatoryUpdate = VersionGate.required
+
     val migration = container.migrationManager.state
 
     fun refreshMigrationMarkers() {
@@ -299,6 +305,26 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
             } catch (error: Exception) {
                 _apkUpdate.value = _apkUpdate.value.copy(busy = false, message = human(error))
             }
+        }
+    }
+
+    fun checkMandatoryUpdate() {
+        val current = session.value ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { container.apiFactory(current.serverUrl).getAppVersion() }
+                .onSuccess { version ->
+                    VersionGate.setRequired(
+                        version.minSupportedVersionCode > 0 && BuildConfig.VERSION_CODE < version.minSupportedVersionCode
+                    )
+                }
+        }
+    }
+
+    fun refreshMapPoints() {
+        val current = session.value ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { container.apiFactory(current.serverUrl).getMapPoints(current.token) }
+                .onSuccess { _mapPoints.value = it }
         }
     }
 

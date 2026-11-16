@@ -46,7 +46,12 @@ class LocationProvider(private val context: Context) {
         if (!hasPermission()) return null
         val candidates = listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER, LocationManager.PASSIVE_PROVIDER)
             .mapNotNull { provider ->
-                runCatching { manager.getLastKnownLocation(provider) }.getOrNull()?.let { provider to it }
+                val location = try {
+                    manager.getLastKnownLocation(provider)
+                } catch (_: SecurityException) {
+                    null
+                }
+                location?.let { provider to it }
             }
         val fresh = candidates
             .filter { (_, location) -> System.currentTimeMillis() - location.time in 0..GeoPolicy.MAX_FIX_AGE_MILLIS }

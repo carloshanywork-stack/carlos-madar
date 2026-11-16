@@ -153,6 +153,33 @@ data class ApkStatusResponse(
 )
 
 @Serializable
+data class AppVersionResponse(
+    val success: Boolean = false,
+    val latestVersionCode: Int = 0,
+    val minSupportedVersionCode: Int = 0,
+    val versionName: String? = null,
+    val apkUrl: String? = null,
+    val sha256: String? = null,
+    val releaseNotes: String = "",
+)
+
+@Serializable
+data class ServerMapPoint(
+    val cardId: Long,
+    val machineId: Long,
+    val machineCode: String,
+    val latitude: Double,
+    val longitude: Double,
+    val locationLocked: Boolean = false,
+)
+
+@Serializable
+data class ServerMapPointsResponse(
+    val success: Boolean = false,
+    val points: List<ServerMapPoint> = emptyList(),
+)
+
+@Serializable
 data class RepSupportReportsResponse(
     val success: Boolean = false,
     val reports: List<RepSupportReport> = emptyList(),

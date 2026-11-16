@@ -373,6 +373,22 @@ router.get('/map/packs', (_req, res) => {
   res.json({ success: true, packs: getOfflineMapPackCatalog() });
 });
 
+router.get('/map/points', (req, res) => {
+  const route = getRepTodayRoute(req.user);
+  const points = route.regions.flatMap((region) => region.machines)
+    .filter((machine) => Number.isFinite(machine.latitude) && Number.isFinite(machine.longitude))
+    .map((machine) => ({
+      cardId: machine.cardId,
+      machineId: machine.machineId,
+      machineCode: machine.machineCode,
+      latitude: machine.latitude,
+      longitude: machine.longitude,
+      locationLocked: machine.isLocationLocked,
+    }));
+  res.set({ 'Cache-Control': 'private, no-store', Pragma: 'no-cache' })
+    .json({ success: true, points });
+});
+
 router.get('/map/packs/:packId/manifest', (req, res, next) => {
   try {
     res.set({ 'Cache-Control': 'private, no-store', Pragma: 'no-cache' });

@@ -29,6 +29,9 @@ import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
+import okhttp3.Interceptor
+import com.madar.rep.app.BuildConfig
+import com.madar.rep.app.data.api.VersionGate
 import okhttp3.Request
 
 /**
@@ -55,6 +58,14 @@ class OperationsEventStream(
     private var streamJob: Job? = null
     private var reconcileJob: Job? = null
     private val client = OkHttpClient.Builder()
+        .addInterceptor(Interceptor { chain ->
+            val request = chain.request().newBuilder()
+                .header("X-App-Version-Code", BuildConfig.VERSION_CODE.toString())
+                .build()
+            chain.proceed(request).also { response ->
+                if (response.code == 426) VersionGate.requireUpdate()
+            }
+        })
         .connectTimeout(20, TimeUnit.SECONDS)
         .readTimeout(0, TimeUnit.MILLISECONDS)
         .retryOnConnectionFailure(true)

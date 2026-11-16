@@ -95,6 +95,51 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', service: 'madar-v2', ...runtimeIdentity });
 });
 
+app.get('/api/app-version', (_req, res) => {
+  const latest = db.prepare(`SELECT version_code AS versionCode, version_name AS versionName,
+      apk_sha256 AS sha256, notes AS releaseNotes
+    FROM apk_releases WHERE status = 'available' ORDER BY version_code DESC, id DESC LIMIT 1`).get();
+  const latestVersionCode = latest ? Number(latest.versionCode) : 0;
+  res.set({ 'Cache-Control': 'no-store', Pragma: 'no-cache' }).json({
+    success: true,
+    latestVersionCode,
+    minSupportedVersionCode: env.repMinSupportedVersionCode,
+    versionName: latest?.versionName ?? null,
+    apkUrl: latest ? '/download/apk' : null,
+    sha256: latest?.sha256 ?? null,
+    releaseNotes: latest?.releaseNotes ?? '',
+  });
+});
+
+app.use('/api', (req, res, next) => {
+  if (!req.path.startsWith('/rep/') || req.path === '/rep/login'
+      || env.repMinSupportedVersionCode === 0) {
+    next();
+    return;
+  }
+  const header = req.get('X-App-Version-Code');
+  const clientVersionCode = /^\d{1,10}$/.test(header ?? '') ? Number(header) : 0;
+  if (clientVersionCode >= env.repMinSupportedVersionCode) {
+    next();
+    return;
+  }
+  const latestRelease = db.prepare(`SELECT version_code AS versionCode, apk_sha256 AS sha256, notes AS releaseNotes
+    FROM apk_releases WHERE status = 'available' ORDER BY version_code DESC, id DESC LIMIT 1`).get();
+  const latestVersionCode = Number(latestRelease?.versionCode ?? 0);
+  res.set({
+    Upgrade: `MADAR/${env.repMinSupportedVersionCode}`,
+    'Cache-Control': 'no-store',
+  }).status(426).json({
+    error: 'يجب تحديث تطبيق مدار للمتابعة.',
+    code: 'APP_UPDATE_REQUIRED',
+    latestVersionCode: Math.max(latestVersionCode, env.repMinSupportedVersionCode),
+    minSupportedVersionCode: env.repMinSupportedVersionCode,
+    apkUrl: '/download/apk',
+    sha256: latestRelease?.sha256 ?? null,
+    releaseNotes: latestRelease?.releaseNotes ?? '',
+  });
+});
+
 function openRegularFileNoFollow(path) {
   const before = lstatSync(path);
   if (before.isSymbolicLink() || !before.isFile()) throw Object.assign(new Error('Artifact is not a regular file.'), { code: 'EUNSAFEPATH' });

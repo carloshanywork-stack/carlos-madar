@@ -116,6 +116,9 @@ fun MapScreen(
 ) {
     val packs by vm.mapPacks.collectAsStateWithLifecycle()
     val download by vm.mapDownload.collectAsStateWithLifecycle()
+    val serverPoints by vm.mapPoints.collectAsStateWithLifecycle()
+
+    LaunchedEffect(Unit) { vm.refreshMapPoints() }
 
     var selectedPackId by rememberSaveable { mutableStateOf<String?>(null) }
     var pendingDelete by remember { mutableStateOf<MapPackEntity?>(null) }
@@ -138,12 +141,14 @@ fun MapScreen(
         zoom = zoom.coerceIn(minZoom, maxZoom)
     }
 
-    val markers = remember(routeView, openVisits) {
+    val markers = remember(routeView, openVisits, serverPoints) {
         val openCards = openVisits.map { it.cardId }.toSet()
+        val remoteByCardId = serverPoints.associateBy { it.cardId }
         routeView?.route?.regions.orEmpty().flatMap { region ->
             region.machines.mapNotNull { machine ->
-                val latitude = machine.approvedLocation?.latitude ?: machine.latitude
-                val longitude = machine.approvedLocation?.longitude ?: machine.longitude
+                val remote = remoteByCardId[machine.cardId]
+                val latitude = remote?.latitude ?: machine.approvedLocation?.latitude ?: machine.latitude
+                val longitude = remote?.longitude ?: machine.approvedLocation?.longitude ?: machine.longitude
                 if (latitude == null || longitude == null) null
                 else MapMarker(machine, latitude, longitude, machine.cardId in openCards)
             }

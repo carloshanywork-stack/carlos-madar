@@ -58,16 +58,13 @@ import com.madar.rep.app.ui.theme.MadarTeal
 @Composable
 fun LoginScreen(
     state: LoginUiState,
-    defaultServerUrl: String,
-    onLogin: (serverUrl: String, username: String, password: String) -> Unit,
+    onLogin: (username: String, password: String) -> Unit,
     onClearError: () -> Unit,
 ) {
-    var serverUrl by rememberSaveable { mutableStateOf(defaultServerUrl) }
     var username by rememberSaveable { mutableStateOf("") }
     // Passwords must never enter saved-instance state or a restoration bundle.
     var password by remember { mutableStateOf("") }
     var passwordVisible by rememberSaveable { mutableStateOf(false) }
-    var advanced by rememberSaveable { mutableStateOf(false) }
 
     Box(
         Modifier
@@ -167,29 +164,6 @@ fun LoginScreen(
                         modifier = Modifier.fillMaxWidth(),
                     )
 
-                    if (advanced) {
-                        OutlinedTextField(
-                            value = serverUrl,
-                            onValueChange = {
-                                serverUrl = it
-                                onClearError()
-                            },
-                            label = { Text("عنوان السيرفر") },
-                            singleLine = true,
-                            keyboardOptions = KeyboardOptions(
-                                keyboardType = KeyboardType.Uri,
-                                imeAction = ImeAction.Next,
-                            ),
-                            supportingText = {
-                                Text(
-                                    if (BuildConfig.DEBUG) "يفضّل HTTPS. HTTP مسموح فقط لعنوان محلي أثناء التطوير."
-                                    else "يجب أن يبدأ بـ https://"
-                                )
-                            },
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                    }
-
                     if (state.error != null) {
                         InlineMessage(state.error, MessageTone.Error)
                     }
@@ -198,9 +172,9 @@ fun LoginScreen(
                         onClick = {
                             val submittedPassword = password
                             password = ""
-                            onLogin(serverUrl.trim(), username.trim(), submittedPassword)
+                            onLogin(username.trim(), submittedPassword)
                         },
-                        enabled = !state.busy && username.isNotBlank() && password.isNotEmpty() && serverUrl.isNotBlank(),
+                        enabled = !state.busy && username.isNotBlank() && password.isNotEmpty(),
                         modifier = Modifier.fillMaxWidth().height(52.dp),
                         shape = RoundedCornerShape(14.dp),
                     ) {
@@ -217,12 +191,6 @@ fun LoginScreen(
                         }
                     }
 
-                    androidx.compose.material3.TextButton(
-                        onClick = { advanced = !advanced },
-                        modifier = Modifier.align(Alignment.CenterHorizontally),
-                    ) {
-                        Text(if (advanced) "إخفاء إعدادات السيرفر" else "إعدادات السيرفر المتقدمة")
-                    }
                 }
             }
 

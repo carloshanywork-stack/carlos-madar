@@ -122,7 +122,7 @@ class CameraActivity : ComponentActivity() {
             Toast.makeText(this, "الكاميرا غير جاهزة", Toast.LENGTH_SHORT).show()
             return
         }
-        capture.targetRotation = display?.rotation ?: Surface.ROTATION_0
+        capture.targetRotation = currentDisplayRotation()
         val container = (application as MadarApplication).container
         val state = CaptureUiState.busy
         assignCaptureState(state)
@@ -161,6 +161,9 @@ class CameraActivity : ComponentActivity() {
                                 areaName = visit.areaName,
                             )
                             kotlinx.coroutines.runBlocking { container.visitRepo.addPhoto(visitUuid, photo) }
+                            val galleryExportFailed = runCatching {
+                                container.photoStore.publishOriginalToGallery(photo)
+                            }.isFailure
                             runOnUiThread {
                                 setResult(
                                     RESULT_OK,
@@ -169,6 +172,9 @@ class CameraActivity : ComponentActivity() {
                                 capturedCount += 1
                                 previewPath = photo.processedPath
                                 assignCaptureState(CaptureUiState.idle)
+                                if (galleryExportFailed) {
+                                    Toast.makeText(this@CameraActivity, "تم حفظ الصورة داخل التطبيق، لكن تعذر نسخها إلى Pictures/MADAR.", Toast.LENGTH_LONG).show()
+                                }
                             }
                         } catch (error: Exception) {
                             // The raw capture remains durable for recovery on processing failure.
@@ -190,7 +196,10 @@ class CameraActivity : ComponentActivity() {
         )
     }
 
-    private fun displayRotation(): Int = when (display?.rotation) {
+    @Suppress("DEPRECATION")
+    private fun currentDisplayRotation(): Int = windowManager.defaultDisplay.rotation
+
+    private fun displayRotation(): Int = when (currentDisplayRotation()) {
         Surface.ROTATION_90 -> 90
         Surface.ROTATION_180 -> 180
         Surface.ROTATION_270 -> 270

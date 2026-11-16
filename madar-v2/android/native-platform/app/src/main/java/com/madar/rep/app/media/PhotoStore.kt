@@ -1,6 +1,13 @@
 package com.madar.rep.app.media
 
 import android.content.Context
+import android.content.ContentValues
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
+import android.media.MediaScannerConnection
+import android.system.Os
+import android.system.OsConstants
 import com.madar.rep.app.core.*
 import com.madar.rep.app.data.db.PhotoEntity
 import java.io.File
@@ -15,6 +22,43 @@ class PhotoStore(private val context:Context,private val governorates:Governorat
         UUID.fromString(visitUuid);require(phase in listOf("before","after"))
         val d=File(root,"$visitUuid/$phase/raw").apply { check(mkdirs()||isDirectory) }
         return File(d,"${UUID.randomUUID()}.capture.jpg")
+    }
+
+    /** Publishes an unchanged original to the public MADAR album while retaining the private evidence copy. */
+    fun publishOriginalToGallery(photo: PhotoEntity) {
+        val source = File(photo.originalPath)
+        require(source.isFile && source.length() > 0L) { "الصورة الأصلية غير متاحة للتصدير" }
+        val displayName = "MADAR_${photo.phase}_${photo.id}.jpg"
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val values = ContentValues().apply {
+                put(MediaStore.Images.Media.DISPLAY_NAME, displayName)
+                put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+                put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/MADAR/")
+                put(MediaStore.Images.Media.IS_PENDING, 1)
+            }
+            val uri = context.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+                ?: throw java.io.IOException("تعذر إنشاء ملف الصورة في المعرض")
+            try {
+                context.contentResolver.openOutputStream(uri, "w")?.use { output ->
+                    source.inputStream().use { it.copyTo(output) }
+                } ?: throw java.io.IOException("تعذر فتح ملف الصورة في المعرض")
+                val ready = ContentValues().apply { put(MediaStore.Images.Media.IS_PENDING, 0) }
+                check(context.contentResolver.update(uri, ready, null, null) == 1) {
+                    "تعذر إنهاء حفظ الصورة في المعرض"
+                }
+            } catch (error: Exception) {
+                context.contentResolver.delete(uri, null, null)
+                throw error
+            }
+        } else {
+            @Suppress("DEPRECATION")
+            val pictures = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES)
+            val directory = File(pictures, "MADAR")
+            if (!directory.exists() && !directory.mkdirs()) throw java.io.IOException("تعذر إنشاء مجلد Pictures/MADAR")
+            val destination = File(directory, displayName)
+            source.inputStream().use { input -> destination.outputStream().use(input::copyTo) }
+            MediaScannerConnection.scanFile(context, arrayOf(destination.absolutePath), arrayOf("image/jpeg"), null)
+        }
     }
     fun originalFile(visitUuid:String,phase:String,position:Int)=File(root,"$visitUuid/$phase/IMG_${position+1}_original.jpg")
     fun processedFile(visitUuid:String,phase:String,position:Int)=File(root,"$visitUuid/$phase/IMG_${position+1}_processed.jpg")
@@ -40,8 +84,11 @@ class PhotoStore(private val context:Context,private val governorates:Governorat
         if (!original.isFile) {
             val capturePath=j.optString("capturePath")
             val capture=File(capturePath)
+            val isSymbolicLink = runCatching {
+                (Os.lstat(capturePath).st_mode and OsConstants.S_IFMT) == OsConstants.S_IFLNK
+            }.getOrDefault(true)
             require(capturePath.isNotBlank() && capture.canonicalPath.startsWith(root.canonicalPath+File.separator)
-                && capture.isFile && !java.nio.file.Files.isSymbolicLink(capture.toPath())) {
+                && capture.isFile && !isSymbolicLink) {
                 "ملف الالتقاط المؤقت غير متاح؛ بقي سجل الاستعادة محفوظًا"
             }
             copyDurably(capture,original)
