@@ -107,6 +107,20 @@ Test camera, precise GPS, mock-location warnings, duty tracking while background
 
 The Windows verification recorded before the package-ID change completed `npm run android:sync`, which builds and synchronizes the Capacitor assets/plugins. It did not compile an APK: Java/JDK, Android SDK environment variables, and SDK tooling were unavailable on that workstation. A successful sync is not evidence of Gradle compilation, signing, installation, update compatibility, or handset behavior. The ignored `madar-rep.apk` present in the workspace predates the new package ID and must not be treated as the new build.
 
+## GitHub issue integration
+
+Creating a GitHub issue is a manual administrator action from Admin → Support; no report is sent to GitHub automatically. Configure both values in the server-only `madar-v2/.env` (mode `600`) and restart PM2:
+
+```dotenv
+MADAR_GITHUB_ISSUES_REPOSITORY=owner/repository
+MADAR_GITHUB_ISSUES_TOKEN=github_pat_replace_locally
+```
+
+- Use a fine-grained personal access token limited to that repository with **Issues: Read and write** and the mandatory **Metadata: Read-only** permission. Do not grant organization-wide or administrative scopes.
+- The token belongs only in the server environment. It must never be placed in the Android app, browser assets, SQLite, a release sidecar, logs, or source control. The issue body contains only the sanitized report fields; attachments stay on the MADAR server.
+- Rotate by creating a replacement token with the same repository and permissions, updating `.env`, running `pm2 restart madar-v2 --update-env`, creating one test issue, and then revoking the old token.
+- Without both settings the report remains local with `githubStatus=failed` and the exact message “GitHub issue integration is not configured on this server.”; the admin UI shows that message without a raw server error.
+
 ## Transition for installed Debug 2.0.2 (versionCode 4) phones
 
 The administrator settings page offers a separate **Debug transition** download when `MADAR_REP_TRANSITION_APK_PATH` exists (default: `madar-v2/madar-rep-transition.apk`). This is for phones that still run the previously distributed Debug-signed `com.madar.rep.app` 2.0.2 (versionCode 4) or later Debug-signed updates. The transition APK is now 2.0.8 (versionCode 10) and uses that same Debug certificate. It contains the native consecutive-photo camera and current representative route UI. The standard `/download/apk` continues to select the release-signed artifact; it is not replaced by this transition file.
