@@ -1439,7 +1439,7 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
       latitude: trackPoints[1].latitude,
       longitude: trackPoints[1].longitude,
       accuracy: trackPoints[1].accuracy,
-      updatedAt: new Date(now - 600000).toISOString(),
+      updatedAt: new Date(now - 30000).toISOString(),
     },
     trail: trackPoints,
   }), login.cookie);
@@ -1509,7 +1509,7 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
       latitude: trackPoints[1].latitude,
       longitude: trackPoints[1].longitude,
       accuracy: trackPoints[1].accuracy,
-      updatedAt: new Date(now - 600000).toISOString(),
+      updatedAt: new Date(now - 30000).toISOString(),
     },
     trail: trackPoints,
   }), login.cookie);
@@ -1564,7 +1564,7 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
     'a stale signal must not be presented as the current speed');
   const localDate = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Africa/Cairo', year: 'numeric', month: '2-digit', day: '2-digit',
-  }).formatToParts(new Date()).filter((part) => part.type !== 'literal').map(({ type, value }) => [type, value]));
+  }).formatToParts(new Date(trackPoints[0].updatedAt)).filter((part) => part.type !== 'literal').map(({ type, value }) => [type, value]));
   const routeDate = `${localDate.year}-${localDate.month}-${localDate.day}`;
   const repRoute = await request(`/api/supervisor/reps/${repId}/route?date=${routeDate}`, {}, adminCookie);
   assert.equal(repRoute.response.status, 200, JSON.stringify(repRoute.body));
