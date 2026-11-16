@@ -34,6 +34,8 @@ export const repApkPath = resolve(
 );
 export const repTransitionApkPath = resolve(projectRoot, env.repTransitionApkPath ?? 'madar-rep-transition.apk');
 export const managerApkPath = resolve(projectRoot, env.managerApkPath ?? 'madar-manager-release.apk');
+export const desktopWindowsDir = resolve(projectRoot, 'build/windows');
+export const desktopDistDir = resolve(projectRoot, 'dist-desktop');
 
 function assertExistingPathIsSafe(path, { mountPath, mountDevice, type, label }) {
   const relativePath = relative(mountPath, path);

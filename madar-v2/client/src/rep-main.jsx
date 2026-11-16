@@ -25,9 +25,10 @@ function cacheRepProfile(user) {
 }
 
 function RepresentativeApplication() {
-  const [user, setUser] = useState(null);
-  const [offlineOnly, setOfflineOnly] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const cachedUser = readCachedRep();
+  const [user, setUser] = useState(cachedUser);
+  const [offlineOnly, setOfflineOnly] = useState(Boolean(cachedUser));
+  const [loading, setLoading] = useState(!cachedUser);
   const [setupRequired, setSetupRequired] = useState(false);
   const [authError, setAuthError] = useState('');
   const [theme, setTheme] = useState(() => {

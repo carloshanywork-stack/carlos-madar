@@ -47,6 +47,21 @@ public class MainActivity extends BridgeActivity {
         MadarSyncScheduler.ensurePeriodic(this);
     }
 
+    @Override
+    public void onStart() {
+        super.onStart();
+        try {
+            android.webkit.WebView webView = getBridge() != null ? getBridge().getWebView() : null;
+            if (webView != null) {
+                webView.setOverScrollMode(android.view.View.OVER_SCROLL_NEVER);
+                android.webkit.WebSettings settings = webView.getSettings();
+                settings.setDomStorageEnabled(true);
+                settings.setDatabaseEnabled(true);
+                settings.setCacheMode(android.webkit.WebSettings.LOAD_DEFAULT);
+            }
+        } catch (Exception ignored) {}
+    }
+
     public synchronized void requestRuntimePermissions(String[] permissions, PermissionResultCallback callback) {
         if (permissionLauncher == null) {
             if (callback != null) callback.onResult(java.util.Collections.emptyMap());

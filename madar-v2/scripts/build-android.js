@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { copyFileSync, existsSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, cpSync, existsSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { config as loadDotEnv } from 'dotenv';
@@ -88,6 +88,13 @@ if (!nativePlatformBuild) {
   run(process.execPath, [viteEntrypoint, 'build'], { cwd: clientDirectory });
   run(process.execPath, [viteEntrypoint, 'build', '--mode', 'capacitor'], { cwd: clientDirectory });
   run(process.execPath, [resolve(projectRoot, 'node_modules/@capacitor/cli/bin/capacitor'), 'sync', 'android']);
+  run(process.execPath, [viteEntrypoint, 'build', '--mode', 'capacitor-manager'], { cwd: clientDirectory });
+  const managerPublicSrc = resolve(projectRoot, 'public/manager');
+  const managerAssetsDest = resolve(projectRoot, 'android/app/src/manager/assets/public');
+  if (existsSync(managerPublicSrc)) {
+    rmSync(managerAssetsDest, { recursive: true, force: true });
+    cpSync(managerPublicSrc, managerAssetsDest, { recursive: true });
+  }
 }
 
 if (!liveReloadBuild && !nativePlatformBuild) {
@@ -160,6 +167,24 @@ if (!syncOnly) {
       renameSync(temporaryManifest, manifestPath);
     } finally {
       rmSync(temporaryManifest, { force: true });
+    }
+    const managerBuiltApk = resolve(projectRoot, `android/app/build/outputs/apk/manager/${buildType}/app-manager-${buildType}.apk`);
+    if (existsSync(managerBuiltApk)) {
+      const managerPublishedApk = resolve(projectRoot, releaseBuild ? 'madar-manager-release.apk' : 'madar-manager.apk');
+      const managerApkBytes = readFileSync(managerBuiltApk);
+      const managerManifest = {
+        sourceRevision, sourceTreeDirty, builtAt: new Date().toISOString(), versionCode, versionName,
+        buildType, serverUrl: process.env.MADAR_REP_SERVER_URL || 'https://carlos-pc.tail852ef0.ts.net',
+        artifactOnly: true, apkSha256: createHash('sha256').update(managerApkBytes).digest('hex'), signerCertificateSha256,
+      };
+      const managerManifestBytes = `${JSON.stringify(managerManifest, null, 2)}\n`;
+      writeFileSync(`${managerBuiltApk}.manifest.json`, managerManifestBytes, { mode: 0o600 });
+      writeFileSync(`${managerPublishedApk}.manifest.json`, managerManifestBytes, { mode: 0o600 });
+      try {
+        writeFileSync(resolve(projectRoot, '..', releaseBuild ? 'madar-manager-release.apk.manifest.json' : 'madar-manager.apk.manifest.json'), managerManifestBytes, { mode: 0o600 });
+        copyFileSync(publishedApk, resolve(projectRoot, '..', releaseBuild ? 'madar-rep-release.apk' : 'madar-rep.apk'));
+        writeFileSync(resolve(projectRoot, '..', releaseBuild ? 'madar-rep-release.apk.manifest.json' : 'madar-rep.apk.manifest.json'), manifestBytes, { mode: 0o600 });
+      } catch (ignored) {}
     }
   }
   console.log(`Android version: ${versionName} (versionCode ${versionCode})`);

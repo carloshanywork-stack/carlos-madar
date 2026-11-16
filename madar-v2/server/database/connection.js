@@ -15,6 +15,11 @@ export function createConnection(filePath = databasePath) {
   connection.pragma('journal_mode = WAL');
   connection.pragma('synchronous = NORMAL');
   connection.pragma('busy_timeout = 5000');
+  connection.pragma('cache_size = -64000');
+  if (filePath !== ':memory:' && !filePath.startsWith('file:')) {
+    connection.pragma('mmap_size = 268435456');
+  }
+  connection.pragma('temp_store = MEMORY');
   if(filePath!==':memory:'&&!filePath.startsWith('file:')) for(const path of [filePath,`${filePath}-wal`,`${filePath}-shm`]) securePrivateFile(path);
   return connection;
 }

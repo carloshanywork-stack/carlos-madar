@@ -169,7 +169,7 @@
 #madar-app .rep-region-folder[open] > summary .rep-folder-chevron { transform: rotate(180deg); }
 #madar-app .rep-machine-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12px; padding: 14px; background: #f7f9f9; }
 #madar-app .rep-machine-card-wrap { display: flex; min-width: 0; flex-direction: column; gap: 6px; }
-#madar-app .rep-machine-card { display: flex; min-width: 0; min-height: 180px; flex-direction: column; align-items: stretch; padding: 15px; border: 1px solid #cbd5db; border-radius: 13px; color: #192d41 !important; background: #fff; cursor: pointer; text-align: right; transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease; }
+#madar-app .rep-machine-card { display: flex; min-width: 0; min-height: 180px; flex-direction: column; align-items: stretch; padding: 15px; border: 1px solid #cbd5db; border-radius: 13px; color: #192d41 !important; background: #fff; cursor: pointer; text-align: right; transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease; content-visibility: auto; contain-intrinsic-size: 0 180px; }
 #madar-app .rep-machine-card-wrap .rep-machine-card { width: 100%; flex: 1; }
 #madar-app .rep-machine-directions { display: inline-flex; min-height: 36px; align-items: center; justify-content: center; border: 1px solid #b8d2c7; border-radius: 9px; color: #0c604a; background: #edf7f1; font-size: 11px; font-weight: 850; text-decoration: none; }
 #madar-app .rep-machine-directions:hover { background: #e0f0e8; }
@@ -485,7 +485,7 @@
   #madar-app .rep-folder-name small { font-size: 9px; }
   #madar-app .rep-folder-count { padding: 4px 7px; font-size: 9px; }
   #madar-app .rep-machine-grid { grid-template-columns: 1fr; gap: 9px; padding: 10px; }
-  #madar-app .rep-machine-card { min-height: 150px; padding: 13px; }
+  #madar-app .rep-machine-card { min-height: 150px; padding: 13px; content-visibility: auto; contain-intrinsic-size: 0 150px; }
   #madar-app .rep-machine-name { margin-top: 9px; }
   #madar-app .rep-machine-branch { margin-top: 8px; }
   #madar-app .rep-app-footer { flex-direction: column; margin-top: 25px; font-size: 9px; }

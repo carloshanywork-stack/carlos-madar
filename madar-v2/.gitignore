@@ -23,6 +23,7 @@ android/.idea/
 *.keystore
 *.pfx
 *.key
+*.pem
 dist-desktop/
 key.properties
 /data/

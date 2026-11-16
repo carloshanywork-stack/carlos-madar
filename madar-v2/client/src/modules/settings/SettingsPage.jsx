@@ -83,14 +83,35 @@ export default function SettingsPage() {
   const { notice, showToast, clearToast } = useToast();
   const desktopApp = typeof window !== 'undefined' ? window.madarDesktop : null;
   const [desktopVersion, setDesktopVersion] = useState('');
+  const [desktopStatus, setDesktopStatus] = useState(null);
+  const [desktopStatusLoading, setDesktopStatusLoading] = useState(false);
+  const [desktopStatusError, setDesktopStatusError] = useState('');
+
+  const reloadDesktopStatus = async () => {
+    setDesktopStatusLoading(true);
+    setDesktopStatusError('');
+    try {
+      const res = await fetch('/download/desktop/status');
+      if (!res.ok) throw new Error('فشل جلب حالة تطبيق Windows');
+      const data = await res.json();
+      setDesktopStatus(data);
+    } catch (err) {
+      setDesktopStatusError(errorMessage(err));
+    } finally {
+      setDesktopStatusLoading(false);
+    }
+  };
 
   useEffect(() => {
     let active = true;
     if (desktopApp?.getVersion) {
       desktopApp.getVersion().then((version) => { if (active) setDesktopVersion(version); }).catch(() => {});
     }
+    if (isAdmin) {
+      reloadDesktopStatus();
+    }
     return () => { active = false; };
-  }, [desktopApp]);
+  }, [desktopApp, isAdmin]);
 
   async function saveUser(event) {
     event.preventDefault();
@@ -185,7 +206,7 @@ export default function SettingsPage() {
         actions={isAdmin ? <div className="madar-inline-wrap">
           {apkStatus?.available && <a className="madar-button madar-button-primary" href="/download/apk?target=rep" download="madar-rep.apk" title="تنزيل حزمة تطبيق المندوب الميداني"><Icon name="download" size={15} /><span>تطبيق المندوب APK</span></a>}
           {managerApkStatus?.available && <a className="madar-button madar-button-primary" href="/download/apk?target=system" download="madar-manager.apk" title="تنزيل تطبيق الإدارة والسيستم الكامل"><Icon name="download" size={15} /><span>تطبيق الإدارة APK</span></a>}
-          <Button variant="secondary" disabled title="سيظهر التنزيل بعد تجهيز أول إصدار Windows موقّع">تطبيق Windows قريباً</Button>
+          {desktopStatus?.available ? <a className="madar-button madar-button-primary" href="/download/desktop" download={desktopStatus.filename || 'MADAR-Windows-Setup.exe'} title="تنزيل تطبيق MADAR لويندوز"><Icon name="download" size={15} /><span>تطبيق Windows</span></a> : <Button variant="secondary" disabled title="سيظهر التنزيل بعد تجهيز أول إصدار Windows موقّع">تطبيق Windows قريباً</Button>}
         </div> : null}
       />
       {isAdmin && <div className="madar-section"><Tabs
@@ -228,8 +249,8 @@ export default function SettingsPage() {
               {item.target === 'rep' && item.status?.transitionAvailable && <div className="madar-stack"><Alert tone="warning">للهواتف التي تستخدم إصدار Debug القديم أو تحديثاته: نزّل أحدث حزمة انتقال وثبّتها فوق التطبيق الحالي بعد حفظ العمل المعلّق. هذه حزمة Debug؛ لا تحذف التطبيق القديم قبل التأكد من حفظ بياناته.</Alert><a className="madar-button madar-button-secondary" href="/download/apk/debug-transition"><Icon name="download" size={15} /> تنزيل حزمة الانتقال</a></div>}
             </article>)}
             <article className="madar-panel madar-panel-pad">
-              <div className="madar-panel-header"><div><h3>تطبيق MADAR لويندوز</h3><p>{desktopApp ? 'نسخة سطح المكتب المثبتة على هذا الجهاز.' : 'سيُتاح رابط التنزيل بعد تجهيز أول مثبت Windows موقّع.'}</p></div>{desktopApp ? <Button variant="secondary" icon="refresh" onClick={() => { void desktopApp.checkForUpdates(); }}>التحقق من تحديث التطبيق</Button> : <Button variant="secondary" disabled>قريباً</Button>}</div>
-              <div className="madar-health-row"><span className="madar-health-pulse" /><div><strong>{desktopApp ? `إصدار Windows ${desktopVersion || '…'}` : 'بيانات MADAR محفوظة على السيرفر'}</strong><small>تحديث برنامج Windows لا يستبدل قاعدة البيانات أو ملفات Ubuntu.</small></div><Badge tone={desktopApp ? 'info' : 'warning'}>{desktopApp ? 'Desktop' : 'قيد التجهيز'}</Badge></div>
+              <div className="madar-panel-header"><div><h3>تطبيق MADAR لويندوز</h3><p>{desktopApp ? 'نسخة سطح المكتب المثبتة على هذا الجهاز.' : desktopStatus?.available ? `مثبت Windows متاح للتحميل (${fileSize(desktopStatus.sizeBytes)}).` : 'سيُتاح رابط التنزيل بعد تجهيز أول مثبت Windows موقّع.'}</p></div>{desktopApp ? <Button variant="secondary" icon="refresh" onClick={() => { void desktopApp.checkForUpdates(); }}>التحقق من تحديث التطبيق</Button> : desktopStatus?.available ? <a className="madar-button madar-button-primary" href="/download/desktop" download={desktopStatus.filename || 'MADAR-Windows-Setup.exe'}><Icon name="download" size={15} /> تنزيل مثبت Windows</a> : <Button variant="secondary" disabled>تطبيق Windows قريباً</Button>}</div>
+              <div className="madar-health-row"><span className="madar-health-pulse" /><div><strong>{desktopApp ? `إصدار Windows ${desktopVersion || '…'}` : desktopStatus?.available ? 'مثبت Windows جاهز للتحميل' : 'بيانات MADAR محفوظة على السيرفر'}</strong><small>{desktopStatus?.available ? `${desktopStatus.filename} · ${fileSize(desktopStatus.sizeBytes)}` : 'تحديث برنامج Windows لا يستبدل قاعدة البيانات أو ملفات Ubuntu.'}</small></div><Badge tone={desktopApp ? 'info' : desktopStatus?.available ? 'success' : 'warning'}>{desktopApp ? 'Desktop' : desktopStatus?.available ? 'متاح' : 'قيد التجهيز'}</Badge></div>
             </article>
           </div>
         </section>

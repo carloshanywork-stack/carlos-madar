@@ -3,11 +3,11 @@ import cors from 'cors';
 import express from 'express';
 import { createHash } from 'node:crypto';
 import {
-  closeSync, constants as fsConstants, createReadStream, fstatSync, lstatSync, openSync, readFileSync, existsSync,
+  closeSync, constants as fsConstants, createReadStream, fstatSync, lstatSync, openSync, readFileSync, readdirSync, existsSync,
 } from 'node:fs';
-import { basename, join } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import { env } from './config/env.js';
-import { clientDistPath, managerApkPath, repApkPath, repTransitionApkPath, storageMountPath, storageRoot } from './config/paths.js';
+import { clientDistPath, desktopDistDir, desktopWindowsDir, managerApkPath, projectRoot, repApkPath, repTransitionApkPath, storageMountPath, storageRoot } from './config/paths.js';
 import { db } from './database/connection.js';
 import { errorHandler, notFoundHandler } from './middleware/error-handler.js';
 import { getSessionUserFromRequest, requireAuthentication } from './modules/auth/service.js';
@@ -18,6 +18,8 @@ import auditRouter from './modules/system/audit-routes.js';
 import repSupportRouter from './modules/system/rep-support-routes.js';
 import repReleaseRouter from './modules/system/rep-release-routes.js';
 import { requestLogger } from './middleware/request-logger.js';
+import { compressionMiddleware } from './middleware/compression.js';
+import rateLimit from 'express-rate-limit';
 import clientsRouter from './modules/clients/routes.js';
 import maintenanceRouter from './modules/maintenance/routes.js';
 import workshopRouter from './modules/workshop/routes.js';
@@ -91,6 +93,15 @@ app.use((req, res, next) => cors({
 })(req, res, next));
 app.use(express.json({ limit: '1mb' }));
 app.use(requestLogger);
+app.use(compressionMiddleware);
+
+const apkDownloadLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: process.env.NODE_ENV === 'test' ? 2000 : 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'تم تجاوز الحد الأقصى لمحاولات تنزيل التحديث. يرجى الانتظار والمحاولة لاحقاً.' },
+});
 
 let lastDiskAlertAt = 0;
 app.get('/api/health', async (req, res) => {
@@ -330,7 +341,7 @@ function apkTarget(req, res) {
   return target;
 }
 
-app.get('/download/apk', (req, res, next) => {
+app.get('/download/apk', apkDownloadLimiter, (req, res, next) => {
   req.user = getSessionUserFromRequest(req) ?? undefined;
   const target = apkTarget(req, res);
   if (!target) return;
@@ -354,7 +365,7 @@ app.get('/download/apk/debug-transition', requireAuthentication, (req, res, next
   downloadApkArtifact(req, res, next, repTransitionApkPath, 'madar-rep-debug-transition.apk');
 });
 
-app.get('/download/apk/status', (req, res) => {
+app.get('/download/apk/status', apkDownloadLimiter, (req, res) => {
   req.user = getSessionUserFromRequest(req) ?? undefined;
   const target = apkTarget(req, res);
   if (!target) return;
@@ -395,6 +406,131 @@ app.get('/download/apk/status', (req, res) => {
       modifiedAt: null,
       reason: 'artifact_missing',
       ...(target === 'rep' && req.user?.role === 'admin' ? { transitionAvailable: existsSync(repTransitionApkPath) } : {}),
+    });
+  }
+});
+
+function resolveDesktopArtifact() {
+  const searchDirs = [desktopDistDir, desktopWindowsDir];
+  for (const dir of searchDirs) {
+    if (!existsSync(dir)) continue;
+    try {
+      const files = readdirSync(dir);
+      const exe = files.find((f) => /^MADAR-Windows-.*-Setup\.exe$/.test(f) || f === 'MADAR-Windows-Setup.exe');
+      if (exe) return { path: join(dir, exe), filename: exe, isZip: false };
+      const zip = files.find((f) => /^MADAR-Windows-.*-Setup\.zip$/.test(f) || f === 'MADAR-Windows-Setup.zip');
+      if (zip) return { path: join(dir, zip), filename: zip, isZip: true };
+    } catch {}
+  }
+  return null;
+}
+
+function resolveDesktopUpdateManifest() {
+  const searchDirs = [desktopDistDir, desktopWindowsDir];
+  for (const dir of searchDirs) {
+    const manifestPath = join(dir, 'latest.yml');
+    if (existsSync(manifestPath)) return manifestPath;
+  }
+  return null;
+}
+
+app.get('/download/desktop', (req, res, next) => {
+  const cdnUrl = process.env.MADAR_DESKTOP_CDN_URL?.trim();
+  if (cdnUrl) {
+    res.redirect(302, cdnUrl);
+    return;
+  }
+  const artifact = resolveDesktopArtifact();
+  if (!artifact) {
+    res.status(404).json({ error: 'The MADAR Windows desktop installer is currently unavailable on the server.' });
+    return;
+  }
+  let descriptor;
+  try {
+    ({ descriptor } = openRegularFileNoFollow(artifact.path));
+  } catch (error) {
+    res.status(404).json({ error: 'The MADAR Windows desktop installer could not be opened.' });
+    return;
+  }
+  const metadata = fstatSync(descriptor);
+  const contentType = artifact.isZip
+    ? 'application/zip'
+    : 'application/vnd.microsoft.portable-executable';
+  res.attachment(artifact.filename);
+  res.set({
+    'Cache-Control': 'private, no-cache',
+    'X-Content-Type-Options': 'nosniff',
+    'Content-Type': contentType,
+    'Content-Length': String(metadata.size),
+  });
+  const stream = createReadStream(artifact.path, { fd: descriptor, autoClose: true });
+  stream.on('error', (error) => {
+    if (res.headersSent) res.destroy(error);
+    else next(error);
+  });
+  stream.pipe(res);
+});
+
+app.get('/download/desktop/latest.yml', (req, res, next) => {
+  const manifestPath = resolveDesktopUpdateManifest();
+  if (!manifestPath) {
+    res.status(404).json({ error: 'No desktop update manifest found.' });
+    return;
+  }
+  let descriptor;
+  try {
+    ({ descriptor } = openRegularFileNoFollow(manifestPath));
+  } catch (error) {
+    res.status(404).json({ error: 'Unable to open desktop update manifest.' });
+    return;
+  }
+  const metadata = fstatSync(descriptor);
+  res.set({
+    'Cache-Control': 'no-cache, no-store, must-revalidate',
+    'Content-Type': 'text/yaml; charset=utf-8',
+    'Content-Length': String(metadata.size),
+  });
+  const stream = createReadStream(manifestPath, { fd: descriptor, autoClose: true });
+  stream.on('error', (err) => {
+    if (res.headersSent) res.destroy(err);
+    else next(err);
+  });
+  stream.pipe(res);
+});
+
+app.get('/download/desktop/status', (req, res) => {
+  const artifact = resolveDesktopArtifact();
+  if (!artifact) {
+    res.set('Cache-Control', 'private, no-store').json({
+      available: false,
+      filename: null,
+      sizeBytes: null,
+      modifiedAt: null,
+      reason: 'artifact_missing',
+      downloadUrl: '/download/desktop',
+    });
+    return;
+  }
+  try {
+    const { descriptor, metadata } = openRegularFileNoFollow(artifact.path);
+    closeSync(descriptor);
+    res.set('Cache-Control', 'private, no-store').json({
+      available: true,
+      filename: artifact.filename,
+      isZip: artifact.isZip,
+      sizeBytes: metadata.size,
+      modifiedAt: metadata.mtime.toISOString(),
+      downloadUrl: '/download/desktop',
+      cdnUrl: process.env.MADAR_DESKTOP_CDN_URL?.trim() || null,
+    });
+  } catch {
+    res.set('Cache-Control', 'private, no-store').json({
+      available: false,
+      filename: null,
+      sizeBytes: null,
+      modifiedAt: null,
+      reason: 'artifact_unreadable',
+      downloadUrl: '/download/desktop',
     });
   }
 });

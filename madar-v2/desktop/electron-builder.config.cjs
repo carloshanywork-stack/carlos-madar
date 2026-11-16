@@ -23,7 +23,6 @@ module.exports = {
     target: [{ target: 'nsis', arch: ['x64'] }],
     artifactName: 'MADAR-Windows-${version}-Setup.${ext}',
     icon: 'desktop/madar.ico',
-    ...(publisherName ? { publisherName: [publisherName] } : {}),
     forceCodeSigning: releaseBuild,
   },
   nsis: {
@@ -37,5 +36,11 @@ module.exports = {
     createStartMenuShortcut: true,
     shortcutName: 'MADAR',
   },
-  ...(publishUrl ? { publish: [{ provider: 'generic', url: publishUrl }] } : {}),
+  ...(publishUrl ? {
+    publish: [{
+      provider: 'generic',
+      url: publishUrl,
+      ...(publisherName ? { publisherName: [publisherName] } : {}),
+    }],
+  } : {}),
 };

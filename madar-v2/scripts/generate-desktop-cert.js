@@ -63,3 +63,4 @@ export function ensureDesktopCertificate() {
 if (process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/\\/g, '/'))) {
   ensureDesktopCertificate();
 }
+

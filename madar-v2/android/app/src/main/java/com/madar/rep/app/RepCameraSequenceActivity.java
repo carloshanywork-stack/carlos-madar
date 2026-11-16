@@ -265,12 +265,34 @@ public final class RepCameraSequenceActivity extends Activity {
                 && ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) return null;
             LocationManager manager = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
             Location best = null;
-            for (String provider : new String[] { LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER }) {
-                Location candidate = manager.getLastKnownLocation(provider);
-                if (candidate != null && (best == null || candidate.getTime() > best.getTime())) best = candidate;
+            for (String provider : new String[] { LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER, LocationManager.PASSIVE_PROVIDER }) {
+                try {
+                    Location candidate = manager.getLastKnownLocation(provider);
+                    if (candidate != null && (best == null || candidate.getTime() > best.getTime())) best = candidate;
+                } catch (Exception ignored) {}
             }
             long now = System.currentTimeMillis();
-            if (best == null || (now - best.getTime()) > 30_000L) {
+            if (best == null || (now - best.getTime()) > 60_000L) {
+                try {
+                    String cachedJson = getSharedPreferences("madar_rep_duty", Context.MODE_PRIVATE).getString("last_location_json", null);
+                    if (cachedJson != null) {
+                        JSONObject locObj = new JSONObject(cachedJson);
+                        if (!locObj.optBoolean("mocked", false) && locObj.has("updatedAt")) {
+                            long cachedTime = java.time.Instant.parse(locObj.getString("updatedAt")).toEpochMilli();
+                            if ((now - cachedTime) <= 5 * 60_000L && (best == null || cachedTime > best.getTime())) {
+                                Location loc = new Location("duty_cache");
+                                loc.setLatitude(locObj.getDouble("latitude"));
+                                loc.setLongitude(locObj.getDouble("longitude"));
+                                loc.setAccuracy((float) locObj.optDouble("accuracy", 25.0));
+                                loc.setTime(cachedTime);
+                                best = loc;
+                            }
+                        }
+                    }
+                } catch (Exception ignored) {}
+            }
+            boolean hasFreshBest = best != null && (now - best.getTime()) <= 3 * 60_000L && best.hasAccuracy() && best.getAccuracy() <= 250f;
+            if (!hasFreshBest) {
                 final java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
                 final Location[] fresh = new Location[1];
                 final LocationListener oneShotListener = new LocationListener() {
@@ -296,7 +318,7 @@ public final class RepCameraSequenceActivity extends Activity {
                     }
                 });
                 try {
-                    latch.await(2, java.util.concurrent.TimeUnit.SECONDS);
+                    latch.await(300, java.util.concurrent.TimeUnit.MILLISECONDS);
                 } catch (InterruptedException ignored) {}
                 runOnUiThread(() -> {
                     try { manager.removeUpdates(oneShotListener); } catch (Exception ignored) {}
@@ -306,7 +328,7 @@ public final class RepCameraSequenceActivity extends Activity {
             if (best != null) {
                 if (RepLocationPlugin.isMockLocation(best)) return null;
                 long age = now - best.getTime();
-                if (age >= -30_000L && age <= 2 * 60_000L && best.hasAccuracy() && best.getAccuracy() <= 100f) {
+                if (age >= -30_000L && age <= 5 * 60_000L && best.hasAccuracy() && best.getAccuracy() <= 350f) {
                     JSONObject result = new JSONObject();
                     result.put("latitude", best.getLatitude());
                     result.put("longitude", best.getLongitude());
