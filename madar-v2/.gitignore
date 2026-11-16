@@ -3,6 +3,11 @@ client/node_modules/
 client/dist/
 client/dist-next/
 client/dist-previous/
+desktop-app/runtime-config.json
+desktop-app/node_modules/
+desktop-build/node_modules/
+desktop/runtime-config.json
+build/windows/
 android/.gradle/
 android/local.properties
 android/build/
@@ -10,6 +15,7 @@ android/app/build/
 madar-rep.apk
 madar-rep-release.apk
 madar-rep-transition.apk
+MADAR-Windows-*-Setup.exe
 .madar-rep-*.apk.tmp
 android/capacitor-cordova-android-plugins/build/
 android/.idea/

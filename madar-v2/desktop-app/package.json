@@ -1,0 +1,10 @@
+{
+  "name": "madar-windows-desktop",
+  "version": "1.0.0",
+  "private": true,
+  "description": "MADAR V2 Windows desktop client",
+  "main": "main.cjs",
+  "dependencies": {
+    "electron-updater": "^6.6.2"
+  }
+}

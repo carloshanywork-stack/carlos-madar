@@ -14,6 +14,11 @@
     "android:sync": "node scripts/build-android.js --sync-only",
     "android:debug": "node scripts/build-android.js --native-platform",
     "android:release": "node scripts/build-android.js --native-platform --release",
+    "predesktop:dev": "npm run desktop:install",
+    "desktop:install": "node scripts/install-desktop-deps.js",
+    "desktop:dev": "node scripts/run-desktop.js",
+    "desktop:build": "node scripts/build-desktop.js",
+    "desktop:release": "node scripts/build-desktop.js --release",
     "db:init": "node server/database/init.js",
     "db:migrate-v1": "node scripts/migrate-from-v1.js"
   },
