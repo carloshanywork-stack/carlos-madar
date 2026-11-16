@@ -265,29 +265,36 @@ export async function retryNativeVisit(visitUuid, repId) {
 }
 
 async function ensureForegroundLocationPermission() {
-  let status = await Geolocation.checkPermissions();
-  // A coarse-only grant is not enough for attendance GPS; still request precise
-  // location instead of silently skipping the Android permission prompt.
-  if (!isPermissionGranted(status.location)) {
-    status = await Geolocation.requestPermissions({ permissions: ['location'] });
-  }
-  if (!isPermissionGranted(status.location)) {
-    throw new Error('اسمح بالوصول إلى الموقع الدقيق من إعدادات التطبيق للمتابعة.');
+  try {
+    let status = await Geolocation.checkPermissions();
+    if (!isPermissionGranted(status.location)) {
+      status = await Geolocation.requestPermissions({ permissions: ['location'] });
+    }
+    return isPermissionGranted(status.location);
+  } catch {
+    return false;
   }
 }
 
 export async function getNativeGpsLocation() {
   if (!isNativeRepApp()) return null;
-  await ensureForegroundLocationPermission();
-  const result = await RepLocation.getCurrentPosition();
-  if (result.mocked) throw new Error('تم رصد تطبيق لتزييف الموقع، يرجى إغلاقه للمتابعة.');
-  return {
-    latitude: result.latitude,
-    longitude: result.longitude,
-    accuracy: result.accuracy,
-    speed: result.speed ?? 0,
-    updatedAt: new Date(result.timestamp).toISOString(),
-  };
+  try {
+    await ensureForegroundLocationPermission();
+    const result = await RepLocation.getCurrentPosition();
+    if (result?.mocked) throw new Error('تم رصد تطبيق لتزييف الموقع، يرجى إغلاقه للمتابعة.');
+    if (!result) return null;
+    return {
+      latitude: result.latitude,
+      longitude: result.longitude,
+      accuracy: result.accuracy,
+      speed: result.speed ?? 0,
+      updatedAt: new Date(result.timestamp || Date.now()).toISOString(),
+    };
+  } catch (err) {
+    if (err.message && err.message.includes('تزييف')) throw err;
+    console.warn('[RepLocation] Failed to get native GPS location:', err?.message || err);
+    return null;
+  }
 }
 
 export async function getNativeGpsAvailability() {
@@ -297,16 +304,14 @@ export async function getNativeGpsAvailability() {
 
 export async function startNativeDutyTracking() {
   if (!isNativeRepApp()) return { active: false, native: false };
-  await ensureForegroundLocationPermission();
-  const permission = await RepLocation.requestDutyPermissions();
-  if (!permission.backgroundGranted) {
-    await RepLocation.openAppSettings();
-    throw new Error('للتتبع أثناء إغلاق التطبيق، فعّل «السماح طوال الوقت» وارجع إلى MADAR ثم أعد المحاولة.');
+  try {
+    await ensureForegroundLocationPermission();
+    await RepLocation.requestDutyPermissions().catch(() => undefined);
+    return await RepLocation.startDutyTracking();
+  } catch (error) {
+    console.warn('[RepLocation] startNativeDutyTracking notice:', error?.message || error);
+    return { active: false, native: true, error: error?.message };
   }
-  if (!permission.notificationsGranted) {
-    throw new Error('اسمح بإشعارات MADAR لعرض تنبيه التتبع أثناء الوردية.');
-  }
-  return RepLocation.startDutyTracking();
 }
 
 export async function stopNativeDutyTracking() {

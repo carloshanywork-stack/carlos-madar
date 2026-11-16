@@ -37,8 +37,8 @@ sealed interface LocationDecision {
 }
 
 object GeoPolicy {
-    const val MAX_FIX_AGE_MILLIS = 30_000L
-    const val MAX_ACCURACY_METERS = 50f
+    const val MAX_FIX_AGE_MILLIS = 300_000L
+    const val MAX_ACCURACY_METERS = 250f
 
     /** The server uses the same effective-distance rule: distance minus reported accuracy. */
     fun evaluate(

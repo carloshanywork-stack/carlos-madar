@@ -46,15 +46,22 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class RepLocationPlugin extends Plugin {
 
     private static final String MOCK_WARNING = "تم رصد تطبيق لتزييف الموقع، يرجى إغلاقه للمتابعة.";
-    private static final long LOCATION_TIMEOUT_MS = 12000;
-    private static final float MAX_CLOCK_ACCURACY_METERS = 120f;
-    private static final float MAX_FALLBACK_ACCURACY_METERS = 250f;
+    private static final long LOCATION_TIMEOUT_MS = 15000;
+    private static final float MAX_CLOCK_ACCURACY_METERS = 200f;
+    private static final float MAX_FALLBACK_ACCURACY_METERS = 500f;
 
     @PluginMethod
     public void getGpsAvailability(PluginCall call) {
         LocationManager manager = (LocationManager) getContext().getSystemService(Context.LOCATION_SERVICE);
-        boolean enabled = manager != null && manager.isProviderEnabled(LocationManager.GPS_PROVIDER);
-        call.resolve(new JSObject().put("enabled", enabled).put("fineLocationGranted", hasFineLocationPermission()));
+        boolean gps = manager != null && manager.isProviderEnabled(LocationManager.GPS_PROVIDER);
+        boolean network = manager != null && manager.isProviderEnabled(LocationManager.NETWORK_PROVIDER);
+        boolean enabled = gps || network;
+        call.resolve(new JSObject()
+            .put("enabled", enabled)
+            .put("gpsEnabled", gps)
+            .put("networkEnabled", network)
+            .put("fineLocationGranted", hasFineLocationPermission())
+            .put("coarseLocationGranted", hasLocationPermission()));
     }
 
     @PluginMethod
@@ -69,7 +76,7 @@ public class RepLocationPlugin extends Plugin {
     @PermissionCallback
     private void dutyPermissionsCallback(PluginCall call) {
         JSObject result = new JSObject();
-        result.put("foregroundGranted", hasFineLocationPermission());
+        result.put("foregroundGranted", hasLocationPermission());
         result.put("backgroundGranted", hasBackgroundLocationPermission());
         result.put("notificationsGranted", hasNotificationPermission());
         call.resolve(result);
@@ -88,34 +95,50 @@ public class RepLocationPlugin extends Plugin {
         }
     }
 
+    private Location getBestLastKnownLocation(LocationManager locationManager) {
+        if (locationManager == null || !hasLocationPermission()) return null;
+        String[] providers = { LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER, LocationManager.PASSIVE_PROVIDER };
+        Location best = null;
+        long now = System.currentTimeMillis();
+        for (String provider : providers) {
+            try {
+                if (!locationManager.isProviderEnabled(provider)) continue;
+                Location candidate = locationManager.getLastKnownLocation(provider);
+                if (candidate == null) continue;
+                long age = now - candidate.getTime();
+                if (age < 0 || age > 5 * 60 * 1000) continue; // within 5 minutes
+                if (best == null || (candidate.hasAccuracy() && (!best.hasAccuracy() || candidate.getAccuracy() < best.getAccuracy()))) {
+                    best = candidate;
+                }
+            } catch (SecurityException | IllegalArgumentException ignored) {}
+        }
+        return best;
+    }
+
     @PluginMethod
     public void getCurrentPosition(PluginCall call) {
-        if (!hasFineLocationPermission()) {
-            call.reject("يلزم السماح بالموقع الدقيق قبل التقاط الزيارة.", "LOCATION_PERMISSION_REQUIRED");
+        if (!hasLocationPermission()) {
+            call.reject("يلزم السماح بالموقع قبل التقاط الزيارة.", "LOCATION_PERMISSION_REQUIRED");
             return;
         }
 
         LocationManager locationManager = (LocationManager) getContext().getSystemService(Context.LOCATION_SERVICE);
-        if (locationManager == null || !locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
-            call.reject("فعّل GPS بالأقمار الصناعية ثم حاول مرة أخرى.", "GPS_DISABLED");
+        boolean gpsEnabled = locationManager != null && locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER);
+        boolean networkEnabled = locationManager != null && locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER);
+
+        if (!gpsEnabled && !networkEnabled) {
+            call.reject("فعّل خدمة الموقع (GPS أو الشبكة) ثم حاول مرة أخرى.", "GPS_DISABLED");
             return;
         }
 
-        try {
-            Location lastKnown = locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER);
-            if (lastKnown != null
-                && System.currentTimeMillis() - lastKnown.getTime() <= 120000
-                && lastKnown.hasAccuracy()
-                && lastKnown.getAccuracy() <= MAX_CLOCK_ACCURACY_METERS) {
-                if (isMockLocation(lastKnown)) {
-                    call.reject(MOCK_WARNING, "MOCK_LOCATION_DETECTED");
-                    return;
-                }
-                call.resolve(locationToJson(lastKnown, false));
+        // Fast-path: check best last known location across GPS, Network, and Passive providers
+        Location fastKnown = getBestLastKnownLocation(locationManager);
+        if (fastKnown != null && fastKnown.hasAccuracy() && fastKnown.getAccuracy() <= MAX_CLOCK_ACCURACY_METERS) {
+            if (isMockLocation(fastKnown)) {
+                call.reject(MOCK_WARNING, "MOCK_LOCATION_DETECTED");
                 return;
             }
-        } catch (SecurityException error) {
-            call.reject("تعذر الوصول إلى شريحة GPS. تحقق من أذونات الموقع الدقيقة.", "LOCATION_PERMISSION_REQUIRED", error);
+            call.resolve(locationToJson(fastKnown, false));
             return;
         }
 
@@ -123,14 +146,23 @@ public class RepLocationPlugin extends Plugin {
         AtomicBoolean settled = new AtomicBoolean(false);
         LocationListener[] listenerRef = new LocationListener[1];
         Location[] bestLocationRef = new Location[1];
+        if (fastKnown != null) {
+            bestLocationRef[0] = fastKnown;
+        }
+
         Runnable timeout = () -> {
             if (!settled.compareAndSet(false, true)) return;
-            if (listenerRef[0] != null) locationManager.removeUpdates(listenerRef[0]);
+            if (listenerRef[0] != null && locationManager != null) {
+                try { locationManager.removeUpdates(listenerRef[0]); } catch (Exception ignored) {}
+            }
             Location best = bestLocationRef[0];
+            if (best == null) {
+                best = getBestLastKnownLocation(locationManager);
+            }
             if (best != null && best.hasAccuracy() && best.getAccuracy() <= MAX_FALLBACK_ACCURACY_METERS) {
                 call.resolve(locationToJson(best, false));
             } else {
-                call.reject("إشارة GPS ضعيفة؛ انتقل إلى مكان مفتوح وحاول مجدداً.", "GPS_TIMEOUT");
+                call.reject("إشارة GPS ضعيفة؛ انتقل إلى مكان مفتوح أو فعّل شبكة الهاتف وحاول مجدداً.", "GPS_TIMEOUT");
             }
         };
 
@@ -140,7 +172,9 @@ public class RepLocationPlugin extends Plugin {
                 if (isMockLocation(location)) {
                     if (!settled.compareAndSet(false, true)) return;
                     handler.removeCallbacks(timeout);
-                    locationManager.removeUpdates(this);
+                    if (locationManager != null) {
+                        try { locationManager.removeUpdates(this); } catch (Exception ignored) {}
+                    }
                     getContext().getSharedPreferences(RepLocationService.PREFERENCES_NAME, Context.MODE_PRIVATE)
                         .edit()
                         .putBoolean("last_location_mocked", true)
@@ -157,50 +191,70 @@ public class RepLocationPlugin extends Plugin {
                 if (!location.hasAccuracy() || location.getAccuracy() > MAX_CLOCK_ACCURACY_METERS
                     || !settled.compareAndSet(false, true)) return;
                 handler.removeCallbacks(timeout);
-                locationManager.removeUpdates(this);
+                if (locationManager != null) {
+                    try { locationManager.removeUpdates(this); } catch (Exception ignored) {}
+                }
                 call.resolve(locationToJson(location, false));
             }
 
             @Override
             public void onProviderDisabled(String provider) {
-                if (!LocationManager.GPS_PROVIDER.equals(provider) || !settled.compareAndSet(false, true)) return;
-                handler.removeCallbacks(timeout);
-                locationManager.removeUpdates(this);
-                call.reject("تم إيقاف GPS أثناء تحديد الموقع.", "GPS_DISABLED");
+                // Do not reject on a single provider being disabled if another is active
+                if (locationManager != null
+                    && !locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)
+                    && !locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
+                    if (!settled.compareAndSet(false, true)) return;
+                    handler.removeCallbacks(timeout);
+                    try { locationManager.removeUpdates(this); } catch (Exception ignored) {}
+                    call.reject("تم إيقاف خدمة الموقع.", "GPS_DISABLED");
+                }
             }
         };
 
-        try {
-            locationManager.requestLocationUpdates(
-                LocationManager.GPS_PROVIDER,
-                0L,
-                0f,
-                listenerRef[0],
-                Looper.getMainLooper()
-            );
-            handler.postDelayed(timeout, LOCATION_TIMEOUT_MS);
-        } catch (SecurityException error) {
-            call.reject("تعذر الوصول إلى شريحة GPS. تحقق من أذونات الموقع الدقيقة.", "LOCATION_PERMISSION_REQUIRED", error);
-        } catch (IllegalArgumentException error) {
-            call.reject("موفر GPS غير متاح على هذا الجهاز.", "GPS_UNAVAILABLE", error);
+        boolean requestedAny = false;
+        if (gpsEnabled && hasFineLocationPermission()) {
+            try {
+                locationManager.requestLocationUpdates(
+                    LocationManager.GPS_PROVIDER,
+                    0L,
+                    0f,
+                    listenerRef[0],
+                    Looper.getMainLooper()
+                );
+                requestedAny = true;
+            } catch (Exception ignored) {}
         }
+        if (networkEnabled) {
+            try {
+                locationManager.requestLocationUpdates(
+                    LocationManager.NETWORK_PROVIDER,
+                    0L,
+                    0f,
+                    listenerRef[0],
+                    Looper.getMainLooper()
+                );
+                requestedAny = true;
+            } catch (Exception ignored) {}
+        }
+
+        if (!requestedAny) {
+            if (fastKnown != null) {
+                call.resolve(locationToJson(fastKnown, false));
+            } else {
+                call.reject("تعذر تشغيل موفرات الموقع على هذا الجهاز.", "GPS_UNAVAILABLE");
+            }
+            return;
+        }
+
+        handler.postDelayed(timeout, LOCATION_TIMEOUT_MS);
     }
 
     @PluginMethod
     public void startDutyTracking(PluginCall call) {
-        if (!hasFineLocationPermission()) {
-            call.reject("يلزم السماح بالموقع الدقيق لبدء الوردية.", "LOCATION_PERMISSION_REQUIRED");
+        if (!hasLocationPermission()) {
+            call.reject("يلزم السماح بالموقع لبدء الوردية.", "LOCATION_PERMISSION_REQUIRED");
             return;
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && !hasBackgroundLocationPermission()) {
-            call.reject("فعّل «السماح طوال الوقت» من إعدادات التطبيق لتشغيل GPS في الخلفية.", "BACKGROUND_LOCATION_REQUIRED");
-            return;
-        }
-        if (!hasNotificationPermission()) {
-            call.reject("اسمح بإشعارات MADAR لعرض تنبيه التتبع أثناء الوردية.", "NOTIFICATION_PERMISSION_REQUIRED");
-            return;
-        }
-
         Intent intent = new Intent(getContext(), RepLocationService.class);
         intent.setAction(RepLocationService.ACTION_START);
         try {
@@ -293,6 +347,12 @@ public void acknowledgeDutyTracking(PluginCall call) {
     private boolean hasFineLocationPermission() {
         return ContextCompat.checkSelfPermission(getContext(), Manifest.permission.ACCESS_FINE_LOCATION)
             == PackageManager.PERMISSION_GRANTED;
+    }
+
+    private boolean hasLocationPermission() {
+        return hasFineLocationPermission()
+            || ContextCompat.checkSelfPermission(getContext(), Manifest.permission.ACCESS_COARSE_LOCATION)
+                == PackageManager.PERMISSION_GRANTED;
     }
 
     private boolean hasBackgroundLocationPermission() {

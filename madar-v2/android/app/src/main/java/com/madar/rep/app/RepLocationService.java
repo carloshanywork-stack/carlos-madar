@@ -119,10 +119,10 @@ public class RepLocationService extends Service implements LocationListener {
     private void beginGpsUpdates() {
         if (locationManager == null || !hasRequiredPermissions()) return;
         try {
-            if (!locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
-                getPreferences().edit().putBoolean("gps_provider_enabled", false).apply();
-            } else {
-                getPreferences().edit().putBoolean("gps_provider_enabled", true).apply();
+            boolean gps = locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER);
+            boolean net = locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER);
+            getPreferences().edit().putBoolean("gps_provider_enabled", gps || net).apply();
+            if (gps || net) {
                 requestGpsUpdates(false);
             }
         } catch (SecurityException error) {
@@ -160,15 +160,34 @@ public class RepLocationService extends Service implements LocationListener {
         try {
             if (updatesRegistered && lowPowerUpdates == lowPower) return;
             locationManager.removeUpdates(this);
-            locationManager.requestLocationUpdates(
-                LocationManager.GPS_PROVIDER,
-                lowPower ? STATIONARY_INTERVAL_MS : MOVING_INTERVAL_MS,
-                0f,
-                this,
-                Looper.getMainLooper()
-            );
+            long interval = lowPower ? STATIONARY_INTERVAL_MS : MOVING_INTERVAL_MS;
+            boolean registered = false;
+            if (locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
+                try {
+                    locationManager.requestLocationUpdates(
+                        LocationManager.GPS_PROVIDER,
+                        interval,
+                        0f,
+                        this,
+                        Looper.getMainLooper()
+                    );
+                    registered = true;
+                } catch (Exception ignored) {}
+            }
+            if (locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
+                try {
+                    locationManager.requestLocationUpdates(
+                        LocationManager.NETWORK_PROVIDER,
+                        interval,
+                        0f,
+                        this,
+                        Looper.getMainLooper()
+                    );
+                    registered = true;
+                } catch (Exception ignored) {}
+            }
             lowPowerUpdates = lowPower;
-            updatesRegistered = true;
+            updatesRegistered = registered;
             getPreferences().edit().putString("gps_polling_mode", lowPower ? "stationary" : "moving").apply();
         } catch (SecurityException error) {
             getPreferences().edit().putBoolean("duty_active", false).apply();
@@ -257,13 +276,12 @@ public class RepLocationService extends Service implements LocationListener {
     private boolean hasRequiredPermissions() {
         boolean fine = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
             == PackageManager.PERMISSION_GRANTED;
-        boolean background = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
-            || ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_BACKGROUND_LOCATION)
-                == PackageManager.PERMISSION_GRANTED;
+        boolean coarse = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION)
+            == PackageManager.PERMISSION_GRANTED;
         boolean notifications = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU
             || ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
                 == PackageManager.PERMISSION_GRANTED;
-        return fine && background && notifications;
+        return (fine || coarse) && notifications;
     }
 
     private android.content.SharedPreferences getPreferences() {

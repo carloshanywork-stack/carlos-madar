@@ -130,7 +130,7 @@ class LocationProvider(private val context: Context) {
             }
 
             handler.postDelayed({
-                val value = best
+                val value = best ?: lastKnown()
                 finish(
                     if (value != null) LocationResult.Success(value, gpsEnabled)
                     else LocationResult.Timeout

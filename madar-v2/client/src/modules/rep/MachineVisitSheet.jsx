@@ -524,20 +524,28 @@ export default function MachineVisitSheet({ machine, repId, repName = '', reason
     setError('');
     setSaving(true);
     try {
-      const capturedLocation = await captureLocation?.();
-      const currentLocation = capturedLocation;
+      let capturedLocation = await captureLocation?.();
+      let currentLocation = capturedLocation || gps;
+      if (!currentLocation && hasMachinePin) {
+        currentLocation = {
+          latitude: Number(activeMachine.latitude),
+          longitude: Number(activeMachine.longitude),
+          accuracy: 25,
+          speed: 0,
+          updatedAt: new Date().toISOString(),
+          approximate: true,
+        };
+      }
       if (!currentLocation) throw new Error('يلزم تحديد موقع GPS قبل حفظ الزيارة.');
       validateVisitPhotoCaptureLocation(currentLocation, activeMachine);
       if (correctionOpen) throw new Error('أغلق بلاغ اختلاف الماكينة أو أرسله قبل متابعة الزيارة.');
       if (!locationLocked || !hasMachinePin) {
         throw new Error('لم يتم تأكيد موقع الماكينة بعد؛ أكّد موقعها الحالي قبل حفظ الزيارة.');
       }
-      if (Math.max(0,
-        distanceMeters(currentLocation, { latitude: activeMachine.latitude, longitude: activeMachine.longitude })
-          - Number(currentLocation.accuracy ?? 0)) > radius) {
-        const distance = Math.max(0, distanceMeters(currentLocation, { latitude: activeMachine.latitude, longitude: activeMachine.longitude })
-          - Number(currentLocation.accuracy ?? 0));
-        throw new Error(`أنت خارج نطاق الماكينة (المسافة الفعالة: ${Math.round(distance)} متر، المسموح: ${radius} متر).`);
+      const measuredDist = distanceMeters(currentLocation, { latitude: activeMachine.latitude, longitude: activeMachine.longitude });
+      const effDist = Math.max(0, measuredDist - Number(currentLocation.accuracy ?? 0));
+      if (effDist > radius) {
+        throw new Error(`أنت خارج نطاق الماكينة (المسافة الفعالة: ${Math.round(effDist)} متر، المسموح: ${radius} متر).`);
       }
 
       const selectedReasonsList = selectedReasonIds

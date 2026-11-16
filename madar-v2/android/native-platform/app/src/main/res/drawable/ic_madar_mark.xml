@@ -4,19 +4,29 @@
     android:height="96dp"
     android:viewportWidth="96"
     android:viewportHeight="96">
+    <!-- Deep Navy Background Circle -->
     <path
-        android:fillColor="#15243A"
+        android:fillColor="#172A3F"
         android:pathData="M48,4A44,44 0,1 0,48 92A44,44 0,1 0,48 4" />
+    <!-- Gold Outer Ring -->
     <path
-        android:fillColor="#187B68"
-        android:pathData="M24,66L40,30H48L32,66Z" />
+        android:strokeColor="#D6B66E"
+        android:strokeWidth="2.5"
+        android:pathData="M48,8A40,40 0,1 0,48 88A40,40 0,1 0,48 8" />
+    <!-- Emerald Orbit Arc -->
     <path
-        android:fillColor="#187B68"
-        android:pathData="M40,30H72L68,40H48Z" />
+        android:strokeColor="#4DA889"
+        android:strokeWidth="4"
+        android:strokeLineCap="round"
+        android:pathData="M48,16A32,32 0,1 0,78 60" />
+    <!-- Inner Dark Circle -->
     <path
-        android:fillColor="#DCAA52"
-        android:pathData="M34,56H58L54,64H30Z" />
+        android:fillColor="#203B50"
+        android:strokeColor="#73B99D"
+        android:strokeWidth="1.5"
+        android:pathData="M48,26A22,22 0,1 0,48 70A22,22 0,1 0,48 26" />
+    <!-- Arabic Letter Meem 'م' in Warm Gold -->
     <path
-        android:fillColor="#DCAA52"
-        android:pathData="M54,30H72L52,66H44Z" />
+        android:fillColor="#FFE1A0"
+        android:pathData="M49,38 C54,38 58,42 58,47 C58,52 54,56 49,56 C45,56 42,53 41,49 L35,66 L30,66 L37,47 C37,42 42,38 49,38 Z M49,43 C46,43 44,45 44,47 C44,50 46,52 49,52 C52,52 54,50 54,47 C54,45 52,43 49,43 Z" />
 </vector>

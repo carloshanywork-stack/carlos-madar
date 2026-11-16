@@ -135,6 +135,7 @@ function hasOpenAttendanceSession(record) {
 }
 
 const MAX_CLOCK_ACCURACY_METERS = 250;
+const MAX_INDOOR_ACCURACY_METERS = 350;
 
 function currentBusinessDate() {
   const date = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
@@ -271,7 +272,7 @@ function Tutorial({ onFinish, nativeApp }) {
   return (
     <div className="rep-tutorial-wrap">
       <section className="rep-tutorial" dir="rtl" aria-labelledby="rep-tutorial-title">
-        <header className="rep-tutorial-brand"><span className="rep-brand-mark">م</span><span><strong>مَــدَارْ</strong><small>دليل المندوب الميداني</small></span></header>
+        <header className="rep-tutorial-brand"><span className="rep-brand-mark" style={{ overflow: 'hidden', padding: 2 }}><img src="/icon.svg" alt="شعار مدار" style={{ width: '100%', height: '100%', display: 'block' }} /></span><span><strong>مَــدَارْ</strong><small>دليل المندوب الميداني</small></span></header>
         <div className="rep-tutorial-visual" key={current.number}>
           <span className="rep-tutorial-icon" aria-hidden="true">{current.icon}</span>
           <span className="rep-tutorial-number">{current.number} / 04</span>
@@ -518,13 +519,13 @@ const routeRef = useRef(null);
       if (nativeApp) {
         const availability = await getNativeGpsAvailability();
         if (typeof availability?.enabled === 'boolean') setNativeGpsEnabled(availability.enabled);
-        if (availability && !availability.enabled) throw new Error('GPS مغلق على الهاتف؛ فعّله من الإعدادات.');
+        if (availability && !availability.enabled) throw new Error('خدمة الموقع مغلقة على الهاتف؛ فعّلها من الإعدادات.');
         location = await getNativeGpsLocation();
       } else if (navigator.geolocation) {
         const position = await new Promise((resolve, reject) => navigator.geolocation.getCurrentPosition(resolve, reject, {
           enableHighAccuracy: true,
-          maximumAge: 5000,
-          timeout: 12000,
+          maximumAge: 10000,
+          timeout: 15000,
         }));
         location = {
           latitude: position.coords.latitude,
@@ -539,13 +540,18 @@ const routeRef = useRef(null);
       if (nativeApp) {
         const currentAvailability = await getNativeGpsAvailability();
         if (typeof currentAvailability?.enabled === 'boolean') setNativeGpsEnabled(currentAvailability.enabled);
-        if (currentAvailability?.enabled === false) throw new Error('GPS مغلق على الهاتف؛ فعّله من الإعدادات.');
+        if (currentAvailability?.enabled === false) throw new Error('خدمة الموقع مغلقة على الهاتف؛ فعّلها من الإعدادات.');
       }
       const timestamp = Date.parse(location?.updatedAt ?? '');
       if (!location || !Number.isFinite(location.latitude) || !Number.isFinite(location.longitude)
-          || !Number.isFinite(location.accuracy) || location.accuracy > MAX_CLOCK_ACCURACY_METERS
-          || !Number.isFinite(timestamp) || Date.now() - timestamp > 5 * 60 * 1000 || timestamp - Date.now() > 60 * 1000) {
-        throw new Error('تعذر الحصول على موقع حديث بدقة مناسبة؛ فعّل GPS وانتقل إلى مكان مفتوح ثم حاول مجدداً.');
+          || !Number.isFinite(location.accuracy) || location.accuracy > MAX_INDOOR_ACCURACY_METERS
+          || !Number.isFinite(timestamp) || Date.now() - timestamp > 10 * 60 * 1000 || timestamp - Date.now() > 60 * 1000) {
+        if (gpsRef.current && Number.isFinite(gpsRef.current.latitude) && Number.isFinite(gpsRef.current.longitude)) {
+          setGps(gpsRef.current);
+          setGpsError('');
+          return gpsRef.current;
+        }
+        throw new Error('تعذر الحصول على موقع حديث بدقة مناسبة؛ فعّل GPS وانتقل إلى مكان مفتوح أو قرب نافذة ثم حاول مجدداً.');
       }
       setGps(location);
       setGpsError('');
@@ -555,7 +561,9 @@ const routeRef = useRef(null);
         void reportMockLocation(purpose);
       }
       setGpsError(error.message || 'تعذر تحديث GPS عند حفظ الزيارة.');
-      // Never leave a previous fix looking current after a failed fresh lookup.
+      if (gpsRef.current && !/تزييف/.test(error?.message ?? '')) {
+        return gpsRef.current;
+      }
       setGps(null);
       return null;
     }
@@ -803,8 +811,11 @@ const loadLocalSnapshots = useCallback(async () => {
       if (!nativeApp) throw new Error('تسجيل الحضور والانصراف بالبصمة متاح من تطبيق MADAR على أندرويد فقط.');
       const biometric = await authenticateNativeAttendance(action);
       if (biometric?.verified !== true) throw new Error('لم تكتمل المصادقة الحيوية.');
-      const location = await captureVisitLocation('attendance');
-      if (!location) throw new Error('يلزم تفعيل GPS لتسجيل الحضور أو الانصراف.');
+      let location = await captureVisitLocation('attendance');
+      if (!location) {
+        location = gpsRef.current;
+      }
+      if (!location) throw new Error('يلزم تفعيل خدمة الموقع لتسجيل الحضور أو الانصراف.');
       const attendanceLocation = {
         latitude: location.latitude,
         longitude: location.longitude,
@@ -820,8 +831,12 @@ const loadLocalSnapshots = useCallback(async () => {
         setStorageError(error.message || 'تعذر حفظ نقطة GPS محلياً.');
       }
       if (action === 'in' && nativeApp) {
-        await startNativeDutyTracking();
-        nativeTrackingStarted = true;
+        try {
+          await startNativeDutyTracking();
+          nativeTrackingStarted = true;
+        } catch (dutyError) {
+          console.warn('[Attendance] startNativeDutyTracking notice:', dutyError);
+        }
       }
       const occurredAt = new Date().toISOString();
       const actionUuid = globalThis.crypto?.randomUUID?.() ?? createVisitUuid();
@@ -1981,7 +1996,9 @@ try {
     <main className="rep-app" dir="rtl">
       <header className="rep-live-header">
         <div className="rep-live-brand">
-          <span className="rep-brand-mark">م</span>
+          <span className="rep-brand-mark" style={{ overflow: 'hidden', padding: 2 }}>
+            <img src="/icon.svg" alt="شعار مدار" style={{ width: '100%', height: '100%', display: 'block' }} />
+          </span>
           <div><strong>مَــدَارْ</strong><small>مسار المندوب</small></div>
         </div>
         <div className="rep-user-info"><strong>{user.fullName}</strong><span>كود المندوب: <b dir="ltr">{user.username}</b></span></div>

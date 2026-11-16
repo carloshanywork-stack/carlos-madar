@@ -28,7 +28,9 @@ export default function Sidebar({ open, onNavigate, user }) {
       <div className={`madar-mobile-scrim ${open ? 'visible' : ''}`} onClick={onNavigate} aria-hidden="true" />
       <aside className={`madar-sidebar ${open ? 'open' : ''}`}>
         <div className="madar-brand">
-          <span className="madar-brand-mark">M</span>
+          <span className="madar-brand-mark" style={{ overflow: 'hidden', padding: 2 }}>
+            <img src="/icon.svg" alt="شعار مدار" style={{ width: '100%', height: '100%', display: 'block' }} />
+          </span>
           <span className="madar-brand-copy">
             <span className="madar-brand-name">MADAR</span>
             <span className="madar-brand-subtitle">نظام إدارة التشغيل والصيانة</span>

@@ -78,7 +78,9 @@ export default function SignInPage({ setupRequired, initialError = '', onLoginSu
     <main className="auth-screen" dir="rtl">
       <header className="auth-header">
         <div className="auth-wordmark" aria-label="تسجيل الدخول إلى مدار">
-          <span className="auth-brand-mark">M</span>
+          <span className="auth-brand-mark" style={{ overflow: 'hidden', padding: 2 }}>
+            <img src="/icon.svg" alt="شعار مدار" style={{ width: '100%', height: '100%', display: 'block' }} />
+          </span>
           <span className="auth-brand-copy"><strong>MADAR</strong><small>مساحة عمل آمنة</small></span>
         </div>
         <button

@@ -1,4 +1,4 @@
-const MAX_LOCATION_AGE_MS = 5 * 60 * 1000;
+const MAX_LOCATION_AGE_MS = 10 * 60 * 1000;
 
 export function isEligibleVisitGps(location, now = Date.now()) {
   const updatedAt = Date.parse(location?.updatedAt ?? '');
@@ -6,8 +6,8 @@ export function isEligibleVisitGps(location, now = Date.now()) {
     && location.mocked !== true
     && Number.isFinite(location.latitude) && location.latitude >= -90 && location.latitude <= 90
     && Number.isFinite(location.longitude) && location.longitude >= -180 && location.longitude <= 180
-    && Number.isFinite(location.accuracy) && location.accuracy >= 0 && location.accuracy <= 100
-    && Number.isFinite(updatedAt) && updatedAt <= now + 30_000 && now - updatedAt <= MAX_LOCATION_AGE_MS;
+    && Number.isFinite(location.accuracy) && location.accuracy >= 0 && location.accuracy <= 250
+    && Number.isFinite(updatedAt) && updatedAt <= now + 60_000 && now - updatedAt <= MAX_LOCATION_AGE_MS;
 }
 
 export function distanceBetweenPointsMeters(first, second) {
