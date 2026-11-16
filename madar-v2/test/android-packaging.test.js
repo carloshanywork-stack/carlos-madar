@@ -176,7 +176,8 @@ test('native rep gate, private SQLite queue, and WorkManager upload contract are
   assert.doesNotMatch(nativeBridges.match(/export async function captureNativeCameraPhotos\([\s\S]*?\n\}/)?.[0] ?? '', /\.filter\(/,
     'malformed camera results must be rejected visibly, not silently filtered');
   assert.match(manifest, /android:name="\.RepCameraSequenceActivity"[\s\S]*?android:exported="false"/);
-  assert.match(watermarkRenderer, /getAssets\(\)\.open\("public\/watermark-logo\.png"\)/);
+  assert.match(read('android/app/src/main/java/com/madar/rep/app/RepNativeEnginePlugin.java'), /private Bitmap getCachedLogo\(\)[\s\S]*?getAssets\(\)\.open\("public\/watermark-logo\.png"\)/);
+  assert.match(watermarkRenderer, /Bitmap logo = getCachedLogo\(\)/);
   assert.match(photoProcessor, /RepGovernorateResolver\.resolve\(getContext\(\), location\)/);
   assert.match(watermarkRenderer, /governorate == null \? "غير متاحة" : governorate/);
   assert.match(nativeBridges, /enqueueNativeAttendanceAction/);

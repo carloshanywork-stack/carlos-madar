@@ -7,7 +7,7 @@ import {
 } from 'node:fs';
 import { basename, join } from 'node:path';
 import { env } from './config/env.js';
-import { clientDistPath, repApkPath, repTransitionApkPath } from './config/paths.js';
+import { clientDistPath, managerApkPath, repApkPath, repTransitionApkPath, storageMountPath, storageRoot } from './config/paths.js';
 import { db } from './database/connection.js';
 import { errorHandler, notFoundHandler } from './middleware/error-handler.js';
 import { getSessionUserFromRequest, requireAuthentication } from './modules/auth/service.js';
@@ -29,6 +29,7 @@ import attendanceRouter from './modules/employees/attendance-routes.js';
 import repRouter from './modules/rep/routes.js';
 import supervisorRouter from './modules/supervisor/routes.js';
 import notificationsRouter from './modules/notifications/routes.js';
+import { getStorageHealth } from './modules/system/health.js';
 
 export const app = express();
 
@@ -91,8 +92,18 @@ app.use((req, res, next) => cors({
 app.use(express.json({ limit: '1mb' }));
 app.use(requestLogger);
 
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', service: 'madar-v2', ...runtimeIdentity });
+let lastDiskAlertAt = 0;
+app.get('/api/health', async (req, res) => {
+  const storage = await getStorageHealth({
+    storagePath: storageMountPath ?? storageRoot,
+    mountRequired: Boolean(storageMountPath),
+  });
+  if (storage.status === 'warning' && Date.now() - lastDiskAlertAt >= 5 * 60 * 1000) {
+    lastDiskAlertAt = Date.now();
+    console.error(`URGENT: MADAR storage free space is ${storage.freePercent}% (threshold ${storage.thresholdPercent}%).`);
+  }
+  const status = storage.status === 'error' ? 'warning' : storage.status;
+  res.json({ status, service: 'madar-v2', storage, ...runtimeIdentity });
 });
 
 app.get('/api/app-version', (_req, res) => {
@@ -300,14 +311,32 @@ function downloadApkArtifact(req, res, next, path, downloadName, { release = fal
   stream.pipe(res);
 }
 
+function apkTarget(req, res) {
+  const target = req.query.target ?? 'rep';
+  if (!['rep', 'system'].includes(target)) {
+    res.status(400).json({ error: 'target must be rep or system.' });
+    return null;
+  }
+  if (target === 'system' && req.user?.role !== 'admin') {
+    res.status(403).json({ error: 'Administrator access is required for the manager APK.' });
+    return null;
+  }
+  if (target === 'rep' && req.user && !['admin', 'rep'].includes(req.user.role)) {
+    res.status(403).json({ error: 'Administrator or field representative access is required.' });
+    return null;
+  }
+  return target;
+}
+
 app.get('/download/apk', (req, res, next) => {
-  const user = getSessionUserFromRequest(req);
-  if (user) {
-    req.user = user;
-    if (!['admin', 'rep'].includes(user.role)) {
-      res.status(403).json({ error: 'Administrator or field representative access is required.' });
-      return;
-    }
+  req.user = getSessionUserFromRequest(req) ?? undefined;
+  const target = apkTarget(req, res);
+  if (!target) return;
+  if (target === 'system') {
+    downloadApkArtifact(req, res, next, managerApkPath, 'madar-manager.apk', {
+      release: basename(managerApkPath) === 'madar-manager-release.apk',
+    });
+    return;
   }
   downloadApkArtifact(req, res, next, repApkPath, 'madar-rep.apk', {
     release: basename(repApkPath) === 'madar-rep-release.apk',
@@ -323,35 +352,32 @@ app.get('/download/apk/debug-transition', requireAuthentication, (req, res, next
 });
 
 app.get('/download/apk/status', (req, res) => {
-  const user = getSessionUserFromRequest(req);
-  if (user) {
-    req.user = user;
-    if (!['admin', 'rep'].includes(user.role)) {
-      res.status(403).json({ error: 'Administrator or field representative access is required.' });
-      return;
-    }
-  }
-
+  req.user = getSessionUserFromRequest(req) ?? undefined;
+  const target = apkTarget(req, res);
+  if (!target) return;
+  const artifactPath = target === 'system' ? managerApkPath : repApkPath;
   try {
-    const { descriptor, metadata } = openRegularFileNoFollow(repApkPath);
+    const { descriptor, metadata } = openRegularFileNoFollow(artifactPath);
     let releaseMetadata = null;
     try {
-      releaseMetadata = readVerifiedApkMetadata(repApkPath, descriptor, {
-        required: basename(repApkPath) === 'madar-rep-release.apk',
+      releaseMetadata = readVerifiedApkMetadata(artifactPath, descriptor, {
+        required: basename(artifactPath) === (target === 'rep' ? 'madar-rep-release.apk' : 'madar-manager-release.apk'),
       });
     } finally { closeSync(descriptor); }
-    const artifactType = basename(repApkPath) === 'madar-rep-release.apk' ? 'release' : 'fallback';
-    const releaseRegistry = artifactType === 'release' ? readReleaseRegistration(releaseMetadata) : null;
-    const distribution = releaseDistributionState(releaseRegistry);
+    const releaseFile = basename(artifactPath) === (target === 'rep' ? 'madar-rep-release.apk' : 'madar-manager-release.apk');
+    const artifactType = releaseFile ? 'release' : 'fallback';
+    const releaseRegistry = target === 'rep' && artifactType === 'release' ? readReleaseRegistration(releaseMetadata) : null;
+    const distribution = target === 'rep' ? releaseDistributionState(releaseRegistry) : { distributable: artifactType === 'release', reason: artifactType === 'release' ? null : 'artifact_not_release' };
     res.set('Cache-Control', 'private, no-store').json({
       available: distribution.distributable,
+      ...(target === 'system' ? { target } : {}),
       artifactType,
       sizeBytes: metadata.size,
       modifiedAt: metadata.mtime.toISOString(),
       ...(distribution.distributable ? {} : { reason: distribution.reason }),
       ...(releaseMetadata ? { releaseMetadata } : {}),
       ...(releaseRegistry ? { releaseRegistry } : {}),
-      ...(req.user?.role === 'admin' ? { transitionAvailable: existsSync(repTransitionApkPath) } : {}),
+      ...(target === 'rep' && req.user?.role === 'admin' ? { transitionAvailable: existsSync(repTransitionApkPath) } : {}),
     });
   } catch (error) {
     if (error.code !== 'ENOENT' && error.code !== 'ENOTDIR') {
@@ -360,11 +386,12 @@ app.get('/download/apk/status', (req, res) => {
     }
     res.set('Cache-Control', 'private, no-store').json({
       available: false,
+      ...(target === 'system' ? { target } : {}),
       artifactType: 'missing',
       sizeBytes: null,
       modifiedAt: null,
       reason: 'artifact_missing',
-      ...(req.user?.role === 'admin' ? { transitionAvailable: existsSync(repTransitionApkPath) } : {}),
+      ...(target === 'rep' && req.user?.role === 'admin' ? { transitionAvailable: existsSync(repTransitionApkPath) } : {}),
     });
   }
 });

@@ -60,6 +60,7 @@ const repAttendanceSyncMigration = '20261110-rep-offline-attendance-sync';
 const attendanceOvertimeRequestsMigration = '20261112-attendance-overtime-requests';
 const userNotificationsMigration = '20261113-user-notifications';
 const attendanceCancellationMigration = '20261111-attendance-cancellation-status';
+const attendanceRevocationMigration = '20261116-attendance-revocation-status';
 const machineUpdatedAtMigration = '20261111-machine-updated-at';
 const machineVerificationCorrectionsMigration = '20261104-machine-verification-corrections';
 const machineLocationConfirmationReviewMigration = '20261110-machine-location-confirmation-review';
@@ -1299,6 +1300,40 @@ export function migrateAttendanceCancellation(database) {
   if (violations.length) throw new Error('Attendance cancellation migration produced foreign key violations.');
 }
 
+export function migrateAttendanceRevocation(database) {
+  if (database.prepare('SELECT 1 FROM schema_migrations WHERE version = ?').get(attendanceRevocationMigration)) return;
+  const original = database.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'employee_daily_attendance'").get()?.sql;
+  if (!original) return;
+  if (original.includes("'revoked'")) {
+    database.prepare('INSERT INTO schema_migrations (version) VALUES (?)').run(attendanceRevocationMigration);
+    return;
+  }
+  const widened = original
+    .replace(/CREATE TABLE\s+(?:IF NOT EXISTS\s+)?["`\[]?employee_daily_attendance["`\]]?/i, 'CREATE TABLE employee_daily_attendance_revoke_migration')
+    .replace("'present', 'absent', 'late', 'leave', 'cancelled'", "'present', 'absent', 'late', 'leave', 'cancelled', 'revoked'");
+  if (widened === original || !widened.includes("'revoked'")) {
+    throw new Error('Unable to safely add revoked attendance status to the existing schema.');
+  }
+  database.pragma('foreign_keys = OFF');
+  try {
+    database.transaction(() => {
+      const columns = database.pragma('table_info(employee_daily_attendance)').map((column) => column.name);
+      const columnList = columns.map((column) => `"${column}"`).join(', ');
+      database.exec(widened);
+      database.exec(`INSERT INTO employee_daily_attendance_revoke_migration (${columnList}) SELECT ${columnList} FROM employee_daily_attendance`);
+      database.exec('DROP TABLE employee_daily_attendance');
+      database.exec('ALTER TABLE employee_daily_attendance_revoke_migration RENAME TO employee_daily_attendance');
+      database.exec(`CREATE INDEX IF NOT EXISTS idx_employee_attendance_date ON employee_daily_attendance(work_date, employee_id);
+        CREATE INDEX IF NOT EXISTS idx_employee_attendance_overtime ON employee_daily_attendance(overtime_status, work_date, employee_id);`);
+      database.prepare('INSERT INTO schema_migrations (version) VALUES (?)').run(attendanceRevocationMigration);
+    }).immediate();
+  } finally {
+    database.pragma('foreign_keys = ON');
+  }
+  const violations = database.pragma('foreign_key_check');
+  if (violations.length) throw new Error('Attendance revocation migration produced foreign key violations.');
+}
+
 export function migrateMachineUpdatedAt(database) {
   const migrate = database.transaction(() => {
     if (database.prepare('SELECT 1 FROM schema_migrations WHERE version = ?').get(machineUpdatedAtMigration)) return;
@@ -2216,6 +2251,7 @@ export function initializeDatabase({ database = db, initialAdminPassword = env.i
   // This rebuild must run outside the initialization transaction: SQLite ignores
   // PRAGMA foreign_keys changes while a transaction is active.
   migrateAttendanceCancellation(database);
+  migrateAttendanceRevocation(database);
   const setupRequired = database
     .prepare('SELECT COUNT(*) AS count FROM users WHERE deleted_at IS NULL')
     .get().count === 0;

@@ -15,7 +15,7 @@ const storageLayout = resolveStorageLayout({
 
 export const storageMountPath = storageLayout.storageMountPath;
 export const dataDirectory = storageLayout.dataDirectory;
-export const thumbnailCacheDirectory = join(dataDirectory, 'thumbnail-cache');
+export const thumbnailCacheDirectory = join(dataDirectory, 'cache', 'thumbs');
 export const storageRoot = storageLayout.storageRoot;
 export const databasePath = storageLayout.databasePath;
 export const backupRoot = storageLayout.backupRoot;
@@ -33,6 +33,7 @@ export const repApkPath = resolve(
         : 'madar-rep-release.apk')
 );
 export const repTransitionApkPath = resolve(projectRoot, env.repTransitionApkPath ?? 'madar-rep-transition.apk');
+export const managerApkPath = resolve(projectRoot, env.managerApkPath ?? 'madar-manager-release.apk');
 
 function assertExistingPathIsSafe(path, { mountPath, mountDevice, type, label }) {
   const relativePath = relative(mountPath, path);

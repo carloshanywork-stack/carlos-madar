@@ -598,7 +598,8 @@ test('V2 parity operations cover imports, area maintenance, HR, exports, users, 
   assert.equal(finalized.response.status, 200, JSON.stringify(finalized.body));
   assert.equal(finalized.body.finalized, true);
   const payrollEntries = await request('/api/finance/treasury');
-  assert.ok(payrollEntries.body.entries.some((entry) => entry.category === 'رواتب وأجور' && entry.employee_id === newEmployee.body.id && entry.amount_cents === 2550000));
+  assert.equal(payrollEntries.body.entries.some((entry) => entry.category === 'رواتب وأجور' && entry.employee_id === newEmployee.body.id), false,
+    'finalizing payroll records payables but only a separately signed payment voucher moves cash');
 
   const pendingMachine = await request('/api/maintenance/machines', json('POST', {
     code: 'PARITY-PENDING', name_ar: 'ماكينة معلقة بدون صور', name_en: 'Pending Photo Machine', area: 'Cairo',

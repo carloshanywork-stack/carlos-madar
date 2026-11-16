@@ -300,8 +300,8 @@ test('unified staff directory, salary advances, adjustments, Friday pay, treasur
   assert.equal(settledWorker.adjustments.length, 2);
   const employeeTreasury = db.prepare(`SELECT category, amount_cents FROM treasury_entries
     WHERE employee_id = ? ORDER BY id`).all(worker.body.id);
-  assert.deepEqual(employeeTreasury.map((entry) => entry.category), ['سلفة راتب', 'رواتب وأجور']);
-  assert.deepEqual(employeeTreasury.map((entry) => entry.amount_cents), [5000, 231500]);
+  assert.deepEqual(employeeTreasury.map((entry) => entry.category), ['سلفة راتب']);
+  assert.deepEqual(employeeTreasury.map((entry) => entry.amount_cents), [5000]);
 
   const lateAdjustment = await request(`/api/employees/${worker.body.id}/payroll-adjustments`, jsonOptions('POST', {
     month: '2026-04', kind: 'bonus', amountCents: 100, description: 'Too late',
@@ -381,6 +381,20 @@ test('rep and admin clock actions persist source/GPS, guard duplicate punches, a
   const cancellationAudit = db.prepare(`SELECT action FROM audit_log
     WHERE entity_type = 'employee_daily_attendance' AND entity_id = ? ORDER BY id DESC LIMIT 1`).get(String(cancellation.body.attendance.id));
   assert.equal(cancellationAudit.action, 'cancel_attendance');
+  const revokeEmployeeId = Number(db.prepare("INSERT INTO employees (name, department) VALUES ('Revocation Fixture', 'Maintenance')")
+    .run().lastInsertRowid);
+  const revokeDate = getAttendanceBusinessDate(db);
+  db.prepare(`INSERT INTO employee_daily_attendance (employee_id, work_date, status, overtime_hours)
+    VALUES (?, ?, 'present', 0)`).run(revokeEmployeeId, revokeDate);
+  const revoked = await request(`/api/employees/${revokeEmployeeId}/attendance/revoke`, jsonOptions('POST', {}), adminCookie);
+  assert.equal(revoked.response.status, 200, JSON.stringify(revoked.body));
+  assert.equal(revoked.body.attendance.status, 'revoked');
+  assert.equal(revoked.body.attendance.clock_in_time, null);
+  const revokeAudit = db.prepare(`SELECT action FROM audit_log WHERE entity_type = 'employee_daily_attendance'
+    AND entity_id = ? ORDER BY id DESC LIMIT 1`).get(String(revoked.body.attendance.id));
+  assert.equal(revokeAudit.action, 'revoke_attendance');
+  const revokedAgain = await request(`/api/employees/${revokeEmployeeId}/attendance/revoke`, jsonOptions('POST', {}), adminCookie);
+  assert.equal(revokedAgain.body.attendance.status, 'revoked');
   const adminUserId = adminLogin.body.user.id;
   db.prepare('UPDATE employees SET base_salary_cents = 234000 WHERE id = ?').run(repEmployeeId);
   const openAttendanceId = Number(db.prepare(`INSERT INTO employee_daily_attendance

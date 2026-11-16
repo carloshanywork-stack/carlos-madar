@@ -1005,10 +1005,13 @@ const loadLocalSnapshots = useCallback(async () => {
           const cancellationIsForUser = Number(event.userId) === userId
             || (Array.isArray(event.recipientUserIds) && event.recipientUserIds.map(Number).includes(userId))
             || Number(event.employeeId) === Number(user.employee_id ?? attendance?.employee_id);
-          if (event.action === 'cancelled' && cancellationIsForUser) {
-            setAttendance(null);
+          if (['cancelled', 'revoked'].includes(event.action) && cancellationIsForUser) {
+            setAttendance({ status: event.action === 'revoked' ? 'revoked' : 'cancelled' });
+            setOnDuty(false);
+            void syncTracking({ duty: false, stop: true, location: null });
+            if (nativeApp) void stopNativeDutyTracking().catch(() => undefined);
             void clearSnapshot('attendance_snapshots', userId).catch(() => undefined);
-            setToast('⚠️ تم إلغاء تسجيل الحضور لهذا اليوم من قبل الإدارة.');
+            setToast(event.action === 'revoked' ? 'تم إلغاء الحضور بواسطة الإدارة.' : '⚠️ تم إلغاء تسجيل الحضور لهذا اليوم من قبل الإدارة.');
           } else void refreshAttendance();
         } else if (event.type === 'overtime.reviewed') {
           setToast(event.decision === 'approved'
@@ -1949,7 +1952,8 @@ try {
   const overtimeClosed = Boolean(attendance?.overtime_clock_in_time && attendance.overtime_clock_out_time);
   const attendanceIsOpen = regularOpen || overtimeOpen;
   const overtimeApproved = overtimeRequest?.status === 'approved';
-  const attendanceIsClosed = regularClosed && !overtimeOpen && !overtimeClosed && !overtimeApproved;
+  const attendanceIsRevoked = attendance?.status === 'revoked';
+  const attendanceIsClosed = attendanceIsRevoked || (regularClosed && !overtimeOpen && !overtimeClosed && !overtimeApproved);
   const overtimeReady = regularClosed && overtimeApproved && !overtimeClosed;
   const canRequestOvertime = regularClosed && !overtimeOpen && !overtimeClosed
     && !overtimeApproved && overtimeRequest?.status !== 'pending';
@@ -1964,7 +1968,9 @@ try {
         ? 'إنهاء جلسة الأوفرتايم ↧'
         : overtimeReady
           ? 'بدء جلسة الأوفرتايم ↥'
-          : attendanceIsClosed
+        : attendanceIsRevoked
+            ? 'تم إلغاء الحضور'
+            : attendanceIsClosed
             ? 'تم تسجيل الانصراف اليوم'
             : 'تسجيل الحضور ↥';
 
@@ -2005,8 +2011,8 @@ try {
       <section className="rep-attendance-card" aria-label="الحضور والانصراف">
         <div className="rep-attendance-summary">
           <span className="rep-eyebrow">الحضور والانصراف · {new Intl.DateTimeFormat('ar-EG', { dateStyle: 'full', timeZone: 'Africa/Cairo' }).format(new Date())}</span>
-          <strong>{attendance?.clock_in_time ? `${attendanceHours(attendance, clockNow).toFixed(2)} ساعة` : 'لم يسجل الحضور بعد'}</strong>
-          <small>{attendance?.clock_in_time
+          <strong>{attendanceIsRevoked ? 'تم إلغاء الحضور' : attendance?.clock_in_time ? `${attendanceHours(attendance, clockNow).toFixed(2)} ساعة` : 'لم يسجل الحضور بعد'}</strong>
+          <small>{attendanceIsRevoked ? 'تم إيقاف تتبع الوردية وإلغاء تسجيل اليوم.' : attendance?.clock_in_time
             ? `حضور ${formatTime(attendance.clock_in_time)}${attendance.clock_out_time ? ` · انصراف ${formatTime(attendance.clock_out_time)}` : ' · الدوام مستمر'}${attendance.overtime_clock_in_time ? ` · أوفرتايم ${formatTime(attendance.overtime_clock_in_time)}${attendance.overtime_clock_out_time ? ` إلى ${formatTime(attendance.overtime_clock_out_time)}` : ' · الجلسة الإضافية مستمرة'}` : ''}`
             : 'يُحفظ وقت الجهاز وموقع GPS بأمان؛ وتتم المزامنة تلقائياً عند الاتصال.'}</small>
         </div>

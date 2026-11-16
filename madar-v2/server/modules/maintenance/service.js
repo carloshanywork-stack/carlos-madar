@@ -555,7 +555,7 @@ export function resetMachineGeofenceLocation(machineId, actorId = null, database
       WHERE id = ?`).run(id);
     const updated = database.prepare(`SELECT id, code, latitude, longitude, is_location_locked,
       geofence_radius_meters FROM machines WHERE id = ?`).get(id);
-    recordAudit({ database, actorId, action: 'reset_geofence_location', entityType: 'machine', entityId: id,
+    recordAudit({ database, actorId, action: 'RESET_MACHINE_LOCATION', entityType: 'machine', entityId: id,
       oldValues: machine, newValues: updated });
     return updated;
   }).immediate();
