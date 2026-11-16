@@ -28,8 +28,7 @@ fun rememberBiometricGate(onResult: (Boolean, String?) -> Unit): (String, String
                 callback(false, "تعذر فتح المصادقة الحيوية على هذا الجهاز.")
             } else {
                 val manager = BiometricManager.from(activity)
-                val authenticators = BiometricManager.Authenticators.BIOMETRIC_STRONG or
-                    BiometricManager.Authenticators.BIOMETRIC_WEAK
+                val authenticators = BiometricManager.Authenticators.BIOMETRIC_STRONG
                 val status = manager.canAuthenticate(authenticators)
                 if (status != BiometricManager.BIOMETRIC_SUCCESS) {
                     val message = when (status) {

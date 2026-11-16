@@ -42,7 +42,7 @@ android {
     defaultConfig {
         applicationId = "com.madar.rep.app"
         minSdk = 24
-        targetSdk = 36
+        targetSdk = 34
         versionCode = representativeVersionCode
         versionName = representativeVersionName
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -61,6 +61,8 @@ android {
                 storePassword = releaseSigningProperties.getProperty("storePassword")
                 keyAlias = releaseSigningProperties.getProperty("keyAlias")
                 keyPassword = releaseSigningProperties.getProperty("keyPassword")
+                enableV1Signing = true
+                enableV2Signing = true
             }
         }
     }
@@ -71,7 +73,8 @@ android {
             versionNameSuffix = "-debug"
         }
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             isDebuggable = false
             if (releaseSigningConfigured) signingConfig = signingConfigs.getByName("release")
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")

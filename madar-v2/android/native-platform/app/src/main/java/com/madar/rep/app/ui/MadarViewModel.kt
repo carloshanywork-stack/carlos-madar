@@ -102,6 +102,9 @@ data class ApkUpdateUiState(
     val busy: Boolean = false,
     val message: String? = null,
     val downloadedApk: File? = null,
+    val bytesReceived: Long = 0L,
+    val totalBytes: Long = 0L,
+    val progress: Float? = null,
 )
 
 data class LocationChangeUiState(
@@ -309,13 +312,18 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun checkMandatoryUpdate() {
-        val current = session.value ?: return
+        val serverUrl = session.value?.serverUrl ?: container.defaultServerUrl()
         viewModelScope.launch(Dispatchers.IO) {
-            runCatching { container.apiFactory(current.serverUrl).getAppVersion() }
+            runCatching { container.apiFactory(serverUrl).getAppVersion() }
                 .onSuccess { version ->
-                    VersionGate.setRequired(
-                        version.minSupportedVersionCode > 0 && BuildConfig.VERSION_CODE < version.minSupportedVersionCode
-                    )
+                    val required = version.minSupportedVersionCode > 0 && BuildConfig.VERSION_CODE < version.minSupportedVersionCode
+                    VersionGate.setRequired(required)
+                    if (required && version.versionName != null) {
+                        _apkUpdate.value = _apkUpdate.value.copy(
+                            availableVersion = "${version.versionName} (${version.latestVersionCode})",
+                            updateAvailable = true
+                        )
+                    }
                 }
         }
     }
@@ -329,18 +337,45 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun downloadApkUpdate() {
-        val current = session.value ?: return
+        val serverUrl = session.value?.serverUrl ?: container.defaultServerUrl()
+        val token = session.value?.token
         if (_apkUpdate.value.busy) return
-        _apkUpdate.value = _apkUpdate.value.copy(busy = true, message = "جارٍ تنزيل APK والتحقق منه…", downloadedApk = null)
+        _apkUpdate.value = _apkUpdate.value.copy(
+            busy = true,
+            message = "جارٍ تنزيل APK والتحقق منه…",
+            downloadedApk = null,
+            bytesReceived = 0L,
+            totalBytes = 0L,
+            progress = null
+        )
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val downloaded = apkUpdateManager.download(container.apiFactory(current.serverUrl), current.token)
+                val downloaded = apkUpdateManager.download(
+                    api = container.apiFactory(serverUrl),
+                    token = token,
+                    onProgress = { bytesRead, total ->
+                        val prog = if (total > 0) bytesRead.toFloat() / total.toFloat() else null
+                        _apkUpdate.value = _apkUpdate.value.copy(
+                            bytesReceived = bytesRead,
+                            totalBytes = total,
+                            progress = prog,
+                            message = if (total > 0) {
+                                val mbRead = "%.1f".format(bytesRead / 1_048_576.0)
+                                val mbTotal = "%.1f".format(total / 1_048_576.0)
+                                "جارٍ التنزيل: $mbRead / $mbTotal ميجابايت…"
+                            } else {
+                                "جارٍ التنزيل…"
+                            }
+                        )
+                    }
+                )
                 _apkUpdate.value = _apkUpdate.value.copy(
                     busy = false,
                     availableVersion = "${downloaded.metadata.versionName} (${downloaded.metadata.versionCode})",
                     updateAvailable = true,
-                    message = "اكتمل التنزيل والتحقق. اضغط تثبيت للمتابعة يدويًا.",
+                    message = "اكتمل التنزيل والتحقق بنجاح. اضغط تثبيت التحديث للمتابعة.",
                     downloadedApk = downloaded.file,
+                    progress = 1.0f
                 )
             } catch (error: ApkUpdateException) {
                 _apkUpdate.value = _apkUpdate.value.copy(busy = false, message = error.failure.userMessage, downloadedApk = null)
@@ -518,7 +553,12 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
         viewModelScope.launch {
             try {
                 com.madar.rep.app.location.GpsBreadcrumbService.stop(container.appContext)
-                withContext(Dispatchers.IO) { container.sessions.logout() }
+                withContext(Dispatchers.IO) {
+                    container.sessions.logout()
+                    container.database.routes().clear()
+                    container.photoStore.clearOrphans()
+                    container.photoStore.pruneOldPhotos(7)
+                }
                 _sync.value = SyncUiState()
                 _login.value = LoginUiState()
                 _location.value = LocationUiState()

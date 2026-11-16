@@ -179,6 +179,9 @@ interface RouteDao {
     @Query("SELECT * FROM route_snapshots WHERE ownerRepId = :repId")
     suspend fun get(repId: Long): RouteSnapshotEntity?
 
+    @Query("DELETE FROM route_snapshots")
+    suspend fun clear()
+
     @Query("SELECT * FROM route_snapshots WHERE ownerRepId = :repId")
     fun observe(repId: Long): Flow<RouteSnapshotEntity?>
 }

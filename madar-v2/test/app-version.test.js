@@ -84,3 +84,11 @@ test('version enforcement is scoped to representative APIs, not admin/browser AP
   const response = await fetch(`${baseUrl}/api/auth/status`);
   assert.equal(response.status, 200);
 });
+
+test('unauthenticated client can access download route without 401 or 403', async () => {
+  const response = await fetch(`${baseUrl}/download/apk`);
+  // Since missing.apk does not exist in temporaryDirectory, it returns 404 instead of 401/403
+  assert.equal(response.status, 404);
+  assert.notEqual(response.status, 401);
+  assert.notEqual(response.status, 403);
+});

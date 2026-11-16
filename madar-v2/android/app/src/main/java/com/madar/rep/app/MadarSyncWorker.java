@@ -155,9 +155,18 @@ public final class MadarSyncWorker extends Worker {
                 for (RepLocalStore.Photo photo : visit.photos) {
                     File file = new File(photo.path);
                     if (!file.isFile() || file.length() < 1L || file.length() > MAX_FILE_BYTES) {
+                    if (!file.isFile() || file.length() < 1L) {
                         store.markBlocked(visit.visitUuid, "صورة الزيارة المحلية مفقودة أو غير صالحة؛ لم تُحذف بيانات الزيارة.");
                         visit = null;
                         break;
+                    }
+                    if (file.length() > MAX_FILE_BYTES) {
+                        boolean recompressed = recompressPhoto(file, 1280, 65);
+                        if (!recompressed || file.length() > MAX_FILE_BYTES) {
+                            store.markBlocked(visit.visitUuid, "صورة الزيارة المحلية تتجاوز الحد المسموح به (3 ميجابايت)؛ لم تُحذف بيانات الزيارة.");
+                            visit = null;
+                            break;
+                        }
                     }
                 }
                 if (visit == null) continue;
@@ -503,6 +512,49 @@ public final class MadarSyncWorker extends Worker {
     private static JSONObject parseJson(String value) {
         try { return new JSONObject(value); }
         catch (Exception ignored) { return null; }
+    }
+
+    private static boolean recompressPhoto(File file, int maxDimension, int quality) {
+        try {
+            android.graphics.BitmapFactory.Options bounds = new android.graphics.BitmapFactory.Options();
+            bounds.inJustDecodeBounds = true;
+            android.graphics.BitmapFactory.decodeFile(file.getAbsolutePath(), bounds);
+            if (bounds.outWidth < 1 || bounds.outHeight < 1) return false;
+            int sampleSize = 1;
+            while (Math.max(bounds.outWidth / sampleSize, bounds.outHeight / sampleSize) > maxDimension * 2) {
+                sampleSize *= 2;
+            }
+            android.graphics.BitmapFactory.Options options = new android.graphics.BitmapFactory.Options();
+            options.inSampleSize = sampleSize;
+            android.graphics.Bitmap decoded = android.graphics.BitmapFactory.decodeFile(file.getAbsolutePath(), options);
+            if (decoded == null) return false;
+            float scale = Math.min(1f, (float) maxDimension / Math.max(decoded.getWidth(), decoded.getHeight()));
+            android.graphics.Bitmap scaled = decoded;
+            if (scale < 1f) {
+                scaled = android.graphics.Bitmap.createScaledBitmap(
+                    decoded,
+                    Math.max(1, Math.round(decoded.getWidth() * scale)),
+                    Math.max(1, Math.round(decoded.getHeight() * scale)),
+                    true
+                );
+                if (scaled != decoded) decoded.recycle();
+            }
+            File temp = new File(file.getParentFile(), file.getName() + ".recomp.tmp");
+            try (java.io.FileOutputStream out = new java.io.FileOutputStream(temp)) {
+                scaled.compress(android.graphics.Bitmap.CompressFormat.JPEG, quality, out);
+                out.flush();
+            } finally {
+                scaled.recycle();
+            }
+            if (temp.length() > 0 && temp.renameTo(file)) {
+                return true;
+            } else {
+                temp.delete();
+                return false;
+            }
+        } catch (Exception error) {
+            return false;
+        }
     }
 
     private static final class FileRequestBody extends RequestBody {

@@ -14,8 +14,20 @@ public class MainActivity extends BridgeActivity {
         void onResult(Map<String, Boolean> result);
     }
 
+    private static class PendingPermissionRequest {
+        final String[] permissions;
+        final PermissionResultCallback callback;
+
+        PendingPermissionRequest(String[] permissions, PermissionResultCallback callback) {
+            this.permissions = permissions;
+            this.callback = callback;
+        }
+    }
+
     private ActivityResultLauncher<String[]> permissionLauncher;
     private PermissionResultCallback permissionResultCallback;
+    private final java.util.Queue<PendingPermissionRequest> permissionQueue = new java.util.concurrent.ConcurrentLinkedQueue<>();
+    private volatile boolean isRequestingPermissions = false;
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -27,16 +39,29 @@ public class MainActivity extends BridgeActivity {
             result -> {
                 PermissionResultCallback callback = permissionResultCallback;
                 permissionResultCallback = null;
+                isRequestingPermissions = false;
                 if (callback != null) callback.onResult(result);
+                processNextPermissionRequest();
             }
         );
         MadarSyncScheduler.ensurePeriodic(this);
     }
 
-    public void requestRuntimePermissions(String[] permissions, PermissionResultCallback callback) {
-        if (permissionLauncher == null) throw new IllegalStateException("Android permission launcher is not ready.");
-        if (permissionResultCallback != null) throw new IllegalStateException("Another permission request is already active.");
-        permissionResultCallback = callback;
-        permissionLauncher.launch(permissions);
+    public synchronized void requestRuntimePermissions(String[] permissions, PermissionResultCallback callback) {
+        if (permissionLauncher == null) {
+            if (callback != null) callback.onResult(java.util.Collections.emptyMap());
+            return;
+        }
+        permissionQueue.offer(new PendingPermissionRequest(permissions, callback));
+        processNextPermissionRequest();
+    }
+
+    private synchronized void processNextPermissionRequest() {
+        if (isRequestingPermissions || permissionLauncher == null) return;
+        PendingPermissionRequest next = permissionQueue.poll();
+        if (next == null) return;
+        isRequestingPermissions = true;
+        permissionResultCallback = next.callback;
+        permissionLauncher.launch(next.permissions);
     }
 }

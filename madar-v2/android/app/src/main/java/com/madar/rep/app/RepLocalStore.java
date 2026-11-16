@@ -47,6 +47,19 @@ final class RepLocalStore extends SQLiteOpenHelper {
         if (oldVersion < 5) createVisitPhotoDrafts(database);
     }
 
+    public void wipeSessionCache() {
+        SQLiteDatabase database = getWritableDatabase();
+        database.beginTransaction();
+        try {
+            database.delete("machines", null, null);
+            database.delete("route_snapshots", null, null);
+            database.setTransactionSuccessful();
+        } catch (Exception ignored) {
+        } finally {
+            database.endTransaction();
+        }
+    }
+
     private static void createVisitPhotoDrafts(SQLiteDatabase database) {
         database.execSQL("CREATE TABLE IF NOT EXISTS visit_photo_drafts ("
             + "visit_uuid TEXT NOT NULL, rep_id INTEGER NOT NULL, phase TEXT NOT NULL CHECK (phase IN ('before','after')), "

@@ -1,21 +1,42 @@
-# Add project specific ProGuard rules here.
-# You can control the set of applied configuration files using the
-# proguardFiles setting in build.gradle.
-#
-# For more details, see
-#   http://developer.android.com/guide/developing/tools/proguard.html
+# General Android and line number preservation
+-keepattributes SourceFile,LineNumberTable
+-keepattributes *Annotation*
+-keepattributes JavascriptInterface
 
-# If your project uses WebView with JS, uncomment the following
-# and specify the fully qualified class name to the JavaScript interface
-# class:
-#-keepclassmembers class fqcn.of.javascript.interface.for.webview {
-#   public *;
-#}
+# Keep Capacitor Core and Plugin reflections
+-keep public class com.getcapacitor.** { *; }
+-keep public class * extends com.getcapacitor.Plugin { *; }
+-keepclassmembers class * extends com.getcapacitor.Plugin {
+    @com.getcapacitor.PluginMethod public *;
+    @com.getcapacitor.annotation.ActivityCallback public *;
+    @com.getcapacitor.annotation.PermissionCallback public *;
+}
+-keep class com.getcapacitor.annotation.* { *; }
+-keep class com.getcapacitor.Bridge { *; }
+-keep class com.getcapacitor.BridgeActivity { *; }
 
-# Uncomment this to preserve the line number information for
-# debugging stack traces.
-#-keepattributes SourceFile,LineNumberTable
+# Keep Cordova plugins
+-keep class org.apache.cordova.** { *; }
 
-# If you keep the line number information, uncomment this to
-# hide the original source file name.
-#-renamesourcefileattribute SourceFile
+# Keep MADAR plugins, SQLite local stores, and background workers
+-keep class com.madar.rep.app.** { *; }
+-keepclassmembers class com.madar.rep.app.** { *; }
+
+# Keep WorkManager workers
+-keep class * extends androidx.work.Worker { *; }
+-keep class * extends androidx.work.ListenableWorker { *; }
+
+# Keep OkHttp
+-dontwarn okhttp3.**
+-dontwarn okio.**
+-keep class okhttp3.** { *; }
+-keep interface okhttp3.** { *; }
+
+# Keep AndroidX Biometric and Security Crypto
+-keep class androidx.biometric.** { *; }
+-keep class androidx.security.crypto.** { *; }
+
+# Keep WebKit and Javascript interfaces
+-keepclassmembers class * {
+    @android.webkit.JavascriptInterface <methods>;
+}

@@ -77,10 +77,15 @@ fun MadarRoot(container: AppContainer) {
         vm.messages.collect { message -> snackbarHostState.showSnackbar(message) }
     }
 
-    val current = session
-    LaunchedEffect(current?.ownerScopeId) {
-        if (current != null) vm.checkMandatoryUpdate()
+    LaunchedEffect(Unit) {
+        vm.checkMandatoryUpdate()
     }
+    if (mandatoryUpdate) {
+        ForcedUpdateScreen(vm)
+        return
+    }
+
+    val current = session
     if (current == null) {
         val login by vm.login.collectAsStateWithLifecycle()
         LoginScreen(
@@ -286,12 +291,22 @@ private fun ForcedUpdateScreen(vm: MadarViewModel) {
             Text("هذا الإصدار لم يعد مدعومًا. حدّث التطبيق للعودة إلى العمل. لن تُرسل البيانات من هذا الإصدار.")
             Spacer(Modifier.height(12.dp))
             update.availableVersion?.let { Text("الإصدار المطلوب: $it") }
-            update.message?.let { Text(it) }
-            if (update.busy) {
-                Spacer(Modifier.height(12.dp))
-                CircularProgressIndicator()
+            update.message?.let {
+                Spacer(Modifier.height(8.dp))
+                Text(it, style = MaterialTheme.typography.bodyMedium)
             }
-            Spacer(Modifier.height(16.dp))
+            if (update.busy) {
+                Spacer(Modifier.height(16.dp))
+                if (update.progress != null) {
+                    androidx.compose.material3.LinearProgressIndicator(
+                        progress = { update.progress ?: 0f },
+                        modifier = Modifier.fillMaxWidth(0.85f)
+                    )
+                } else {
+                    CircularProgressIndicator()
+                }
+            }
+            Spacer(Modifier.height(20.dp))
             when {
                 update.downloadedApk != null -> Button(onClick = {
                     val activity = context as? Activity

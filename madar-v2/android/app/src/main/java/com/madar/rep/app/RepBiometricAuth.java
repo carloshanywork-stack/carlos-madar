@@ -13,7 +13,7 @@ import androidx.fragment.app.FragmentActivity;
 final class RepBiometricAuth {
     static final int ALLOWED_AUTHENTICATORS = BiometricManager.Authenticators.BIOMETRIC_STRONG
         | BiometricManager.Authenticators.DEVICE_CREDENTIAL;
-    private static final int BIOMETRIC_AUTHENTICATORS = BiometricManager.Authenticators.BIOMETRIC_WEAK;
+    private static final int BIOMETRIC_AUTHENTICATORS = BiometricManager.Authenticators.BIOMETRIC_STRONG;
 
     interface Callback {
         void onSuccess(int authenticationType);

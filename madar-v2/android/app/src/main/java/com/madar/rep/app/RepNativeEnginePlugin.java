@@ -347,13 +347,50 @@ public final class RepNativeEnginePlugin extends Plugin {
     @PluginMethod
     public void clearSession(PluginCall call) {
         try {
-            realtimeWanted=false;
-            if(realtime!=null)realtime.stop();
+            realtimeWanted = false;
+            if (realtime != null) realtime.stop();
             RepAuthStore.clear(getContext());
+            try (RepLocalStore store = new RepLocalStore(getContext())) {
+                store.wipeSessionCache();
+            }
+            cleanupStorageAndOrphans(getContext());
             MadarSyncScheduler.cancelImmediate(getContext());
             call.resolve(new JSObject().put("cleared", true));
         } catch (Exception error) {
             call.reject("تعذر إنهاء الجلسة المحلية الآمنة.", "SECURE_SESSION_CLEAR_FAILED", error);
+        }
+    }
+
+    private void cleanupStorageAndOrphans(Context context) {
+        try {
+            File captures = new File(context.getFilesDir(), "visit-camera-captures");
+            if (captures.exists() && captures.isDirectory()) {
+                File[] files = captures.listFiles();
+                if (files != null) {
+                    for (File f : files) {
+                        f.delete();
+                    }
+                }
+            }
+            File uploadsRoot = new File(new File(context.getFilesDir(), "MADAR"), "uploads");
+            if (uploadsRoot.exists() && uploadsRoot.isDirectory()) {
+                long cutoff = System.currentTimeMillis() - (7L * 24 * 60 * 60 * 1000L);
+                pruneOldFiles(uploadsRoot, cutoff);
+            }
+        } catch (Exception ignored) {}
+    }
+
+    private void pruneOldFiles(File dir, long cutoff) {
+        File[] files = dir.listFiles();
+        if (files == null) return;
+        for (File f : files) {
+            if (f.isDirectory()) {
+                pruneOldFiles(f, cutoff);
+                File[] remaining = f.listFiles();
+                if (remaining != null && remaining.length == 0) f.delete();
+            } else if (f.isFile() && f.lastModified() < cutoff) {
+                f.delete();
+            }
         }
     }
 
@@ -1046,9 +1083,25 @@ private JSONArray exportPhasePhotos(JSONArray entries, String phase, String visi
         return Bitmap.createBitmap(source, 0, 0, source.getWidth(), source.getHeight(), matrix, true);
     }
 
+    private static volatile Bitmap cachedLogoBitmap;
+
+    private Bitmap getCachedLogo() throws Exception {
+        Bitmap logo = cachedLogoBitmap;
+        if (logo != null && !logo.isRecycled()) return logo;
+        synchronized (RepNativeEnginePlugin.class) {
+            if (cachedLogoBitmap == null || cachedLogoBitmap.isRecycled()) {
+                try (InputStream input = getContext().getAssets().open("public/watermark-logo.png")) {
+                    cachedLogoBitmap = BitmapFactory.decodeStream(input);
+                }
+            }
+            if (cachedLogoBitmap == null) throw new IllegalStateException("تعذر قراءة شعار A to Z المضمّن في التطبيق.");
+            return cachedLogoBitmap;
+        }
+    }
+
     private Bitmap drawWatermark(Bitmap source, JSONObject data, JSONObject location, String phase,
         String governorate) throws Exception {
-        Bitmap output = source.copy(Bitmap.Config.ARGB_8888, true);
+        Bitmap output = source.isMutable() ? source : source.copy(Bitmap.Config.ARGB_8888, true);
         Canvas canvas = new Canvas(output);
         int width = output.getWidth();
         int height = output.getHeight();
@@ -1062,14 +1115,9 @@ private JSONArray exportPhasePhotos(JSONArray entries, String phase, String visi
         Paint background = new Paint(Paint.ANTI_ALIAS_FLAG);
         background.setColor(Color.argb(210, 7, 19, 31));
         canvas.drawRect(new RectF(0f, top, panelWidth, height), background);
-        Bitmap logo;
-        try (InputStream input = getContext().getAssets().open("public/watermark-logo.png")) {
-            logo = BitmapFactory.decodeStream(input);
-        }
-        if (logo == null) throw new IllegalStateException("تعذر قراءة شعار A to Z المضمّن في التطبيق.");
+        Bitmap logo = getCachedLogo();
         float logoHeight = logoSize * logo.getHeight() / (float) logo.getWidth();
         canvas.drawBitmap(logo, null, new RectF(padding, top + padding, padding + logoSize, top + padding + logoHeight), new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG));
-        logo.recycle();
         Paint text = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.SUBPIXEL_TEXT_FLAG);
         text.setColor(Color.WHITE);
         text.setTextSize(fontSize);

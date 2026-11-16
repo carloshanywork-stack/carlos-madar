@@ -67,14 +67,14 @@ function assertAndroidToolchain() {
   if (!androidSdk || !existsSync(androidSdk)) {
     throw new Error('Android SDK was not found. Set ANDROID_HOME or ANDROID_SDK_ROOT to an installed Android SDK.');
   }
-  if (!existsSync(join(androidSdk, 'platforms', 'android-36'))) {
-    throw new Error('Android SDK platform 36 is missing. Install Android SDK Platform 36 with sdkmanager or Android Studio.');
+  if (!existsSync(join(androidSdk, 'platforms', 'android-34')) && !existsSync(join(androidSdk, 'platforms', 'android-36'))) {
+    throw new Error('Android SDK platform 34 or 36 is missing. Install Android SDK Platform with sdkmanager or Android Studio.');
   }
   const buildToolsDirectory = join(androidSdk, 'build-tools');
-  const hasBuildTools36 = existsSync(buildToolsDirectory)
-    && readdirSync(buildToolsDirectory).some((version) => /^36\./.test(version));
-  if (!hasBuildTools36) {
-    throw new Error('Android Build Tools 36 are missing. Install Android SDK Build-Tools 36 before building the APK.');
+  const hasBuildTools = existsSync(buildToolsDirectory)
+    && readdirSync(buildToolsDirectory).some((version) => /^(?:34|35|36)\./.test(version));
+  if (!hasBuildTools) {
+    throw new Error('Android Build Tools 34+ are missing. Install Android SDK Build-Tools before building the APK.');
   }
   const localProperties = resolve(projectRoot, 'android', 'local.properties');
   if (!existsSync(localProperties)) {
@@ -124,7 +124,7 @@ if (!syncOnly) {
   );
   if (!existsSync(builtApk)) throw new Error(`Gradle reported success but the APK is missing: ${builtApk}`);
   const androidSdk = process.env.ANDROID_HOME || process.env.ANDROID_SDK_ROOT;
-  const buildTools = readdirSync(join(androidSdk, 'build-tools')).filter((version) => /^36\./.test(version)).sort().at(-1);
+  const buildTools = readdirSync(join(androidSdk, 'build-tools')).filter((version) => /^(?:34|35|36)\./.test(version)).sort().at(-1);
   const apksigner = join(androidSdk, 'build-tools', buildTools, isWindows ? 'apksigner.bat' : 'apksigner');
   if (!existsSync(apksigner)) throw new Error('Android Build Tools apksigner was not found; refusing to publish an unverifiable APK.');
   const signatureReport = execFileSync(apksigner, ['verify', '--verbose', '--print-certs', builtApk], {

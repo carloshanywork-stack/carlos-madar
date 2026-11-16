@@ -125,4 +125,28 @@ class PhotoStore(private val context:Context,private val governorates:Governorat
     }
     private fun copyDurably(source:File,dest:File) { source.inputStream().use{input->val part=File(dest.parentFile,dest.name+".part");FileOutputStream(part).use{out->input.copyTo(out);out.fd.sync()};check(part.length()==source.length());check(part.renameTo(dest))} }
     private fun write(file:File,bytes:ByteArray) { val part=File(file.parentFile,file.name+".part");FileOutputStream(part).use{it.write(bytes);it.fd.sync()};check(part.renameTo(file)) }
+
+    fun pruneOldPhotos(maxAgeDays: Int = 7) {
+        val cutoff = System.currentTimeMillis() - (maxAgeDays.toLong() * 24 * 60 * 60 * 1000L)
+        root.listFiles()?.forEach { visitDir ->
+            if (visitDir.isDirectory && visitDir.lastModified() < cutoff) {
+                visitDir.deleteRecursively()
+            }
+        }
+    }
+
+    fun clearOrphans() {
+        root.listFiles()?.forEach { visitDir ->
+            if (visitDir.isDirectory) {
+                visitDir.walkBottomUp().forEach { file ->
+                    if (file.isFile && file.name.endsWith(".capture.jpg") && (System.currentTimeMillis() - file.lastModified() > 24 * 60 * 60 * 1000L)) {
+                        file.delete()
+                    }
+                }
+                if (visitDir.listFiles()?.isEmpty() == true) {
+                    visitDir.delete()
+                }
+            }
+        }
+    }
 }

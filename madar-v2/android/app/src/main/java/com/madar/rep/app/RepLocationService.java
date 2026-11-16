@@ -31,11 +31,11 @@ public class RepLocationService extends Service implements LocationListener {
     public static final String PREFERENCES_NAME = "madar_rep_duty";
     private static final String CHANNEL_ID = "madar-rep-duty-location";
     private static final int NOTIFICATION_ID = 43102;
-    private static final long MOVING_INTERVAL_MS = 5000L;
+    private static final long MOVING_INTERVAL_MS = 15000L;
     private static final long STATIONARY_INTERVAL_MS = 60000L;
     private static final long STATIONARY_AFTER_MS = 3 * 60 * 1000L;
     private static final float MOVING_SPEED_METERS_PER_SECOND = 2f / 3.6f;
-    private static final float MOVING_DISTANCE_METERS = 15f;
+    private static final float MOVING_DISTANCE_METERS = 10f;
     private static volatile boolean running;
 
     private LocationManager locationManager;
@@ -233,7 +233,7 @@ public class RepLocationService extends Service implements LocationListener {
         if (powerManager == null) return;
         wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "madar-rep:duty-location");
         wakeLock.setReferenceCounted(false);
-        wakeLock.acquire();
+        wakeLock.acquire(10000L);
     }
 
     private void releaseWakeLock() {

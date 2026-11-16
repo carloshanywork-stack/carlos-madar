@@ -38,6 +38,17 @@ data class WatermarkOutput(val text: String, val width: Int, val height: Int)
 object Watermarker {
     private const val MAX_DIMENSION = 1600
     private const val JPEG_QUALITY = 82
+    private var cachedLogo: Bitmap? = null
+
+    @Synchronized
+    private fun getLogo(context: Context): Bitmap {
+        val current = cachedLogo
+        if (current != null && !current.isRecycled) return current
+        val loaded = context.assets.open("watermark-logo.png").use { BitmapFactory.decodeStream(it) }
+        require(loaded != null) { "شعار A to Z غير متاح؛ الأصل محفوظ" }
+        cachedLogo = loaded
+        return loaded
+    }
 
     fun render(context: Context, source: File, destination: File, input: WatermarkInput): WatermarkOutput {
         val bitmap = decodeScaled(source) ?: throw IllegalArgumentException("الصورة غير صالحة أو لا يمكن فتحها.")
@@ -53,11 +64,9 @@ object Watermarker {
                 val panel = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(210, 7, 19, 31) }
                 canvas.drawRect(0f, layout.panelTop.toFloat(), layout.panelWidth.toFloat(), oriented.height.toFloat(), panel)
 
-                val logo=context.assets.open("watermark-logo.png").use { android.graphics.BitmapFactory.decodeStream(it) }
-                require(logo != null) { "شعار A to Z غير متاح؛ الأصل محفوظ" }
-                val ratio=logo.height.toFloat()/logo.width
-                canvas.drawBitmap(logo,null,android.graphics.RectF(layout.padding.toFloat(),(layout.panelTop+layout.padding).toFloat(),(layout.padding+layout.logoSize).toFloat(),layout.panelTop+layout.padding+layout.logoSize*ratio),null)
-                logo.recycle()
+                val logo = getLogo(context)
+                val ratio = logo.height.toFloat() / logo.width
+                canvas.drawBitmap(logo, null, android.graphics.RectF(layout.padding.toFloat(), (layout.panelTop + layout.padding).toFloat(), (layout.padding + layout.logoSize).toFloat(), layout.panelTop + layout.padding + layout.logoSize * ratio), null)
 
                 val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                     color = Color.WHITE

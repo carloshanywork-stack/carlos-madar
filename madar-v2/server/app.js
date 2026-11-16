@@ -10,7 +10,7 @@ import { env } from './config/env.js';
 import { clientDistPath, repApkPath, repTransitionApkPath } from './config/paths.js';
 import { db } from './database/connection.js';
 import { errorHandler, notFoundHandler } from './middleware/error-handler.js';
-import { requireAuthentication } from './modules/auth/service.js';
+import { getSessionUserFromRequest, requireAuthentication } from './modules/auth/service.js';
 import authRouter from './modules/auth/routes.js';
 import usersRouter from './modules/auth/users.js';
 import systemRouter from './modules/system/backup.js';
@@ -300,10 +300,14 @@ function downloadApkArtifact(req, res, next, path, downloadName, { release = fal
   stream.pipe(res);
 }
 
-app.get('/download/apk', requireAuthentication, (req, res, next) => {
-  if (!['admin', 'rep'].includes(req.user?.role)) {
-    res.status(403).json({ error: 'Administrator or field representative access is required.' });
-    return;
+app.get('/download/apk', (req, res, next) => {
+  const user = getSessionUserFromRequest(req);
+  if (user) {
+    req.user = user;
+    if (!['admin', 'rep'].includes(user.role)) {
+      res.status(403).json({ error: 'Administrator or field representative access is required.' });
+      return;
+    }
   }
   downloadApkArtifact(req, res, next, repApkPath, 'madar-rep.apk', {
     release: basename(repApkPath) === 'madar-rep-release.apk',
@@ -318,10 +322,14 @@ app.get('/download/apk/debug-transition', requireAuthentication, (req, res, next
   downloadApkArtifact(req, res, next, repTransitionApkPath, 'madar-rep-debug-transition.apk');
 });
 
-app.get('/download/apk/status', requireAuthentication, (req, res) => {
-  if (!['admin', 'rep'].includes(req.user?.role)) {
-    res.status(403).json({ error: 'Administrator or field representative access is required.' });
-    return;
+app.get('/download/apk/status', (req, res) => {
+  const user = getSessionUserFromRequest(req);
+  if (user) {
+    req.user = user;
+    if (!['admin', 'rep'].includes(user.role)) {
+      res.status(403).json({ error: 'Administrator or field representative access is required.' });
+      return;
+    }
   }
 
   try {

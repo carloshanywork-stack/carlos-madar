@@ -71,14 +71,16 @@ class MadarApi(
         return parse(result.body, AppVersionResponse.serializer())
     }
 
-    /** Streams the authenticated APK response into a sibling temporary file and atomically renames it. */
-    fun downloadApk(token: String, destination: File): Long {
+    /** Streams the APK response into a sibling temporary file and atomically renames it. */
+    fun downloadApk(token: String?, destination: File, onProgress: ((bytesRead: Long, totalBytes: Long) -> Unit)? = null): Long {
         val temporary = File(destination.parentFile, destination.name + ".part")
-        val request = Request.Builder()
+        val requestBuilder = Request.Builder()
             .url("$baseUrl/download/apk")
-            .header("Authorization", "Bearer $token")
             .get()
-            .build()
+        if (!token.isNullOrBlank()) {
+            requestBuilder.header("Authorization", "Bearer $token")
+        }
+        val request = requestBuilder.build()
         try {
             destination.parentFile?.let { if (!it.exists() && !it.mkdirs()) throw IOException("Cannot create update directory") }
             temporary.delete()
@@ -87,8 +89,21 @@ class MadarApi(
                     throw mapReadError(HttpResult(response.code, response.body?.string().orEmpty()))
                 }
                 val body = response.body ?: throw MadarError.Protocol("Empty APK response")
+                val totalBytes = body.contentLength()
                 val output = FileOutputStream(temporary)
-                body.byteStream().use { input -> output.use { input.copyTo(it) } }
+                val buffer = ByteArray(8192)
+                var bytesReadTotal = 0L
+                body.byteStream().use { input ->
+                    output.use { out ->
+                        var read: Int
+                        while (input.read(buffer).also { read = it } != -1) {
+                            out.write(buffer, 0, read)
+                            bytesReadTotal += read
+                            onProgress?.invoke(bytesReadTotal, totalBytes)
+                        }
+                        out.flush()
+                    }
+                }
                 FileOutputStream(temporary, true).use { it.fd.sync() }
                 if (temporary.length() <= 0L) throw MadarError.Protocol("Empty APK response")
                 destination.delete()

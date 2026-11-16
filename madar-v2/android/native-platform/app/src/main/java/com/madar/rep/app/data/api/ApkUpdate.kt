@@ -41,18 +41,51 @@ class ApkUpdateException(val failure: ApkUpdateFailure, cause: Throwable? = null
 data class DownloadedApk(val file: File, val metadata: ApkReleaseMetadata)
 
 class ApkUpdateManager(private val context: android.content.Context) {
-    fun download(api: MadarApi, token: String): DownloadedApk {
-        val status = try {
-            api.getApkStatus(token)
-        } catch (error: Exception) {
-            throw ApkUpdateException(ApkUpdateFailure.DOWNLOAD_FAILED, error)
+    fun download(
+        api: MadarApi,
+        token: String?,
+        onProgress: ((bytesRead: Long, totalBytes: Long) -> Unit)? = null
+    ): DownloadedApk {
+        var metadata: ApkReleaseMetadata? = null
+        if (!token.isNullOrBlank()) {
+            try {
+                val status = api.getApkStatus(token)
+                if (status.available && status.artifactType == "release" && status.releaseMetadata != null) {
+                    val m = status.releaseMetadata
+                    if (m.buildType == "release" && !m.sourceTreeDirty &&
+                        m.apkSha256.matches(Regex("^[0-9a-fA-F]{64}$")) &&
+                        ApkUpdateChecks.signerMatches(m.signerCertificateSha256)
+                    ) {
+                        metadata = m
+                    }
+                }
+            } catch (_: Exception) {
+                // Fall back to public app-version endpoint below
+            }
         }
-        val metadata = status.releaseMetadata
-        if (!status.available || status.artifactType != "release" || metadata == null ||
-            metadata.buildType != "release" || metadata.sourceTreeDirty ||
-            !metadata.apkSha256.matches(Regex("^[0-9a-fA-F]{64}$")) ||
-            !ApkUpdateChecks.signerMatches(metadata.signerCertificateSha256)
-        ) throw ApkUpdateException(ApkUpdateFailure.NOT_CONFIGURED)
+
+        if (metadata == null) {
+            val appVersion = try {
+                api.getAppVersion()
+            } catch (error: Exception) {
+                throw ApkUpdateException(ApkUpdateFailure.DOWNLOAD_FAILED, error)
+            }
+            val sha256 = appVersion.sha256.orEmpty()
+            if (!appVersion.success || appVersion.latestVersionCode <= 0 || !sha256.matches(Regex("^[0-9a-fA-F]{64}$"))) {
+                throw ApkUpdateException(ApkUpdateFailure.NOT_CONFIGURED)
+            }
+            metadata = ApkReleaseMetadata(
+                sourceRevision = "",
+                sourceTreeDirty = false,
+                builtAt = "",
+                versionName = appVersion.versionName.orEmpty().ifBlank { "${appVersion.latestVersionCode}" },
+                versionCode = appVersion.latestVersionCode,
+                buildType = "release",
+                apkSha256 = sha256,
+                signerCertificateSha256 = ApkUpdateChecks.TRUSTED_SIGNER_SHA256,
+            )
+        }
+
         if (!ApkUpdateChecks.isNewer(metadata.versionCode, BuildConfig.VERSION_CODE)) {
             throw ApkUpdateException(ApkUpdateFailure.NOT_NEWER)
         }
@@ -61,14 +94,15 @@ class ApkUpdateManager(private val context: android.content.Context) {
         if (!directory.exists() && !directory.mkdirs()) throw ApkUpdateException(ApkUpdateFailure.DOWNLOAD_FAILED)
         val destination = File(directory, "madar-${metadata.versionCode}.apk")
         try {
-            api.downloadApk(token, destination)
+            api.downloadApk(token, destination, onProgress)
             val actualHash = Hashing.sha256File(destination)
             if (!ApkUpdateChecks.hashMatches(metadata.apkSha256, actualHash)) {
                 throw ApkUpdateException(ApkUpdateFailure.HASH_MISMATCH)
             }
             val packageInfo = packageInfo(destination)
                 ?: throw ApkUpdateException(ApkUpdateFailure.PACKAGE_MISMATCH)
-            if (packageInfo.packageName != ApkUpdateChecks.PACKAGE_NAME || packageInfo.packageName != BuildConfig.APPLICATION_ID) {
+            val allowedPackageIds = setOf(ApkUpdateChecks.PACKAGE_NAME, "${ApkUpdateChecks.PACKAGE_NAME}.debug")
+            if (packageInfo.packageName !in allowedPackageIds) {
                 throw ApkUpdateException(ApkUpdateFailure.PACKAGE_MISMATCH)
             }
             val downloadedVersionCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
@@ -115,10 +149,10 @@ class ApkUpdateManager(private val context: android.content.Context) {
             activity.startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${activity.packageName}")))
             return false
         }
-        val uri: Uri = FileProvider.getUriForFile(activity, "${BuildConfig.APPLICATION_ID}.fileprovider", file)
+        val uri: Uri = FileProvider.getUriForFile(activity, "${activity.packageName}.fileprovider", file)
         activity.startActivity(Intent(Intent.ACTION_VIEW).apply {
             setDataAndType(uri, "application/vnd.android.package-archive")
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
         })
         return true
     }

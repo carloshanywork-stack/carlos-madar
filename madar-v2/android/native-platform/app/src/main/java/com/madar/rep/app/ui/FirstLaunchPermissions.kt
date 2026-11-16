@@ -26,6 +26,16 @@ fun FirstLaunchPermissions() {
     var showRationale by remember {
         mutableStateOf(!preferences.getBoolean(KEY_PROMPTED, false))
     }
+    val manufacturer = remember { Build.MANUFACTURER.lowercase() }
+    val isAggressiveOem = remember(manufacturer) {
+        manufacturer.contains("xiaomi") || manufacturer.contains("redmi") || manufacturer.contains("poco") ||
+            manufacturer.contains("samsung") || manufacturer.contains("oppo") || manufacturer.contains("realme") ||
+            manufacturer.contains("oneplus") || manufacturer.contains("huawei") || manufacturer.contains("vivo")
+    }
+    var showBatteryGuide by remember {
+        mutableStateOf(!preferences.getBoolean(KEY_BATTERY_PROMPTED, false) && isAggressiveOem)
+    }
+
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) {
@@ -35,6 +45,7 @@ fun FirstLaunchPermissions() {
 
     LaunchedEffect(Unit) {
         if (preferences.getBoolean(KEY_PROMPTED, false)) showRationale = false
+        if (preferences.getBoolean(KEY_BATTERY_PROMPTED, false)) showBatteryGuide = false
     }
 
     if (showRationale) {
@@ -72,7 +83,50 @@ fun FirstLaunchPermissions() {
                 }) { Text("لاحقًا") }
             },
         )
+    } else if (showBatteryGuide) {
+        val oemText = when {
+            manufacturer.contains("xiaomi") || manufacturer.contains("redmi") || manufacturer.contains("poco") ->
+                "لضمان استمرار تسجيل الحضور وتتبع مسار العمل أثناء النهار على أجهزة شاومي/ريدمي: يرجى تفعيل 'التشغيل التلقائي' (Auto-start) وضبط موفر البطارية على 'بلا قيود' (No restrictions)."
+            manufacturer.contains("samsung") ->
+                "لضمان استمرار تسجيل الحضور وتتبع مسار العمل على أجهزة سامسونج: يرجى إزالة التطبيق من قائمة 'التطبيقات في وضع السكون' وضبط استخدام البطارية على 'غير مقيد' (Unrestricted)."
+            manufacturer.contains("oppo") || manufacturer.contains("realme") || manufacturer.contains("oneplus") ->
+                "لضمان عمل التطبيق في الخلفية على أجهزة أوبو/ريلمي: يرجى تفعيل 'السماح بالنشاط في الخلفية' وتفعيل 'التشغيل التلقائي'."
+            else ->
+                "لضمان عمل التطبيق وتسجيل الحضور دون توقف: يرجى استثناء تطبيق MADAR من قيود توفير البطارية في إعدادات النظام."
+        }
+        AlertDialog(
+            onDismissRequest = {
+                preferences.edit().putBoolean(KEY_BATTERY_PROMPTED, true).apply()
+                showBatteryGuide = false
+            },
+            title = { Text("تحسين عمل التطبيق في الخلفية") },
+            text = { Text(oemText) },
+            confirmButton = {
+                TextButton(onClick = {
+                    preferences.edit().putBoolean(KEY_BATTERY_PROMPTED, true).apply()
+                    showBatteryGuide = false
+                    try {
+                        val intent = android.content.Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                        context.startActivity(intent)
+                    } catch (_: Exception) {
+                        try {
+                            val intent = android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                data = android.net.Uri.parse("package:${context.packageName}")
+                            }
+                            context.startActivity(intent)
+                        } catch (_: Exception) {}
+                    }
+                }) { Text("فتح الإعدادات") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    preferences.edit().putBoolean(KEY_BATTERY_PROMPTED, true).apply()
+                    showBatteryGuide = false
+                }) { Text("تم لاحقًا") }
+            },
+        )
     }
 }
 
 private const val KEY_PROMPTED = "first_launch_permissions_prompted"
+private const val KEY_BATTERY_PROMPTED = "oem_battery_guide_prompted"

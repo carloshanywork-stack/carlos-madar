@@ -15,12 +15,14 @@ import android.hardware.camera2.CameraManager;
 import android.hardware.camera2.CaptureRequest;
 import android.hardware.camera2.params.StreamConfigurationMap;
 import android.location.Location;
+import android.location.LocationListener;
 import android.location.LocationManager;
 import android.media.Image;
 import android.media.ImageReader;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.HandlerThread;
+import android.os.Looper;
 import android.view.Surface;
 import android.view.TextureView;
 import android.view.View;
@@ -268,6 +270,39 @@ public final class RepCameraSequenceActivity extends Activity {
                 if (candidate != null && (best == null || candidate.getTime() > best.getTime())) best = candidate;
             }
             long now = System.currentTimeMillis();
+            if (best == null || (now - best.getTime()) > 30_000L) {
+                final java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
+                final Location[] fresh = new Location[1];
+                final LocationListener oneShotListener = new LocationListener() {
+                    @Override
+                    public void onLocationChanged(Location loc) {
+                        if (loc != null && !RepLocationPlugin.isMockLocation(loc)) {
+                            fresh[0] = loc;
+                        }
+                        latch.countDown();
+                    }
+                };
+                runOnUiThread(() -> {
+                    try {
+                        if (manager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
+                            manager.requestSingleUpdate(LocationManager.GPS_PROVIDER, oneShotListener, Looper.getMainLooper());
+                        } else if (manager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
+                            manager.requestSingleUpdate(LocationManager.NETWORK_PROVIDER, oneShotListener, Looper.getMainLooper());
+                        } else {
+                            latch.countDown();
+                        }
+                    } catch (Exception ex) {
+                        latch.countDown();
+                    }
+                });
+                try {
+                    latch.await(2, java.util.concurrent.TimeUnit.SECONDS);
+                } catch (InterruptedException ignored) {}
+                runOnUiThread(() -> {
+                    try { manager.removeUpdates(oneShotListener); } catch (Exception ignored) {}
+                });
+                if (fresh[0] != null) best = fresh[0];
+            }
             if (best != null) {
                 if (RepLocationPlugin.isMockLocation(best)) return null;
                 long age = now - best.getTime();

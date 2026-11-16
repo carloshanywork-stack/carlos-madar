@@ -127,7 +127,14 @@ class CameraActivity : ComponentActivity() {
         val state = CaptureUiState.busy
         assignCaptureState(state)
         val capturedAt = System.currentTimeMillis()
-        val frozenLocation = livePoint?.takeIf { it.isFresh(capturedAt) && !it.isMock }
+        var frozenLocation = livePoint?.takeIf { it.isFresh(capturedAt) && !it.isMock }
+        if (frozenLocation == null) {
+            val freshFix = kotlinx.coroutines.runBlocking { container.locationProvider.currentFix(2000L) }
+            val point = (freshFix as? com.madar.rep.app.location.LocationResult.Success)?.point
+            if (point != null && point.isFresh(capturedAt) && !point.isMock) {
+                frozenLocation = point
+            }
+        }
         val captureFile = container.photoStore.newCaptureFile(visitUuid, phase)
         capture.takePicture(
             ImageCapture.OutputFileOptions.Builder(captureFile).build(),
