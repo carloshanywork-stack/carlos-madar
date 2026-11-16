@@ -25,7 +25,6 @@ android {
     namespace = "com.madar.rep.app"
     compileSdk = rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "com.madar.rep.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode repVersionCode
@@ -38,6 +37,17 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    flavorDimensions = ["mode"]
+    productFlavors {
+        rep {
+            dimension "mode"
+            applicationId "com.madar.rep.app"
+        }
+        manager {
+            dimension "mode"
+            applicationId "com.madar.system.app"
+        }
+    }
     buildFeatures {
         buildConfig true
     }
@@ -48,16 +58,61 @@ android {
                 storePassword releaseSigningProperties.getProperty('storePassword')
                 keyAlias releaseSigningProperties.getProperty('keyAlias')
                 keyPassword releaseSigningProperties.getProperty('keyPassword')
+                v1SigningEnabled true
+                v2SigningEnabled true
             }
         }
     }
     buildTypes {
         release {
-            minifyEnabled false
+            minifyEnabled true
+            shrinkResources false
             if (releaseSigningConfigured) signingConfig signingConfigs.release
-            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }
+}
+
+tasks.register('publishDualReleaseApks') {
+    doLast {
+        def repApk = file("${buildDir}/outputs/apk/rep/release/app-rep-release.apk")
+        def managerApk = file("${buildDir}/outputs/apk/manager/release/app-manager-release.apk")
+        def defaultReleaseDir = file("${buildDir}/outputs/apk/release")
+        defaultReleaseDir.mkdirs()
+        if (repApk.exists()) {
+            copy {
+                from repApk
+                into defaultReleaseDir
+                rename { 'app-release.apk' }
+            }
+            copy {
+                from repApk
+                into rootProject.file("..")
+                rename { 'madar-rep-release.apk' }
+            }
+            copy {
+                from repApk
+                into rootProject.file("../..")
+                rename { 'madar-rep-release.apk' }
+            }
+        }
+        if (managerApk.exists()) {
+            copy {
+                from managerApk
+                into rootProject.file("..")
+                rename { 'madar-manager-release.apk' }
+            }
+            copy {
+                from managerApk
+                into rootProject.file("../..")
+                rename { 'madar-manager-release.apk' }
+            }
+        }
+    }
+}
+
+tasks.matching { it.name in ['assembleRelease', 'assembleRepRelease', 'assembleManagerRelease'] }.configureEach {
+    finalizedBy 'publishDualReleaseApks'
 }
 
 gradle.taskGraph.whenReady { taskGraph ->
@@ -75,13 +130,11 @@ repositories {
     }
 }
 
-
 dependencies {
     implementation fileTree(include: ['*.jar'], dir: 'libs')
     implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
     implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
-    implementation 'androidx.work:work-runtime:2.10.1'
     implementation 'androidx.work:work-runtime:2.9.1'
     implementation 'androidx.security:security-crypto:1.1.0-alpha06'
     implementation 'androidx.biometric:biometric:1.1.0'
