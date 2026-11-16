@@ -1,12 +1,12 @@
 {
-  "sourceRevision": "a1d6b1b34e73686c1b18429ebcbf33ddcfda26d5",
+  "sourceRevision": "afa3fa07fe07d8bd6247a0be3bf5661069a67ec2",
   "sourceTreeDirty": false,
-  "builtAt": "2026-11-16T21:34:22.968Z",
-  "versionCode": 19,
-  "versionName": "2.3.3",
+  "builtAt": "2026-11-16T21:46:19.622Z",
+  "versionCode": 20,
+  "versionName": "2.4.0",
   "buildType": "release",
   "serverUrl": "https://carlos-pc.tail852ef0.ts.net",
   "artifactOnly": false,
-  "apkSha256": "bf1a7f1e651bcfebf37605a499e443f111c1900b3d266734f279d64edb356b1e",
+  "apkSha256": "688fe08e486aef5cc4d8d5634dba814dca43fc1c76a736ba4f3bf4bead41690f",
   "signerCertificateSha256": "f4c8bffc9f852ea6056e350b65156eb880d05629991682492159b9e3937c02a1"
 }
