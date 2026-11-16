@@ -173,6 +173,7 @@ class LegacyMigrationActivity : FragmentActivity() {
     private suspend fun exportIndexedDb(): String = withContext(Dispatchers.Main) {
         val deferred = CompletableDeferred<String>()
         val loader = WebViewAssetLoader.Builder()
+            .setDomain("localhost")
             .addPathHandler("/", WebViewAssetLoader.AssetsPathHandler(this@LegacyMigrationActivity))
             .build()
         val webView = WebView(this@LegacyMigrationActivity)
