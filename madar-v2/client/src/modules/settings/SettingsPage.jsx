@@ -67,7 +67,8 @@ export default function SettingsPage() {
   const { data: authStatus } = useApi('/api/auth/status');
   const isAdmin = authStatus?.user?.role === 'admin';
   const { data: systemHealth, loading: systemHealthLoading, error: systemHealthError, reload: reloadSystemHealth } = useApi('/api/system/health', { enabled: isAdmin });
-  const { data: apkStatus, loading: apkStatusLoading, error: apkStatusError, reload: reloadApkStatus } = useApi('/download/apk/status', { enabled: isAdmin });
+  const { data: apkStatus, loading: apkStatusLoading, error: apkStatusError, reload: reloadApkStatus } = useApi('/download/apk/status?target=rep', { enabled: isAdmin });
+  const { data: managerApkStatus, loading: managerApkLoading, error: managerApkError, reload: reloadManagerApkStatus } = useApi('/download/apk/status?target=system', { enabled: isAdmin });
   const { data: users, loading: usersLoading, error: usersError, reload: reloadUsers } = useApi('/api/users', { enabled: isAdmin });
   const { data: backups, loading: backupsLoading, error: backupsError, reload: reloadBackups } = useApi('/api/system/backups', { enabled: isAdmin });
   const [userModal, setUserModal] = useState(false);
@@ -171,17 +172,10 @@ export default function SettingsPage() {
         kicker="النظام · الإصدار والتشغيل"
         title="إعدادات النظام"
         description="إدارة حسابات الدخول والنسخ الاحتياطي المحلي واستعادة النظام."
-        actions={isAdmin && apkStatus?.available ? (
-          <a
-            className="madar-button madar-button-primary"
-            href="/download/apk"
-            download="madar-rep.apk"
-            title="تنزيل حزمة تطبيق المندوب الميداني لهواتف أندرويد"
-          >
-            <Icon name="download" size={15} />
-            <span>تنزيل تطبيق المندوب (APK)</span>
-          </a>
-        ) : null}
+        actions={isAdmin ? <div className="madar-inline-wrap">
+          {apkStatus?.available && <a className="madar-button madar-button-primary" href="/download/apk?target=rep" download="madar-rep.apk" title="تنزيل حزمة تطبيق المندوب الميداني"><Icon name="download" size={15} /><span>تطبيق المندوب APK</span></a>}
+          {managerApkStatus?.available && <a className="madar-button madar-button-primary" href="/download/apk?target=system" download="madar-manager.apk" title="تنزيل تطبيق الإدارة والسيستم الكامل"><Icon name="download" size={15} /><span>تطبيق الإدارة APK</span></a>}
+        </div> : null}
       />
       {isAdmin && <div className="madar-section"><Tabs
         items={[{ value: 'system', label: 'إعدادات النظام' }, { value: 'audit', label: 'سجل العمليات والرقابة' }]}
@@ -209,21 +203,19 @@ export default function SettingsPage() {
         </section>
 
         <section className="madar-panel madar-section">
-          <div className="madar-panel-header"><div><h2>تطبيق المندوب (APK)</h2><p>نزّل النسخة المتاحة حالياً. يُفضّل استخدام إصدار موقّع للتوزيع والتحديث.</p></div><Button variant="secondary" size="small" icon="refresh" disabled={apkStatusLoading} onClick={reloadApkStatus}>تحديث الحالة</Button></div>
+          <div className="madar-panel-header"><div><h2>تنزيل تطبيقات MADAR</h2><p>اختر تطبيق المندوب الميداني أو الإدارة والسيستم الكامل.</p></div><Button variant="secondary" size="small" icon="refresh" disabled={apkStatusLoading || managerApkLoading} onClick={() => { void reloadApkStatus(); void reloadManagerApkStatus(); }}>تحديث الحالة</Button></div>
           <div className="madar-panel-body madar-stack">
-            {apkStatusError && <Alert tone="error">{apkStatusError}</Alert>}
-            {apkStatusLoading && !apkStatus ? <LoadingState label="جارٍ فحص ملف APK" /> : apkStatus && <>
-              {!apkStatus.available ? <Alert tone="warning">{apkUnavailableMessage(apkStatus)}</Alert> : <div className="madar-health-row">
-                <span className="madar-health-pulse" />
-                <div><strong>{apkStatus.artifactType === 'release' ? 'إصدار موقّع جاهز' : 'نسخة تجريبية / بانتظار بناء الإصدار الجديد'}</strong><small>{apkStatus.releaseMetadata ? `الإصدار ${apkStatus.releaseMetadata.versionName} (${apkStatus.releaseMetadata.versionCode}) · SHA-256 ${apkStatus.releaseMetadata.apkSha256.slice(0, 16)}… · ` : ''}{fileSize(apkStatus.sizeBytes)} · آخر تحديث {String(apkStatus.modifiedAt).replace('T', ' ').slice(0, 19)}</small></div>
-                <Badge tone={apkStatus.artifactType === 'release' ? 'success' : 'warning'}>{apkStatus.artifactType === 'release' ? 'إصدار' : 'تجريبية'}</Badge>
+            {[
+              { label: 'تطبيق المندوب الميداني (MADAR Rep APK)', target: 'rep', status: apkStatus, loading: apkStatusLoading, error: apkStatusError },
+              { label: 'تطبيق الإدارة والسيستم الكامل (MADAR Manager APK)', target: 'system', status: managerApkStatus, loading: managerApkLoading, error: managerApkError },
+            ].map((item) => <article key={item.target} className="madar-panel madar-panel-pad">
+              <div className="madar-panel-header"><div><h3>{item.label}</h3><p>حالة الإصدار والحجم ورقم البناء</p></div>{item.status?.available && <a className="madar-button madar-button-primary" href={`/download/apk?target=${item.target}`} download={item.target === 'rep' ? 'madar-rep.apk' : 'madar-manager.apk'}><Icon name="download" size={15} /> تنزيل</a>}</div>
+              {item.error ? <Alert tone="error">{item.error}</Alert> : item.loading && !item.status ? <LoadingState label="جارٍ فحص ملف APK" /> : item.status && <div className="madar-stack">
+                {!item.status.available && <Alert tone="warning">{item.target === 'rep' ? apkUnavailableMessage(item.status) : item.status.reason === 'artifact_missing' ? 'لا يوجد APK للإدارة على الخادم حالياً.' : 'نسخة الإدارة غير موقعة أو غير جاهزة للتوزيع.'}</Alert>}
+                <div className="madar-health-row"><span className="madar-health-pulse" /><div><strong>{item.status.available ? item.status.artifactType === 'release' ? 'إصدار جاهز للتوزيع' : 'نسخة تجريبية' : 'غير متاح للتوزيع'}</strong><small>{item.status.releaseMetadata ? `الإصدار ${item.status.releaseMetadata.versionName} (${item.status.releaseMetadata.versionCode}) · ` : 'رقم الإصدار غير متاح · '}{fileSize(item.status.sizeBytes)}{item.status.modifiedAt ? ` · آخر تحديث ${String(item.status.modifiedAt).replace('T', ' ').slice(0, 19)}` : ''}</small></div><Badge tone={item.status.available ? 'success' : 'warning'}>{item.status.available ? 'متاح' : 'غير متاح'}</Badge></div>
               </div>}
-              {apkStatus.available && <a className="madar-button madar-button-primary" href="/download/apk" aria-label="تنزيل تطبيق المندوب APK"><Icon name="download" size={15} /><span>تنزيل APK المندوب</span></a>}
-              {apkStatus.transitionAvailable && <>
-                <Alert tone="warning">للهواتف التي تستخدم إصدار Debug القديم أو تحديثاته: نزّل أحدث حزمة انتقال وثبّتها فوق التطبيق الحالي بعد حفظ العمل المعلّق. هذه حزمة Debug؛ لا تحذف التطبيق القديم قبل التأكد من حفظ بياناته.</Alert>
-                <a className="madar-button madar-button-secondary" href="/download/apk/debug-transition" aria-label="تنزيل حزمة انتقال Debug للهواتف القديمة"><Icon name="download" size={15} /><span>تنزيل حزمة الانتقال للهواتف القديمة</span></a>
-              </>}
-            </>}
+              {item.target === 'rep' && item.status?.transitionAvailable && <div className="madar-stack"><Alert tone="warning">للهواتف التي تستخدم إصدار Debug القديم أو تحديثاته: نزّل أحدث حزمة انتقال وثبّتها فوق التطبيق الحالي بعد حفظ العمل المعلّق. هذه حزمة Debug؛ لا تحذف التطبيق القديم قبل التأكد من حفظ بياناته.</Alert><a className="madar-button madar-button-secondary" href="/download/apk/debug-transition"><Icon name="download" size={15} /> تنزيل حزمة الانتقال</a></div>}
+            </article>)}
           </div>
         </section>
 

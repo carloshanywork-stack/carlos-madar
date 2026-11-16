@@ -16,6 +16,7 @@ process.env.MADAR_V2_OFFLINE_MAP_PATH = join(temporaryDirectory, 'local-map.mbti
 process.env.MADAR_V2_OFFLINE_MAPS_DIR = '';
 process.env.MADAR_REP_APK_PATH = join(temporaryDirectory, 'madar-rep.apk');
 process.env.MADAR_REP_TRANSITION_APK_PATH = join(temporaryDirectory, 'madar-rep-transition.apk');
+process.env.MADAR_MANAGER_APK_PATH = join(temporaryDirectory, 'madar-manager-release.apk');
 process.env.REP_ATTENDANCE_MAX_OFFLINE_AGE_HOURS = '24';
 process.env.MADAR_REP_SELF_APPROVAL_DAILY_LIMIT = '1';
 process.env.STORAGE_MOUNT_PATH = '';
@@ -264,6 +265,17 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
     transitionAvailable: true,
   });
   assert.ok(Number.isFinite(Date.parse(adminApkStatus.body.modifiedAt)));
+  const managerApkStatus = await request('/download/apk/status?target=system', {}, adminCookie);
+  assert.equal(managerApkStatus.response.status, 200);
+  assert.deepEqual(managerApkStatus.body, {
+    available: false,
+    target: 'system',
+    artifactType: 'missing',
+    sizeBytes: null,
+    modifiedAt: null,
+    reason: 'artifact_missing',
+  });
+  assert.equal((await request('/download/apk/status?target=unknown', {}, adminCookie)).response.status, 400);
   const mapStatus = await request('/api/supervisor/map/status', {}, adminCookie);
   assert.deepEqual(mapStatus.body, {
     available: true,
@@ -448,6 +460,7 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
     updatedAt: '2026-11-02T08:30:00.000Z',
   });
   assert.ok(login.cookie.startsWith('madar_token='));
+  assert.equal((await request('/download/apk/status?target=system', {}, login.cookie)).response.status, 403);
 
   const bugReportUuid = randomUUID();
   const supportForm = new FormData();

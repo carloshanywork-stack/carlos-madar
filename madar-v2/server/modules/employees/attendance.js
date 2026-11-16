@@ -198,6 +198,40 @@ export function cancelDailyAttendance(employeeIdValue, workDateValue, actorId = 
   }).immediate();
 }
 
+export function revokeDailyAttendance(employeeIdValue, actorId = null, database = db, now = new Date()) {
+  const employeeId = positiveId(employeeIdValue, 'employeeId');
+  const workDate = getAttendanceBusinessDate(database, now);
+  return database.transaction(() => {
+    const current = database.prepare(`SELECT * FROM employee_daily_attendance
+      WHERE employee_id = ? AND work_date = ?`).get(employeeId, workDate);
+    if (!current) throw new HttpError(404, 'لا يوجد سجل حضور لهذا الموظف اليوم.');
+    if (current.status === 'revoked') return current;
+    const overtimeRequest = latestOvertimeRequest(employeeId, workDate, database);
+    if (overtimeRequest && ['pending', 'approved', 'used'].includes(overtimeRequest.status)) {
+      database.prepare(`UPDATE attendance_overtime_requests
+        SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(overtimeRequest.id);
+    }
+    const overtimeSession = overtimeSessionForDate(employeeId, workDate, database);
+    if (overtimeSession) {
+      database.prepare(`UPDATE attendance_overtime_sessions
+        SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(overtimeSession.id);
+    }
+    database.prepare(`UPDATE employee_daily_attendance SET status = 'revoked',
+      clock_in_time = NULL, clock_out_time = NULL, total_hours = 0, regular_hours = 0,
+      overtime_hours = 0, normal_overtime_hours = 0, holiday_overtime_hours = 0,
+      overtime_status = 'none', overtime_approved_by = NULL,
+      notes = CASE WHEN COALESCE(notes, '') = ''
+        THEN 'تم إلغاء الحضور بواسطة الإدارة'
+        ELSE notes || ' | تم إلغاء الحضور بواسطة الإدارة' END
+      WHERE employee_id = ? AND work_date = ?`).run(employeeId, workDate);
+    const updated = database.prepare(`SELECT * FROM employee_daily_attendance
+      WHERE employee_id = ? AND work_date = ?`).get(employeeId, workDate);
+    recordAudit({ database, actorId, action: 'revoke_attendance', entityType: 'employee_daily_attendance',
+      entityId: updated.id, oldValues: current, newValues: updated });
+    return updated;
+  }).immediate();
+}
+
 export function getOverdueAttendance(database = db, now = new Date()) {
   const timeZone = getAttendanceBusinessTimeZone(database);
   const records = database.prepare(`SELECT attendance.id, attendance.employee_id, attendance.work_date,

@@ -402,7 +402,7 @@ router.post('/orders', (req, res, next) => {
   }
 });
 
-router.post('/orders/test-mock', requireAdminOrOperations, (req, res, next) => {
+router.post('/orders/test-mock', requireRole('admin'), (req, res, next) => {
   try {
     const order = createTestMockMaintenanceOrder(req.body, requestActorId(req));
     publishOperationsEvent('maintenance.order.assigned', {

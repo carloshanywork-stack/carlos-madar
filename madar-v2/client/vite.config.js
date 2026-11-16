@@ -7,13 +7,14 @@ import { loadEnv } from 'vite';
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 export default defineConfig(({ mode }) => {
-  const capacitorBuild = mode === 'capacitor';
+  const capacitorBuild = mode === 'capacitor' || mode === 'capacitor-rep' || mode === 'capacitor-manager';
+  const capacitorTarget = mode === 'capacitor-manager' ? 'manager' : capacitorBuild ? 'rep' : 'web';
   const projectEnv = loadEnv(mode, projectRoot, ['VITE_', 'MADAR_REP_']);
   // `loadEnv` surfaces a server-only NODE_ENV as VITE_USER_NODE_ENV even when
   // it is excluded by the prefix allowlist; do not let that trigger Vite's warning.
   delete process.env.VITE_USER_NODE_ENV;
   const releaseBuild = process.env.MADAR_ANDROID_BUILD_TYPE === 'release';
-  const liveReloadBuild = capacitorBuild && !releaseBuild && process.env.MADAR_REP_LIVE_RELOAD === 'true';
+  const liveReloadBuild = capacitorTarget === 'rep' && !releaseBuild && process.env.MADAR_REP_LIVE_RELOAD === 'true';
   const standaloneBuild = capacitorBuild && !liveReloadBuild;
   const apiServerUrl = projectEnv.VITE_MADAR_API_BASE_URL
     || projectEnv.MADAR_REP_SERVER_URL
@@ -30,7 +31,15 @@ export default defineConfig(({ mode }) => {
     }
   }
   return {
-    plugins: [react()],
+    plugins: [react(), {
+      name: 'madar-capacitor-entry',
+      transformIndexHtml: {
+        order: 'pre',
+        handler(html) {
+          return capacitorTarget === 'rep' ? html.replace('/src/main.jsx', '/src/rep-main.jsx') : html;
+        },
+      },
+    }],
     // The project root .env is loaded explicitly above with an allowlist.
     // Avoid Vite also reading server-only NODE_ENV from that file.
     envFile: false,
@@ -38,10 +47,12 @@ export default defineConfig(({ mode }) => {
     define: {
       __MADAR_BUILD_VERSION__: JSON.stringify(process.env.MADAR_BUILD_VERSION || new Date().toISOString()),
       __MADAR_API_BASE_URL__: JSON.stringify(apiBaseUrl),
+      __MADAR_BUILD_TARGET__: JSON.stringify(capacitorTarget),
     },
     build: {
       chunkSizeWarningLimit: 200,
-      outDir: capacitorBuild ? '../public/rep' : 'dist',
+      target: capacitorTarget === 'rep' ? ['chrome74', 'es2018'] : 'modules',
+      outDir: capacitorTarget === 'manager' ? '../public/manager' : capacitorBuild ? '../public/rep' : 'dist',
       emptyOutDir: true,
       manifest: 'asset-manifest.json',
       rollupOptions: {

@@ -91,6 +91,7 @@ export const env = Object.freeze({
   offlineMapDirectory: process.env.MADAR_V2_OFFLINE_MAPS_DIR?.trim() || undefined,
   repApkPath: process.env.MADAR_REP_APK_PATH?.trim() || undefined,
   repTransitionApkPath: process.env.MADAR_REP_TRANSITION_APK_PATH?.trim() || undefined,
+  managerApkPath: process.env.MADAR_MANAGER_APK_PATH?.trim() || undefined,
   githubToken: process.env.MADAR_GITHUB_ISSUES_TOKEN?.trim() || undefined,
   githubRepository: process.env.MADAR_GITHUB_ISSUES_REPOSITORY?.trim() || undefined,
   repSignerCertificateSha256: process.env.MADAR_REP_SIGNER_CERT_SHA256?.trim().toLowerCase() || undefined,
