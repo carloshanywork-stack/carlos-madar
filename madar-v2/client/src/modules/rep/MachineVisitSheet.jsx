@@ -730,8 +730,30 @@ export default function MachineVisitSheet({ machine, repId, repName = '', reason
 
           <section className="rep-form-section">
             <div className="rep-section-title">
-              <div><span className="rep-eyebrow">PHOTO PROOF</span><h3>توثيق الزيارة</h3></div>
-              <small>{activePhase === 'before' ? 'الخطوة 1 من 2 · صور قبل الصيانة' : 'الخطوة 2 من 2 · صور بعد الصيانة اختيارية'}</small>
+              <div><span className="rep-eyebrow">PHOTO PROOF</span><h3>توثيق وصور الزيارة</h3></div>
+              <small>{activePhase === 'before' ? 'المرحلة 1 من 2 · صور قبل الصيانة' : 'المرحلة 2 من 2 · صور بعد الصيانة'}</small>
+            </div>
+            <div className="rep-phase-selector-tabs" role="tablist" aria-label="اختيار مرحلة التصوير">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activePhase === 'before'}
+                className={`rep-phase-tab ${activePhase === 'before' ? 'active' : ''}`}
+                onClick={() => setActivePhase('before')}
+              >
+                <span>📸 01 · قبل الصيانة</span>
+                <b>{photos.before.length > 0 ? `✓ ${photos.before.length}` : 'مطلوب'}</b>
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activePhase === 'after'}
+                className={`rep-phase-tab ${activePhase === 'after' ? 'active' : ''}`}
+                onClick={() => setActivePhase('after')}
+              >
+                <span>✨ 02 · بعد الصيانة</span>
+                <b>{photos.after.length > 0 ? `✓ ${photos.after.length}` : 'مطلوب'}</b>
+              </button>
             </div>
             <div className="rep-photo-grid">
               {activePhase === 'before'
@@ -741,17 +763,17 @@ export default function MachineVisitSheet({ machine, repId, repName = '', reason
             {activePhase === 'before' ? (
               <button type="button" className="rep-button rep-button-primary"
                 onClick={() => setActivePhase('after')} disabled={photos.before.length < 1 || saving || Boolean(processingPhase)}>
-                {photos.before.length >= 1 ? 'اعتماد صور قبل الصيانة · الانتقال إلى بعد الصيانة' : 'التقط صورة قبل الصيانة على الأقل للمتابعة'}
+                {photos.before.length >= 1 ? 'الانتقال إلى صور بعد الصيانة ←' : 'التقط صورة قبل الصيانة على الأقل للمتابعة'}
               </button>
             ) : (
               <div className="rep-photo-capture-actions">
                 <button type="button" className="rep-button rep-button-light" onClick={() => setActivePhase('before')} disabled={saving || Boolean(processingPhase)}>
                   العودة إلى صور قبل الصيانة
                 </button>
-                {!photos.after.length && <small>يمكنك إنهاء الزيارة الآن دون صور بعد الصيانة.</small>}
+                {photos.after.length >= 1 && <small>✓ اكتملت صور قبل وبعد؛ يمكنك الآن حفظ الزيارة.</small>}
               </div>
             )}
-            <p className="rep-watermark-note">يُدمج ختم واضح ببكسلات كل صورة قبل حفظها: التاريخ واليوم، الوقت بالثواني، إحداثيات GPS والمنطقة المسجلة، وكود الماكينة واسمها.</p>
+            <p className="rep-watermark-note">يُدمج ووترمارك رسمي ببكسلات كل صورة: شعار مدار، اليوم والتاريخ بتوقيت القاهرة الرسمي، إحداثيات GPS، والماكينة.</p>
           </section>
 
           <label className="rep-notes-field">

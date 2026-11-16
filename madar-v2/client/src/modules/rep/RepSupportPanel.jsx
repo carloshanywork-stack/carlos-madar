@@ -17,7 +17,7 @@ function createReportUuid() {
   });
 }
 
-export default function RepSupportPanel({ onClose }) {
+export default function RepSupportPanel({ onClose, inline = false }) {
   const [reports, setReports] = useState([]);
   const [category, setCategory] = useState('bug');
   const [severity, setSeverity] = useState('normal');
@@ -58,19 +58,50 @@ export default function RepSupportPanel({ onClose }) {
     finally { setBusy(false); }
   }
 
-  return <div className="rep-support-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-    <section className="rep-support-dialog" role="dialog" aria-modal="true" aria-labelledby="rep-support-title" dir="rtl">
-      <header><div><span className="rep-eyebrow">مساعدة ودعم</span><h2 id="rep-support-title">إرسال بلاغ</h2></div><button type="button" onClick={onClose} aria-label="إغلاق">×</button></header>
-      <p>سيُحفظ البلاغ على خادم MADAR المحلي. لن يُنشأ issue خارجي إلا بطلب صريح من المدير.</p>
+  const dialogContent = (
+    <section className={`rep-support-dialog ${inline ? 'is-inline-view' : ''}`} role={inline ? 'region' : 'dialog'} aria-modal={inline ? undefined : 'true'} aria-labelledby="rep-support-title" dir="rtl">
+      <header>
+        <div>
+          <span className="rep-eyebrow">مساعدة ودعم ميداني</span>
+          <h2 id="rep-support-title">إرسال بلاغ فوري</h2>
+        </div>
+        {onClose && !inline && <button type="button" onClick={onClose} aria-label="إغلاق">×</button>}
+      </header>
+      <p>سيُحفظ البلاغ على خادم MADAR المحلي لإخطار المشرف والإدارة فوراً.</p>
       <form ref={formRef} onSubmit={submit}>
-        <label>نوع البلاغ<select value={category} onChange={(event) => setCategory(event.target.value)}><option value="bug">مشكلة بالتطبيق</option><option value="sync">مزامنة</option><option value="location">الموقع</option><option value="camera">الكاميرا والصور</option><option value="account">الحساب</option><option value="other">أخرى</option></select></label>
-        <label>الأهمية<select value={severity} onChange={(event) => setSeverity(event.target.value)}><option value="low">منخفضة</option><option value="normal">عادية</option><option value="high">مرتفعة</option><option value="critical">حرجة</option></select></label>
-        <label>وصف المشكلة<textarea value={description} onChange={(event) => setDescription(event.target.value)} required minLength={5} maxLength={8000} rows={5} placeholder="اذكر ما حدث والخطوات التي سبقت المشكلة" /></label>
+        <label>نوع البلاغ<select value={category} onChange={(event) => setCategory(event.target.value)}><option value="bug">مشكلة بالتطبيق أو الـ GPS</option><option value="sync">مزامنة أو اتصال</option><option value="location">الموقع وعنوان العميل</option><option value="camera">الكاميرا والصور</option><option value="account">الحساب والوردية</option><option value="other">أخرى</option></select></label>
+        <label>الأهمية<select value={severity} onChange={(event) => setSeverity(event.target.value)}><option value="low">منخفضة</option><option value="normal">عادية</option><option value="high">مرتفعة (مستعجل)</option><option value="critical">حرجة (توقف العمل)</option></select></label>
+        <label>وصف المشكلة<textarea value={description} onChange={(event) => setDescription(event.target.value)} required minLength={5} maxLength={8000} rows={5} placeholder="اذكر ما حدث والخطوات التي سبقت المشكلة بالتفصيل" /></label>
         <label>صورة توضيحية (اختياري)<input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setAttachment(event.target.files?.[0] ?? null)} /></label>
         {error && <p role="alert" className="rep-support-error">{error}</p>}{message && <p role="status" className="rep-support-success">{message}</p>}
-        <div className="rep-support-actions"><button type="button" onClick={onClose}>إغلاق</button><button type="submit" disabled={busy}>{busy ? 'جارٍ الحفظ…' : 'حفظ وإرسال البلاغ'}</button></div>
+        <div className="rep-support-actions">
+          {onClose && <button type="button" onClick={onClose}>رجوع لخط السير</button>}
+          <button type="submit" disabled={busy}>{busy ? 'جارٍ الحفظ…' : 'حفظ وإرسال البلاغ 🚀'}</button>
+        </div>
       </form>
-      {!!reports.length && <div className="rep-support-history"><h3>بلاغاتك السابقة</h3><ul>{reports.slice(0, 5).map((report) => <li key={report.id}><span>{report.description}</span><b>{({ new: 'جديد', in_progress: 'قيد المعالجة', resolved: 'تم الحل', closed: 'مغلق' })[report.status] || report.status}</b></li>)}</ul></div>}
+      {!!reports.length && (
+        <div className="rep-support-history">
+          <h3>بلاغاتك السابقة</h3>
+          <ul>
+            {reports.slice(0, 5).map((report) => (
+              <li key={report.id}>
+                <span>{report.description}</span>
+                <b>{({ new: 'جديد', in_progress: 'قيد المعالجة', resolved: 'تم الحل', closed: 'مغلق' })[report.status] || report.status}</b>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </section>
-  </div>;
+  );
+
+  if (inline) {
+    return <div className="rep-support-tab-container">{dialogContent}</div>;
+  }
+
+  return (
+    <div className="rep-support-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose?.(); }}>
+      {dialogContent}
+    </div>
+  );
 }

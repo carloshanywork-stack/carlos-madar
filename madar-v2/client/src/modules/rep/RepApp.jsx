@@ -324,6 +324,7 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
   const [nativeGpsEnabled, setNativeGpsEnabled] = useState(null);
   const [gpsError, setGpsError] = useState('');
   const [onDuty, setOnDuty] = useState(false);
+  const [activeTab, setActiveTab] = useState('route');
   const [showQueue, setShowQueue] = useState(false);
   const [supportPanelOpen, setSupportPanelOpen] = useState(false);
   const [showOfflineMap, setShowOfflineMap] = useState(false);
@@ -1123,8 +1124,8 @@ const loadLocalSnapshots = useCallback(async () => {
     attendanceLoaded, nativeApp, syncTracking]);
 
   useEffect(() => {
-    nativeBackStateRef.current = { selectedMachine, showQueue, tutorialOpen };
-  }, [selectedMachine, showQueue, tutorialOpen]);
+    nativeBackStateRef.current = { selectedMachine, showQueue, tutorialOpen, activeTab };
+  }, [selectedMachine, showQueue, tutorialOpen, activeTab]);
 
   useEffect(() => {
     if (!nativeApp) return undefined;
@@ -1137,6 +1138,8 @@ const loadLocalSnapshots = useCallback(async () => {
         setTutorialOpen(false);
       } else if (current.selectedMachine) {
         setSelectedMachine(null);
+      } else if (current.activeTab && current.activeTab !== 'route') {
+        setActiveTab('route');
       } else if (current.showQueue) {
         setShowQueue(false);
       } else {
@@ -1986,11 +1989,11 @@ try {
           <span className={`rep-connect-status ${serverState === 'online' && networkOnline ? 'connected' : ''} ${serverState === 'checking' ? 'checking' : ''}`}>
             <i aria-hidden="true" />{serverLabel}
           </span>
-          <button className="rep-queue-count" type="button" onClick={() => setShowQueue((value) => !value)} aria-expanded={showQueue}>
+          <button className={`rep-queue-count ${activeTab === 'sync' ? 'active' : ''}`} type="button" onClick={() => setActiveTab((value) => value === 'sync' ? 'route' : 'sync')} aria-expanded={activeTab === 'sync'}>
             <span>⏳</span><b>{pendingQueueCount}</b><small>معلق</small>
           </button>
           <NotificationBell user={user} online={serverState === 'online' && networkOnline && !offlineOnly} variant="rep" />
-          <button className="rep-icon-button" type="button" onClick={() => setSupportPanelOpen(true)} aria-label="إرسال بلاغ للدعم" title="إرسال بلاغ">؟</button>
+          <button className={`rep-icon-button ${activeTab === 'tickets' ? 'active' : ''}`} type="button" onClick={() => setActiveTab((value) => value === 'tickets' ? 'route' : 'tickets')} aria-label="إرسال بلاغ للدعم" title="إرسال بلاغ">؟</button>
           <button className="rep-icon-button rep-refresh-button" type="button" onClick={() => { void checkServer(); void refreshData(); void refreshAttendance(); }} disabled={routeLoading} aria-label="تحديث مسار اليوم" title="تحديث المسار">
             <span className={routeLoading ? 'rep-spinning' : ''}>↻</span>
           </button>
@@ -2008,221 +2011,386 @@ try {
       {offlineOnly && <div className="rep-offline-banner" role="status">أنت في وضع العمل المحلي. لا تُرسل أي بيانات حتى تتم إعادة التحقق من الجلسة مع الخادم.</div>}
       {supportPanelOpen && <RepSupportPanel onClose={() => setSupportPanelOpen(false)} />}
 
-      <section className="rep-attendance-card" aria-label="الحضور والانصراف">
-        <div className="rep-attendance-summary">
-          <span className="rep-eyebrow">الحضور والانصراف · {new Intl.DateTimeFormat('ar-EG', { dateStyle: 'full', timeZone: 'Africa/Cairo' }).format(new Date())}</span>
-          <strong>{attendanceIsRevoked ? 'تم إلغاء الحضور' : attendance?.clock_in_time ? `${attendanceHours(attendance, clockNow).toFixed(2)} ساعة` : 'لم يسجل الحضور بعد'}</strong>
-          <small>{attendanceIsRevoked ? 'تم إيقاف تتبع الوردية وإلغاء تسجيل اليوم.' : attendance?.clock_in_time
-            ? `حضور ${formatTime(attendance.clock_in_time)}${attendance.clock_out_time ? ` · انصراف ${formatTime(attendance.clock_out_time)}` : ' · الدوام مستمر'}${attendance.overtime_clock_in_time ? ` · أوفرتايم ${formatTime(attendance.overtime_clock_in_time)}${attendance.overtime_clock_out_time ? ` إلى ${formatTime(attendance.overtime_clock_out_time)}` : ' · الجلسة الإضافية مستمرة'}` : ''}`
-            : 'يُحفظ وقت الجهاز وموقع GPS بأمان؛ وتتم المزامنة تلقائياً عند الاتصال.'}</small>
-        </div>
-        <div className="rep-attendance-actions">
-          <button
-            className={`rep-attendance-punch ${attendanceIsOpen ? 'clock-out' : 'clock-in'} ${overtimeReady ? 'overtime' : ''}`}
-            type="button"
-            disabled={attendanceSaving || offlineOnly || !nativeApp || attendanceIsClosed}
-            onClick={() => void clockAttendance(punchAction)}
-            aria-label={regularOpen
-              ? 'تسجيل الانصراف وإيقاف تتبع الوردية'
-              : overtimeOpen
-                ? 'إنهاء جلسة الأوفرتايم'
-                : overtimeReady
-                  ? 'بدء جلسة الأوفرتايم المعتمدة'
-                  : attendanceIsClosed
-                    ? 'تم تسجيل الانصراف لهذا اليوم'
-                    : 'تسجيل الحضور وبدء تتبع الوردية'}
-          >
-            {punchLabel}
-          </button>
-          <div className={`rep-attendance-gps ${gps ? 'has-fix' : ''}`} role="status">
-            <i aria-hidden="true" />
-            <span><b>GPS</b> · {gps ? formatGps(gps) : visibleGpsError || 'سيُطلب الموقع عند تسجيل البصمة'}{pendingAttendanceActions.length ? ` · ${pendingAttendanceActions.length} تسجيل حضور بانتظار المزامنة` : ''}</span>
-          </div>
-        </div>
-        {(overtimeRequest || regularClosed) && (
-          <div className="rep-attendance-overtime" aria-live="polite">
-            {overtimeRequest?.status === 'pending' && (
-              <div className="rep-overtime-state pending">
-                <span><b>طلب أوفرتايم قيد الاعتماد</b><small>أُرسل {formatTime(overtimeRequest.created_at)} وينتظر موافقة المشرف؛ لن يبدأ التسجيل الإضافي قبل الاعتماد.</small></span>
-                <button type="button" disabled={overtimeBusy} onClick={() => void cancelOvertimeRequest()}>{overtimeBusy ? 'جارٍ الإلغاء…' : 'إلغاء الطلب'}</button>
-              </div>
-            )}
-            {overtimeApproved && !overtimeClosed && (
-              <div className="rep-overtime-state approved">
-                <span><b>تم اعتماد الأوفرتايم</b><small>اضغط «بدء جلسة الأوفرتايم» لتسجيل حضور وانصراف إضافي مرة واحدة لهذا اليوم.</small></span>
-              </div>
-            )}
-            {overtimeClosed && (
-              <div className="rep-overtime-state done">
-                <span><b>جلسة أوفرتايم مكتملة · {overtimeHoursForToday.toFixed(2)} ساعة</b><small>من {formatTime(attendance.overtime_clock_in_time)} إلى {formatTime(attendance.overtime_clock_out_time)} · تُراجع الساعات إدارياً مع مسير الرواتب.</small></span>
-              </div>
-            )}
-            {overtimeRequest?.status === 'rejected' && (
-              <div className="rep-overtime-state rejected">
-                <span><b>تم رفض طلب الأوفرتايم</b><small>{overtimeRequest.supervisor_note || 'لم يُسجّل المشرف سبباً للرفض.'} يمكنك إرسال طلب جديد.</small></span>
-              </div>
-            )}
-            {canRequestOvertime && (overtimeFormOpen ? (
-              <form className="rep-overtime-form" onSubmit={(event) => void submitOvertimeRequest(event)}>
-                <label>سبب الأوفرتايم (اختياري)
-                  <textarea value={overtimeReason} onChange={(event) => setOvertimeReason(event.target.value)} maxLength={500} rows={2} placeholder="مثال: استكمال زيارة ماكينة متأخرة" />
-                </label>
-                <div className="rep-overtime-form-actions">
-                  <button type="submit" disabled={overtimeBusy}>{overtimeBusy ? 'جارٍ الإرسال…' : 'إرسال الطلب للمشرف'}</button>
-                  <button type="button" disabled={overtimeBusy} onClick={() => { setOvertimeFormOpen(false); setOvertimeReason(''); }}>إلغاء</button>
-                </div>
-              </form>
-            ) : (
-              <button type="button" className="rep-overtime-open" onClick={() => setOvertimeFormOpen(true)}>
-                طلب أوفرتايم إضافي · بعد إغلاق الدوام الأساسي
+      {/* Tab 1: الوردية (Shift / Attendance) */}
+      {activeTab === 'shift' && (
+        <div className="rep-tab-view rep-tab-shift">
+          <section className="rep-attendance-card" aria-label="الحضور والانصراف">
+            <div className="rep-attendance-summary">
+              <span className="rep-eyebrow">الوردية · {new Intl.DateTimeFormat('ar-EG', { dateStyle: 'full', timeZone: 'Africa/Cairo' }).format(new Date())}</span>
+              <strong>{attendanceIsRevoked ? 'تم إلغاء الحضور' : attendance?.clock_in_time ? `${attendanceHours(attendance, clockNow).toFixed(2)} ساعة عمل` : 'لم يسجل الحضور بعد'}</strong>
+              <small>{attendanceIsRevoked ? 'تم إيقاف تتبع الوردية وإلغاء تسجيل اليوم.' : attendance?.clock_in_time
+                ? `حضور ${formatTime(attendance.clock_in_time)}${attendance.clock_out_time ? ` · انصراف ${formatTime(attendance.clock_out_time)}` : ' · الدوام مستمر'}${attendance.overtime_clock_in_time ? ` · أوفرتايم ${formatTime(attendance.overtime_clock_in_time)}${attendance.overtime_clock_out_time ? ` إلى ${formatTime(attendance.overtime_clock_out_time)}` : ' · الجلسة الإضافية مستمرة'}` : ''}`
+                : 'تسجيل الحضور بالبصمة الحيوية وإحداثيات الـ GPS الميدانية.'}</small>
+            </div>
+            <div className="rep-attendance-actions">
+              <button
+                className={`rep-attendance-punch ${attendanceIsOpen ? 'clock-out' : 'clock-in'} ${overtimeReady ? 'overtime' : ''}`}
+                type="button"
+                disabled={attendanceSaving || offlineOnly || !nativeApp || attendanceIsClosed}
+                onClick={() => void clockAttendance(punchAction)}
+                aria-label={regularOpen
+                  ? 'تسجيل الانصراف وإيقاف تتبع الوردية'
+                  : overtimeOpen
+                    ? 'إنهاء جلسة الأوفرتايم'
+                    : overtimeReady
+                      ? 'بدء جلسة الأوفرتايم المعتمدة'
+                      : attendanceIsClosed
+                        ? 'تم تسجيل الانصراف لهذا اليوم'
+                        : 'تسجيل الحضور وبدء تتبع الوردية'}
+              >
+                {punchLabel}
               </button>
-            ))}
-          </div>
-        )}
-      </section>
-
-      <section className="rep-welcome-row">
-        <div>
-          <span className="rep-eyebrow">{new Intl.DateTimeFormat('ar-EG', { dateStyle: 'full', timeZone: 'Africa/Cairo' }).format(new Date())}</span>
-          <h1>مسار اليوم <span>جاهز لخطوتك التالية.</span></h1>
-          <p>ابحث عن ماكينة، وثّق الزيارة، ثم يتولى المشرف اعتمادها قبل دخولها التقارير.</p>
-        </div>
-        <div className="rep-welcome-mark" aria-hidden="true"><span>م</span><i /><i /></div>
-      </section>
-
-      <section className="rep-progress-card" aria-label="إنجاز اليوم">
-        <div className="rep-progress-copy">
-          <div><span className="rep-eyebrow">إنجاز الوردية</span><strong>{summary.completed} <small>من</small> {summary.totalMachines} <small>ماكينة</small></strong></div>
-          <span className="rep-progress-percent">{summary.progress}%</span>
-        </div>
-        <div className="rep-progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={summary.progress}>
-          <span style={{ width: `${summary.progress}%` }} />
-        </div>
-        <div className="rep-progress-foot"><span><i className="done-dot" />معتمدة <b>{summary.completed}</b></span><span><i className="pending-dot" />بانتظار الاعتماد <b>{summary.pendingReview ?? 0}</b></span><span>متبقية <b>{routeFilterCounts.remaining}</b></span><small>{routeLoading ? 'جارٍ تحديث المسار…' : route ? `آخر تحديث ${formatTime(route.cachedAt ?? route.fetchedAt ?? new Date())}` : 'لا توجد نسخة مسار محفوظة بعد'}</small></div>
-      </section>
-
-      <section className="rep-route-section">
-        <div className="rep-route-heading">
-          <div><span className="rep-eyebrow">أوامر الصيانة المعيّنة لك</span><h2>ماكيناتك <small>{summary.totalMachines} بطاقة</small></h2></div>
-          <div className="rep-route-heading-actions">
-              <button type="button" className={`rep-map-toggle ${showOfflineMap ? 'active' : ''}`} onClick={() => setShowOfflineMap((value) => !value)} aria-expanded={showOfflineMap}>
-               ⌖ {showOfflineMap ? 'إخفاء خريطة الماكينات' : 'خريطة الماكينات · متاحة دون إنترنت'}
-            </button>
-            <label className="rep-search">
-              <span aria-hidden="true">⌕</span>
-              <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="ابحث بالكود أو العميل أو المنطقة" aria-label="ابحث بالكود أو العميل أو المنطقة" />
-              {query && <button type="button" onClick={() => setQuery('')} aria-label="مسح البحث">×</button>}
-            </label>
-          </div>
-        </div>
-
-        <div className="rep-route-filters" role="group" aria-label="تصفية مسار اليوم">
-          {[['remaining', 'المتبقية'], ['sent', 'قيد الاعتماد'], ['completed', 'المعتمدة'], ['all', 'الكل']].map(([value, label]) => (
-            <button key={value} type="button" className={routeFilter === value ? 'active' : ''}
-              aria-pressed={routeFilter === value} onClick={() => setRouteFilter(value)}>
-              {label}<b>{routeFilterCounts[value]}</b>
-            </button>
-          ))}
-        </div>
-
-        {storagePersistent === false && <p className="rep-storage-hint">قد يقوم المتصفح بإخلاء بعض البيانات المحلية عند امتلاء الهاتف. اترك مساحة كافية ولا تمسح بيانات التطبيق قبل المزامنة.</p>}
-        {storageError && <p className="rep-storage-error" role="alert">{storageError}</p>}
-        {showOfflineMap && <OfflineMapPanel
-          route={route}
-          gps={gps}
-          online={serverState === 'online' && networkOnline}
-          offlineOnly={offlineOnly}
-          onMachineSelect={(machine) => setSelectedMachine(machine)}
-        />}
-
-        {filteredRegions.length ? (
-          <div className="rep-region-list">
-            {filteredRegions.map((region) => {
-              const done = region.machines.filter((machine) => machine.isCompleted).length;
-              return (
-                <details className="rep-region-folder" key={`${region.regionName}-${query.trim() ? 'search' : 'browse'}`} defaultOpen={Boolean(query.trim())}>
-                  <summary>
-                    <span className="rep-folder-icon" aria-hidden="true">▰</span>
-                    <span className="rep-folder-name"><strong>{region.regionName}</strong><small>{region.machines.length} ماكينة · {done} مكتملة</small></span>
-                    <span className="rep-folder-count">{done}/{region.machines.length}</span>
-                    <span className="rep-folder-chevron" aria-hidden="true">⌄</span>
-                  </summary>
-                  <div className="rep-machine-grid">
-                    {region.machines.map((machine) => (
-                      <article className="rep-machine-card-wrap" key={`${machine.cardId}-${machine.machineCode}`}>
-                        <button
-                          type="button"
-                          className={`rep-machine-card ${machine.workStatus === 'done' ? 'is-complete' : ''} ${machine.canVisit === false ? 'is-locked' : ''}`}
-                          onClick={() => setSelectedMachine({ ...machine, regionName: region.regionName })}
-                          disabled={machine.canVisit === false}
-                        >
-                            <div className="rep-machine-card-top"><span className="rep-machine-code" dir="ltr">{machine.machineCode}</span><span className="rep-machine-status">{machine.reviewStatus === 'pending' ? '🟣 بانتظار مراجعة الصور' : machine.workStatus === 'done' ? '✅ تم' : machine.workStatus === 'in_progress' ? '🟠 قيد التنفيذ' : machine.correctionPending ? '⚠️ بلاغ تصحيح قيد المراجعة' : machine.reviewStatus === 'reshoot' ? '🔁 إعادة تصوير' : machine.canVisit === false ? 'مغلقة' : '⏳ متبقية'}</span></div>
-                          <small className="rep-work-order-code">أمر الصيانة · {machine.workOrderCode}</small>
-                          {machine.clientName && <strong className="rep-machine-branch">{machine.clientName}</strong>}
-                          <span className="rep-machine-name">{machine.arabicName || `ماكينة ${machine.machineCode}`}</span>
-                          <span className="rep-machine-address"><i aria-hidden="true">⌖</i>{machine.address || 'عنوان العميل غير مسجل'}</span>
-                           {machine.reviewNote && <small className="rep-review-note">ملاحظة المشرف: {machine.reviewNote}</small>}
-                           <span className="rep-machine-open">{machine.isCompleted ? 'تم اعتماد الزيارة' : machine.reviewStatus === 'pending' ? 'بانتظار مراجعة الصور · تابع إلى ماكينة أخرى' : machine.reviewStatus === 'reshoot' ? 'افتح لإعادة التصوير' : machine.canVisit === false ? 'للعرض فقط' : 'ابدأ الزيارة'} <b aria-hidden="true">←</b></span>
-                        </button>
-                      </article>
-                    ))}
+              <div className={`rep-attendance-gps ${gps ? 'has-fix' : ''}`} role="status">
+                <i aria-hidden="true" />
+                <span><b>GPS</b> · {gps ? formatGps(gps) : visibleGpsError || 'سيُطلب الموقع عند تسجيل البصمة'}{pendingAttendanceActions.length ? ` · ${pendingAttendanceActions.length} تسجيل حضور بانتظار المزامنة` : ''}</span>
+              </div>
+            </div>
+            {(overtimeRequest || regularClosed) && (
+              <div className="rep-attendance-overtime" aria-live="polite">
+                {overtimeRequest?.status === 'pending' && (
+                  <div className="rep-overtime-state pending">
+                    <span><b>طلب أوفرتايم قيد الاعتماد</b><small>أُرسل {formatTime(overtimeRequest.created_at)} وينتظر موافقة المشرف؛ لن يبدأ التسجيل الإضافي قبل الاعتماد.</small></span>
+                    <button type="button" disabled={overtimeBusy} onClick={() => void cancelOvertimeRequest()}>{overtimeBusy ? 'جارٍ الإلغاء…' : 'إلغاء الطلب'}</button>
                   </div>
-                </details>
-              );
-            })}
-          </div>
-        ) : routeLoading ? (
-          <div className="rep-empty-state"><span className="rep-empty-icon rep-spinning">↻</span><h3>جارٍ تنزيل مسار اليوم</h3><p>سيتم حفظ نسخة محلية لتتمكن من فتحها دون اتصال لاحقاً.</p></div>
-        ) : route?.regions?.length ? (
-          <div className="rep-empty-state"><span className="rep-empty-icon">⌕</span><h3>لا توجد نتائج لهذا البحث</h3><p>جرّب كتابة كود الماكينة أو جزء من اسمها.</p></div>
-        ) : (
-          <div className="rep-empty-state"><span className="rep-empty-icon">▤</span><h3>{networkOnline ? 'لا توجد ماكينات مسندة اليوم' : 'لا توجد نسخة محلية للمسار بعد'}</h3><p>{networkOnline ? 'اسحب للأسفل أو استخدم زر التحديث إذا أضاف المشرف تكليفاً جديداً.' : 'اتصل بالخادم مرة واحدة لتنزيل مسارك، وبعدها يمكنك متابعة العمل أوفلاين.'}</p><button type="button" className="rep-button rep-button-light" onClick={() => { void checkServer(); void refreshData(); void refreshAttendance(); }}>إعادة المحاولة</button></div>
-        )}
-      </section>
+                )}
+                {overtimeApproved && !overtimeClosed && (
+                  <div className="rep-overtime-state approved">
+                    <span><b>تم اعتماد الأوفرتايم</b><small>اضغط «بدء جلسة الأوفرتايم» لتسجيل حضور وانصراف إضافي مرة واحدة لهذا اليوم.</small></span>
+                  </div>
+                )}
+                {overtimeClosed && (
+                  <div className="rep-overtime-state done">
+                    <span><b>جلسة أوفرتايم مكتملة · {overtimeHoursForToday.toFixed(2)} ساعة</b><small>من {formatTime(attendance.overtime_clock_in_time)} إلى {formatTime(attendance.overtime_clock_out_time)} · تُراجع الساعات إدارياً مع مسير الرواتب.</small></span>
+                  </div>
+                )}
+                {overtimeRequest?.status === 'rejected' && (
+                  <div className="rep-overtime-state rejected">
+                    <span><b>تم رفض طلب الأوفرتايم</b><small>{overtimeRequest.supervisor_note || 'لم يُسجّل المشرف سبباً للرفض.'} يمكنك إرسال طلب جديد.</small></span>
+                  </div>
+                )}
+                {canRequestOvertime && (overtimeFormOpen ? (
+                  <form className="rep-overtime-form" onSubmit={(event) => void submitOvertimeRequest(event)}>
+                    <label>سبب الأوفرتايم (اختياري)
+                      <textarea value={overtimeReason} onChange={(event) => setOvertimeReason(event.target.value)} maxLength={500} rows={2} placeholder="مثال: استكمال زيارة ماكينة متأخرة" />
+                    </label>
+                    <div className="rep-overtime-form-actions">
+                      <button type="submit" disabled={overtimeBusy}>{overtimeBusy ? 'جارٍ الإرسال…' : 'إرسال الطلب للمشرف'}</button>
+                      <button type="button" disabled={overtimeBusy} onClick={() => { setOvertimeFormOpen(false); setOvertimeReason(''); }}>إلغاء</button>
+                    </div>
+                  </form>
+                ) : (
+                  <button type="button" className="rep-overtime-open" onClick={() => setOvertimeFormOpen(true)}>
+                    طلب أوفرتايم إضافي · بعد إغلاق الدوام الأساسي
+                  </button>
+                ))}
+              </div>
+            )}
+          </section>
 
-       {showQueue && <section className="rep-queue-panel" aria-label="قائمة الإجراءات المعلقة">
-         <div className="rep-queue-panel-head"><div><span className="rep-eyebrow">التخزين المحلي</span><h2>سجل الإجراءات والمزامنة <small>{pendingQueueCount}</small></h2></div><button className="rep-icon-button" type="button" onClick={() => setShowQueue(false)} aria-label="إخفاء قائمة المزامنة">×</button></div>
-         {!pendingQueueCount ? <p className="rep-queue-empty">لا توجد إجراءات معلقة لهذا الحساب.</p> : <ul className="rep-queue-list">
-          {pendingMachineActions.map((action) => <li key={action.actionUuid}>
-      {['pending_approval', 'approved', 'rejected'].includes(action.status) && <span>
-        {({ pending_approval: action.type === 'confirm_location' ? 'تصحيح موقع بانتظار مراجعة الإدارة' : 'بانتظار المراجعة الإدارية', approved: 'معتمد', rejected: 'مرفوض؛ أعد الإرسال من بطاقة الماكينة' })[action.status]} {action.reviewNote || ''}
-     </span>}
-    <span className={`rep-queue-state ${action.status === 'syncing' ? 'syncing' : ''} ${action.status === 'blocked' ? 'blocked' : ''}`} aria-hidden="true">{action.status === 'syncing' ? '↻' : action.status === 'blocked' ? '!' : '⏳'}</span>
-     <div><strong>{action.type === 'confirm_location' ? `مقترح موقع الماكينة · بطاقة ${action.payload?.cardId || ''}` : `بلاغ ماكينة مختلفة · ${action.payload?.reportedCode || ''}`}</strong><small>حُفظ {formatTime(action.createdAt)}{action.attempts ? ` · محاولات ${action.attempts}` : ''} · {locationReviewLabel(action.status)}</small>{(action.evidence || action.evidenceAvailable) && <small>صورة الإثبات محفوظة محلياً · {action.evidence ? `${Math.ceil(action.evidence.size / 1024)} KB` : 'ملف أصلي'}</small>}{action.lastError && <small className="rep-queue-error">{action.lastError}</small>}</div>
-     {action.status === 'blocked'
-       ? <button type="button" className="rep-queue-retry" disabled={serverState !== 'online' || offlineOnly} onClick={() => void retryMachineAction(action)}>إعادة المحاولة</button>
-      : <span className="rep-queue-local">محفوظ محلياً</span>}
-  </li>)}
-   {pendingVisits.map((visit) => <li key={visit.visitUuid}>
-    <span className={`rep-queue-state ${visit.status === 'syncing' ? 'syncing' : ''} ${visit.status === 'blocked' ? 'blocked' : ''}`} aria-hidden="true">{visit.status === 'syncing' ? '↻' : visit.status === 'blocked' ? '!' : '⏳'}</span>
-           <div><strong>ماكينة {visit.payload.machineCode} · {visit.payload.regionName}</strong><small>حُفظت {formatTime(visit.createdAt)}{visit.attempts ? ` · محاولات ${visit.attempts}` : ''} · {visit.status === 'blocked' ? 'تحتاج مراجعة' : visit.status === 'syncing' ? 'جارٍ الإرسال' : 'بانتظار المزامنة'}</small>{visit.lastError && <small className="rep-queue-error">{visit.lastError}</small>}</div>
-     {visit.status === 'blocked'
-       ? <button type="button" className="rep-queue-retry" disabled={serverState !== 'online' || offlineOnly} onClick={async () => { if (nativeApp && visit.nativeStoragePath?.startsWith('internal://visits/')) await retryNativeVisit(visit.visitUuid, userId); else await updatePendingVisit(visit.visitUuid, { status: 'queued', lastError: '' }); await refreshPending(); void drainQueue(); }}>إعادة المحاولة</button>
-       : <span className="rep-queue-local">محفوظة محلياً</span>}
-   </li>)}
-    {pendingAttendanceActions.map((action) => <li key={action.actionUuid}>
-     <span className="rep-queue-state" aria-hidden="true">⏳</span>
-     <div><strong>{action.action === 'in' ? 'تسجيل حضور محفوظ محلياً' : 'تسجيل انصراف محفوظ محلياً'}</strong><small>{formatTime(action.occurredAt)} · دقة GPS ±{Math.round(action.location?.accuracy ?? 0)}م · {action.status === 'attendance_rejected' ? 'مرفوض؛ يحتاج مراجعة' : action.status || 'pending_attendance_sync'}</small>{action.attempts ? <small>محاولات المزامنة {action.attempts}</small> : null}{action.lastError && <small className="rep-queue-error">{action.lastError}</small>}</div>
-      <span className="rep-queue-local">محفوظ محلياً</span>
-    </li>)}
-   {pendingGpsQueue.pending.length > 0 && <li><span className="rep-queue-state" aria-hidden="true">⌖</span><div><strong>نقاط GPS محفوظة محلياً · {pendingGpsQueue.pending.length}</strong><small>تبقى على الهاتف حتى تأكيد الخادم مزامنتها.</small></div><span className="rep-queue-local">SQLite</span></li>}
-   {pendingGpsQueue.rejected.map((point) => <li key={`gps-rejected:${point.trackId}`}><span className="rep-queue-state blocked" aria-hidden="true">!</span><div><strong>نقطة GPS تحتاج مراجعة · {formatTime(point.capturedAt)}</strong><small className="rep-queue-error">{point.reason || 'رفض الخادم هذه النقطة دون رسالة.'}</small></div><span className="rep-queue-local">محتفظ بها</span></li>)}
-    </ul>}
-   <button type="button" className="rep-button rep-button-light rep-sync-now" disabled={!pendingQueueCount || pendingExportBusy} onClick={() => void exportPending()}>{pendingExportBusy ? 'جارٍ تجهيز نسخة JSON…' : 'تصدير نسخة JSON'}</button>
-   {nativeApp && <><input type="file" accept="application/json,.json" className="rep-recovery-file-input" aria-label="اختيار نسخة استرداد محلية" onChange={(event) => void importRecovery(event)} /><button type="button" className="rep-button rep-button-light rep-sync-now" disabled={pendingImportBusy} onClick={(event) => event.currentTarget.previousElementSibling?.click()}>{pendingImportBusy ? 'جارٍ التحقق والاسترداد…' : 'استيراد نسخة استرداد محلية'}</button></>}
-   <button type="button" className="rep-button rep-button-primary rep-sync-now" disabled={!pendingQueueCount || serverState !== 'online' || offlineOnly} onClick={() => { if (nativeApp && pendingAttendanceActions.length) void requestNativeSync().catch(() => undefined); void drainQueue(); }}>{serverState === 'online' ? 'مزامنة الآن ↻' : 'ستتم المزامنة عند الاتصال'}</button>
-</section>}
+          {nativeApp && (
+            <section className="rep-photo-archive-card" aria-label="حفظ الصور على الهاتف">
+              <strong>نسخة الصور على معرض الهاتف</strong>
+              <p>{photoArchive?.configured ? 'الحفظ التلقائي مفعّل في المجلد المختار بنفس ترتيب السيرفر.' : 'اختر مجلداً مرة واحدة لنسخ الصور تلقائياً حسب المنطقة والماكينة وقبل/بعد.'}</p>
+              {photoArchive?.pending > 0 && <p>صور محفوظة داخل التطبيق بانتظار النسخ: {photoArchive.pending}</p>}
+              {photoArchive?.error && <p role="alert">{photoArchive.error}</p>}
+              <button type="button" className="rep-button rep-button-light" disabled={photoArchiveBusy} onClick={async () => { setPhotoArchiveBusy(true); try { setPhotoArchive(await chooseNativePhotoArchiveFolder()); } catch (error) { setToast(error.message); } finally { setPhotoArchiveBusy(false); } }}>
+                {photoArchiveBusy ? 'جارٍ اختيار المجلد…' : photoArchive?.configured ? 'تغيير مجلد الصور' : 'اختيار مجلد الصور'}
+              </button>
+            </section>
+          )}
 
- {nativeApp && <section className="rep-queue-panel" aria-label="حفظ الصور على الهاتف">
-   <strong>نسخة الصور على الهاتف</strong>
-   <p>{photoArchive?.configured ? 'الحفظ التلقائي مفعّل في المجلد المختار بنفس ترتيب السيرفر.' : 'اختر مجلداً مرة واحدة لنسخ الصور تلقائياً حسب المنطقة والسنة والشهر والماكينة وقبل/بعد.'}</p>
-   {photoArchive?.pending > 0 && <p>صور محفوظة داخل التطبيق بانتظار النسخ: {photoArchive.pending}</p>}
-   {photoArchive?.error && <p role="alert">{photoArchive.error}</p>}
-   <button type="button" className="rep-button rep-button-light" disabled={photoArchiveBusy} onClick={async()=>{setPhotoArchiveBusy(true);try{setPhotoArchive(await chooseNativePhotoArchiveFolder());}catch(error){setToast(error.message);}finally{setPhotoArchiveBusy(false);}}}>{photoArchiveBusy ? 'جارٍ اختيار المجلد…' : photoArchive?.configured ? 'تغيير مجلد الصور' : 'اختيار مجلد الصور'}</button>
- </section>}
- <footer className="rep-app-footer"><span>مَــدَارْ · تطبيق المندوب الميداني{appVersion ? ` · إصدار ${appVersion}` : ''}</span><span>{gps ? `آخر GPS: ${formatGps(gps)}` : visibleGpsError || (nativeApp ? 'فعّل الحضور لتسجيل GPS أثناء الوردية' : 'يُسجّل GPS مع الحضور والانصراف والزيارة')}</span></footer>
+          <section className="rep-shift-summary-card">
+            <h3>بيانات الوردية</h3>
+            <div className="rep-shift-stats-grid">
+              <div className="rep-stat-box">
+                <span className="rep-stat-label">ساعات العمل</span>
+                <span className="rep-stat-value">{attendance?.clock_in_time ? `${attendanceHours(attendance, clockNow).toFixed(2)} س` : '0 س'}</span>
+              </div>
+              <div className="rep-stat-box">
+                <span className="rep-stat-label">حالة الدوام</span>
+                <span className="rep-stat-value">{attendanceIsOpen ? '🟢 نشط' : attendanceIsClosed ? '⚪ مغلق' : '⏳ لم يبدأ'}</span>
+              </div>
+              <div className="rep-stat-box">
+                <span className="rep-stat-label">ماكينات اليوم</span>
+                <span className="rep-stat-value">{summary.completed} / {summary.totalMachines}</span>
+              </div>
+              <div className="rep-stat-box">
+                <span className="rep-stat-label">دقة الـ GPS</span>
+                <span className="rep-stat-value">{gps ? `±${Math.round(gps.accuracy)}م` : 'غير متاح'}</span>
+              </div>
+            </div>
+            {attendance?.clock_in_time && (
+              <button type="button" className="rep-button rep-button-primary rep-goto-route-btn" onClick={() => setActiveTab('route')}>
+                الذهاب إلى خط سير اليوم ←
+              </button>
+            )}
+          </section>
+        </div>
+      )}
 
-        {selectedMachine && <MachineVisitSheet machine={{ ...selectedMachine, ...(route?.regions ?? []).flatMap((region) => region.machines).find((machine) => machine.cardId === selectedMachine.cardId) }} repId={userId} repName={user.fullName} reasons={reasons} gps={gps} gpsError={visibleGpsError} captureLocation={captureVisitLocation} onStartWork={startMachineWork} onStopWork={stopMachineWork} onClose={() => setSelectedMachine(null)} onSave={saveVisit} onConfirmLocation={confirmSelectedMachineLocation} onReportCorrection={submitSelectedMachineCorrection} onRequestLocationChange={submitSelectedMachineLocationChange} />}
+      {/* Tab 2: خط السير والماكينات (Route & Machines) */}
+      {activeTab === 'route' && (
+        <div className="rep-tab-view rep-tab-route">
+          {!attendance?.clock_in_time && !attendanceIsClosed && (
+            <div className="rep-shift-banner-alert" onClick={() => setActiveTab('shift')}>
+              <span>⏱️ <strong>تنبيه:</strong> لم يتم تسجيل حضور الوردية بعد.</span>
+              <b>سجّل البصمة الآن ←</b>
+            </div>
+          )}
+
+          <section className="rep-welcome-row">
+            <div>
+              <span className="rep-eyebrow">{new Intl.DateTimeFormat('ar-EG', { dateStyle: 'full', timeZone: 'Africa/Cairo' }).format(new Date())}</span>
+              <h1>مسار اليوم <span>جاهز لخطوتك التالية.</span></h1>
+              <p>ابحث عن ماكينة، وثّق الزيارة، ثم يتولى المشرف اعتمادها قبل دخولها التقارير.</p>
+            </div>
+            <div className="rep-welcome-mark" aria-hidden="true"><span>م</span><i /><i /></div>
+          </section>
+
+          <section className="rep-progress-card" aria-label="إنجاز اليوم">
+            <div className="rep-progress-copy">
+              <div><span className="rep-eyebrow">إنجاز الوردية</span><strong>{summary.completed} <small>من</small> {summary.totalMachines} <small>ماكينة</small></strong></div>
+              <span className="rep-progress-percent">{summary.progress}%</span>
+            </div>
+            <div className="rep-progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={summary.progress}>
+              <span style={{ width: `${summary.progress}%` }} />
+            </div>
+            <div className="rep-progress-foot"><span><i className="done-dot" />معتمدة <b>{summary.completed}</b></span><span><i className="pending-dot" />بانتظار الاعتماد <b>{summary.pendingReview ?? 0}</b></span><span>متبقية <b>{routeFilterCounts.remaining}</b></span><small>{routeLoading ? 'جارٍ تحديث المسار…' : route ? `آخر تحديث ${formatTime(route.cachedAt ?? route.fetchedAt ?? new Date())}` : 'لا توجد نسخة مسار محفوظة بعد'}</small></div>
+          </section>
+
+          <section className="rep-route-section">
+            <div className="rep-route-heading">
+              <div><span className="rep-eyebrow">أوامر الصيانة المعيّنة لك</span><h2>ماكيناتك <small>{summary.totalMachines} بطاقة</small></h2></div>
+              <div className="rep-route-heading-actions">
+                <button type="button" className={`rep-map-toggle ${showOfflineMap ? 'active' : ''}`} onClick={() => setShowOfflineMap((value) => !value)} aria-expanded={showOfflineMap}>
+                  ⌖ {showOfflineMap ? 'إخفاء خريطة الماكينات' : 'خريطة الماكينات · متاحة دون إنترنت'}
+                </button>
+                <label className="rep-search">
+                  <span aria-hidden="true">⌕</span>
+                  <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="ابحث بالكود أو العميل أو المنطقة" aria-label="ابحث بالكود أو العميل أو المنطقة" />
+                  {query && <button type="button" onClick={() => setQuery('')} aria-label="مسح البحث">×</button>}
+                </label>
+              </div>
+            </div>
+
+            <div className="rep-route-filters" role="group" aria-label="تصفية مسار اليوم">
+              {[['remaining', 'المتبقية'], ['sent', 'قيد الاعتماد'], ['completed', 'المعتمدة'], ['all', 'الكل']].map(([value, label]) => (
+                <button key={value} type="button" className={routeFilter === value ? 'active' : ''}
+                  aria-pressed={routeFilter === value} onClick={() => setRouteFilter(value)}>
+                  {label}<b>{routeFilterCounts[value]}</b>
+                </button>
+              ))}
+            </div>
+
+            {storagePersistent === false && <p className="rep-storage-hint">قد يقوم المتصفح بإخلاء بعض البيانات المحلية عند امتلاء الهاتف. اترك مساحة كافية ولا تمسح بيانات التطبيق قبل المزامنة.</p>}
+            {storageError && <p className="rep-storage-error" role="alert">{storageError}</p>}
+            {showOfflineMap && <OfflineMapPanel
+              route={route}
+              gps={gps}
+              online={serverState === 'online' && networkOnline}
+              offlineOnly={offlineOnly}
+              onMachineSelect={(machine) => setSelectedMachine(machine)}
+            />}
+
+            {filteredRegions.length ? (
+              <div className="rep-region-list">
+                {filteredRegions.map((region) => {
+                  const done = region.machines.filter((machine) => machine.isCompleted).length;
+                  return (
+                    <details className="rep-region-folder" key={`${region.regionName}-${query.trim() ? 'search' : 'browse'}`} defaultOpen={Boolean(query.trim())}>
+                      <summary>
+                        <span className="rep-folder-icon" aria-hidden="true">▰</span>
+                        <span className="rep-folder-name"><strong>{region.regionName}</strong><small>{region.machines.length} ماكينة · {done} مكتملة</small></span>
+                        <span className="rep-folder-count">{done}/{region.machines.length}</span>
+                        <span className="rep-folder-chevron" aria-hidden="true">⌄</span>
+                      </summary>
+                      <div className="rep-machine-grid">
+                        {region.machines.map((machine) => (
+                          <article className="rep-machine-card-wrap" key={`${machine.cardId}-${machine.machineCode}`}>
+                            <button
+                              type="button"
+                              className={`rep-machine-card ${machine.workStatus === 'done' ? 'is-complete' : ''} ${machine.canVisit === false ? 'is-locked' : ''}`}
+                              onClick={() => setSelectedMachine({ ...machine, regionName: region.regionName })}
+                              disabled={machine.canVisit === false}
+                            >
+                              <div className="rep-machine-card-top"><span className="rep-machine-code" dir="ltr">{machine.machineCode}</span><span className="rep-machine-status">{machine.reviewStatus === 'pending' ? '🟣 بانتظار مراجعة الصور' : machine.workStatus === 'done' ? '✅ تم' : machine.workStatus === 'in_progress' ? '🟠 قيد التنفيذ' : machine.correctionPending ? '⚠️ بلاغ تصحيح قيد المراجعة' : machine.reviewStatus === 'reshoot' ? '🔁 إعادة تصوير' : machine.canVisit === false ? 'مغلقة' : '⏳ متبقية'}</span></div>
+                              <small className="rep-work-order-code">أمر الصيانة · {machine.workOrderCode}</small>
+                              {machine.clientName && <strong className="rep-machine-branch">{machine.clientName}</strong>}
+                              <span className="rep-machine-name">{machine.arabicName || `ماكينة ${machine.machineCode}`}</span>
+                              <span className="rep-machine-address"><i aria-hidden="true">⌖</i>{machine.address || 'عنوان العميل غير مسجل'}</span>
+                              {machine.reviewNote && <small className="rep-review-note">ملاحظة المشرف: {machine.reviewNote}</small>}
+                              <span className="rep-machine-open">{machine.isCompleted ? 'تم اعتماد الزيارة' : machine.reviewStatus === 'pending' ? 'بانتظار مراجعة الصور · تابع إلى ماكينة أخرى' : machine.reviewStatus === 'reshoot' ? 'افتح لإعادة التصوير' : machine.canVisit === false ? 'للعرض فقط' : 'ابدأ الزيارة'} <b aria-hidden="true">←</b></span>
+                            </button>
+                          </article>
+                        ))}
+                      </div>
+                    </details>
+                  );
+                })}
+              </div>
+            ) : routeLoading ? (
+              <div className="rep-empty-state"><span className="rep-empty-icon rep-spinning">↻</span><h3>جارٍ تنزيل مسار اليوم</h3><p>سيتم حفظ نسخة محلية لتتمكن من فتحها دون اتصال لاحقاً.</p></div>
+            ) : route?.regions?.length ? (
+              <div className="rep-empty-state"><span className="rep-empty-icon">⌕</span><h3>لا توجد نتائج لهذا البحث</h3><p>جرّب كتابة كود الماكينة أو جزء من اسمها.</p></div>
+            ) : (
+              <div className="rep-empty-state"><span className="rep-empty-icon">▤</span><h3>{networkOnline ? 'لا توجد ماكينات مسندة اليوم' : 'لا توجد نسخة محلية للمسار بعد'}</h3><p>{networkOnline ? 'اسحب للأسفل أو استخدم زر التحديث إذا أضاف المشرف تكليفاً جديداً.' : 'اتصل بالخادم مرة واحدة لتنزيل مسارك، وبعدها يمكنك متابعة العمل أوفلاين.'}</p><button type="button" className="rep-button rep-button-light" onClick={() => { void checkServer(); void refreshData(); void refreshAttendance(); }}>إعادة المحاولة</button></div>
+            )}
+          </section>
+        </div>
+      )}
+
+      {/* Tab 3: البلاغات والدعم (Tickets / Support) */}
+      {activeTab === 'tickets' && (
+        <div className="rep-tab-view rep-tab-tickets">
+          <RepSupportPanel inline onClose={() => setActiveTab('route')} />
+        </div>
+      )}
+
+      {/* Tab 4: المزامنة والتخزين المحلي (Sync & Outbox Queue) */}
+      {(activeTab === 'sync' || showQueue) && (
+        <div className="rep-tab-view rep-tab-sync">
+          <section className="rep-queue-panel is-tab-view" aria-label="قائمة الإجراءات المعلقة">
+            <div className="rep-queue-panel-head">
+              <div>
+                <span className="rep-eyebrow">التخزين المحلي والمزامنة</span>
+                <h2>طابور الإجراءات المعلقة <small>{pendingQueueCount}</small></h2>
+              </div>
+              {showQueue && <button className="rep-icon-button" type="button" onClick={() => setShowQueue(false)} aria-label="إخفاء قائمة المزامنة">×</button>}
+            </div>
+            {!pendingQueueCount ? (
+              <div className="rep-empty-state">
+                <span className="rep-empty-icon">✓</span>
+                <h3>كل البيانات متزامنة بالكامل</h3>
+                <p>لا توجد زيارات أو بصمات حضور معلقة على هذا الجهاز.</p>
+              </div>
+            ) : (
+              <ul className="rep-queue-list">
+                {pendingMachineActions.map((action) => (
+                  <li key={action.actionUuid}>
+                    {['pending_approval', 'approved', 'rejected'].includes(action.status) && (
+                      <span>
+                        {({ pending_approval: action.type === 'confirm_location' ? 'تصحيح موقع بانتظار مراجعة الإدارة' : 'بانتظار المراجعة الإدارية', approved: 'معتمد', rejected: 'مرفوض؛ أعد الإرسال من بطاقة الماكينة' })[action.status]} {action.reviewNote || ''}
+                      </span>
+                    )}
+                    <span className={`rep-queue-state ${action.status === 'syncing' ? 'syncing' : ''} ${action.status === 'blocked' ? 'blocked' : ''}`} aria-hidden="true">{action.status === 'syncing' ? '↻' : action.status === 'blocked' ? '!' : '⏳'}</span>
+                    <div>
+                      <strong>{action.type === 'confirm_location' ? `مقترح موقع الماكينة · بطاقة ${action.payload?.cardId || ''}` : `بلاغ ماكينة مختلفة · ${action.payload?.reportedCode || ''}`}</strong>
+                      <small>حُفظ {formatTime(action.createdAt)}{action.attempts ? ` · محاولات ${action.attempts}` : ''} · {locationReviewLabel(action.status)}</small>
+                      {(action.evidence || action.evidenceAvailable) && <small>صورة الإثبات محفوظة محلياً · {action.evidence ? `${Math.ceil(action.evidence.size / 1024)} KB` : 'ملف أصلي'}</small>}
+                      {action.lastError && <small className="rep-queue-error">{action.lastError}</small>}
+                    </div>
+                    {action.status === 'blocked'
+                      ? <button type="button" className="rep-queue-retry" disabled={serverState !== 'online' || offlineOnly} onClick={() => void retryMachineAction(action)}>إعادة المحاولة</button>
+                      : <span className="rep-queue-local">محفوظ محلياً</span>}
+                  </li>
+                ))}
+                {pendingVisits.map((visit) => (
+                  <li key={visit.visitUuid}>
+                    <span className={`rep-queue-state ${visit.status === 'syncing' ? 'syncing' : ''} ${visit.status === 'blocked' ? 'blocked' : ''}`} aria-hidden="true">{visit.status === 'syncing' ? '↻' : visit.status === 'blocked' ? '!' : '⏳'}</span>
+                    <div>
+                      <strong>ماكينة {visit.payload.machineCode} · {visit.payload.regionName}</strong>
+                      <small>حُفظت {formatTime(visit.createdAt)}{visit.attempts ? ` · محاولات ${visit.attempts}` : ''} · {visit.status === 'blocked' ? 'تحتاج مراجعة' : visit.status === 'syncing' ? 'جارٍ الإرسال' : 'بانتظار المزامنة'}</small>
+                      {visit.lastError && <small className="rep-queue-error">{visit.lastError}</small>}
+                    </div>
+                    {visit.status === 'blocked'
+                      ? <button type="button" className="rep-queue-retry" disabled={serverState !== 'online' || offlineOnly} onClick={async () => { if (nativeApp && visit.nativeStoragePath?.startsWith('internal://visits/')) await retryNativeVisit(visit.visitUuid, userId); else await updatePendingVisit(visit.visitUuid, { status: 'queued', lastError: '' }); await refreshPending(); void drainQueue(); }}>إعادة المحاولة</button>
+                      : <span className="rep-queue-local">محفوظة محلياً</span>}
+                  </li>
+                ))}
+                {pendingAttendanceActions.map((action) => (
+                  <li key={action.actionUuid}>
+                    <span className="rep-queue-state" aria-hidden="true">⏳</span>
+                    <div>
+                      <strong>{action.action === 'in' ? 'تسجيل حضور محفوظ محلياً' : 'تسجيل انصراف محفوظ محلياً'}</strong>
+                      <small>{formatTime(action.occurredAt)} · دقة GPS ±{Math.round(action.location?.accuracy ?? 0)}م · {action.status === 'attendance_rejected' ? 'مرفوض؛ يحتاج مراجعة' : action.status || 'pending_attendance_sync'}</small>
+                      {action.attempts ? <small>محاولات المزامنة {action.attempts}</small> : null}
+                      {action.lastError && <small className="rep-queue-error">{action.lastError}</small>}
+                    </div>
+                    <span className="rep-queue-local">محفوظ محلياً</span>
+                  </li>
+                ))}
+                {pendingGpsQueue.pending.length > 0 && (
+                  <li>
+                    <span className="rep-queue-state" aria-hidden="true">⌖</span>
+                    <div><strong>نقاط GPS محفوظة محلياً · {pendingGpsQueue.pending.length}</strong><small>تبقى على الهاتف حتى تأكيد الخادم مزامنتها.</small></div>
+                    <span className="rep-queue-local">SQLite</span>
+                  </li>
+                )}
+                {pendingGpsQueue.rejected.map((point) => (
+                  <li key={`gps-rejected:${point.trackId}`}>
+                    <span className="rep-queue-state blocked" aria-hidden="true">!</span>
+                    <div><strong>نقطة GPS تحتاج مراجعة · {formatTime(point.capturedAt)}</strong><small className="rep-queue-error">{point.reason || 'رفض الخادم هذه النقطة دون رسالة.'}</small></div>
+                    <span className="rep-queue-local">محتفظ بها</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="rep-queue-actions-bar">
+              <button type="button" className="rep-button rep-button-light rep-sync-now" disabled={!pendingQueueCount || pendingExportBusy} onClick={() => void exportPending()}>{pendingExportBusy ? 'جارٍ تجهيز نسخة JSON…' : 'تصدير نسخة JSON'}</button>
+              {nativeApp && (
+                <>
+                  <input type="file" accept="application/json,.json" className="rep-recovery-file-input" aria-label="اختيار نسخة استرداد محلية" onChange={(event) => void importRecovery(event)} />
+                  <button type="button" className="rep-button rep-button-light rep-sync-now" disabled={pendingImportBusy} onClick={(event) => event.currentTarget.previousElementSibling?.click()}>{pendingImportBusy ? 'جارٍ التحقق والاسترداد…' : 'استيراد نسخة استرداد محلية'}</button>
+                </>
+              )}
+              <button type="button" className="rep-button rep-button-primary rep-sync-now" disabled={!pendingQueueCount || serverState !== 'online' || offlineOnly} onClick={() => { if (nativeApp && pendingAttendanceActions.length) void requestNativeSync().catch(() => undefined); void drainQueue(); }}>{serverState === 'online' ? 'مزامنة الآن ↻' : 'ستتم المزامنة عند الاتصال'}</button>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {/* Fixed Mobile Bottom Navigation Bar */}
+      <nav className="rep-bottom-nav" aria-label="شريط التنقل الرئيسي">
+        <button
+          type="button"
+          className={`rep-nav-item ${activeTab === 'shift' ? 'active' : ''}`}
+          onClick={() => { setShowQueue(false); setActiveTab('shift'); }}
+          aria-label="تبويب الوردية"
+        >
+          <span className="rep-nav-icon">{attendanceIsOpen ? '🟢' : '⏱️'}</span>
+          <span className="rep-nav-label">الوردية</span>
+        </button>
+        <button
+          type="button"
+          className={`rep-nav-item ${activeTab === 'route' ? 'active' : ''}`}
+          onClick={() => { setShowQueue(false); setActiveTab('route'); }}
+          aria-label="تبويب خط السير"
+        >
+          <span className="rep-nav-icon">📋</span>
+          <span className="rep-nav-label">خط السير</span>
+          {routeFilterCounts.remaining > 0 && (
+            <span className="rep-nav-badge">{routeFilterCounts.remaining}</span>
+          )}
+        </button>
+        <button
+          type="button"
+          className={`rep-nav-item ${activeTab === 'tickets' ? 'active' : ''}`}
+          onClick={() => { setShowQueue(false); setActiveTab('tickets'); }}
+          aria-label="تبويب البلاغات"
+        >
+          <span className="rep-nav-icon">💬</span>
+          <span className="rep-nav-label">البلاغات</span>
+        </button>
+        <button
+          type="button"
+          className={`rep-nav-item ${activeTab === 'sync' ? 'active' : ''}`}
+          onClick={() => { setShowQueue(false); setActiveTab('sync'); }}
+          aria-label="تبويب المزامنة"
+        >
+          <span className="rep-nav-icon">⚡</span>
+          <span className="rep-nav-label">المزامنة</span>
+          {pendingQueueCount > 0 && (
+            <span className="rep-nav-badge alert">{pendingQueueCount}</span>
+          )}
+        </button>
+      </nav>
+
+      <footer className="rep-app-footer">
+        <span>مَــدَارْ · تطبيق المندوب الميداني{appVersion ? ` · إصدار ${appVersion}` : ''}</span>
+        <span>{gps ? `آخر GPS: ${formatGps(gps)}` : visibleGpsError || (nativeApp ? 'فعّل الحضور لتسجيل GPS أثناء الوردية' : 'يُسجّل GPS مع الحضور والانصراف والزيارة')}</span>
+      </footer>
+
+      {selectedMachine && <MachineVisitSheet machine={{ ...selectedMachine, ...(route?.regions ?? []).flatMap((region) => region.machines).find((machine) => machine.cardId === selectedMachine.cardId) }} repId={userId} repName={user.fullName} reasons={reasons} gps={gps} gpsError={visibleGpsError} captureLocation={captureVisitLocation} onStartWork={startMachineWork} onStopWork={stopMachineWork} onClose={() => setSelectedMachine(null)} onSave={saveVisit} onConfirmLocation={confirmSelectedMachineLocation} onReportCorrection={submitSelectedMachineCorrection} onRequestLocationChange={submitSelectedMachineLocationChange} />}
       {tutorialOpen && <Tutorial nativeApp={nativeApp} onFinish={finishTutorial} />}
       {toast && <div className="rep-toast" role="status">✓ {toast}</div>}
     </main>

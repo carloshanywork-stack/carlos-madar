@@ -55,7 +55,10 @@ import com.madar.rep.app.migration.LegacyMigrationActivity
 import kotlinx.coroutines.delay
 
 private object Tabs {
+    const val ATTENDANCE = "attendance"
     const val ROUTE = "route"
+    const val SUPPORT = "support"
+    const val SYNC = "sync"
     const val MAP = "map"
 }
 
@@ -191,10 +194,16 @@ private fun SignedInShell(
     }
 
     val title = when (tab) {
+        Tabs.ATTENDANCE -> "الوردية"
+        Tabs.SUPPORT -> "البلاغات"
+        Tabs.SYNC -> "المزامنة"
         Tabs.MAP -> "الخريطة"
         else -> "مدار"
     }
     val subtitle = when (tab) {
+        Tabs.ATTENDANCE -> "تسجيل الحضور والانصراف بالبصمة"
+        Tabs.SUPPORT -> "إرسال بلاغ فوري للإدارة"
+        Tabs.SYNC -> "طابور العمليات غير المرفوعة"
         Tabs.MAP -> "بلاطات مرخصة بدون خدمات جوجل"
         else -> "${session.fullName?.takeIf { it.isNotBlank() } ?: session.username} · مسار اليوم"
     }
@@ -209,12 +218,12 @@ private fun SignedInShell(
                         Icon(Icons.Default.AccountCircle, contentDescription = "حسابي والإعدادات")
                     }
                     when (tab) {
-                        Tabs.ROUTE -> Unit
                         Tabs.MAP -> {
                             IconButton(onClick = { vm.refreshMapCatalog(); vm.refreshMapPoints() }) {
                                 Icon(Icons.Default.Refresh, contentDescription = "تحديث حزم الخرائط")
                             }
                         }
+                        else -> Unit
                     }
                 },
             )
@@ -222,16 +231,36 @@ private fun SignedInShell(
         bottomBar = {
             NavigationBar {
                 NavigationBarItem(
+                    selected = tab == Tabs.ATTENDANCE,
+                    onClick = { tab = Tabs.ATTENDANCE },
+                    icon = { Icon(Icons.Default.Fingerprint, contentDescription = null) },
+                    label = { Text("الوردية") },
+                )
+                NavigationBarItem(
                     selected = tab == Tabs.ROUTE,
                     onClick = { tab = Tabs.ROUTE },
                     icon = { Icon(Icons.Default.AssignmentTurnedIn, contentDescription = null) },
-                    label = { Text("العمل") },
+                    label = { Text("خط السير") },
                 )
                 NavigationBarItem(
-                    selected = tab == Tabs.MAP,
-                    onClick = { tab = Tabs.MAP },
-                    icon = { Icon(Icons.Default.Map, contentDescription = null) },
-                    label = { Text("الخريطة") },
+                    selected = tab == Tabs.SUPPORT,
+                    onClick = { tab = Tabs.SUPPORT },
+                    icon = { Icon(Icons.Default.Notifications, contentDescription = null) },
+                    label = { Text("البلاغات") },
+                )
+                NavigationBarItem(
+                    selected = tab == Tabs.SYNC,
+                    onClick = { tab = Tabs.SYNC },
+                    icon = {
+                        if (openVisits.isNotEmpty()) {
+                            BadgedBox(badge = { Badge { Text("${openVisits.size}") } }) {
+                                Icon(Icons.Default.Sync, contentDescription = null)
+                            }
+                        } else {
+                            Icon(Icons.Default.Sync, contentDescription = null)
+                        }
+                    },
+                    label = { Text("المزامنة") },
                 )
             }
         },
@@ -239,6 +268,15 @@ private fun SignedInShell(
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
             when (tab) {
+                Tabs.ATTENDANCE -> AttendanceHost(vm = vm, onClose = { tab = Tabs.ROUTE })
+                Tabs.SUPPORT -> SupportScreen(vm = vm, screenName = "tabs/support")
+                Tabs.SYNC -> SyncScreen(
+                    vm = vm,
+                    openVisits = openVisits,
+                    onOpenVisit = { visit -> visitUuid = visit.visitUuid },
+                    onOpenAttendance = { tab = Tabs.ATTENDANCE },
+                    onOpenMigration = { context.startActivity(Intent(context, LegacyMigrationActivity::class.java)) },
+                )
                 Tabs.MAP -> MapScreen(
                     vm = vm,
                     mapRepository = container.mapRepository,

@@ -11,8 +11,8 @@
   min-height: 100vh;
   min-height: 100svh;
   min-height: 100dvh;
-  padding: 0 max(clamp(12px, 3.2vw, 48px), env(safe-area-inset-right, 0px)) max(20px, env(safe-area-inset-bottom, 0px)) max(clamp(12px, 3.2vw, 48px), env(safe-area-inset-left, 0px));
-  overflow: clip;
+  padding: 0 max(clamp(12px, 3.2vw, 48px), env(safe-area-inset-right, 0px)) max(85px, calc(72px + env(safe-area-inset-bottom, 0px))) max(clamp(12px, 3.2vw, 48px), env(safe-area-inset-left, 0px));
+  overflow-x: clip;
   color: var(--rep-ink);
   background: var(--rep-canvas);
   color-scheme: light;
@@ -570,4 +570,304 @@
 #madar-app .madar-notification-bell-rep .madar-notification-badge { border-color: #fff; }
 @media (max-width: 760px) {
   #madar-app .madar-notification-bell-rep .madar-notification-trigger { width: 35px; height: 35px; min-height: 35px; }
+}
+
+/* ==========================================================================
+   MADAR Rep Dual-App 4-Tab Navigation & Tab Views
+   ========================================================================== */
+
+#madar-app .rep-tab-view {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  animation: repTabFadeIn 0.18s ease-out;
+}
+
+@keyframes repTabFadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Bottom Navigation Bar */
+#madar-app .rep-bottom-nav {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  display: flex;
+  align-items: stretch;
+  justify-content: space-around;
+  height: calc(64px + env(safe-area-inset-bottom, 0px));
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  background: rgba(255, 255, 255, 0.97);
+  backdrop-filter: blur(16px);
+  border-top: 1px solid #d4dde5;
+  box-shadow: 0 -4px 20px rgba(19, 38, 59, 0.08);
+}
+
+#madar-app .rep-nav-item {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-width: 0;
+  padding: 8px 4px;
+  border: 0;
+  background: transparent;
+  color: #596c7a;
+  cursor: pointer;
+  transition: all 0.15s ease-in-out;
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+#madar-app .rep-nav-item::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 20%;
+  right: 20%;
+  height: 3px;
+  border-radius: 0 0 3px 3px;
+  background: transparent;
+  transition: background-color 0.15s ease-in-out;
+}
+
+#madar-app .rep-nav-item:active {
+  transform: scale(0.96);
+}
+
+#madar-app .rep-nav-item.active {
+  color: #0b5142;
+  font-weight: 800;
+}
+
+#madar-app .rep-nav-item.active::before {
+  background: #126b57;
+}
+
+#madar-app .rep-nav-icon {
+  font-size: 20px;
+  line-height: 1;
+  display: inline-block;
+}
+
+#madar-app .rep-nav-label {
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+#madar-app .rep-nav-badge {
+  position: absolute;
+  top: 4px;
+  margin-inline-start: 14px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 900;
+  line-height: 18px;
+  text-align: center;
+  color: #fff;
+  background: #0f766e;
+  box-shadow: 0 2px 6px rgba(15, 118, 110, 0.3);
+}
+
+#madar-app .rep-nav-badge.alert {
+  background: #dc2626;
+  box-shadow: 0 2px 6px rgba(220, 38, 38, 0.35);
+  animation: repPulseBadge 2s infinite;
+}
+
+@keyframes repPulseBadge {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.12); }
+}
+
+/* Alert Banner on Route if Attendance not punched */
+#madar-app .rep-shift-banner-alert {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  margin-top: 8px;
+  border: 1px solid #fcd34d;
+  border-radius: 14px;
+  background: #fef3c7;
+  color: #92400e;
+  font-size: 13px;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(245, 158, 11, 0.12);
+  transition: transform 0.12s ease;
+}
+
+#madar-app .rep-shift-banner-alert:hover {
+  transform: translateY(-1px);
+}
+
+#madar-app .rep-shift-banner-alert b {
+  color: #b45309;
+  white-space: nowrap;
+  font-weight: 800;
+}
+
+/* Shift Summary Card */
+#madar-app .rep-shift-summary-card {
+  padding: 20px;
+  border: 1px solid #d4dde5;
+  border-radius: 18px;
+  background: #fff;
+  box-shadow: 0 4px 18px rgba(19, 38, 59, 0.05);
+}
+
+#madar-app .rep-shift-summary-card h3 {
+  margin: 0 0 16px;
+  font-size: 16px;
+  font-weight: 800;
+  color: #13263b;
+}
+
+#madar-app .rep-shift-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+#madar-app .rep-stat-box {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+
+#madar-app .rep-stat-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #64748b;
+}
+
+#madar-app .rep-stat-value {
+  font-size: 17px;
+  font-weight: 900;
+  color: #0f172a;
+}
+
+#madar-app .rep-goto-route-btn {
+  width: 100%;
+  margin-top: 16px;
+  min-height: 48px;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+/* Photo Archive Card */
+#madar-app .rep-photo-archive-card {
+  padding: 18px;
+  border: 1px solid #d4dde5;
+  border-radius: 18px;
+  background: #fff;
+  box-shadow: 0 4px 18px rgba(19, 38, 59, 0.05);
+}
+
+#madar-app .rep-photo-archive-card strong {
+  display: block;
+  font-size: 15px;
+  color: #13263b;
+  margin-bottom: 6px;
+}
+
+#madar-app .rep-photo-archive-card p {
+  margin: 0 0 12px;
+  font-size: 12px;
+  color: #5b6c74;
+  line-height: 1.6;
+}
+
+/* Support Tab Container */
+#madar-app .rep-support-tab-container {
+  width: 100%;
+}
+
+#madar-app .rep-support-dialog.is-inline-view {
+  width: 100%;
+  max-height: none;
+  border-radius: 18px;
+  box-shadow: 0 4px 18px rgba(19, 38, 59, 0.05);
+}
+
+/* Queue Panel Tab View */
+#madar-app .rep-queue-panel.is-tab-view {
+  position: static;
+  width: 100%;
+  border-radius: 18px;
+  box-shadow: 0 4px 18px rgba(19, 38, 59, 0.05);
+  margin: 0;
+}
+
+#madar-app .rep-queue-actions-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+#madar-app .rep-queue-actions-bar .rep-button {
+  width: 100%;
+  min-height: 48px;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+/* Phase Selector Tabs in Visit Sheet */
+#madar-app .rep-phase-selector-tabs {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+#madar-app .rep-phase-tab {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border: 1px solid #cbd4dc;
+  border-radius: 12px;
+  background: #f8fafc;
+  color: #4e5d6d;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+#madar-app .rep-phase-tab.active {
+  border-color: #0b5142;
+  background: #e3f1ec;
+  color: #0b5142;
+  box-shadow: 0 2px 8px rgba(11, 81, 66, 0.12);
+}
+
+#madar-app .rep-phase-tab b {
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.06);
+}
+
+#madar-app .rep-phase-tab.active b {
+  background: #0b5142;
+  color: #fff;
 }
