@@ -38,6 +38,14 @@ function uptimeLabel(value) {
   return `${days} يوم · ${hours} ساعة · ${minutes} دقيقة`;
 }
 
+function apkUnavailableMessage(status) {
+  if (status.reason === 'release_withdrawn') return 'تم سحب هذا الإصدار من التوزيع؛ التحميل والتحديث من داخل التطبيق متوقفان حتى تسجيل إصدار أحدث من سجل إصدارات APK.';
+  if (status.reason === 'release_retained') return 'هذا الإصدار محتفظ به للتاريخ فقط وغير مخصص للتوزيع.';
+  if (status.reason === 'release_not_recorded') return 'ملف APK موجود على الخادم لكنه غير مسجّل في سجل الإصدارات. سجّله من «سجل إصدارات APK» بعد التحقق منه قبل السماح بتحميله.';
+  if (status.reason === 'release_artifact_mismatch') return 'ملف APK لا يطابق البصمة المسجّلة لنفس رقم الإصدار، لذلك أُوقف توزيعه. أعد بناء الإصدار برقم إصدار جديد وسجّله.';
+  return 'لا يوجد APK متاح على الخادم حالياً. بعد بناء الإصدار الجديد سيظهر زر التنزيل هنا.';
+}
+
 function parseAssignedRegions(value) {
   return [...new Set(String(value ?? '').split(/[\n,،]+/).map((region) => region.trim()).filter(Boolean))];
 }
@@ -205,7 +213,7 @@ export default function SettingsPage() {
           <div className="madar-panel-body madar-stack">
             {apkStatusError && <Alert tone="error">{apkStatusError}</Alert>}
             {apkStatusLoading && !apkStatus ? <LoadingState label="جارٍ فحص ملف APK" /> : apkStatus && <>
-              {!apkStatus.available ? <Alert tone="warning">لا يوجد APK متاح على الخادم حالياً. بعد بناء الإصدار الجديد سيظهر زر التنزيل هنا.</Alert> : <div className="madar-health-row">
+              {!apkStatus.available ? <Alert tone="warning">{apkUnavailableMessage(apkStatus)}</Alert> : <div className="madar-health-row">
                 <span className="madar-health-pulse" />
                 <div><strong>{apkStatus.artifactType === 'release' ? 'إصدار موقّع جاهز' : 'نسخة تجريبية / بانتظار بناء الإصدار الجديد'}</strong><small>{apkStatus.releaseMetadata ? `الإصدار ${apkStatus.releaseMetadata.versionName} (${apkStatus.releaseMetadata.versionCode}) · SHA-256 ${apkStatus.releaseMetadata.apkSha256.slice(0, 16)}… · ` : ''}{fileSize(apkStatus.sizeBytes)} · آخر تحديث {String(apkStatus.modifiedAt).replace('T', ' ').slice(0, 19)}</small></div>
                 <Badge tone={apkStatus.artifactType === 'release' ? 'success' : 'warning'}>{apkStatus.artifactType === 'release' ? 'إصدار' : 'تجريبية'}</Badge>

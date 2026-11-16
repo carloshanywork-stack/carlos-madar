@@ -84,7 +84,7 @@ export default function RepSupportAdminPage() {
   }
 
   async function withdrawRelease(release) {
-    if (!window.confirm(`سحب الإصدار ${release.versionName} من حالة الإتاحة؟`)) return;
+    if (!window.confirm(`سحب الإصدار ${release.versionName}؟ سيتوقف تحميله فوراً ولن يستطيع المندوبون التحديث إليه.`)) return;
     setBusy(`withdraw-${release.id}`); setError('');
     try { await api.post(`/api/system/rep-releases/${release.id}/withdraw`, {}); await reloadReleases(); }
     catch (caught) { setError(errorMessage(caught)); }
@@ -147,7 +147,7 @@ export default function RepSupportAdminPage() {
       {view === 'releases' && <section className="madar-panel madar-section">
         <div className="madar-panel-header"><div><h2>سجل إصدارات تطبيق المندوب</h2><p>التسجيل يتطلب APK نظيفاً متحققاً وموقّعاً ببصمة المفتاح المعتمدة في إعداد الخادم.</p></div><Button variant="secondary" onClick={reloadReleases}>تحديث</Button></div>
         <div className="madar-panel-body" style={{ display: 'grid', gap: 10 }}>
-          <Alert tone="info">لا يؤدي التسجيل إلى نشر خارجي أو تثبيت تلقائي. توافق التحديث داخل التطبيق يتطلب بقاء مفتاح التوقيع نفسه.</Alert>
+          <Alert tone="info">لا يؤدي التسجيل إلى نشر خارجي أو تثبيت تلقائي. يسري التسجيل على التحميل والتحديث من داخل التطبيق: الإصدار المسجّل «available» فقط هو الذي يُقدَّم، وسحب الإصدار يوقف تقديمه فوراً. توافق التحديث داخل التطبيق يتطلب بقاء مفتاح التوقيع نفسه.</Alert>
           <label>ملاحظات الإصدار (اختياري)<textarea rows={2} maxLength={2000} value={releaseNotes} onChange={(event) => setReleaseNotes(event.target.value)} /></label>
           <div><Button disabled={busy === 'publish-release'} onClick={publishRelease}>{busy === 'publish-release' ? 'جارٍ التحقق…' : 'التحقق وتسجيل APK المحلي'}</Button></div>
         </div>

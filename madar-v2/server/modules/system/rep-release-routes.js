@@ -74,10 +74,9 @@ router.get('/rep-releases', (_req, res) => {
   res.set({ 'Cache-Control': 'private, no-store', Pragma: 'no-cache' }).json({ success: true, releases });
 });
 
-router.post('/rep-releases/publish', asyncHandler(async (req, res) => {
+export function recordVerifiedRelease({ actorId, notes = null } = {}) {
   const { manifest, apkSha256 } = readVerifiedRelease();
-  const notes = optionalText(req.body?.notes, 'notes', { maxLength: 2000 });
-  const result = db.transaction(() => {
+  return db.transaction(() => {
     const existing = db.prepare('SELECT id FROM apk_releases WHERE version_code = ?').get(manifest.versionCode);
     if (existing) throw new HttpError(409, 'This release version code has already been recorded.');
     const inserted = db.prepare(`INSERT INTO apk_releases
@@ -85,20 +84,25 @@ router.post('/rep-releases/publish', asyncHandler(async (req, res) => {
        signer_certificate_sha256, artifact_path, status, published_by, notes)
       VALUES (?, ?, ?, 0, ?, ?, ?, 'available', ?, ?)`)
       .run(manifest.versionCode, manifest.versionName, manifest.sourceRevision, apkSha256,
-        manifest.signerCertificateSha256.toLowerCase(), basename(repApkPath), req.user.id, notes);
+        manifest.signerCertificateSha256.toLowerCase(), basename(repApkPath), actorId, notes);
     const id = Number(inserted.lastInsertRowid);
-    recordAudit({ database: db, actorId: req.user.id, action: 'rep_release_published', entityType: 'apk_release', entityId: id,
+    recordAudit({ database: db, actorId, action: 'rep_release_published', entityType: 'apk_release', entityId: id,
       newValues: { version_code: manifest.versionCode, version_name: manifest.versionName,
         source_revision: manifest.sourceRevision, apk_sha256: apkSha256,
         signer_certificate_sha256: manifest.signerCertificateSha256.toLowerCase(), artifact_path: basename(repApkPath), notes } });
-    return id;
-  }).immediate();
-  res.status(201).set({ 'Cache-Control': 'private, no-store', Pragma: 'no-cache' }).json({
-    success: true,
-    release: db.prepare(`SELECT id, version_code AS versionCode, version_name AS versionName,
+    return db.prepare(`SELECT id, version_code AS versionCode, version_name AS versionName,
       source_revision AS sourceRevision, apk_sha256 AS apkSha256,
       signer_certificate_sha256 AS signerCertificateSha256, status, published_at AS publishedAt,
-      notes FROM apk_releases WHERE id = ?`).get(result),
+      notes FROM apk_releases WHERE id = ?`).get(id);
+  }).immediate();
+}
+
+router.post('/rep-releases/publish', asyncHandler(async (req, res) => {
+  const notes = optionalText(req.body?.notes, 'notes', { maxLength: 2000 });
+  const release = recordVerifiedRelease({ actorId: req.user.id, notes });
+  res.status(201).set({ 'Cache-Control': 'private, no-store', Pragma: 'no-cache' }).json({
+    success: true,
+    release,
   });
 }));
 

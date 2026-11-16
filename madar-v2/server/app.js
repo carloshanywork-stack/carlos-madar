@@ -8,6 +8,7 @@ import {
 import { basename, join } from 'node:path';
 import { env } from './config/env.js';
 import { clientDistPath, repApkPath, repTransitionApkPath } from './config/paths.js';
+import { db } from './database/connection.js';
 import { errorHandler, notFoundHandler } from './middleware/error-handler.js';
 import { requireAuthentication } from './modules/auth/service.js';
 import authRouter from './modules/auth/routes.js';
@@ -152,11 +153,83 @@ function readVerifiedApkMetadata(apkPath, apkDescriptor, { required = false } = 
   };
 }
 
+// The release registry is the distribution gate: an artifact may only be served
+// for download when the exact bytes and signer of its version code are recorded
+// and still marked available. Anything else (unrecorded, rebuilt under the same
+// version code, withdrawn, retained for history) fails closed.
+function readReleaseRegistration(metadata) {
+  if (!metadata) return null;
+  const row = db.prepare(`SELECT id, version_code AS versionCode, version_name AS versionName,
+      apk_sha256 AS apkSha256, signer_certificate_sha256 AS signerCertificateSha256,
+      status, published_at AS publishedAt
+    FROM apk_releases WHERE version_code = ?`).get(metadata.versionCode);
+  if (!row) {
+    return {
+      recorded: false,
+      status: 'unrecorded',
+      versionCode: metadata.versionCode,
+      versionName: metadata.versionName,
+      publishedAt: null,
+    };
+  }
+  const matches = String(row.apkSha256).toLowerCase() === metadata.apkSha256.toLowerCase()
+    && String(row.signerCertificateSha256).toLowerCase() === metadata.signerCertificateSha256.toLowerCase();
+  return {
+    recorded: matches,
+    status: matches ? row.status : 'mismatch',
+    versionCode: Number(row.versionCode),
+    versionName: row.versionName,
+    publishedAt: row.publishedAt,
+  };
+}
+
+function releaseDistributionState(registration) {
+  if (!registration) return { distributable: true, reason: null };
+  if (registration.status === 'mismatch') return { distributable: false, reason: 'release_artifact_mismatch' };
+  if (!registration.recorded) return { distributable: false, reason: 'release_not_recorded' };
+  if (registration.status !== 'available') return { distributable: false, reason: `release_${registration.status}` };
+  return { distributable: true, reason: null };
+}
+
+const RELEASE_DISTRIBUTION_ERRORS = Object.freeze({
+  release_not_recorded: {
+    status: 503,
+    message: 'This release is not recorded in the release registry; an administrator must publish it before download.',
+  },
+  release_artifact_mismatch: {
+    status: 503,
+    message: 'This release artifact no longer matches its recorded digest and cannot be distributed.',
+  },
+  release_withdrawn: {
+    status: 410,
+    message: 'This release has been withdrawn and is no longer distributed.',
+  },
+  release_retained: {
+    status: 410,
+    message: 'This release is retained for history only and is not distributed.',
+  },
+});
+
 function downloadApkArtifact(req, res, next, path, downloadName, { release = false } = {}) {
   let descriptor;
   try {
     ({ descriptor } = openRegularFileNoFollow(path));
-    if (release) readVerifiedApkMetadata(path, descriptor, { required: true });
+    if (release) {
+      const verified = readVerifiedApkMetadata(path, descriptor, { required: true });
+      const distribution = releaseDistributionState(readReleaseRegistration(verified));
+      if (!distribution.distributable) {
+        closeSync(descriptor);
+        const rejection = RELEASE_DISTRIBUTION_ERRORS[distribution.reason] ?? {
+          status: 503,
+          message: 'This release is not available for distribution.',
+        };
+        res.set('Cache-Control', 'private, no-store').status(rejection.status).json({
+          error: rejection.message,
+          code: distribution.reason.toUpperCase(),
+        });
+        return;
+      }
+    }
   } catch (error) {
     if (descriptor !== undefined) closeSync(descriptor);
     if (['ENOENT', 'ENOTDIR', 'ELOOP', 'EUNSAFEPATH', 'EAPKMETADATA'].includes(error.code)) {
@@ -215,12 +288,16 @@ app.get('/download/apk/status', requireAuthentication, (req, res) => {
       });
     } finally { closeSync(descriptor); }
     const artifactType = basename(repApkPath) === 'madar-rep-release.apk' ? 'release' : 'fallback';
+    const releaseRegistry = artifactType === 'release' ? readReleaseRegistration(releaseMetadata) : null;
+    const distribution = releaseDistributionState(releaseRegistry);
     res.set('Cache-Control', 'private, no-store').json({
-      available: true,
+      available: distribution.distributable,
       artifactType,
       sizeBytes: metadata.size,
       modifiedAt: metadata.mtime.toISOString(),
+      ...(distribution.distributable ? {} : { reason: distribution.reason }),
       ...(releaseMetadata ? { releaseMetadata } : {}),
+      ...(releaseRegistry ? { releaseRegistry } : {}),
       ...(req.user?.role === 'admin' ? { transitionAvailable: existsSync(repTransitionApkPath) } : {}),
     });
   } catch (error) {
@@ -233,6 +310,7 @@ app.get('/download/apk/status', requireAuthentication, (req, res) => {
       artifactType: 'missing',
       sizeBytes: null,
       modifiedAt: null,
+      reason: 'artifact_missing',
       ...(req.user?.role === 'admin' ? { transitionAvailable: existsSync(repTransitionApkPath) } : {}),
     });
   }
