@@ -1,6 +1,7 @@
 import { writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { publishDesktopArtifacts } from './publish-desktop.js';
 
 const projectRoot = resolve(import.meta.dirname, '..');
 if (!process.env.ELECTRON_MIRROR) {
@@ -60,7 +61,8 @@ const install = spawnSync(process.execPath, [resolve(projectRoot, 'scripts/insta
 if (install.error) throw install.error;
 if (install.status !== 0) process.exit(install.status ?? 1);
 
-const args = ['--win', 'nsis', '--config', 'desktop/electron-builder.config.cjs', '--publish', 'never'];
+const targetType = process.env.MADAR_WINDOWS_TARGET || 'nsis';
+const args = ['--win', targetType, '--config', 'desktop/electron-builder.config.cjs', '--publish', 'never'];
 const result = spawnSync(process.execPath, [resolve(projectRoot, 'desktop-build/node_modules/electron-builder/cli.js'), ...args], {
   cwd: projectRoot,
   stdio: 'inherit',
@@ -68,4 +70,11 @@ const result = spawnSync(process.execPath, [resolve(projectRoot, 'desktop-build/
 });
 
 if (result.error) throw result.error;
+if (result.status === 0) {
+  try {
+    publishDesktopArtifacts();
+  } catch (err) {
+    console.warn('[BuildDesktop] Could not stage desktop artifacts:', err.message);
+  }
+}
 process.exitCode = result.status ?? 1;

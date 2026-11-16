@@ -20,7 +20,7 @@ module.exports = {
     main: 'main.cjs',
   },
   win: {
-    target: [{ target: 'nsis', arch: ['x64'] }],
+    target: [{ target: process.env.MADAR_WINDOWS_TARGET || 'nsis', arch: ['x64'] }],
     artifactName: 'MADAR-Windows-${version}-Setup.${ext}',
     icon: 'desktop/madar.ico',
     forceCodeSigning: releaseBuild,
