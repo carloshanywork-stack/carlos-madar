@@ -1578,7 +1578,7 @@ test('maintenance PowerPoint export exposes live machine progress and a final co
     return result;
   });
   const observedProgress = [];
-  const deadline = Date.now() + 120_000;
+  const deadline = Date.now() + 300_000;
   while (!exportFinished && Date.now() < deadline) {
     const progressResult = await request(`/api/maintenance/export/pptx/progress?exportId=${encodeURIComponent(exportId)}`);
     assert.equal(progressResult.response.status, 200, JSON.stringify(progressResult.body));

@@ -1,12 +1,12 @@
 {
-  "sourceRevision": "d058c1836df6fc3ab221af83844fc07c7730f107",
+  "sourceRevision": "cd915965b1f697dfb4a5d5f828644b6e7631ddab",
   "sourceTreeDirty": false,
-  "builtAt": "2026-11-16T22:39:42.352Z",
-  "versionCode": 21,
-  "versionName": "2.4.1",
+  "builtAt": "2026-11-16T23:19:59.244Z",
+  "versionCode": 22,
+  "versionName": "2.4.2",
   "buildType": "release",
   "serverUrl": "https://carlos-pc.tail852ef0.ts.net",
   "artifactOnly": false,
-  "apkSha256": "e90673e6a16fb8e8a998b72eb912979d66d5feadf759b655832bac65a319744a",
+  "apkSha256": "89af16932d07f6da633d313628c5364a6a510a7ba44e21c6ceb11ce3d1c0df4e",
   "signerCertificateSha256": "f4c8bffc9f852ea6056e350b65156eb880d05629991682492159b9e3937c02a1"
 }
