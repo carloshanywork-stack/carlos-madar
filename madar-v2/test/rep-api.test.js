@@ -17,6 +17,7 @@ process.env.MADAR_V2_OFFLINE_MAPS_DIR = '';
 process.env.MADAR_REP_APK_PATH = join(temporaryDirectory, 'madar-rep.apk');
 process.env.MADAR_REP_TRANSITION_APK_PATH = join(temporaryDirectory, 'madar-rep-transition.apk');
 process.env.REP_ATTENDANCE_MAX_OFFLINE_AGE_HOURS = '24';
+process.env.MADAR_REP_SELF_APPROVAL_DAILY_LIMIT = '1';
 process.env.STORAGE_MOUNT_PATH = '';
 process.env.NODE_ENV = 'test';
 process.env.COOKIE_SECURE = 'false';
@@ -1236,6 +1237,25 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   assert.equal(universalVisit.body.status, 'approved', 'an explicitly enabled representative self-approves an eligible visit');
   assert.equal(universalVisit.body.reviewSource, 'self_approval');
   assert.deepEqual(universalVisit.body.reasonCodes, []);
+  const selfReview = db.prepare(`SELECT review.status, review.review_source, review.reviewed_by,
+      review.reason_codes_json FROM rep_visit_reviews review
+    JOIN rep_visits visit ON visit.id = review.visit_id WHERE visit.visit_uuid = ?`).get(universalVisitPayload.visitUuid);
+  assert.deepEqual(selfReview, {
+    status: 'approved', review_source: 'self_approval', reviewed_by: universalRepId, reason_codes_json: '[]',
+  });
+  const selfReviewAudit = db.prepare(`SELECT actor_id, new_values_json FROM audit_log
+    WHERE action = 'create' AND entity_type = 'rep_visit' AND entity_id =
+      (SELECT id FROM rep_visits WHERE visit_uuid = ?)`).get(universalVisitPayload.visitUuid);
+  assert.equal(selfReviewAudit.actor_id, universalRepId);
+  assert.equal(JSON.parse(selfReviewAudit.new_values_json).review_source, 'self_approval');
+  const forgedApproval = await request('/api/rep/sync-visit', {
+    method: 'POST',
+    body: buildVisitForm({
+      ...universalVisitPayload, visitUuid: randomUUID(), status: 'approved', reviewStatus: 'approved',
+    }, 1, 1),
+  }, universalLogin.cookie);
+  assert.equal(forgedApproval.response.status, 400, 'client-asserted approval fields are rejected, not trusted');
+  assert.match(forgedApproval.body.error, /Unsupported field/);
   const flexibleReplay = await request('/api/rep/sync-visit', { method: 'POST', body: buildVisitForm(universalVisitPayload, 1, 1) }, universalLogin.cookie);
   assert.equal(flexibleReplay.response.status, 200);
   assert.equal(flexibleReplay.body.idempotent, true);
@@ -1319,6 +1339,42 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   assert.equal(idempotentRetry.response.status, 200);
   assert.equal(idempotentRetry.body.idempotent, true);
   assert.equal(idempotentRetry.body.status, 'approved');
+
+  // The configured self-approval cap is one visit per Cairo business day in
+  // this isolated test. The next eligible visit must stay pending with the
+  // explicit DAILY_LIMIT reason instead of being silently approved.
+  const dailyLimitMachineId = Number(db.prepare(`
+    INSERT INTO machines (code, name_ar, area, latitude, longitude, is_location_locked,
+      geofence_radius_meters, area_name, updated_at)
+    VALUES ('2401', 'ماكينة اختبار الحد اليومي', 'الرياض', ?, ?, 1, 50, 'الرياض', CURRENT_TIMESTAMP)
+  `).run(universalVisitPayload.location.latitude, universalVisitPayload.location.longitude).lastInsertRowid);
+  const dailyLimitCardId = Number(db.prepare(`
+    INSERT INTO maintenance_cards (order_id, machine_id) VALUES (?, ?)
+  `).run(orderId, dailyLimitMachineId).lastInsertRowid);
+  const dailyLimitCapturedAt = new Date().toISOString();
+  const dailyLimitVisit = await request('/api/rep/sync-visit', {
+    method: 'POST',
+    body: buildVisitForm({
+      ...universalVisitPayload,
+      visitUuid: randomUUID(),
+      cardId: dailyLimitCardId,
+      machineCode: '2401',
+      capturedAt: dailyLimitCapturedAt,
+      beforeCapturedAt: [dailyLimitCapturedAt],
+      afterCapturedAt: [dailyLimitCapturedAt],
+      location: { ...universalVisitPayload.location, updatedAt: dailyLimitCapturedAt },
+    }, 1, 1),
+  }, universalLogin.cookie);
+  assert.equal(dailyLimitVisit.response.status, 200, JSON.stringify(dailyLimitVisit.body));
+  assert.equal(dailyLimitVisit.body.status, 'pending_review');
+  assert.deepEqual(dailyLimitVisit.body.reasonCodes, ['DAILY_LIMIT']);
+  assert.equal(dailyLimitVisit.body.reviewSource, 'supervisor');
+  const dailyLimitReview = db.prepare(`SELECT status, review_source, reviewed_by, reason_codes_json
+    FROM rep_visit_reviews WHERE visit_id = (SELECT id FROM rep_visits WHERE visit_uuid = ?)`)
+    .get(dailyLimitVisit.body.visitUuid);
+  assert.deepEqual(dailyLimitReview, {
+    status: 'pending', review_source: 'supervisor', reviewed_by: null, reason_codes_json: '["DAILY_LIMIT"]',
+  });
 
   const now = Date.now();
   // Fixture captures must lie inside the existing attendance-created duty interval.
@@ -1864,6 +1920,136 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   const movedMachine = db.prepare('SELECT latitude, longitude FROM machines WHERE id = ?').get(optionalAfterMachineId);
   assert.equal(movedMachine.latitude, locationChangePayload.location.latitude);
   assert.equal(movedMachine.longitude, locationChangePayload.location.longitude);
+
+  const ownerEvidence = await fetch(`${baseUrl}/api/rep/location-change-requests/${locationChangeId}/evidence`, {
+    headers: { cookie: login.cookie },
+  });
+  assert.equal(ownerEvidence.status, 200, 'the requesting representative can read their own evidence');
+  assert.match(ownerEvidence.headers.get('content-type'), /image\/jpeg/);
+  const otherRepEvidence = await fetch(`${baseUrl}/api/rep/location-change-requests/${locationChangeId}/evidence`, {
+    headers: { cookie: universalLogin.cookie },
+  });
+  assert.equal(otherRepEvidence.status, 404, 'another representative cannot read the evidence');
+  assert.doesNotMatch(await otherRepEvidence.text(), /JFIF|Exif/);
+
+  const secondLocationPayload = {
+    actionUuid: randomUUID(),
+    cardId: optionalAfterCardId,
+    location: {
+      latitude: locationChangePayload.location.latitude + 0.0003,
+      longitude: locationChangePayload.location.longitude + 0.0003,
+      accuracy: 8, updatedAt: new Date().toISOString(), isMock: false,
+    },
+    note: 'طلب ثانٍ لاختبار التكرار والرفض.',
+  };
+  const secondLocationForm = new FormData();
+  secondLocationForm.set('request', JSON.stringify(secondLocationPayload));
+  const secondLocation = await request(`/api/rep/machines/${optionalAfterMachineId}/location-change-requests`, {
+    method: 'POST', body: secondLocationForm,
+  }, login.cookie);
+  assert.equal(secondLocation.response.status, 201, JSON.stringify(secondLocation.body));
+  assert.equal(secondLocation.body.status, 'pending');
+  const coordsWhilePending = db.prepare('SELECT latitude, longitude FROM machines WHERE id = ?').get(optionalAfterMachineId);
+  assert.deepEqual(coordsWhilePending, movedMachine, 'a pending request never mutates machine coordinates');
+  const duplicatePending = await request(`/api/rep/machines/${optionalAfterMachineId}/location-change-requests`, {
+    method: 'POST', body: secondLocationForm,
+  }, login.cookie);
+  assert.equal(duplicatePending.response.status, 200);
+  assert.equal(duplicatePending.body.idempotent, true);
+  const conflictingPendingForm = new FormData();
+  conflictingPendingForm.set('request', JSON.stringify({ ...secondLocationPayload, actionUuid: randomUUID() }));
+  const conflictingPending = await request(`/api/rep/machines/${optionalAfterMachineId}/location-change-requests`, {
+    method: 'POST', body: conflictingPendingForm,
+  }, login.cookie);
+  assert.equal(conflictingPending.response.status, 409, 'a second pending request for the same machine is refused');
+  const otherRepPendingForm = new FormData();
+  otherRepPendingForm.set('request', JSON.stringify({ ...secondLocationPayload, actionUuid: randomUUID() }));
+  const otherRepPending = await request(`/api/rep/machines/${optionalAfterMachineId}/location-change-requests`, {
+    method: 'POST', body: otherRepPendingForm,
+  }, universalLogin.cookie);
+  assert.equal(otherRepPending.response.status, 409);
+
+  db.prepare('UPDATE machines SET latitude = ?, longitude = ? WHERE id = ?')
+    .run(movedMachine.latitude - 0.002, movedMachine.longitude - 0.002, optionalAfterMachineId);
+  const staleDestination = db.prepare('SELECT latitude, longitude FROM machines WHERE id = ?').get(optionalAfterMachineId);
+  const staleApproval = await request(`/api/system/rep-location-changes/${secondLocation.body.requestId}/approved`,
+    jsonOptions('POST', { note: 'محاولة اعتماد بعد تغيير الموقع.' }), adminCookie);
+  assert.equal(staleApproval.response.status, 409, 'approval refuses a request whose old coordinates no longer match');
+  assert.deepEqual(db.prepare('SELECT latitude, longitude FROM machines WHERE id = ?').get(optionalAfterMachineId), staleDestination);
+  const staleRejection = await request(`/api/system/rep-location-changes/${secondLocation.body.requestId}/rejected`,
+    jsonOptions('POST', { note: 'الموقع تغيّر؛ يُرفض الطلب.' }), adminCookie);
+  assert.equal(staleRejection.response.status, 200);
+  assert.deepEqual(db.prepare('SELECT latitude, longitude FROM machines WHERE id = ?').get(optionalAfterMachineId), staleDestination,
+    'rejection never mutates machine coordinates');
+
+  const thirdLocationPayload = {
+    actionUuid: randomUUID(),
+    cardId: optionalAfterCardId,
+    location: {
+      latitude: staleDestination.latitude + 0.0004,
+      longitude: staleDestination.longitude + 0.0004,
+      accuracy: 7, updatedAt: new Date().toISOString(), isMock: false,
+    },
+    note: 'اعتماد نهائي مع إعادة المحاولة.',
+  };
+  const thirdLocationForm = new FormData();
+  thirdLocationForm.set('request', JSON.stringify(thirdLocationPayload));
+  const thirdLocation = await request(`/api/rep/machines/${optionalAfterMachineId}/location-change-requests`, {
+    method: 'POST', body: thirdLocationForm,
+  }, login.cookie);
+  assert.equal(thirdLocation.response.status, 201, JSON.stringify(thirdLocation.body));
+  const firstApproval = await request(`/api/system/rep-location-changes/${thirdLocation.body.requestId}/approved`,
+    jsonOptions('POST', { note: 'اعتماد أول.' }), adminCookie);
+  assert.equal(firstApproval.response.status, 200, JSON.stringify(firstApproval.body));
+  assert.equal(firstApproval.body.idempotent, false);
+  const replayedApproval = await request(`/api/system/rep-location-changes/${thirdLocation.body.requestId}/approved`,
+    jsonOptions('POST', { note: 'اعتماد أول.' }), adminCookie);
+  assert.equal(replayedApproval.response.status, 200, 'replaying the same approval is idempotent');
+  assert.equal(replayedApproval.body.idempotent, true);
+  const changedApprovalReplay = await request(`/api/system/rep-location-changes/${thirdLocation.body.requestId}/approved`,
+    jsonOptions('POST', { note: 'ملاحظة مختلفة.' }), adminCookie);
+  assert.equal(changedApprovalReplay.response.status, 409);
+  assert.deepEqual(db.prepare('SELECT latitude, longitude FROM machines WHERE id = ?').get(optionalAfterMachineId), {
+    latitude: thirdLocationPayload.location.latitude, longitude: thirdLocationPayload.location.longitude,
+  }, 'coordinates are applied exactly once');
+
+  const adminOnlyRoutes = [
+    ['GET', '/api/system/rep-support/reports'],
+    ['GET', '/api/system/rep-support/reports/export.xlsx'],
+    ['GET', '/api/system/rep-support/reports/999/package.zip'],
+    ['GET', '/api/system/rep-support/999/attachments/1'],
+    ['PATCH', '/api/system/rep-support/reports/999'],
+    ['POST', '/api/system/rep-support/reports/999/github-issue'],
+    ['GET', '/api/system/rep-location-changes'],
+    ['GET', '/api/system/rep-location-changes/999/evidence'],
+    ['POST', '/api/system/rep-location-changes/999/approved'],
+    ['POST', '/api/system/rep-location-changes/999/rejected'],
+    ['GET', '/api/system/rep-releases'],
+    ['POST', '/api/system/rep-releases/publish'],
+    ['POST', '/api/system/rep-releases/999/withdraw'],
+  ];
+  const repOnlyRoutes = [
+    ['GET', '/api/rep/support/reports'],
+    ['POST', '/api/rep/support/reports'],
+    ['GET', '/api/rep/support/reports/999/attachments/1'],
+    ['GET', '/api/rep/location-change-requests'],
+    ['GET', '/api/rep/location-change-requests/999/evidence'],
+    ['POST', '/api/rep/machines/999/location-change-requests'],
+    ['GET', '/api/rep/location-confirmations'],
+    ['POST', '/api/rep/machines/999/confirm-location'],
+  ];
+  for (const [method, path] of [...adminOnlyRoutes, ...repOnlyRoutes]) {
+    const anonymous = await request(path, { method });
+    assert.equal(anonymous.response.status, 401, `anonymous ${method} ${path} must be unauthenticated`);
+  }
+  for (const [method, path] of adminOnlyRoutes) {
+    const wrongRole = await request(path, { method }, login.cookie);
+    assert.equal(wrongRole.response.status, 403, `representative ${method} ${path} must be forbidden`);
+  }
+  for (const [method, path] of repOnlyRoutes) {
+    const wrongRole = await request(path, { method }, adminCookie);
+    assert.equal(wrongRole.response.status, 403, `administrator ${method} ${path} must be forbidden`);
+  }
 
   const disabledRep = await request(`/api/users/${repId}`, jsonOptions('PUT', { isActive: 0 }), adminCookie);
   assert.equal(disabledRep.response.status, 200);

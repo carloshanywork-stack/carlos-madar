@@ -28,6 +28,20 @@ const reportExportLimiter = rateLimit({
   legacyHeaders: false,
   message: { error: 'تم تجاوز الحد المسموح لتصدير البلاغات. حاول مرة أخرى بعد دقيقة.' },
 });
+const githubIssueLimiter = rateLimit({
+  windowMs: 10 * 60_000,
+  limit: 10,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  message: { error: 'تم تجاوز الحد المسموح لإنشاء بلاغات GitHub. حاول مرة أخرى لاحقاً.' },
+});
+const locationDecisionLimiter = rateLimit({
+  windowMs: 60_000,
+  limit: 60,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  message: { error: 'تم تجاوز الحد المسموح لقرارات الموقع. حاول مرة أخرى بعد دقيقة.' },
+});
 
 router.get('/rep-support/reports/export.xlsx', reportExportLimiter, (req, res) => {
   const status = typeof req.query.status === 'string' ? req.query.status : 'all';
@@ -132,7 +146,7 @@ router.patch('/rep-support/reports/:reportId', (req, res) => {
   res.json({ success: true, report: updateRepBugReport(req.params.reportId, req.body, req.user.id) });
 });
 
-router.post('/rep-support/reports/:reportId/github-issue', asyncHandler(async (req, res) => {
+router.post('/rep-support/reports/:reportId/github-issue', githubIssueLimiter, asyncHandler(async (req, res) => {
   res.set({ 'Cache-Control': 'private, no-store', Pragma: 'no-cache' });
   res.json({ success: true, report: await createGitHubIssueForRepBugReport(req.params.reportId, req.user.id) });
 }));
@@ -159,7 +173,7 @@ router.get('/rep-location-changes/:requestId/evidence', asyncHandler(async (req,
     .sendFile(file.absolutePath);
 }));
 
-router.post('/rep-location-changes/:requestId/:decision', asyncHandler(async (req, res) => {
+router.post('/rep-location-changes/:requestId/:decision', locationDecisionLimiter, asyncHandler(async (req, res) => {
   const result = await reviewRepMachineLocationChange(req.params.requestId, req.body, req.user.id, req.params.decision);
   res.set({ 'Cache-Control': 'private, no-store', Pragma: 'no-cache' });
   res.json({ success: true, ...result });

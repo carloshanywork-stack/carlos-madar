@@ -449,7 +449,8 @@ export async function createMachine(input, actorId = null, database = db) {
       }
 
       const result = database.prepare(`
-        INSERT INTO machines (code, name_ar, name_en, area) VALUES (?, ?, ?, ?)
+        INSERT INTO machines (code, name_ar, name_en, area, updated_at)
+        VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
       `).run(machine.code, machine.nameAr, machine.nameEn, machine.area);
       const id = Number(result.lastInsertRowid);
       recordAudit({
@@ -1406,9 +1407,10 @@ export async function importMachines(file, actorId = null, database = db) {
   for (const machine of machinesToWrite) await ensureMachineDirectories(machine);
   database.transaction(() => {
     const upsert = database.prepare(`
-      INSERT INTO machines (code, name_ar, name_en, area, active, deleted_at) VALUES (?, ?, ?, ?, 1, NULL)
+      INSERT INTO machines (code, name_ar, name_en, area, active, deleted_at, updated_at)
+      VALUES (?, ?, ?, ?, 1, NULL, CURRENT_TIMESTAMP)
       ON CONFLICT(code) DO UPDATE SET name_ar = excluded.name_ar, name_en = excluded.name_en,
-        area = excluded.area, active = 1, deleted_at = NULL
+        area = excluded.area, active = 1, deleted_at = NULL, updated_at = CURRENT_TIMESTAMP
     `);
     for (const machine of machinesToWrite) {
       const id = machine.id ?? database.prepare('SELECT id FROM machines WHERE code = ? COLLATE NOCASE').get(machine.code)?.id ?? null;
@@ -2968,8 +2970,8 @@ export function createTestMockMaintenanceOrder(input, actorId = null, database =
       recordAudit({ database, actorId, action: priorClient ? 'update_test_fixture' : 'create_test_fixture',
         entityType: 'client', entityId: Number(client.id), oldValues: priorClient, newValues: currentClient });
     }
-    database.prepare(`INSERT INTO machines (code, name_ar, name_en, area, is_location_locked)
-      VALUES (?, 'ماكينة تجريبية لاختبار التطبيق', 'Test ATM', ?, 0)`).run(machineCode, region);
+    database.prepare(`INSERT INTO machines (code, name_ar, name_en, area, is_location_locked, updated_at)
+      VALUES (?, 'ماكينة تجريبية لاختبار التطبيق', 'Test ATM', ?, 0, CURRENT_TIMESTAMP)`).run(machineCode, region);
     const machine = database.prepare(`SELECT id FROM machines WHERE code = ?`).get(machineCode);
     const currentMachine = database.prepare('SELECT * FROM machines WHERE id = ?').get(machine.id);
     recordAudit({ database, actorId, action: 'create_test_fixture',

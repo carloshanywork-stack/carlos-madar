@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import rateLimit from 'express-rate-limit';
 import { env } from '../../config/env.js';
 import { db } from '../../database/connection.js';
 import { asyncHandler, allowOnlyKeys, HttpError, requireObject, requireText } from '../http.js';
@@ -31,6 +32,7 @@ import {
   listLocationConfirmations,
   submitRepMachineLocationChange,
   listRepMachineLocationChangeRequests,
+  getMyRepMachineLocationChangeEvidence,
   requireRepUsername,
   submitRepMachineCorrection,
   syncRepLocationPing,
@@ -54,6 +56,21 @@ const supportReportUpload = memoryUpload({
   maxBytes: 4 * 1024 * 1024,
   extensions: ['.jpg', '.jpeg', '.png', '.webp'],
 }).single('attachment');
+
+const supportWriteLimiter = rateLimit({
+  windowMs: 10 * 60_000,
+  limit: 20,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  message: { error: 'تم تجاوز الحد المسموح لإرسال البلاغات. حاول مرة أخرى بعد قليل.' },
+});
+const locationChangeLimiter = rateLimit({
+  windowMs: 60 * 60_000,
+  limit: 20,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  message: { error: 'تم تجاوز الحد المسموح لطلبات تغيير الموقع. حاول مرة أخرى لاحقاً.' },
+});
 
 function setSessionCookie(req, res, token) {
   res.cookie(env.authCookieName, token, {
@@ -269,7 +286,13 @@ router.get('/location-change-requests', (req, res) => {
   res.json({ success: true, requests: listRepMachineLocationChangeRequests({ repId: req.user.id, status: 'all' }) });
 });
 
-router.post('/machines/:machineId/location-change-requests', machineCorrectionUpload, asyncHandler(async (req, res) => {
+router.get('/location-change-requests/:requestId/evidence', asyncHandler(async (req, res) => {
+  const file = await getMyRepMachineLocationChangeEvidence(req.params.requestId, req.user.id);
+  res.set({ 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff', 'Content-Type': file.contentType })
+    .sendFile(file.absolutePath);
+}));
+
+router.post('/machines/:machineId/location-change-requests', locationChangeLimiter, machineCorrectionUpload, asyncHandler(async (req, res) => {
   let input;
   try { input = JSON.parse(req.body?.request ?? ''); }
   catch { throw new HttpError(400, 'request must contain valid JSON.'); }
@@ -293,7 +316,7 @@ router.get('/support/reports/:reportId/attachments/:attachmentId', asyncHandler(
   }).attachment(file.original_name).sendFile(file.absolutePath);
 }));
 
-router.post('/support/reports', supportReportUpload, asyncHandler(async (req, res) => {
+router.post('/support/reports', supportWriteLimiter, supportReportUpload, asyncHandler(async (req, res) => {
   let report;
   try { report = typeof req.body?.report === 'string' ? JSON.parse(req.body.report) : req.body; }
   catch { throw new HttpError(400, 'report must contain valid JSON.'); }

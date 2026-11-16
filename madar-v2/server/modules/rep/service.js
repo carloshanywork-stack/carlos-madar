@@ -24,6 +24,13 @@ import {
 const DEFAULT_TIME_ZONE = 'Africa/Cairo';
 const MAX_TRACK_POINT_AGE_MS = 90 * 24 * 60 * 60 * 1000;
 const MAX_FIELD_CONFIRMATION_ACCURACY_METERS = 100;
+// Policy cap for unattended self-approval. Visits beyond the cap stay pending
+// for supervisor review; the limit can be tuned per installation.
+const DEFAULT_SELF_APPROVAL_DAILY_LIMIT = 20;
+const MAX_SELF_APPROVED_VISITS_PER_DAY = (() => {
+  const configured = Number(process.env.MADAR_REP_SELF_APPROVAL_DAILY_LIMIT);
+  return Number.isSafeInteger(configured) && configured > 0 ? configured : DEFAULT_SELF_APPROVAL_DAILY_LIMIT;
+})();
 
 function regionKey(value) {
   return String(value ?? '').normalize('NFKC').trim().toLocaleLowerCase('ar');
@@ -709,7 +716,20 @@ function evaluateSelfApproval(repId, visit, machine, beforePhotos, afterPhotos, 
   const reasons = [];
   const representative = database.prepare(`SELECT can_self_approve_visits FROM users
     WHERE id = ? AND role = 'rep' AND active = 1 AND deleted_at IS NULL`).get(repId);
-  if (Number(representative?.can_self_approve_visits) !== 1) reasons.push('PERMISSION_DISABLED');
+  if (Number(representative?.can_self_approve_visits) !== 1) {
+    reasons.push('PERMISSION_DISABLED');
+  } else {
+    const { start: dayStart, end: dayEnd } = getBusinessDayRange(database);
+    const selfApprovedToday = database.prepare(`
+      SELECT COUNT(*) AS count
+      FROM rep_visit_reviews review
+      JOIN rep_visits visit ON visit.id = review.visit_id
+      WHERE visit.rep_user_id = ? AND review.status = 'approved'
+        AND review.review_source = 'self_approval'
+        AND review.reviewed_at >= ? AND review.reviewed_at < ?
+    `).get(repId, dayStart, dayEnd).count;
+    if (selfApprovedToday >= MAX_SELF_APPROVED_VISITS_PER_DAY) reasons.push('DAILY_LIMIT');
+  }
 
   if (Number(machine.is_location_locked) !== 1
       || !Number.isFinite(machine.latitude) || !Number.isFinite(machine.longitude)) {
@@ -1034,6 +1054,16 @@ export async function submitRepMachineLocationChange(rep, machineId, input, evid
   }
 }
 
+/** Return evidence only to the representative who filed the request. */
+export async function getMyRepMachineLocationChangeEvidence(requestIdValue, repIdValue, database = db) {
+  const requestId = positiveId(requestIdValue, 'requestId');
+  const repId = positiveId(repIdValue, 'repId');
+  const owned = database.prepare(`SELECT 1 FROM rep_machine_location_change_requests
+    WHERE id = ? AND rep_user_id = ?`).get(requestId, repId);
+  if (!owned) throw new HttpError(404, 'Location evidence was not found.');
+  return getRepMachineLocationChangeEvidence(requestId, database);
+}
+
 export function listRepMachineLocationChangeRequests({ status = 'pending', repId = null } = {}, database = db) {
   if (!['pending', 'approved', 'rejected', 'all'].includes(status)) throw new HttpError(400, 'Invalid request status.');
   const clauses = [];
@@ -1075,7 +1105,13 @@ export async function reviewRepMachineLocationChange(requestIdValue, input, acto
     if (reviewer?.role !== 'admin') throw new HttpError(403, 'Administrator access is required.');
     const request = database.prepare('SELECT * FROM rep_machine_location_change_requests WHERE id = ?').get(requestId);
     if (!request) throw new HttpError(404, 'Location change request was not found.');
-    if (request.status !== 'pending') throw new HttpError(409, 'This location change request has already been reviewed.');
+    if (request.status !== 'pending') {
+      if (request.status === decision && (request.review_note ?? null) === (note ?? null)) {
+        return { repId: Number(request.rep_user_id), machineId: Number(request.machine_id), requestId,
+          status: decision, idempotent: true };
+      }
+      throw new HttpError(409, 'This location change request has already been reviewed.');
+    }
     const machine = database.prepare(`SELECT id, latitude, longitude, is_location_locked, geofence_radius_meters
       FROM machines WHERE id = ? AND active = 1 AND deleted_at IS NULL`).get(request.machine_id);
     if (!machine) throw new HttpError(409, 'The machine is no longer active.');
@@ -1096,9 +1132,8 @@ export async function reviewRepMachineLocationChange(requestIdValue, input, acto
       newValues: { latitude: decision === 'approved' ? request.proposed_latitude : machine.latitude,
         longitude: decision === 'approved' ? request.proposed_longitude : machine.longitude,
         request_status: decision, request_id: requestId, review_note: note } });
-    return { repId: Number(request.rep_user_id), machineId: Number(request.machine_id), requestId, status: decision };
-  }).immediate();
-  publishOperationsEvent('rep.machine.location-change-reviewed', {
+    return { repId: Number(request.rep_user_id), machineId: Number(request.machine_id), requestId, status: decision, idempotent: false };
+  }).immediate();  publishOperationsEvent('rep.machine.location-change-reviewed', {
     userId: outcome.repId, machineId: outcome.machineId, requestId: outcome.requestId, status: outcome.status,
   });
   return outcome;
