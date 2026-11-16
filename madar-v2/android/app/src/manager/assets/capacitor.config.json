@@ -1,0 +1,18 @@
+{
+	"appId": "com.madar.system.app",
+	"appName": "MADAR Manager",
+	"webDir": "public",
+	"android": {
+		"backgroundColor": "#126b57",
+		"loggingBehavior": "none",
+		"webContentsDebuggingEnabled": false
+	},
+	"plugins": {
+		"CapacitorHttp": {
+			"enabled": true
+		},
+		"CapacitorCookies": {
+			"enabled": true
+		}
+	}
+}

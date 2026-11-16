@@ -75,11 +75,13 @@ android {
 
 tasks.register('publishDualReleaseApks') {
     doLast {
+        def requested = gradle.startParameter.taskNames
+        def isManagerOnly = requested.any { it.contains('Manager') } && !requested.any { it.contains('Rep') }
         def repApk = file("${buildDir}/outputs/apk/rep/release/app-rep-release.apk")
         def managerApk = file("${buildDir}/outputs/apk/manager/release/app-manager-release.apk")
         def defaultReleaseDir = file("${buildDir}/outputs/apk/release")
         defaultReleaseDir.mkdirs()
-        if (repApk.exists()) {
+        if (repApk.exists() && !isManagerOnly) {
             copy {
                 from repApk
                 into defaultReleaseDir
