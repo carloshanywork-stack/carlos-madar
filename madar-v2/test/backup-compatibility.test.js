@@ -36,6 +36,29 @@ test('old backup is migrated in an isolated copy with IDs/history intact and ori
  const again=await prepareRestorableSnapshot(restored);new Database(again).close();
 });
 
+test('machine rows with a NULL updated_at are repaired for backup compatibility',async()=>{
+ const source=join(root,'null-machine-timestamp.sqlite');
+ await db.backup(source);
+ const stale=new Database(source);
+ // Reproduce a database written while the technical timestamp column was
+ // nullable: the recorded migration exists, but a later insert left NULL.
+ stale.exec('ALTER TABLE machines DROP COLUMN updated_at');
+ stale.exec('ALTER TABLE machines ADD COLUMN updated_at TEXT');
+ stale.prepare(`INSERT INTO machines (code, name_ar, area)
+   VALUES ('NULL-TIMESTAMP', 'ماكينة بلا وقت تحديث', 'test')`).run();
+ assert.equal(stale.prepare("SELECT updated_at FROM machines WHERE code = 'NULL-TIMESTAMP'").get().updated_at, null);
+ stale.close();
+ const restored=await prepareRestorableSnapshot(source);
+ const checked=new Database(restored,{readonly:true});
+ try {
+   assert.notEqual(checked.prepare("SELECT updated_at FROM machines WHERE code = 'NULL-TIMESTAMP'").get().updated_at, null,
+     'migration repairs machine rows created without a technical timestamp');
+   assert.equal(checked.prepare('SELECT COUNT(*) AS n FROM machines WHERE updated_at IS NULL').get().n,0);
+   assert.equal(checked.pragma('integrity_check',{simple:true}),'ok');
+   assert.equal(checked.pragma('foreign_key_check').length,0);
+ } finally {checked.close();}
+});
+
 test('newer migrations and corrupt snapshots are rejected without changing current data',async()=>{
  const source=join(root,'future.sqlite');await db.backup(source);
  const future=new Database(source);future.prepare('INSERT INTO schema_migrations(version) VALUES (?)').run('20990101-future');future.close();

@@ -35,10 +35,12 @@ export function schemaFingerprint(database, schema = 'main') {
 }
 export function migrateMachineTimestampMetadata(database) {
   const version='20261113-machine-updated-at-null-backfill';
-  if(database.prepare('SELECT 1 FROM schema_migrations WHERE version=?').get(version))return;
+  // Machine rows created through older insert paths can still carry a NULL
+  // updated_at after this migration was first recorded. Repair every time so
+  // backup schema fingerprints and restore staging remain valid.
   database.transaction(()=>{
     // created_at supplies initial technical update metadata, not a new business event.
     database.prepare('UPDATE machines SET updated_at=created_at WHERE updated_at IS NULL').run();
-    database.prepare('INSERT INTO schema_migrations(version) VALUES (?)').run(version);
+    database.prepare('INSERT OR IGNORE INTO schema_migrations(version) VALUES (?)').run(version);
   })();
 }
