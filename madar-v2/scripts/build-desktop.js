@@ -3,6 +3,12 @@ import { resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 const projectRoot = resolve(import.meta.dirname, '..');
+if (!process.env.ELECTRON_MIRROR) {
+  process.env.ELECTRON_MIRROR = 'https://npmmirror.com/mirrors/electron/';
+}
+if (!process.env.ELECTRON_BUILDER_BINARIES_MIRROR) {
+  process.env.ELECTRON_BUILDER_BINARIES_MIRROR = 'https://npmmirror.com/mirrors/electron-builder-binaries/';
+}
 const releaseBuild = process.argv.includes('--release');
 const serverUrlValue = process.env.MADAR_DESKTOP_SERVER_URL?.trim()
   || (releaseBuild ? '' : 'http://127.0.0.1:3000');

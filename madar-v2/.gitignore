@@ -21,6 +21,9 @@ android/capacitor-cordova-android-plugins/build/
 android/.idea/
 *.jks
 *.keystore
+*.pfx
+*.key
+dist-desktop/
 key.properties
 /data/
 .env
