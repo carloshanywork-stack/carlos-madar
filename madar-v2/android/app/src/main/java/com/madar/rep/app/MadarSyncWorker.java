@@ -154,7 +154,6 @@ public final class MadarSyncWorker extends Worker {
                 if (visit == null) return retryIndependentQueues ? Result.retry() : Result.success();
                 for (RepLocalStore.Photo photo : visit.photos) {
                     File file = new File(photo.path);
-                    if (!file.isFile() || file.length() < 1L || file.length() > MAX_FILE_BYTES) {
                     if (!file.isFile() || file.length() < 1L) {
                         store.markBlocked(visit.visitUuid, "صورة الزيارة المحلية مفقودة أو غير صالحة؛ لم تُحذف بيانات الزيارة.");
                         visit = null;
