@@ -46,7 +46,7 @@ abstract class MadarDatabase : RoomDatabase() {
     companion object {
         @Volatile private var instance: MadarDatabase? = null
 
-        private val MIGRATION_1_2 = object : Migration(1, 2) {
+        val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(database: SupportSQLiteDatabase) {
                 database.execSQL(
                     """CREATE TABLE IF NOT EXISTS gps_points (
@@ -70,7 +70,7 @@ abstract class MadarDatabase : RoomDatabase() {
             }
         }
 
-        private val MIGRATION_2_3 = object : Migration(2, 3) {
+        val MIGRATION_2_3 = object : Migration(2, 3) {
             override fun migrate(database: SupportSQLiteDatabase) {
                 database.execSQL("""CREATE TABLE IF NOT EXISTS support_reports (
                     reportUuid TEXT NOT NULL PRIMARY KEY,

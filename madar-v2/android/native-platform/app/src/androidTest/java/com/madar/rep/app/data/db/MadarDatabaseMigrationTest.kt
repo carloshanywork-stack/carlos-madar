@@ -22,7 +22,12 @@ class MadarDatabaseMigrationTest {
     @Test
     fun v1QueueAndHistorySurviveAdditiveGpsMigration() {
         helper.createDatabase(TEST_DATABASE, 1).apply {
-            execSQL("INSERT INTO visits (visitUuid,repId,cardId,machineId,machineCode,machineName,regionName,areaName,clientName,address,geofenceRadiusMeters,state,condition,reasonIdsCsv,maintenanceLinesJson,notes,capturedAt,attempts,nextAttemptAt,createdAt,updatedAt) VALUES ('legacy-visit',7,9,2,'M-2','آلة','القاهرة','','عميل','','50','draft','working','','[]','',100,0,0,100,100)")
+            execSQL(
+                "INSERT INTO visits (visitUuid,ownerRepId,cardId,machineCode,machineName,regionName,areaName,clientName,address," +
+                    "geofenceRadiusMeters,locationLocked,machineCondition,reasonIdsCsv,maintenanceLinesJson,notes,capturedAt," +
+                    "beforeCapturedAtCsv,afterCapturedAtCsv,photoPolicyVersion,state,attempts,nextAttemptAt,contentHash,createdAt,updatedAt) " +
+                    "VALUES ('legacy-visit',7,9,'M-2','آلة','القاهرة','','عميل','',50,0,'working','','[]','',100,'','',1,'draft',0,0,'hash',100,100)",
+            )
             close()
         }
 
@@ -32,7 +37,7 @@ class MadarDatabaseMigrationTest {
             true,
             MadarDatabase.MIGRATION_1_2,
         )
-        migrated.query("SELECT visitUuid,repId,state FROM visits").use { cursor ->
+        migrated.query("SELECT visitUuid,ownerRepId,state FROM visits").use { cursor ->
             check(cursor.moveToFirst())
             assertEquals("legacy-visit", cursor.getString(0))
             assertEquals(7L, cursor.getLong(1))
@@ -45,5 +50,33 @@ class MadarDatabaseMigrationTest {
         migrated.close()
     }
 
-    companion object { private const val TEST_DATABASE = "madar-room-v1-upgrade-test" }
+    @Test
+    fun v2SupportOutboxMigrationIsAdditiveAndPreservesExistingRows() {
+        helper.createDatabase(TEST_DATABASE_V2, 2).apply {
+            execSQL("INSERT INTO migration_state (key,value,updatedAt) VALUES ('legacy','preserved',123)")
+            close()
+        }
+
+        val migrated = helper.runMigrationsAndValidate(
+            TEST_DATABASE_V2,
+            3,
+            true,
+            MadarDatabase.MIGRATION_2_3,
+        )
+        migrated.query("SELECT value,updatedAt FROM migration_state WHERE key = 'legacy'").use { cursor ->
+            check(cursor.moveToFirst())
+            assertEquals("preserved", cursor.getString(0))
+            assertEquals(123L, cursor.getLong(1))
+        }
+        migrated.query("SELECT COUNT(*) FROM support_reports").use { cursor ->
+            check(cursor.moveToFirst())
+            assertEquals(0, cursor.getInt(0))
+        }
+        migrated.close()
+    }
+
+    companion object {
+        private const val TEST_DATABASE = "madar-room-v1-upgrade-test"
+        private const val TEST_DATABASE_V2 = "madar-room-v2-upgrade-test"
+    }
 }

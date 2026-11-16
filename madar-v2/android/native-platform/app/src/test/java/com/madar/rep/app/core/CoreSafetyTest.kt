@@ -12,18 +12,18 @@ class CoreSafetyTest {
         val infinity = GeoPoint(30.0, Double.POSITIVE_INFINITY, 4f, NOW)
         val outOfRange = GeoPoint(91.0, 31.2, 4f, NOW)
 
-        assertTrue(GeoPolicy.evaluate(nan, null, null, nowMillis = NOW) is LocationDecision.Invalid)
-        assertTrue(GeoPolicy.evaluate(infinity, null, null, nowMillis = NOW) is LocationDecision.Invalid)
-        assertTrue(GeoPolicy.evaluate(outOfRange, null, null, nowMillis = NOW) is LocationDecision.Invalid)
+        assertTrue(GeoPolicy.evaluate(nan, null, null, nowMillis = NOW) is LocationDecision.InvalidCoordinates)
+        assertTrue(GeoPolicy.evaluate(infinity, null, null, nowMillis = NOW) is LocationDecision.InvalidCoordinates)
+        assertTrue(GeoPolicy.evaluate(outOfRange, null, null, nowMillis = NOW) is LocationDecision.InvalidCoordinates)
     }
 
     @Test
     fun validatesMachinePinAndPolicyParameters() {
         val point = point()
-        assertTrue(GeoPolicy.evaluate(point, 30.0, null, nowMillis = NOW) is LocationDecision.Invalid)
-        assertTrue(GeoPolicy.evaluate(point, 91.0, 31.2, nowMillis = NOW) is LocationDecision.Invalid)
-        assertTrue(GeoPolicy.evaluate(point, null, null, radiusMeters = Double.NaN, nowMillis = NOW) is LocationDecision.Invalid)
-        assertTrue(GeoPolicy.evaluate(point, null, null, maxAccuracyMeters = Float.NaN, nowMillis = NOW) is LocationDecision.Invalid)
+        assertTrue(GeoPolicy.evaluate(point, 30.0, null, nowMillis = NOW) is LocationDecision.InvalidCoordinates)
+        assertTrue(GeoPolicy.evaluate(point, 91.0, 31.2, nowMillis = NOW) is LocationDecision.InvalidCoordinates)
+        assertTrue(GeoPolicy.evaluate(point, null, null, radiusMeters = Double.NaN, nowMillis = NOW) is LocationDecision.InvalidCoordinates)
+        assertTrue(GeoPolicy.evaluate(point, null, null, maxAccuracyMeters = Float.NaN, nowMillis = NOW) is LocationDecision.InvalidCoordinates)
     }
 
     @Test

@@ -27,7 +27,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsStateWithLifecycle
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -153,7 +153,7 @@ fun SupportScreen(vm: MadarViewModel, screenName: String = "profile/support") {
         ) {
             if (busy) CircularProgressIndicator() else Text("حفظ البلاغ وإضافته للمزامنة")
         }
-        if (!message.isNullOrBlank()) Text(message!!)
+        message?.takeIf { it.isNotBlank() }?.let { Text(it) }
         Text("بلاغات هذا الجهاز")
         reports.take(10).forEach { report ->
             val status = when (report.state) {
