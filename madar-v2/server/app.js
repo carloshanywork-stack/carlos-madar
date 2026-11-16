@@ -266,24 +266,26 @@ const RELEASE_DISTRIBUTION_ERRORS = Object.freeze({
   },
 });
 
-function downloadApkArtifact(req, res, next, path, downloadName, { release = false } = {}) {
+function downloadApkArtifact(req, res, next, path, downloadName, { release = false, checkRegistry = true } = {}) {
   let descriptor;
   try {
     ({ descriptor } = openRegularFileNoFollow(path));
     if (release) {
       const verified = readVerifiedApkMetadata(path, descriptor, { required: true });
-      const distribution = releaseDistributionState(readReleaseRegistration(verified));
-      if (!distribution.distributable) {
-        closeSync(descriptor);
-        const rejection = RELEASE_DISTRIBUTION_ERRORS[distribution.reason] ?? {
-          status: 503,
-          message: 'This release is not available for distribution.',
-        };
-        res.set('Cache-Control', 'private, no-store').status(rejection.status).json({
-          error: rejection.message,
-          code: distribution.reason.toUpperCase(),
-        });
-        return;
+      if (checkRegistry) {
+        const distribution = releaseDistributionState(readReleaseRegistration(verified));
+        if (!distribution.distributable) {
+          closeSync(descriptor);
+          const rejection = RELEASE_DISTRIBUTION_ERRORS[distribution.reason] ?? {
+            status: 503,
+            message: 'This release is not available for distribution.',
+          };
+          res.set('Cache-Control', 'private, no-store').status(rejection.status).json({
+            error: rejection.message,
+            code: distribution.reason.toUpperCase(),
+          });
+          return;
+        }
       }
     }
   } catch (error) {
@@ -335,6 +337,7 @@ app.get('/download/apk', (req, res, next) => {
   if (target === 'system') {
     downloadApkArtifact(req, res, next, managerApkPath, 'madar-manager.apk', {
       release: basename(managerApkPath) === 'madar-manager-release.apk',
+      checkRegistry: false,
     });
     return;
   }

@@ -36,6 +36,7 @@ after(async () => {
   await new Promise((resolve) => server.close(resolve));
   if (db.open) db.close();
   rmSync(temporaryDirectory, { recursive: true, force: true });
+  process.env.MADAR_REP_MIN_SUPPORTED_VERSION_CODE = '0';
 });
 
 test('app version endpoint is public and reports the configured minimum', async () => {
