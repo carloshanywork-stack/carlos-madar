@@ -685,7 +685,6 @@ export function finalizePayroll(input, actorId = null, database = db) {
         draft.totals.total_bonus_cents, draft.totals.total_advances_cents, draft.totals.net_total_cents);
       id = Number(result.lastInsertRowid);
     }
-    assertCashAvailable(draft.totals.net_total_cents, database);
     const insertLine = database.prepare(`INSERT INTO payroll_lines (run_id, employee_id, base_salary_cents, present_days, absent_days,
       overtime_hours, overtime_amount_cents, deductions_cents, net_salary_cents, normal_overtime_hours,
       holiday_overtime_hours, normal_overtime_amount_cents, holiday_overtime_amount_cents, bonus_cents,
@@ -697,10 +696,6 @@ export function finalizePayroll(input, actorId = null, database = db) {
         line.holiday_overtime_hours, line.normal_overtime_amount_cents, line.holiday_overtime_amount_cents,
         line.bonus_cents, line.advances_cents, line.absence_deduction_cents, line.other_deductions_cents,
         line.name, line.department);
-      if (line.net_salary_cents > 0) {
-        insertTreasuryEntry({ database, kind: 'expense', category: 'رواتب وأجور', amountCents: line.net_salary_cents,
-          employeeId: line.employee_id, reference: `Payroll ${draft.month}`, notes: `Monthly salary disbursement ${draft.month}`, actorId });
-      }
     }
     database.prepare(`UPDATE payroll_runs SET status = 'finalized', finalized_at = CURRENT_TIMESTAMP WHERE id = ?`).run(id);
     recordAudit({ database, actorId, action: 'finalize_payroll', entityType: 'payroll_run', entityId: id,

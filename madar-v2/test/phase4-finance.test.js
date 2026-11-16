@@ -122,8 +122,8 @@ test('Phase 4 finance lifecycle keeps integer-cents, stock, custody, billing, an
 
   assert.equal((await request('/api/employees/payroll?month=2026-11', {}, salesLogin.cookie)).response.status, 403);
   assert.equal((await request('/api/employees/payroll?month=2026-11', {}, purchasingLogin.cookie)).response.status, 403);
-  assert.equal((await request('/api/employees/payroll?month=2026-11', {}, financeRoleLogin.cookie)).response.status, 200);
-  assert.equal((await request('/api/employees/payroll?month=2026-11', {}, accountantLogin.cookie)).response.status, 200);
+  assert.equal((await request('/api/employees/payroll?month=2026-11', {}, financeRoleLogin.cookie)).response.status, 403);
+  assert.equal((await request('/api/employees/payroll?month=2026-11', {}, accountantLogin.cookie)).response.status, 403);
 
   const auditAsAdmin = await request('/api/system/audit-log?page=1&limit=10&action=login&entityType=user');
   assert.equal(auditAsAdmin.response.status, 200, JSON.stringify(auditAsAdmin.body));

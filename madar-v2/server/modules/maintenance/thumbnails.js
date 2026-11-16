@@ -67,7 +67,7 @@ export async function getMaintenanceThumbnail(absolutePath, savedRotation = 0) {
         : absolutePath;
       const pipeline = sharp(rotatedSource, { failOn: 'none' });
       const buffer = await (rotation ? pipeline : pipeline.rotate())
-        .resize({ width: 320, height: 240, fit: 'inside', withoutEnlargement: true })
+        .resize({ width: 200, height: 200, fit: 'inside', withoutEnlargement: true })
         .webp({ quality: 74, effort: 4 })
         .toBuffer();
       await writeFile(temporaryPath, buffer, { flag: 'wx', mode: 0o600 });

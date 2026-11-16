@@ -86,7 +86,7 @@ test('test mock order creates and assigns an isolated visit; geofence reset clea
   assert.equal(reset.body.machine.longitude, null);
   assert.equal(reset.body.machine.is_location_locked, 0);
   assert.equal(reset.body.machine.geofence_radius_meters, 50);
-  assert.equal(db.prepare(`SELECT action FROM audit_log WHERE entity_type = 'machine' AND entity_id = ? ORDER BY id DESC LIMIT 1`).get(String(machineId)).action, 'reset_geofence_location');
+  assert.equal(db.prepare(`SELECT action FROM audit_log WHERE entity_type = 'machine' AND entity_id = ? ORDER BY id DESC LIMIT 1`).get(String(machineId)).action, 'RESET_MACHINE_LOCATION');
 });
 
 test('deleting one isolated training order permanently removes its machine, visit, photos, and files without affecting another', async () => {
