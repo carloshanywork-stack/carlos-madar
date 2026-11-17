@@ -626,6 +626,39 @@ app.whenReady().then(async () => {
   }
 });
 
+function reportDesktopCrash(error, context = 'uncaughtException') {
+  try {
+    const errorUuid = require('node:crypto').randomUUID();
+    const bugPayload = {
+      reportUuid: errorUuid,
+      category: 'bug',
+      severity: 'critical',
+      description: `Desktop ${context}: ${error?.message || String(error)}`,
+      screenName: 'desktop/main',
+      appVersion: app.getVersion() || '2.0.0',
+      deviceModel: `Windows ${process.platform} ${process.arch}`,
+      androidVersion: process.getSystemVersion() || 'Windows',
+      logs: `${error?.stack || ''}\nContext: ${context}\nMemory: ${JSON.stringify(process.memoryUsage())}`,
+    };
+    const storageBugsDir = process.env.STORAGE_ROOT_PATH ? join(process.env.STORAGE_ROOT_PATH, 'bugs') : '/mnt/madar-storage/madar-storage/bugs';
+    if (existsSync(storageBugsDir)) {
+      writeFileSync(join(storageBugsDir, `desktop-${errorUuid}.json`), JSON.stringify(bugPayload, null, 2), 'utf8');
+    }
+  } catch (err) {
+    console.error('Failed to log desktop crash:', err);
+  }
+}
+
+process.on('uncaughtException', (err) => {
+  console.error('Unhandled desktop exception:', err);
+  reportDesktopCrash(err, 'uncaughtException');
+});
+
+process.on('unhandledRejection', (reason) => {
+  console.error('Unhandled desktop rejection:', reason);
+  reportDesktopCrash(reason instanceof Error ? reason : new Error(String(reason)), 'unhandledRejection');
+});
+
 app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) createWindow();
 });
