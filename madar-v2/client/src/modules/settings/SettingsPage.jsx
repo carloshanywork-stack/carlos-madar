@@ -105,7 +105,7 @@ export default function SettingsPage() {
   useEffect(() => {
     let active = true;
     if (desktopApp?.getVersion) {
-      desktopApp.getVersion().then((version) => { if (active) setDesktopVersion(version); }).catch(() => {});
+      desktopApp.getVersion().then((version) => { if (active) setDesktopVersion(version); }).catch(() => { });
     }
     if (isAdmin) {
       reloadDesktopStatus();

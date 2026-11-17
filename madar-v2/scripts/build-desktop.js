@@ -29,7 +29,7 @@ if (!serverUrlValue && releaseBuild) {
   throw new Error('Set MADAR_DESKTOP_SERVER_URL to the approved production HTTPS server before making a release build.');
 }
 if (serverUrlValue.startsWith('http://') && !releaseBuild
-    && ['localhost', '127.0.0.1'].includes(new URL(serverUrlValue).hostname)) {
+  && ['localhost', '127.0.0.1'].includes(new URL(serverUrlValue).hostname)) {
   serverUrl = new URL(serverUrlValue).origin;
 } else {
   serverUrl = parseHttpsUrl(serverUrlValue, 'MADAR_DESKTOP_SERVER_URL', { originOnly: true });

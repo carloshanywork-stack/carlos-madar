@@ -51,7 +51,7 @@ function validateServerUrl(value) {
   try { url = new URL(value); } catch { throw new Error('The configured MADAR server URL is invalid.'); }
   const local = isLocalAddress(url.hostname);
   if ((!local && url.protocol !== 'https:') || (local && !['http:', 'https:'].includes(url.protocol))
-      || url.username || url.password || url.search || url.hash || url.pathname !== '/') {
+    || url.username || url.password || url.search || url.hash || url.pathname !== '/') {
     throw new Error('The Windows app requires an HTTPS server origin (HTTP is allowed only for localhost and local network).');
   }
   return url;
@@ -517,7 +517,7 @@ app.on('activate', () => {
 
 app.on('window-all-closed', () => {
   if (loopbackServer) {
-    try { loopbackServer.close(); } catch {}
+    try { loopbackServer.close(); } catch { }
   }
   if (process.platform !== 'darwin') app.quit();
 });

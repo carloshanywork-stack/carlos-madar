@@ -95,7 +95,7 @@ function AuthenticatedApplication() {
       const status = await api.get('/api/auth/status');
       const authenticatedUser = status.authenticated ? status.user : null;
       if (authenticatedUser?.role === 'rep') {
-        try { await api.post('/api/auth/logout'); } catch {}
+        try { await api.post('/api/auth/logout'); } catch { }
         setUser(null);
         setOfflineOnly(false);
         setSetupRequired(false);
@@ -234,7 +234,7 @@ function AuthenticatedApplication() {
 
   const loginSuccess = async (authenticatedUser) => {
     if (authenticatedUser?.role === 'rep') {
-      try { await api.post('/api/auth/logout'); } catch {}
+      try { await api.post('/api/auth/logout'); } catch { }
       setUser(null);
       setAuthError('هذا التطبيق مخصص للإدارة والمشرفين فقط. يرجى استخدام تطبيق مدار للمناديب.');
       return;
@@ -267,13 +267,13 @@ function AuthenticatedApplication() {
   return (
     <div id="madar-app" dir="rtl" data-theme={theme}>
       {loading ? <LoadingState label="جارٍ التحقق من تسجيل الدخول..." /> : !user ? (
-          <SignInPage
-            setupRequired={setupRequired}
-            initialError={authError}
-            onLoginSuccess={loginSuccess}
-            theme={theme}
-            onThemeToggle={toggleTheme}
-          />
+        <SignInPage
+          setupRequired={setupRequired}
+          initialError={authError}
+          onLoginSuccess={loginSuccess}
+          theme={theme}
+          onThemeToggle={toggleTheme}
+        />
       ) : user.role === 'rep' ? (
         <SignInPage
           setupRequired={false}
