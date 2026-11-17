@@ -10,4 +10,7 @@ contextBridge.exposeInMainWorld('madarDesktop', Object.freeze({
   testServer: (url) => ipcRenderer.invoke('madar:desktop:test-server', url),
   openServerSettings: () => ipcRenderer.invoke('madar:desktop:open-server-settings'),
   reloadApp: () => ipcRenderer.invoke('madar:desktop:reload'),
+  getPrinters: () => ipcRenderer.invoke('madar:desktop:get-printers'),
+  printSilent: (options) => ipcRenderer.invoke('madar:desktop:print-silent', options),
+  showNotification: (options) => ipcRenderer.invoke('madar:desktop:notification', options),
 }));
