@@ -220,6 +220,7 @@ export default function SupervisorRadarPage() {
   const [selectedVisit, setSelectedVisit] = useState(null);
   const [reviewNotes, setReviewNotes] = useState({});
   const [loading, setLoading] = useState(true);
+  const [mobileTab, setMobileTab] = useState('map');
   const [busyVisit, setBusyVisit] = useState(null);
   const [selectedBulkIds, setSelectedBulkIds] = useState(() => new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
@@ -382,7 +383,25 @@ export default function SupervisorRadarPage() {
       </section>
 
       <LocationReviews />
-      <div className="supervisor-main-grid">
+
+      <div className="supervisor-mobile-tabs" role="tablist" aria-label="أقسام الرادار للهواتف">
+        <button
+          type="button"
+          className={`supervisor-mobile-tab ${mobileTab === 'map' ? 'active' : ''}`}
+          onClick={() => setMobileTab('map')}
+        >
+          🗺️ الخريطة والمسار
+        </button>
+        <button
+          type="button"
+          className={`supervisor-mobile-tab ${mobileTab === 'qa' ? 'active' : ''}`}
+          onClick={() => setMobileTab('qa')}
+        >
+          📋 مراجعة الصور ({visits.length})
+        </button>
+      </div>
+
+      <div className={`supervisor-main-grid show-mobile-${mobileTab}`}>
         <section className="supervisor-panel radar-panel">
           <div className="supervisor-panel-head">
             <div><span className="supervisor-eyebrow">GPS · LAST SIGNAL</span><h2>الخريطة ومسارات اليوم</h2></div>

@@ -148,6 +148,43 @@
   #madar-app .supervisor-panel-head h2 { font-size: 14px; }
   #madar-app .live-pill { font-size: 8px; }
 }
+#madar-app .supervisor-mobile-tabs {
+  display: none;
+  gap: 8px;
+  margin-bottom: 15px;
+}
+@media (max-width: 900px) {
+  #madar-app .supervisor-mobile-tabs {
+    display: flex;
+    overflow-x: auto;
+    padding-bottom: 4px;
+  }
+  #madar-app .supervisor-mobile-tab {
+    flex: 1;
+    min-width: 120px;
+    padding: 10px 14px;
+    border: 1px solid #d3dddf;
+    border-radius: 10px;
+    background: #fff;
+    color: #374151;
+    font-size: 13px;
+    font-weight: 800;
+    cursor: pointer;
+    text-align: center;
+    white-space: nowrap;
+    transition: all 0.15s ease;
+  }
+  #madar-app .supervisor-mobile-tab.active {
+    background: #187b68;
+    color: #fff;
+    border-color: #187b68;
+  }
+  #madar-app .supervisor-main-grid.show-mobile-map .qa-panel { display: none; }
+  #madar-app .supervisor-main-grid.show-mobile-map .radar-panel { display: block; }
+  #madar-app .supervisor-main-grid.show-mobile-qa .radar-panel { display: none; }
+  #madar-app .supervisor-main-grid.show-mobile-qa .qa-panel { display: block; }
+}
+
 #madar-app .location-reviews-panel { padding: 20px; border: 1px solid #283e52; border-radius: 14px; color: #e2e8f0; background: #152232; box-shadow: 0 16px 36px rgba(4, 12, 21, .18); }
 #madar-app .location-reviews-header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
 #madar-app .location-reviews-header > div { flex: 1; }
@@ -179,4 +216,8 @@
 #madar-app .location-review-actions button:disabled, #madar-app .location-reviews-refresh:disabled { cursor: not-allowed; opacity: .55; }
 #madar-app .location-reviews-empty, #madar-app .location-reviews-error { padding: 12px; border: 1px solid #2c4257; border-radius: 9px; color: #a8bac9; background: #1a2a3d; }
 #madar-app .location-reviews-error { color: #fecaca; border-color: #7f1d1d; background: #351d27; }
-@media (max-width: 560px) { #madar-app .location-reviews-panel { padding: 14px; } #madar-app .location-review-comparison { grid-template-columns: 1fr; } #madar-app .location-reviews-header { flex-wrap: wrap; } }
+@media (max-width: 560px) {
+  #madar-app .location-reviews-panel { padding: 14px; }
+  #madar-app .location-review-comparison { grid-template-columns: 1fr; }
+  #madar-app .location-reviews-header { flex-wrap: wrap; }
+}

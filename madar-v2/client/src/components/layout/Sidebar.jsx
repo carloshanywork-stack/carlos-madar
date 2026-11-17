@@ -17,10 +17,11 @@ const sections = [
 
 export default function Sidebar({ open, onNavigate, user }) {
   const location = useLocation();
+  const canViewSupervisor = ['admin', 'supervisor'].includes(user?.role);
   const canViewFinance = ['admin', 'finance', 'accountant'].includes(user?.role);
-  const visibleSections = [...sections.slice(0, 3), ...(user?.role === 'admin' ? [{ path: '/supervisor', label: 'رادار المشرف', icon: 'map' }] : []), ...sections.slice(3)]
+  const visibleSections = [...sections.slice(0, 3), ...(canViewSupervisor ? [{ path: '/supervisor', label: 'رادار المشرف', icon: 'map' }] : []), ...sections.slice(3)]
     .filter((item) => item.path !== '/staff' || user?.role === 'admin')
-    .filter((item) => item.path !== '/rep-support' || user?.role === 'admin')
+    .filter((item) => item.path !== '/rep-support' || canViewSupervisor)
     .filter((item) => !['/finance', '/accounting'].includes(item.path) || canViewFinance)
     .filter((item) => item.path !== '/settings' || user?.role === 'admin');
   return (

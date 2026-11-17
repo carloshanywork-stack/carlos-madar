@@ -16,6 +16,18 @@ export function requireAdmin(req, res, next) {
   next();
 }
 
+export function requireSupervisorOrAdmin(req, res, next) {
+  if (!req.user) {
+    res.status(401).json({ error: 'Authentication is required.' });
+    return;
+  }
+  if (!['admin', 'supervisor'].includes(req.user.role)) {
+    forbid(res, 'Administrator or supervisor access is required.');
+    return;
+  }
+  next();
+}
+
 export function isFinanceOrAdmin(req) {
   if (!req.user) return false;
   const role = req.user.role;

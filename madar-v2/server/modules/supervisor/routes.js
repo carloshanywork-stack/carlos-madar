@@ -19,8 +19,8 @@ import {
 const router = Router();
 
 router.use((req, res, next) => {
-  if (req.user?.role !== 'admin') {
-    res.status(403).json({ error: 'Administrator access is required for supervisor radar and visit review.' });
+  if (!['admin', 'supervisor'].includes(req.user?.role)) {
+    res.status(403).json({ error: 'Administrator or supervisor access is required for supervisor radar and visit review.' });
     return;
   }
   next();

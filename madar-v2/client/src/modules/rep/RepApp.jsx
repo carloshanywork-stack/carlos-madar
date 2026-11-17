@@ -22,6 +22,8 @@ import {
   listGpsSamples,
   listPendingVisits,
   listPendingMachineActions,
+  listPendingSupportReports,
+  deletePendingSupportReport,
   markRouteCardSubmitted,
   requestPersistentStorage,
   saveSnapshot,
@@ -1519,6 +1521,24 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
           break;
         }
       }
+
+      // Drain queued offline support reports
+      try {
+        const queuedReports = await listPendingSupportReports(userId);
+        for (const item of queuedReports) {
+          try {
+            const formData = new FormData();
+            formData.append('report', JSON.stringify(item.report));
+            if (item.attachment) formData.append('attachment', item.attachment);
+            await api.upload('/api/rep/support/reports', formData, { timeoutMs: 30000 });
+            await deletePendingSupportReport(item.reportUuid);
+          } catch (reportErr) {
+            if (reportErr?.status && reportErr.status >= 400 && reportErr.status < 500) {
+              await deletePendingSupportReport(item.reportUuid);
+            }
+          }
+        }
+      } catch {}
     } catch (error) {
       setStorageError(error.message || 'تعذر قراءة قائمة المزامنة المحلية.');
     } finally {
@@ -2028,7 +2048,7 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
       )}
 
       {offlineOnly && <div className="rep-offline-banner" role="status">أنت في وضع العمل المحلي. لا تُرسل أي بيانات حتى تتم إعادة التحقق من الجلسة مع الخادم.</div>}
-      {supportPanelOpen && <RepSupportPanel onClose={() => setSupportPanelOpen(false)} />}
+      {supportPanelOpen && <RepSupportPanel repId={userId} onClose={() => setSupportPanelOpen(false)} />}
 
       {/* Tab 1: الوردية (Shift / Attendance) */}
       {activeTab === 'shift' && (
@@ -2261,7 +2281,7 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
       {/* Tab 3: البلاغات والدعم (Tickets / Support) */}
       {activeTab === 'tickets' && (
         <div className="rep-tab-view rep-tab-tickets">
-          <RepSupportPanel inline onClose={() => setActiveTab('route')} />
+          <RepSupportPanel repId={userId} inline onClose={() => setActiveTab('route')} />
         </div>
       )}
 

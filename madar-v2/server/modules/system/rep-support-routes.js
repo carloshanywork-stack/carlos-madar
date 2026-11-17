@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { ZipArchive } from 'archiver';
 import rateLimit from 'express-rate-limit';
 import XLSX from 'xlsx';
-import { requireAdmin } from '../auth/authorization.js';
+import { requireSupervisorOrAdmin } from '../auth/authorization.js';
 import { asyncHandler, HttpError } from '../http.js';
 import {
   createGitHubIssueForRepBugReport,
@@ -19,7 +19,7 @@ import {
 } from '../rep/service.js';
 
 const router = Router();
-router.use(requireAdmin);
+router.use(requireSupervisorOrAdmin);
 
 const reportExportLimiter = rateLimit({
   windowMs: 60_000,
