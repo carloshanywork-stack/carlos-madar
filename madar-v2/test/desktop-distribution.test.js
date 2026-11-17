@@ -65,3 +65,19 @@ test('desktop download route redirects to CDN when configured', async () => {
     delete process.env.MADAR_DESKTOP_CDN_URL;
   }
 });
+
+test('desktop download route serves artifact by filename and rejects path traversal', async () => {
+  const statusRes = await fetch(`${baseUrl}/download/desktop/status`);
+  const status = await statusRes.json();
+  if (status.available && status.filename) {
+    const fileRes = await fetch(`${baseUrl}/download/desktop/${status.filename}`);
+    assert.equal(fileRes.status, 200);
+    assert.match(fileRes.headers.get('content-disposition') || '', new RegExp(status.filename));
+  }
+
+  const missingRes = await fetch(`${baseUrl}/download/desktop/non-existent-package.zip`);
+  assert.equal(missingRes.status, 404);
+
+  const traversalRes = await fetch(`${baseUrl}/download/desktop/%2e%2e%2fpackage.json`);
+  assert.equal(traversalRes.status, 404);
+});

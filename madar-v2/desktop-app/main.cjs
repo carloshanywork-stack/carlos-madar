@@ -88,10 +88,28 @@ function readConfig() {
   }
 
   currentServerOrigin = validateServerUrl(baseConfig.serverUrl).origin;
+  if (!baseConfig.updateUrl && currentServerOrigin) {
+    baseConfig.updateUrl = `${currentServerOrigin}/download/desktop/`;
+  }
   return baseConfig;
 }
 
 const config = readConfig();
+
+function configureAutoUpdater() {
+  const targetUpdateUrl = config.updateUrl || (currentServerOrigin ? `${currentServerOrigin}/download/desktop/` : '');
+  if (!targetUpdateUrl) return false;
+  try {
+    autoUpdater.setFeedURL({
+      provider: 'generic',
+      url: targetUpdateUrl,
+    });
+    return true;
+  } catch (err) {
+    console.warn('Could not set autoUpdater feed URL:', err.message);
+    return false;
+  }
+}
 
 function isTrustedUrl(value) {
   try {
@@ -268,13 +286,14 @@ async function showUpdateAvailable(info) {
 }
 
 async function checkForUpdates({ manual = false } = {}) {
-  if (!app.isPackaged || !config.updateUrl) {
+  const configured = configureAutoUpdater();
+  if (!app.isPackaged || !configured) {
     if (manual && mainWindow) {
       await dialog.showMessageBox(mainWindow, {
         type: 'info',
         title: 'التحقق من التحديثات',
         message: 'قناة تحديث تطبيق Windows لم تُجهّز بعد.',
-        detail: 'سيظل بإمكانك استخدام إصدار MADAR الحالي.',
+        detail: 'سيظل بإمكانك استخدام إصدار MADAR الحالي دون انقطاع.',
         buttons: ['حسناً'],
         noLink: true,
       });
@@ -285,20 +304,26 @@ async function checkForUpdates({ manual = false } = {}) {
   updateCheckInProgress = true;
   try {
     const result = await autoUpdater.checkForUpdates();
-    if (manual && result?.isUpdateAvailable === false && mainWindow) {
+    if (manual && (!result || result.isUpdateAvailable === false) && mainWindow) {
       await dialog.showMessageBox(mainWindow, {
-        type: 'info', title: 'التحقق من التحديثات',
-        message: 'تطبيق MADAR محدّث بالفعل.', buttons: ['حسناً'], noLink: true,
+        type: 'info',
+        title: 'التحقق من التحديثات',
+        message: 'تطبيق MADAR محدّث بالفعل.',
+        detail: `أنت تستخدم أحدث إصدار متاح (${app.getVersion() || '1.0.0'}).`,
+        buttons: ['حسناً'],
+        noLink: true,
       });
     }
   } catch (error) {
     console.error('MADAR desktop update check failed:', error);
     if (manual && mainWindow) {
       await dialog.showMessageBox(mainWindow, {
-        type: 'warning', title: 'تعذر التحقق من التحديثات',
+        type: 'warning',
+        title: 'تعذر التحقق من التحديثات',
         message: 'لم نتمكن من الوصول إلى قناة التحديث الآن.',
         detail: 'بياناتك لم تتأثر. تحقق من اتصال السيرفر وحاول لاحقاً.',
-        buttons: ['حسناً'], noLink: true,
+        buttons: ['حسناً'],
+        noLink: true,
       });
     }
   } finally {
@@ -434,6 +459,9 @@ ipcMain.handle('madar:desktop:set-server-config', (_event, payload) => {
   if (!payload?.serverUrl) throw new Error('يرجى تحديد عنوان خادم صحيح.');
   const validated = validateServerUrl(payload.serverUrl);
   currentServerOrigin = validated.origin;
+  config.serverUrl = currentServerOrigin;
+  config.updateUrl = `${currentServerOrigin}/download/desktop/`;
+  configureAutoUpdater();
   const userConfigPath = getUserConfigPath();
   writeFileSync(userConfigPath, JSON.stringify({ serverUrl: currentServerOrigin }, null, 2), { encoding: 'utf8', mode: 0o600 });
   return { ok: true, serverUrl: currentServerOrigin };
@@ -568,6 +596,7 @@ autoUpdater.autoDownload = false;
 autoUpdater.autoInstallOnAppQuit = true;
 autoUpdater.on('update-available', (info) => { void showUpdateAvailable(info); });
 autoUpdater.on('error', (error) => console.error('MADAR desktop updater:', error));
+configureAutoUpdater();
 
 app.whenReady().then(async () => {
   createMenu();

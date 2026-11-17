@@ -53,6 +53,11 @@ const desktopConfig = {
   releaseBuild,
 };
 writeFileSync(resolve(projectRoot, 'desktop-app/runtime-config.json'), `${JSON.stringify(desktopConfig, null, 2)}\n`, { mode: 0o600 });
+if (updateUrl) {
+  const ymlContent = `provider: generic\nurl: '${updateUrl}'\n`;
+  writeFileSync(resolve(projectRoot, 'desktop-app/dev-app-update.yml'), ymlContent);
+  writeFileSync(resolve(projectRoot, 'desktop-app/app-update.yml'), ymlContent);
+}
 
 // Build the client web assets and bundle them into desktop-app/web for offline/local execution
 console.log('[BuildDesktop] Compiling web client bundle for desktop shell...');

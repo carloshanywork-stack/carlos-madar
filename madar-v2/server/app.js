@@ -410,16 +410,27 @@ app.get('/download/apk/status', apkDownloadLimiter, (req, res) => {
   }
 });
 
-function resolveDesktopArtifact() {
+function resolveDesktopArtifact(requestedFilename) {
   const searchDirs = [desktopDistDir, desktopWindowsDir];
   for (const dir of searchDirs) {
     if (!existsSync(dir)) continue;
     try {
       const files = readdirSync(dir);
-      const exe = files.find((f) => /^MADAR-Windows-.*-Setup\.exe$/.test(f) || f === 'MADAR-Windows-Setup.exe');
-      if (exe) return { path: join(dir, exe), filename: exe, isZip: false };
-      const zip = files.find((f) => /^MADAR-Windows-.*-Setup\.zip$/.test(f) || f === 'MADAR-Windows-Setup.zip');
-      if (zip) return { path: join(dir, zip), filename: zip, isZip: true };
+      if (requestedFilename) {
+        const base = basename(requestedFilename);
+        if (files.includes(base) && /^MADAR-Windows-.*(\.exe|\.zip|\.blockmap|\.yml)$/i.test(base)) {
+          return {
+            path: join(dir, base),
+            filename: base,
+            isZip: base.endsWith('.zip'),
+          };
+        }
+      } else {
+        const exe = files.find((f) => /^MADAR-Windows-.*-Setup\.exe$/.test(f) || f === 'MADAR-Windows-Setup.exe');
+        if (exe) return { path: join(dir, exe), filename: exe, isZip: false };
+        const zip = files.find((f) => /^MADAR-Windows-.*-Setup\.zip$/.test(f) || f === 'MADAR-Windows-Setup.zip');
+        if (zip) return { path: join(dir, zip), filename: zip, isZip: true };
+      }
     } catch {}
   }
   return null;
@@ -428,34 +439,30 @@ function resolveDesktopArtifact() {
 function resolveDesktopUpdateManifest() {
   const searchDirs = [desktopDistDir, desktopWindowsDir];
   for (const dir of searchDirs) {
+    if (!existsSync(dir)) continue;
     const manifestPath = join(dir, 'latest.yml');
     if (existsSync(manifestPath)) return manifestPath;
   }
   return null;
 }
 
-app.get('/download/desktop', (req, res, next) => {
-  const cdnUrl = process.env.MADAR_DESKTOP_CDN_URL?.trim();
-  if (cdnUrl) {
-    res.redirect(302, cdnUrl);
-    return;
-  }
-  const artifact = resolveDesktopArtifact();
-  if (!artifact) {
-    res.status(404).json({ error: 'The MADAR Windows desktop installer is currently unavailable on the server.' });
-    return;
-  }
+function sendDesktopFile(res, next, artifact) {
   let descriptor;
   try {
     ({ descriptor } = openRegularFileNoFollow(artifact.path));
   } catch (error) {
-    res.status(404).json({ error: 'The MADAR Windows desktop installer could not be opened.' });
+    res.status(404).json({ error: 'The requested MADAR Windows desktop file could not be opened.' });
     return;
   }
   const metadata = fstatSync(descriptor);
-  const contentType = artifact.isZip
-    ? 'application/zip'
-    : 'application/vnd.microsoft.portable-executable';
+  let contentType = 'application/octet-stream';
+  if (artifact.isZip) {
+    contentType = 'application/zip';
+  } else if (artifact.filename.endsWith('.exe')) {
+    contentType = 'application/vnd.microsoft.portable-executable';
+  } else if (artifact.filename.endsWith('.yml') || artifact.filename.endsWith('.yaml')) {
+    contentType = 'text/yaml; charset=utf-8';
+  }
   res.attachment(artifact.filename);
   res.set({
     'Cache-Control': 'private, no-cache',
@@ -469,6 +476,20 @@ app.get('/download/desktop', (req, res, next) => {
     else next(error);
   });
   stream.pipe(res);
+}
+
+app.get('/download/desktop', (req, res, next) => {
+  const cdnUrl = process.env.MADAR_DESKTOP_CDN_URL?.trim();
+  if (cdnUrl) {
+    res.redirect(302, cdnUrl);
+    return;
+  }
+  const artifact = resolveDesktopArtifact();
+  if (!artifact) {
+    res.status(404).json({ error: 'The MADAR Windows desktop installer is currently unavailable on the server.' });
+    return;
+  }
+  sendDesktopFile(res, next, artifact);
 });
 
 app.get('/download/desktop/latest.yml', (req, res, next) => {
@@ -533,6 +554,26 @@ app.get('/download/desktop/status', (req, res) => {
       downloadUrl: '/download/desktop',
     });
   }
+});
+
+app.get('/download/desktop/:filename', (req, res, next) => {
+  const requested = req.params.filename;
+  const cdnUrl = process.env.MADAR_DESKTOP_CDN_URL?.trim();
+  if (cdnUrl) {
+    try {
+      const target = new URL(requested, cdnUrl.endsWith('/') ? cdnUrl : `${cdnUrl}/`);
+      res.redirect(302, target.toString());
+      return;
+    } catch {
+      // Fall through to local resolve
+    }
+  }
+  const artifact = resolveDesktopArtifact(requested);
+  if (!artifact) {
+    res.status(404).json({ error: `File '${requested}' not found in desktop distribution.` });
+    return;
+  }
+  sendDesktopFile(res, next, artifact);
 });
 
 app.use('/api/auth', authRouter);

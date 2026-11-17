@@ -49,9 +49,12 @@ export function publishDesktopArtifacts() {
   // Ensure dist-desktop directory exists
   mkdirSync(distDesktopDir, { recursive: true });
 
-  // Copy to dist-desktop for Firebase Hosting
-  const distArtifactPath = resolve(distDesktopDir, chosenFile);
-  copyFileSync(chosenPath, distArtifactPath);
+  // Copy all built packages to dist-desktop
+  for (const pkg of [...zips, ...exes]) {
+    const pkgSrc = resolve(windowsBuildDir, pkg);
+    const pkgDest = resolve(distDesktopDir, pkg);
+    copyFileSync(pkgSrc, pkgDest);
+  }
 
   const distManifestPath = resolve(distDesktopDir, 'latest.yml');
   writeFileSync(distManifestPath, manifest, 'utf8');
