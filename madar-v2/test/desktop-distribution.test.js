@@ -81,3 +81,13 @@ test('desktop download route serves artifact by filename and rejects path traver
   const traversalRes = await fetch(`${baseUrl}/download/desktop/%2e%2e%2fpackage.json`);
   assert.equal(traversalRes.status, 404);
 });
+
+test('desktop install.ps1 endpoint generates valid powershell installer script', async () => {
+  const response = await fetch(`${baseUrl}/download/desktop/install.ps1`);
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get('content-type') || '', /text\/plain/);
+  const body = await response.text();
+  assert.match(body, /MADAR Windows Automated Installer/);
+  assert.match(body, /Unblock-File/);
+  assert.match(body, /Start-Process/);
+});

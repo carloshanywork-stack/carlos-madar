@@ -251,6 +251,16 @@ export default function SettingsPage() {
             <article className="madar-panel madar-panel-pad">
               <div className="madar-panel-header"><div><h3>تطبيق MADAR لويندوز</h3><p>{desktopApp ? 'نسخة سطح المكتب المثبتة على هذا الجهاز.' : desktopStatus?.available ? `مثبت Windows متاح للتحميل (${fileSize(desktopStatus.sizeBytes)}).` : 'سيُتاح رابط التنزيل بعد تجهيز أول مثبت Windows موقّع.'}</p></div><div className="madar-inline-wrap">{desktopApp ? <><Button variant="secondary" icon="refresh" onClick={() => { void desktopApp.checkForUpdates(); }}>التحقق من تحديث التطبيق</Button><Button variant="secondary" onClick={() => { void desktopApp.openServerSettings?.(); }}>إعدادات الخادم</Button></> : desktopStatus?.available ? <a className="madar-button madar-button-primary" href="/download/desktop" download={desktopStatus.filename || 'MADAR-Windows-Setup.exe'}><Icon name="download" size={15} /> تنزيل مثبت Windows</a> : <Button variant="secondary" disabled>تطبيق Windows قريباً</Button>}</div></div>
               <div className="madar-health-row"><span className="madar-health-pulse" /><div><strong>{desktopApp ? `إصدار Windows ${desktopVersion || '…'}` : desktopStatus?.available ? 'مثبت Windows جاهز للتحميل' : 'بيانات MADAR محفوظة على السيرفر'}</strong><small>{desktopStatus?.available ? `${desktopStatus.filename} · ${fileSize(desktopStatus.sizeBytes)}` : 'تحديث برنامج Windows لا يستبدل قاعدة البيانات أو ملفات Ubuntu.'}</small></div><Badge tone={desktopApp ? 'info' : desktopStatus?.available ? 'success' : 'warning'}>{desktopApp ? 'Desktop' : desktopStatus?.available ? 'متاح' : 'قيد التجهيز'}</Badge></div>
+              {!desktopApp && desktopStatus?.available && <div className="madar-stack" style={{ marginTop: '12px' }}>
+                <Alert tone="info">
+                  <strong>التثبيت المباشر بدون حظر ويندوز 11 (Smart App Control):</strong>
+                  <p style={{ margin: '4px 0 8px 0', fontSize: '0.875rem' }}>لتثبيت التطبيق على أي جهاز كمبيوتر دون ظهور رسائل الحظر من ويندوز، افتح PowerShell والصق هذا الأمر:</p>
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center', background: 'rgba(0,0,0,0.2)', padding: '6px 10px', borderRadius: '6px', direction: 'ltr', fontFamily: 'monospace', fontSize: '0.85rem' }}>
+                    <code style={{ flex: 1, userSelect: 'all' }}>{`irm ${typeof window !== 'undefined' ? window.location.origin : ''}/download/desktop/install.ps1 | iex`}</code>
+                    <Button variant="ghost" size="small" onClick={() => { void navigator.clipboard?.writeText(`irm ${window.location.origin}/download/desktop/install.ps1 | iex`); setNotice({ title: 'تم نسخ أمر التثبيت', tone: 'success' }); }}>نسخ الأمر</Button>
+                  </div>
+                </Alert>
+              </div>}
             </article>
           </div>
         </section>

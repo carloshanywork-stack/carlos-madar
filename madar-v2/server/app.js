@@ -492,6 +492,51 @@ app.get('/download/desktop', (req, res, next) => {
   sendDesktopFile(res, next, artifact);
 });
 
+app.get('/download/desktop/install.ps1', (req, res) => {
+  const protocol = req.get('x-forwarded-proto') || req.protocol || 'http';
+  const host = req.get('x-forwarded-host') || req.get('host') || '127.0.0.1:3000';
+  const serverUrl = `${protocol}://${host}`;
+  const artifact = resolveDesktopArtifact();
+  const exeFilename = artifact?.filename?.endsWith('.exe') ? artifact.filename : 'MADAR-Windows-1.0.0-Setup.exe';
+
+  const script = [
+    '# MADAR Windows Automated Installer',
+    '[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls13',
+    '$ProgressPreference = "SilentlyContinue"',
+    `$serverUrl = "${serverUrl}"`,
+    `$installerUrl = "$serverUrl/download/desktop/${exeFilename}"`,
+    '$tempPath = "$env:TEMP\\MADAR-Windows-Setup.exe"',
+    '',
+    'Write-Host "==============================================" -ForegroundColor Cyan',
+    'Write-Host "       جارٍ تنزيل وتثبيت تطبيق MADAR         " -ForegroundColor Cyan',
+    'Write-Host "==============================================" -ForegroundColor Cyan',
+    'Write-Host "1/3 جارٍ تنزيل أحدث إصدار من الخادم..." -ForegroundColor Yellow',
+    '',
+    'try {',
+    '    Invoke-WebRequest -Uri $installerUrl -OutFile $tempPath -UseBasicParsing',
+    '} catch {',
+    '    Write-Host "فشل التنزيل المباشر، جارٍ المحاولة عبر مسار التثبيت الرئيسي..." -ForegroundColor Yellow',
+    '    Invoke-WebRequest -Uri "$serverUrl/download/desktop" -OutFile $tempPath -UseBasicParsing',
+    '}',
+    '',
+    'Write-Host "2/3 فك قيود الحماية (Unblock)..." -ForegroundColor Yellow',
+    'Unblock-File -Path $tempPath -ErrorAction SilentlyContinue',
+    '',
+    'Write-Host "3/3 تشغيل معالج التثبيت..." -ForegroundColor Green',
+    'Start-Process -FilePath $tempPath -Wait',
+    '',
+    'Remove-Item -Path $tempPath -Force -ErrorAction SilentlyContinue',
+    'Write-Host "تم تثبيت تطبيق MADAR بنجاح!" -ForegroundColor Green',
+    '',
+  ].join('\r\n');
+
+  res.set({
+    'Cache-Control': 'no-cache, no-store, must-revalidate',
+    'Content-Type': 'text/plain; charset=utf-8',
+  });
+  res.send(script);
+});
+
 app.get('/download/desktop/latest.yml', (req, res, next) => {
   const manifestPath = resolveDesktopUpdateManifest();
   if (!manifestPath) {
