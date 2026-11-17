@@ -7,7 +7,8 @@ import LocationReviews from './LocationReviews.jsx';
 const STATUS = {
   active: { label: 'على المسار', color: '#168569' },
   onsite: { label: 'في موقع صيانة', color: '#d3931b' },
-  offline: { label: 'أوفلاين / خارج التغطية', color: '#88939d' },
+  stationary: { label: 'في الوردية · ثابت', color: '#2563eb' },
+  offline: { label: 'خارج الوردية / أوفلاين', color: '#88939d' },
 };
 
 function formatTime(value) {
@@ -421,9 +422,10 @@ export default function SupervisorRadarPage() {
       </div>}
 
       <section className="supervisor-kpis" aria-label="ملخص الوردية">
-        <article><span>المناديب المسجلون</span><strong>{representatives.length}</strong><small>حسابات ميدانية فعالة أو محفوظة</small></article>
-        <article><span>على المسار الآن</span><strong>{representatives.filter((rep) => rep.status === 'active').length}</strong><small>إشارة حديثة ووردية مفتوحة</small></article>
-        <article><span>في موقع صيانة</span><strong>{representatives.filter((rep) => rep.status === 'onsite').length}</strong><small>زيارة تنتظر الفحص الميداني</small></article>
+        <article><span>المناديب المسجلون</span><strong>{representatives.length}</strong><small>إجمالي حسابات المناديب</small></article>
+        <article><span>في الوردية اليوم</span><strong>{representatives.filter((rep) => rep.onDuty).length}</strong><small>تم تسجيل الحضور ومتابعة اليوم</small></article>
+        <article><span>على المسار الآن</span><strong>{representatives.filter((rep) => rep.status === 'active').length}</strong><small>إشارة حديثة وحركة مستمرة</small></article>
+        <article><span>في موقع صيانة / ثابت</span><strong>{representatives.filter((rep) => rep.status === 'onsite' || rep.status === 'stationary').length}</strong><small>في موقع عميل أو انتظار إشارة</small></article>
         <article className="qa-kpi"><span>طابور مراجعة الصور</span><strong>{visits.length}</strong><small>لا تدخل التقارير قبل الاعتماد</small></article>
       </section>
 

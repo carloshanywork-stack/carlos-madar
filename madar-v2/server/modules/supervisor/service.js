@@ -162,9 +162,16 @@ export function getSupervisorRadar(database = defaultDatabase, now = new Date())
         AND datetime(visit.created_at) >= datetime('now', '-45 minutes') LIMIT 1
     `).get(rep.id);
     const onDuty = Boolean(rep.duty_session_id);
-    const status = !onDuty || staleMs > 2 * 60 * 1000
-      ? 'offline'
-      : recentPending ? 'onsite' : 'active';
+    let status = 'offline';
+    if (onDuty) {
+      if (recentPending) {
+        status = 'onsite';
+      } else if (staleMs <= 5 * 60 * 1000) {
+        status = 'active';
+      } else {
+        status = 'stationary';
+      }
+    }
     const trail = points.map((point) => ({
       latitude: Number(point.latitude), longitude: Number(point.longitude), accuracy: Number(point.accuracy), updatedAt: point.captured_at,
     }));

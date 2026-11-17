@@ -29,7 +29,7 @@ after(async () => {
 });
 async function request(path, cookie, body, method = body === undefined ? 'GET' : 'POST') {
   const response = await fetch(base + path, { method,
-    headers: { ...(cookie ? { cookie } : {}), ...(body === undefined ? {} : { 'content-type': 'application/json' }) },
+    headers: { ...(cookie ? { cookie } : {}), ...(body === undefined ? {} : { 'content-type': 'application/json' }), 'X-App-Version-Code': '25' },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   return { status: response.status, body: await response.json(), cookie: response.headers.get('set-cookie')?.split(';')[0] };
@@ -245,7 +245,7 @@ test('visit upload is rejected before first location and succeeds immediately af
   const send = async () => {
     const form = new FormData(); form.append('visit', JSON.stringify(visit));
     for (const phase of ['before', 'after']) for (let i = 0; i < 3; i++) form.append(`${phase}Photo`, new Blob([photo], { type: 'image/jpeg' }), `${phase}-${i}.jpg`);
-    const response = await fetch(base + '/api/rep/sync-visit', { method: 'POST', headers: { cookie: owner.cookie }, body: form });
+    const response = await fetch(base + '/api/rep/sync-visit', { method: 'POST', headers: { cookie: owner.cookie, 'X-App-Version-Code': '25' }, body: form });
     return { status: response.status, body: await response.json() };
   };
   assert.equal((await send()).status, 409);
@@ -275,7 +275,7 @@ test('bulk visit approval is admin-only, idempotent, atomic, and does not archiv
       form.append(`${phase}Photo`, new Blob([photo], { type: 'image/jpeg' }), `${phase}-${index}.jpg`);
     }
     const response = await fetch(base + '/api/rep/sync-visit', {
-      method: 'POST', headers: { cookie: owner.cookie }, body: form,
+      method: 'POST', headers: { cookie: owner.cookie, 'X-App-Version-Code': '25' }, body: form,
     });
     assert.equal(response.status, 200, await response.text());
     return { ...f, visitId: db.prepare('SELECT id FROM rep_visits WHERE visit_uuid=?').get(visitUuid).id };
