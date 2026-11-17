@@ -1,41 +1,34 @@
 # MADAR Multi-Agent Worktree Coordination Ledger
 
-> هذا الملف مشترك بين وكيل الديسكتوب/الباك إند (Agent 1) ووكيل الموبايل (Agent 2) لتنسيق التغييرات ومنع أي تعارض أثناء التطوير المتزامن.
+> هذا الملف هو المرجع الأساسي لتنسيق العمل بين وكلاء الذكاء الاصطناعي الثلاثة لنظام "مدار" لمنع أي تعارض أثناء التطوير المتزامن.
 
 ---
 
 ## 1. خريطة مساحات العمل والفروع (Worktree Topology)
 
-| الوكيل (Agent) | الفرع (Git Branch) | مسار العمل (Working Directory) | نطاق المسؤولية الحصري (Scope Boundaries) |
-|---|---|---|---|
-| **Agent 1 (Desktop & Core)** | `feat/desktop-system` | `/home/carlos/Desktop/MADAR` | `desktop/`, `desktop-app/`, `server/`, `client/src/modules/admin/`, `accounting/`, `maintenance/` |
-| **Agent 2 (Mobile App)** | `feat/mobile-app` | `/home/carlos/Desktop/MADAR-mobile` | `android/`, `client/src/modules/rep/`, `scripts/build-android.js` |
-| **Protected Base** | `main` | - | فرع الإنتاج المحمي؛ لا يدمج فيه أي طرف إلا بعد انتهاء العمل واعتماده. |
+| الوكيل (Agent) | الفرع (Git Branch) | مسار العمل (Working Directory) | نطاق المسؤولية الحصري (Scope Boundaries) | الصلاحيات المحظورة (Strict Prohibitions) |
+|---|---|---|---|---|
+| **Coordinator & Release Gatekeeper (الشات الرئيسي)** | `main` | `/home/carlos/Desktop/MADAR` | السيرفر الحي (`server/`), إدارة قواعد البيانات، مراجعة الكود، الدمج إلى `main`, والرفع إلى `origin/main`. | لا يكتب ميزات فرعية بنفسه أثناء عمل الوكلاء. |
+| **Desktop & Windows Specialist (شات الديسكتوب)** | `feat/desktop-system` | `/home/carlos/Desktop/MADAR-desktop` | حزم الويندوز، Electron (`madar-v2/desktop-app/**`), الشهادات وسكربتات التوقيع (`sign_and_deploy.sh`, `install.ps1`). | ❌ ممنوع لمس `android/` أو `server/` أو الدمج في `main`. |
+| **Mobile & Android Specialist (شات الموبايل)** | `feat/mobile-app` | `/home/carlos/Desktop/MADAR-mobile` | تطبيقات أندرويد (`madar-v2/android/**`), شاشات المناديل والمشرفين (`client/src/modules/rep/**`), سكربتات بناء الـ APK (`scripts/build-android.js`). | ❌ ممنوع لمس `desktop-app/` أو `server/` أو الدمج في `main`. |
 
 ---
 
 ## 2. بروتوكول التنسيق والرؤية اللحظية (Coordination Protocol)
 
 1. **الرؤية المتبادلة (Zero Lag Visibility):**
-   - كلا المجلدين يشتركان في نفس قاعدة بيانات `.git`.
-   - لمشاهدة أحدث التعديلات والـ commits التي أنجزها وكيل الموبايل من داخل مستودع الديسكتوب:
-     ```bash
-     git log feat/mobile-app -n 5 --oneline
-     ```
-   - لمشاهدة أحدث التعديلات التي أنجزها وكيل الديسكتوب من داخل مستودع الموبايل:
-     ```bash
-     git log feat/desktop-system -n 5 --oneline
-     ```
+   - كافة المجلدات تشترك في نفس قاعدة بيانات `.git`.
+   - لمشاهدة أحدث تعديلات الموبايل: `git log feat/mobile-app -n 5 --oneline`
+   - لمشاهدة أحدث تعديلات الديسكتوب: `git log feat/desktop-system -n 5 --oneline`
+   - لمشاهدة الإنتاج الرئيسي: `git log main -n 5 --oneline`
 
-2. **قواعد تعديل الملفات المشتركة (Shared Files Protocol):**
-   - إذا احتاج وكيل الموبايل أو وكيل السيرفر تعديل endpoint مشترك أو schema:
-     1. يتم تسجيل التغيير في جدول سجل المهام أدناه.
-     2. عمل commit للتعديل على الفرع الخاص.
-     3. يمكن للوكيل الآخر دمج الفرع أو عمل cherry-pick للـ commit المحدد بسهولة.
+2. **قواعد تعديل الملفات المشتركة والسيرفر (Shared Contracts):**
+   - السيرفر وقاعدة البيانات يعملان من المسار الرئيسي `/home/carlos/Desktop/MADAR`.
+   - إذا احتاج تطبيق الموبايل أو الديسكتوب تعديلاً في الـ API، يطلب من المنسق في الشات الرئيسي إجراء التعديل على السيرفر المركزي بنمط إضافي (Additive) آمن.
 
 3. **الدمج النهائي (Final Integration):**
-   - يتم الدمج فقط عندما يطلب المالك (User) ذلك صراحة.
-   - يتم التأكد من اجتياز كافة الاختبارات `npm test` وبناء حزم APK و Windows بنجاح قبل دمج الفرعين على `main`.
+   - الوكلاء الفرعيون ينتهي عملهم بعمل `git commit` محلي على فرعهم الخاص.
+   - المنسق في الشات الرئيسي هو الكيان الوحيد المخول بعمل `git merge` إلى `main` واختبار الخدمات ثم الرفع إلى `origin/main`.
 
 ---
 
@@ -43,5 +36,6 @@
 
 | التاريخ والوقت | الوكيل | الفرع | الملفات المستهدفة | ملخص العمل والحالة |
 |---|---|---|---|---|
-| 2026-11-17 11:53 | Agent 1 (Desktop) | `feat/desktop-system` | `WORKTREE_COORDINATION.md` | تهيئة وتفعيل نظام الـ Worktrees المعزول وتوثيق البروتوكول. |
-| 2026-11-17 11:53 | Agent 2 (Mobile) | `feat/mobile-app` | `madar-v2/android/*` | بدء العمل المستقل على تطبيق الموبايل في `/home/carlos/Desktop/MADAR-mobile`. |
+| 2026-11-17 11:53 | Desktop Agent | `feat/desktop-system` | `madar-v2/desktop-app/*` | شهادات التوقيع، سكربتات التثبيت، وإشعارات الـ updater. |
+| 2026-11-17 13:40 | Mobile Agent | `feat/mobile-app` | `madar-v2/android/*` | بناء نسختي Release موثقتين للمندوب والمشرف، وحل مشكلة الـ serialization الافتراضية. |
+| 2026-11-17 14:12 | Coordinator | `main` | كامل النظام والـ Worktrees | تفعيل هيكلية الـ 3 Worktrees المعزولة رسمياً وتثبيت فروعها. |

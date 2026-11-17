@@ -1,8 +1,14 @@
 # Agent instructions
 
-## Git workflow
-- The repository owner wants `main` to be the only branch. Work directly on `main`; do not create feature branches or Git worktrees unless the owner explicitly requests one.
-- Preserve existing edits. Before committing or pushing, inspect the working tree, verify the relevant changes, and run appropriate safe tests. Push completed, verified changes to `origin/main` so the existing deployment process can pick them up. Do not assume a successful push proves the running service or APK has updated; verify their actual state separately.
+## Multi-Agent Worktree Architecture & Coordinator Role
+- This workspace (`/home/carlos/Desktop/MADAR`) is the **Production & Coordinator Workspace** on branch `main`.
+- The repository owner operates a 3-agent worktree layout:
+  1. **Coordinator Agent** (this workspace, branch `main`): reviews incoming commits from feature worktrees, performs clean merges into `main`, verifies system and PM2 health, and executes safe `git push origin main`.
+  2. **Mobile Specialist Agent** (`/home/carlos/Desktop/MADAR-mobile`, branch `feat/mobile-app`): builds and modifies Android apps, APK releases, and mobile rep modules exclusively.
+  3. **Desktop Specialist Agent** (`/home/carlos/Desktop/MADAR-desktop`, branch `feat/desktop-system`): builds and modifies Windows Electron desktop app, code signing certificates, and packaging scripts exclusively.
+- **Git workflow for Coordinator**:
+  - The `main` branch is the production trunk. Only the Coordinator merges from `feat/mobile-app` or `feat/desktop-system` into `main`.
+  - Preserve existing edits. Before committing or pushing, inspect the working tree, verify the relevant changes, and run appropriate safe tests. Push completed, verified changes to `origin/main` so the existing deployment process can pick them up. Do not assume a successful push proves the running service or APK has updated; verify their actual state separately.
 
 ## Repository map and commands
 - `system/` is the npm package: Express API in `src/server.js`, React/Vite UI in `src/App.jsx`, SQLite schema/migrations in `src/db.js`, and pure stock arithmetic in `src/inventory.js`.
