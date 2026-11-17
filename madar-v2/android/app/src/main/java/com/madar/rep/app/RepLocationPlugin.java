@@ -47,7 +47,7 @@ public class RepLocationPlugin extends Plugin {
 
     private static final String MOCK_WARNING = "تم رصد تطبيق لتزييف الموقع، يرجى إغلاقه للمتابعة.";
     private static final long LOCATION_TIMEOUT_MS = 15000;
-    private static final float MAX_CLOCK_ACCURACY_METERS = 200f;
+    private static final float MAX_CLOCK_ACCURACY_METERS = 250f;
     private static final float MAX_FALLBACK_ACCURACY_METERS = 500f;
 
     @PluginMethod
@@ -106,7 +106,7 @@ public class RepLocationPlugin extends Plugin {
                 Location candidate = locationManager.getLastKnownLocation(provider);
                 if (candidate == null) continue;
                 long age = now - candidate.getTime();
-                if (age < 0 || age > 5 * 60 * 1000) continue; // within 5 minutes
+                if (age < 0 || age > 15 * 60 * 1000) continue; // within 15 minutes
                 if (best == null || (candidate.hasAccuracy() && (!best.hasAccuracy() || candidate.getAccuracy() < best.getAccuracy()))) {
                     best = candidate;
                 }
@@ -288,9 +288,15 @@ public class RepLocationPlugin extends Plugin {
             RepLocationService.PREFERENCES_NAME,
             Context.MODE_PRIVATE
         );
+        LocationManager locationManager = (LocationManager) getContext().getSystemService(Context.LOCATION_SERVICE);
+        boolean hardwareGpsEnabled = locationManager != null
+            && (locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)
+                || locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER));
+        boolean isDutyRunning = preferences.getBoolean("duty_active", false) && RepLocationService.isRunning();
+
         JSObject result = new JSObject();
-        result.put("active", preferences.getBoolean("duty_active", false) && RepLocationService.isRunning());
-        result.put("gpsEnabled", preferences.getBoolean("gps_provider_enabled", false));
+        result.put("active", isDutyRunning);
+        result.put("gpsEnabled", isDutyRunning ? preferences.getBoolean("gps_provider_enabled", false) : hardwareGpsEnabled);
         result.put("mocked", preferences.getBoolean("last_location_mocked", false));
         String lastLocation = preferences.getString("last_location_json", null);
         if (lastLocation != null) {

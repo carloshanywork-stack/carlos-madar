@@ -25,20 +25,20 @@ export default function NativePermissionGate({ children }) {
     if (!nativeAndroid) return;
     let active = true;
 
-    const requestNotificationsOnly = async () => {
+    const requestPermissionsQuietly = async () => {
       try {
         const permissions = await RepEngine.getPermissionState();
         if (!active) return;
-        // Request notification permission quietly if not yet granted
-        if (!permissions?.notifications && !permissions?.initialRequestMade) {
+        // Request essential permissions (location, camera, notification) quietly if not yet granted
+        if ((!permissions?.notifications || !permissions?.fineLocation) && !permissions?.initialRequestMade) {
           await RepEngine.requestInitialPermissions().catch(() => undefined);
         }
       } catch (err) {
-        console.warn('[NativePermissionGate] Soft notification check:', err);
+        console.warn('[NativePermissionGate] Soft permission check:', err);
       }
     };
 
-    void requestNotificationsOnly();
+    void requestPermissionsQuietly();
     return () => { active = false; };
   }, [nativeAndroid]);
 

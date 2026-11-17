@@ -180,11 +180,13 @@ if (!syncOnly) {
       const managerManifestBytes = `${JSON.stringify(managerManifest, null, 2)}\n`;
       writeFileSync(`${managerBuiltApk}.manifest.json`, managerManifestBytes, { mode: 0o600 });
       writeFileSync(`${managerPublishedApk}.manifest.json`, managerManifestBytes, { mode: 0o600 });
+      copyFileSync(managerBuiltApk, managerPublishedApk);
       try {
         writeFileSync(resolve(projectRoot, '..', releaseBuild ? 'madar-manager-release.apk.manifest.json' : 'madar-manager.apk.manifest.json'), managerManifestBytes, { mode: 0o600 });
+        copyFileSync(managerBuiltApk, resolve(projectRoot, '..', releaseBuild ? 'madar-manager-release.apk' : 'madar-manager.apk'));
         copyFileSync(publishedApk, resolve(projectRoot, '..', releaseBuild ? 'madar-rep-release.apk' : 'madar-rep.apk'));
         writeFileSync(resolve(projectRoot, '..', releaseBuild ? 'madar-rep-release.apk.manifest.json' : 'madar-rep.apk.manifest.json'), manifestBytes, { mode: 0o600 });
-      } catch (ignored) {}
+      } catch (ignored) { }
     }
   }
   console.log(`Android version: ${versionName} (versionCode ${versionCode})`);

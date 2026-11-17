@@ -18,14 +18,14 @@ import {
   deleteGpsSamples,
   deletePendingMachineAction,
   deletePendingVisit,
-getSnapshot,
-listGpsSamples,
-listPendingVisits,
-listPendingMachineActions,
-markRouteCardSubmitted,
-requestPersistentStorage,
-saveSnapshot,
-saveGpsSample,
+  getSnapshot,
+  listGpsSamples,
+  listPendingVisits,
+  listPendingMachineActions,
+  markRouteCardSubmitted,
+  requestPersistentStorage,
+  saveSnapshot,
+  saveGpsSample,
   updatePendingVisit,
   updatePendingMachineAction,
 } from './offline-store.js';
@@ -35,15 +35,15 @@ import {
   addNativeBackListener,
   addNativeNetworkListener,
   acknowledgeNativeDutyTracking,
-acknowledgeNativeAttendanceAction,
-authenticateNativeAttendance,
-deleteNativePendingBackup,
-exportPendingQueue,
-importNativeRecoveryPackage,
-getNativeDutyTrackingState,
-getNativeRepCache,
-getNativeRecoveryGps,
-getNativeGpsLocation,
+  acknowledgeNativeAttendanceAction,
+  authenticateNativeAttendance,
+  deleteNativePendingBackup,
+  exportPendingQueue,
+  importNativeRecoveryPackage,
+  getNativeDutyTrackingState,
+  getNativeRepCache,
+  getNativeRecoveryGps,
+  getNativeGpsLocation,
   getNativeGpsAvailability,
   getNativeNetworkStatus,
   isNativeRepApp,
@@ -53,15 +53,15 @@ getNativeGpsLocation,
   enqueueNativeMachineAction,
   listNativeMachineActions,
   cacheNativeReasons,
-cacheNativeRoute,
-restoreNativePendingBackups,
-retryNativeVisit,
-retryNativeMachineAction,
-reconcileNativeMachineActionReview,
-requestNativeSync,
-saveNativePendingBackup,
-startNativeDutyTracking,
-stopNativeDutyTracking,
+  cacheNativeRoute,
+  restoreNativePendingBackups,
+  retryNativeVisit,
+  retryNativeMachineAction,
+  reconcileNativeMachineActionReview,
+  requestNativeSync,
+  saveNativePendingBackup,
+  startNativeDutyTracking,
+  stopNativeDutyTracking,
 } from './native-bridges.js';
 import { mergeMachineActions } from './queue-recovery.js';
 import NotificationBell from '../../components/notifications/NotificationBell.jsx';
@@ -332,15 +332,15 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
   const [assignmentNotice, setAssignmentNotice] = useState(null);
   const [toast, setToast] = useState('');
   const [tutorialOpen, setTutorialOpen] = useState(false);
-const [storagePersistent, setStoragePersistent] = useState(null);
-const [appVersion, setAppVersion] = useState('');
-const [storageError, setStorageError] = useState('');
-const [pendingExportBusy, setPendingExportBusy] = useState(false);
-const [pendingImportBusy, setPendingImportBusy] = useState(false);
-const syncingRef = useRef(false);
-const trackingSyncingRef = useRef(false);
-const gpsRef = useRef(null);
-const routeRef = useRef(null);
+  const [storagePersistent, setStoragePersistent] = useState(null);
+  const [appVersion, setAppVersion] = useState('');
+  const [storageError, setStorageError] = useState('');
+  const [pendingExportBusy, setPendingExportBusy] = useState(false);
+  const [pendingImportBusy, setPendingImportBusy] = useState(false);
+  const syncingRef = useRef(false);
+  const trackingSyncingRef = useRef(false);
+  const gpsRef = useRef(null);
+  const routeRef = useRef(null);
   const pendingMachineActionsRef = useRef([]);
   const seenReviewNoticesRef = useRef(new Set());
   const mockAuditAtRef = useRef(0);
@@ -351,15 +351,15 @@ const routeRef = useRef(null);
   const gps = nativeApp && nativeGpsEnabled === false ? null : lastGps;
   const visibleGpsError = nativeApp && nativeGpsEnabled === false
     ? 'GPS مغلق على الهاتف؛ فعّله من الإعدادات قبل تسجيل الحضور أو التصوير.' : gpsError;
-  const [photoArchive,setPhotoArchive] = useState(null);
-  const [photoArchiveBusy,setPhotoArchiveBusy] = useState(false);
+  const [photoArchive, setPhotoArchive] = useState(null);
+  const [photoArchiveBusy, setPhotoArchiveBusy] = useState(false);
   useEffect(() => {
     if (!nativeApp) return undefined;
-    let active=true;
-    const refresh=()=>void getNativePhotoArchiveStatus().then(state=>{if(active)setPhotoArchive(state);}).catch(()=>{if(active)setPhotoArchive({configured:false,error:'تعذر قراءة حالة مجلد الصور.'});});
-    refresh(); const timer=setInterval(refresh,30000);
-    return ()=>{active=false;clearInterval(timer);};
-  },[nativeApp,userId]);
+    let active = true;
+    const refresh = () => void getNativePhotoArchiveStatus().then(state => { if (active) setPhotoArchive(state); }).catch(() => { if (active) setPhotoArchive({ configured: false, error: 'تعذر قراءة حالة مجلد الصور.' }); });
+    refresh(); const timer = setInterval(refresh, 30000);
+    return () => { active = false; clearInterval(timer); };
+  }, [nativeApp, userId]);
   routeRef.current = route;
 
   const reportMockLocation = useCallback(async (action) => {
@@ -544,8 +544,8 @@ const routeRef = useRef(null);
       }
       const timestamp = Date.parse(location?.updatedAt ?? '');
       if (!location || !Number.isFinite(location.latitude) || !Number.isFinite(location.longitude)
-          || !Number.isFinite(location.accuracy) || location.accuracy > MAX_INDOOR_ACCURACY_METERS
-          || !Number.isFinite(timestamp) || Date.now() - timestamp > 10 * 60 * 1000 || timestamp - Date.now() > 60 * 1000) {
+        || !Number.isFinite(location.accuracy) || location.accuracy > MAX_INDOOR_ACCURACY_METERS
+        || !Number.isFinite(timestamp) || Date.now() - timestamp > 10 * 60 * 1000 || timestamp - Date.now() > 60 * 1000) {
         if (gpsRef.current && Number.isFinite(gpsRef.current.latitude) && Number.isFinite(gpsRef.current.longitude)) {
           setGps(gpsRef.current);
           setGpsError('');
@@ -595,27 +595,27 @@ const routeRef = useRef(null);
     gpsRef.current = gps;
   }, [gps]);
 
-const loadLocalSnapshots = useCallback(async () => {
-  try {
-    const recoveredCount = await restoreNativePendingBackups(userId);
-    const [savedRoute, savedReasons, visits, storedActions, savedAttendance, nativeCache, attendanceActions, nativeActions, nativeGps] = await Promise.all([
-      getSnapshot('route_snapshots', userId),
-      getSnapshot('reason_snapshots', userId),
-      listPendingVisits(userId),
-      listPendingMachineActions(userId),
-      getSnapshot('attendance_snapshots', userId),
-      nativeApp ? getNativeRepCache(userId) : Promise.resolve(null),
-      nativeApp ? listNativeAttendanceActions(userId) : Promise.resolve([]),
-      nativeApp ? listNativeMachineActions(userId) : Promise.resolve([]),
-      nativeApp ? getNativeRecoveryGps(userId) : Promise.resolve({ pending: [], rejected: [] }),
-    ]);
-    const actions = nativeApp ? mergeMachineActions(storedActions, nativeActions, userId) : storedActions;
-    setPendingAttendanceActions(attendanceActions);
-    setPendingGpsQueue(nativeGps);
-    pendingMachineActionsRef.current = actions;
-    setPendingMachineActions(actions);
-    const cachedRoute = savedRoute?.route ?? nativeCache?.route;
-    const cachedReasons = savedReasons?.reasons ?? nativeCache?.reasons;
+  const loadLocalSnapshots = useCallback(async () => {
+    try {
+      const recoveredCount = await restoreNativePendingBackups(userId);
+      const [savedRoute, savedReasons, visits, storedActions, savedAttendance, nativeCache, attendanceActions, nativeActions, nativeGps] = await Promise.all([
+        getSnapshot('route_snapshots', userId),
+        getSnapshot('reason_snapshots', userId),
+        listPendingVisits(userId),
+        listPendingMachineActions(userId),
+        getSnapshot('attendance_snapshots', userId),
+        nativeApp ? getNativeRepCache(userId) : Promise.resolve(null),
+        nativeApp ? listNativeAttendanceActions(userId) : Promise.resolve([]),
+        nativeApp ? listNativeMachineActions(userId) : Promise.resolve([]),
+        nativeApp ? getNativeRecoveryGps(userId) : Promise.resolve({ pending: [], rejected: [] }),
+      ]);
+      const actions = nativeApp ? mergeMachineActions(storedActions, nativeActions, userId) : storedActions;
+      setPendingAttendanceActions(attendanceActions);
+      setPendingGpsQueue(nativeGps);
+      pendingMachineActionsRef.current = actions;
+      setPendingMachineActions(actions);
+      const cachedRoute = savedRoute?.route ?? nativeCache?.route;
+      const cachedReasons = savedReasons?.reasons ?? nativeCache?.reasons;
       if (cachedRoute) setRoute(applyPendingMachineLocations({ ...cachedRoute, cachedAt: savedRoute?.cachedAt ?? cachedRoute.cachedAt }, actions));
       if (cachedReasons) setReasons(cachedReasons);
       if (savedAttendance?.date === currentBusinessDate() || attendanceActions.length) {
@@ -627,38 +627,38 @@ const loadLocalSnapshots = useCallback(async () => {
       }
       setPendingVisits(visits);
       if (recoveredCount) setToast(`استُعيدت ${recoveredCount} زيارة من نسخة الهاتف الاحتياطية.`);
-    setStorageError('');
-  } catch (error) {
-    if (nativeApp) {
-      try {
-        const [nativeCache, nativeVisits, nativeAttendanceActions, nativeMachineActions, nativeGps] = await Promise.all([
-          getNativeRepCache(userId),
-          listNativeVisits(userId),
-          listNativeAttendanceActions(userId),
-          listNativeMachineActions(userId),
-          getNativeRecoveryGps(userId),
-        ]);
-        const machineActions = mergeMachineActions([], nativeMachineActions, userId);
-        setPendingAttendanceActions(nativeAttendanceActions);
-        setPendingGpsQueue(nativeGps);
-        pendingMachineActionsRef.current = machineActions;
-        setPendingMachineActions(machineActions);
-        const offlineAttendance = applyPendingAttendance(null, nativeAttendanceActions);
-        if (offlineAttendance) {
-          setAttendance(offlineAttendance);
-          setOnDuty(hasOpenAttendanceSession(offlineAttendance));
+      setStorageError('');
+    } catch (error) {
+      if (nativeApp) {
+        try {
+          const [nativeCache, nativeVisits, nativeAttendanceActions, nativeMachineActions, nativeGps] = await Promise.all([
+            getNativeRepCache(userId),
+            listNativeVisits(userId),
+            listNativeAttendanceActions(userId),
+            listNativeMachineActions(userId),
+            getNativeRecoveryGps(userId),
+          ]);
+          const machineActions = mergeMachineActions([], nativeMachineActions, userId);
+          setPendingAttendanceActions(nativeAttendanceActions);
+          setPendingGpsQueue(nativeGps);
+          pendingMachineActionsRef.current = machineActions;
+          setPendingMachineActions(machineActions);
+          const offlineAttendance = applyPendingAttendance(null, nativeAttendanceActions);
+          if (offlineAttendance) {
+            setAttendance(offlineAttendance);
+            setOnDuty(hasOpenAttendanceSession(offlineAttendance));
             setAttendanceLoaded(true);
+          }
+          if (nativeCache?.route) setRoute(applyPendingMachineLocations(nativeCache.route));
+          if (Array.isArray(nativeCache?.reasons)) setReasons(nativeCache.reasons);
+          setPendingVisits(nativeVisits.filter((visit) => visit.status !== 'synced'));
+          setStorageError('قاعدة المتصفح غير متاحة؛ عُرضت المسارات والزيارات وإجراءات الماكينة من قواعد SQLite الأصلية على الهاتف.');
+        } catch (nativeError) {
+          setStorageError(`تعذر قراءة إحدى طوابير SQLite الأصلية؛ لم تُعتبر فارغة. ${nativeError.message || error.message || 'خطأ قراءة محلي.'}`);
         }
-    if (nativeCache?.route) setRoute(applyPendingMachineLocations(nativeCache.route));
-    if (Array.isArray(nativeCache?.reasons)) setReasons(nativeCache.reasons);
-    setPendingVisits(nativeVisits.filter((visit) => visit.status !== 'synced'));
-    setStorageError('قاعدة المتصفح غير متاحة؛ عُرضت المسارات والزيارات وإجراءات الماكينة من قواعد SQLite الأصلية على الهاتف.');
-  } catch (nativeError) {
-    setStorageError(`تعذر قراءة إحدى طوابير SQLite الأصلية؛ لم تُعتبر فارغة. ${nativeError.message || error.message || 'خطأ قراءة محلي.'}`);
-  }
-} else {
-  setStorageError(error.message || 'لا يمكن استخدام قاعدة البيانات المحلية لهذا المتصفح.');
-}
+      } else {
+        setStorageError(error.message || 'لا يمكن استخدام قاعدة البيانات المحلية لهذا المتصفح.');
+      }
     }
   }, [nativeApp, userId]);
 
@@ -667,8 +667,8 @@ const loadLocalSnapshots = useCallback(async () => {
     setRouteLoading(true);
     const params = new URLSearchParams({ username: user.username });
     const [routeResult, reasonsResult] = await Promise.allSettled([
-          api.get(`/api/rep/today-route?${params.toString()}`, { timeoutMs: 4000 }),
-          api.get('/api/rep/fault-reasons', { timeoutMs: 4000 }),
+      api.get(`/api/rep/today-route?${params.toString()}`, { timeoutMs: 4000 }),
+      api.get('/api/rep/fault-reasons', { timeoutMs: 4000 }),
     ]);
     if (routeResult.status === 'fulfilled' && routeResult.value?.success) {
       const cachedRoute = applyPendingMachineLocations(
@@ -1069,7 +1069,7 @@ const loadLocalSnapshots = useCallback(async () => {
             return;
           }
           void checkServer().then((reachable) => {
-          if (reachable) { void requestNativeSync().catch(() => undefined); void refreshData(); void refreshAttendance(); void syncTracking(); }
+            if (reachable) { void requestNativeSync().catch(() => undefined); void refreshData(); void refreshAttendance(); void syncTracking(); }
           });
         });
         if (!active) await networkHandle?.remove();
@@ -1107,7 +1107,7 @@ const loadLocalSnapshots = useCallback(async () => {
       if (!active) return;
       const restoredLocation = usableNativeGpsSnapshot(state);
       if (restoredLocation) setGps(restoredLocation);
-      if (state.gpsEnabled === false) { setGps(null); setNativeGpsEnabled(false); }
+      if (state.active && state.gpsEnabled === false) { setGps(null); setNativeGpsEnabled(false); }
       if (state.mocked) {
         setGps(null);
         setOnDuty(false);
@@ -1135,7 +1135,7 @@ const loadLocalSnapshots = useCallback(async () => {
     }).catch(() => undefined);
     return () => { active = false; };
   }, [attendance?.clock_in_time, attendance?.clock_out_time,
-    attendance?.overtime_clock_in_time, attendance?.overtime_clock_out_time,
+  attendance?.overtime_clock_in_time, attendance?.overtime_clock_out_time,
     attendanceLoaded, nativeApp, syncTracking]);
 
   useEffect(() => {
@@ -1171,16 +1171,12 @@ const loadLocalSnapshots = useCallback(async () => {
   }, [nativeApp, userId]);
 
   useEffect(() => {
-    if (!onDuty && !selectedMachine) {
-      setGpsError('فعّل الوردية أو افتح زيارة لتحديث GPS.');
-      return undefined;
-    }
     if (nativeApp) {
       let active = true;
       let timer;
       let stationarySince = null;
       let previousLocation = null;
-      let nextIntervalMs = GPS_POLLING.movingIntervalMs;
+      let nextIntervalMs = onDuty ? GPS_POLLING.movingIntervalMs : 30000;
       const readNativePosition = async () => {
         try {
           const availability = await getNativeGpsAvailability();
@@ -1190,7 +1186,7 @@ const loadLocalSnapshots = useCallback(async () => {
           if (onDuty) {
             const state = await getNativeDutyTrackingState();
             if (state.mocked) throw new Error('تم رصد تطبيق لتزييف الموقع، يرجى إغلاقه للمتابعة.');
-            if (state.gpsEnabled === false) { setNativeGpsEnabled(false); throw new Error('GPS مغلق على الهاتف؛ فعّله من الإعدادات.'); }
+            if (state.active && state.gpsEnabled === false) { setNativeGpsEnabled(false); throw new Error('GPS مغلق على الهاتف؛ فعّله من الإعدادات.'); }
             location = usableNativeGpsSnapshot(state);
           }
           location ??= await getNativeGpsLocation();
@@ -1205,7 +1201,9 @@ const loadLocalSnapshots = useCallback(async () => {
           if (moving) stationarySince = null;
           else if (stationarySince === null) stationarySince = Date.now();
           const stationaryDurationMs = stationarySince === null ? 0 : Date.now() - stationarySince;
-          nextIntervalMs = getAdaptiveGpsInterval({ speedMetersPerSecond, displacementMeters, stationaryDurationMs });
+          nextIntervalMs = onDuty
+            ? getAdaptiveGpsInterval({ speedMetersPerSecond, displacementMeters, stationaryDurationMs })
+            : 30000;
           previousLocation = location;
           setGps(location);
           setGpsError('');
@@ -1220,7 +1218,7 @@ const loadLocalSnapshots = useCallback(async () => {
             setOnDuty(false);
             void syncTracking({ duty: false, location: null });
           }
-          nextIntervalMs = GPS_POLLING.movingIntervalMs;
+          nextIntervalMs = onDuty ? GPS_POLLING.movingIntervalMs : 30000;
         } finally {
           if (active) timer = window.setTimeout(readNativePosition, nextIntervalMs);
         }
@@ -1230,6 +1228,10 @@ const loadLocalSnapshots = useCallback(async () => {
         active = false;
         window.clearTimeout(timer);
       };
+    }
+    if (!onDuty && !selectedMachine) {
+      setGpsError('فعّل الوردية أو افتح زيارة لتحديث GPS.');
+      return undefined;
     }
     if (!navigator.geolocation) {
       setGpsError('هذا المتصفح لا يدعم تحديد الموقع.');
@@ -1297,54 +1299,54 @@ const loadLocalSnapshots = useCallback(async () => {
   }, [nativeApp, onDuty, selectedMachine, syncTracking]);
 
   const drainQueue = useCallback(async () => {
-  if (syncingRef.current || offlineOnly || !navigator.onLine || serverState !== 'online') return;
-  syncingRef.current = true;
-  let changedServer = false;
-  try {
-    const [indexedActions, nativeActions] = await Promise.all([
-      listPendingMachineActions(userId),
-      nativeApp ? listNativeMachineActions(userId) : Promise.resolve([]),
-    ]);
-    const actions = nativeApp ? mergeMachineActions(indexedActions, nativeActions, userId) : indexedActions;
-    const reviews = await api.get('/api/rep/location-confirmations', { timeoutMs: 12000 });
-    for (const action of actions.filter((item) => item.type === 'confirm_location')) {
-  const review = reviews.requests?.find((item) => item.actionUuid === action.actionUuid);
-  if (!review) continue;
-  if (action.status !== locationReviewState(review.status)) changedServer = true;
-  Object.assign(action, { status: locationReviewState(review.status), correctionId: review.id, reviewNote: review.reviewNote });
-  if (action.source === 'native-sqlite') {
-    await reconcileNativeMachineActionReview(action.actionUuid, userId, {
-      status: action.status,
-      correctionId: review.id,
-      reviewNote: review.reviewNote,
-    });
-  } else {
-    await updatePendingMachineAction(action.actionUuid, { status: action.status, correctionId: review.id, reviewNote: review.reviewNote });
-  }
-}
-const pausedCardIds = new Set();
-const pausedMachineIds = new Set();
-let canDrainVisits = true;
-    for (const action of actions) {
-      if (Number(action.repId) !== userId) continue;
-      const cardId = Number(action.payload?.cardId);
-      if (nativeApp && action.source === 'native-sqlite') {
+    if (syncingRef.current || offlineOnly || !navigator.onLine || serverState !== 'online') return;
+    syncingRef.current = true;
+    let changedServer = false;
+    try {
+      const [indexedActions, nativeActions] = await Promise.all([
+        listPendingMachineActions(userId),
+        nativeApp ? listNativeMachineActions(userId) : Promise.resolve([]),
+      ]);
+      const actions = nativeApp ? mergeMachineActions(indexedActions, nativeActions, userId) : indexedActions;
+      const reviews = await api.get('/api/rep/location-confirmations', { timeoutMs: 12000 });
+      for (const action of actions.filter((item) => item.type === 'confirm_location')) {
+        const review = reviews.requests?.find((item) => item.actionUuid === action.actionUuid);
+        if (!review) continue;
+        if (action.status !== locationReviewState(review.status)) changedServer = true;
+        Object.assign(action, { status: locationReviewState(review.status), correctionId: review.id, reviewNote: review.reviewNote });
+        if (action.source === 'native-sqlite') {
+          await reconcileNativeMachineActionReview(action.actionUuid, userId, {
+            status: action.status,
+            correctionId: review.id,
+            reviewNote: review.reviewNote,
+          });
+        } else {
+          await updatePendingMachineAction(action.actionUuid, { status: action.status, correctionId: review.id, reviewNote: review.reviewNote });
+        }
+      }
+      const pausedCardIds = new Set();
+      const pausedMachineIds = new Set();
+      let canDrainVisits = true;
+      for (const action of actions) {
+        if (Number(action.repId) !== userId) continue;
+        const cardId = Number(action.payload?.cardId);
+        if (nativeApp && action.source === 'native-sqlite') {
+          if (action.type === 'confirm_location' && ['approved', 'rejected'].includes(action.status)) {
+            const review = reviews.requests?.find((item) => item.actionUuid === action.actionUuid);
+            if (!review?.approvedLocation) {
+              pausedMachineIds.add(Number(action.machineId));
+              pausedCardIds.add(cardId);
+            }
+          } else if (['queued', 'syncing', 'blocked', 'pending_approval'].includes(action.status)) {
+            if (Number.isSafeInteger(cardId) && cardId > 0) pausedCardIds.add(cardId);
+            if (action.type === 'report_correction') pausedMachineIds.add(Number(action.machineId));
+          }
+          continue;
+        }
         if (action.type === 'confirm_location' && ['approved', 'rejected'].includes(action.status)) {
           const review = reviews.requests?.find((item) => item.actionUuid === action.actionUuid);
           if (!review?.approvedLocation) {
             pausedMachineIds.add(Number(action.machineId));
-            pausedCardIds.add(cardId);
-          }
-        } else if (['queued', 'syncing', 'blocked', 'pending_approval'].includes(action.status)) {
-          if (Number.isSafeInteger(cardId) && cardId > 0) pausedCardIds.add(cardId);
-          if (action.type === 'report_correction') pausedMachineIds.add(Number(action.machineId));
-        }
-        continue;
-      }
-      if (action.type === 'confirm_location' && ['approved', 'rejected'].includes(action.status)) {
-        const review = reviews.requests?.find((item) => item.actionUuid === action.actionUuid);
-        if (!review?.approvedLocation) {
-          pausedMachineIds.add(Number(action.machineId));
             pausedCardIds.add(cardId);
           }
           continue;
@@ -1435,13 +1437,13 @@ let canDrainVisits = true;
         }
       }
 
-        const visits = await listPendingVisits(userId);
-        setPendingVisits(visits);
-        for (const queuedVisit of (canDrainVisits ? visits : [])) {
+      const visits = await listPendingVisits(userId);
+      setPendingVisits(visits);
+      for (const queuedVisit of (canDrainVisits ? visits : [])) {
         // Never send a visit queued by another representative, even after an account switch.
-          if (Number(queuedVisit.repId) !== userId || queuedVisit.status === 'blocked') continue;
-          // Native Android visits are uploaded from filesDir by WorkManager, never through WebView Blobs.
-          if (nativeApp && queuedVisit.nativeStoragePath?.startsWith('internal://visits/')) continue;
+        if (Number(queuedVisit.repId) !== userId || queuedVisit.status === 'blocked') continue;
+        // Native Android visits are uploaded from filesDir by WorkManager, never through WebView Blobs.
+        if (nativeApp && queuedVisit.nativeStoragePath?.startsWith('internal://visits/')) continue;
         if (pausedCardIds.has(Number(queuedVisit.payload.cardId))) continue;
         await updatePendingVisit(queuedVisit.visitUuid, { status: 'syncing', lastAttemptAt: new Date().toISOString() });
         const formData = new FormData();
@@ -1451,7 +1453,7 @@ let canDrainVisits = true;
           ['after', queuedPhotos(queuedVisit, 'after')],
         ]) {
           photos.forEach((photo, index) => {
-             formData.append(`${phase}Photo`, photo, `${phase}_${index}.jpg`);
+            formData.append(`${phase}Photo`, photo, `${phase}_${index}.jpg`);
           });
         }
         try {
@@ -1484,10 +1486,10 @@ let canDrainVisits = true;
                 regions,
                 summary: {
                   totalMachines: machines.length,
-                    completed,
-                    pending: machines.length - completed,
-                    pendingReview: machines.filter((machine) => machine.isSubmitted && !machine.isCompleted).length,
-                    progress: machines.length ? Math.floor((completed / machines.length) * 100) : 0,
+                  completed,
+                  pending: machines.length - completed,
+                  pendingReview: machines.filter((machine) => machine.isSubmitted && !machine.isCompleted).length,
+                  progress: machines.length ? Math.floor((completed / machines.length) * 100) : 0,
                 },
               };
             });
@@ -1517,15 +1519,15 @@ let canDrainVisits = true;
           break;
         }
       }
-  } catch (error) {
-    setStorageError(error.message || 'تعذر قراءة قائمة المزامنة المحلية.');
-  } finally {
-    syncingRef.current = false;
-    try { await refreshPending(); }
-    catch (error) { setStorageError(`تعذر إعادة قراءة طوابير المزامنة؛ لم تُعتبر فارغة. ${error.message || ''}`); }
-    if (changedServer) void refreshData();
-  }
-}, [nativeApp, networkOnline, offlineOnly, refreshData, refreshPending, serverState, userId]);
+    } catch (error) {
+      setStorageError(error.message || 'تعذر قراءة قائمة المزامنة المحلية.');
+    } finally {
+      syncingRef.current = false;
+      try { await refreshPending(); }
+      catch (error) { setStorageError(`تعذر إعادة قراءة طوابير المزامنة؛ لم تُعتبر فارغة. ${error.message || ''}`); }
+      if (changedServer) void refreshData();
+    }
+  }, [nativeApp, networkOnline, offlineOnly, refreshData, refreshPending, serverState, userId]);
 
   useEffect(() => {
     if (!nativeApp) return undefined;
@@ -1542,7 +1544,7 @@ let canDrainVisits = true;
           setGpsError('تم رصد تطبيق لتزييف الموقع، يرجى إغلاقه للمتابعة.');
           setToast('تم إيقاف تتبع الوردية بعد رصد موقع مزيف.');
           void syncTracking({ duty: false, location: null });
-        } else if (state.gpsEnabled === false) {
+        } else if (state.active && state.gpsEnabled === false) {
           setGps(null);
           setNativeGpsEnabled(false);
         }
@@ -1590,35 +1592,35 @@ let canDrainVisits = true;
   const filteredRegions = useMemo(() => {
     const term = normalize(query);
     return groupRouteMachinesByRegion(route?.regions, (machine) => {
-        const matchesTerm = !term
-          || normalize(machine.machineCode).includes(term)
-          || normalize(machine.arabicName).includes(term)
-          || normalize(machine.clientName).includes(term)
-          || normalize(machine.address).includes(term)
-          || normalize(machine.workOrderCode).includes(term)
-          || normalize(machine.areaName).includes(term)
-          || normalize(machine.regionName).includes(term);
-        const matchesFilter = routeFilter === 'all'
-          || (routeFilter === 'remaining' && !visitSubmitted(machine))
-          || (routeFilter === 'sent' && machine.isSubmitted && !machine.isCompleted)
-          || (routeFilter === 'completed' && machine.isCompleted);
-        return matchesTerm && matchesFilter;
-      });
+      const matchesTerm = !term
+        || normalize(machine.machineCode).includes(term)
+        || normalize(machine.arabicName).includes(term)
+        || normalize(machine.clientName).includes(term)
+        || normalize(machine.address).includes(term)
+        || normalize(machine.workOrderCode).includes(term)
+        || normalize(machine.areaName).includes(term)
+        || normalize(machine.regionName).includes(term);
+      const matchesFilter = routeFilter === 'all'
+        || (routeFilter === 'remaining' && !visitSubmitted(machine))
+        || (routeFilter === 'sent' && machine.isSubmitted && !machine.isCompleted)
+        || (routeFilter === 'completed' && machine.isCompleted);
+      return matchesTerm && matchesFilter;
+    });
   }, [query, route, routeFilter]);
 
   const routeMachines = useMemo(() => (route?.regions ?? []).flatMap((region) => (region.machines ?? []).map((machine) => ({ ...machine, regionName: region.regionName }))), [route]);
   const routeFilterCounts = {
-  all: routeMachines.length,
-  remaining: routeMachines.filter((machine) => !visitSubmitted(machine)).length,
-  sent: routeMachines.filter((machine) => machine.isSubmitted && !machine.isCompleted).length,
-  completed: routeMachines.filter((machine) => machine.isCompleted).length,
-};
-const pendingGpsCount = pendingGpsQueue.pending.length + pendingGpsQueue.rejected.length;
-const pendingQueueCount = pendingVisits.length + pendingMachineActions.length + pendingAttendanceActions.length + pendingGpsCount;
+    all: routeMachines.length,
+    remaining: routeMachines.filter((machine) => !visitSubmitted(machine)).length,
+    sent: routeMachines.filter((machine) => machine.isSubmitted && !machine.isCompleted).length,
+    completed: routeMachines.filter((machine) => machine.isCompleted).length,
+  };
+  const pendingGpsCount = pendingGpsQueue.pending.length + pendingGpsQueue.rejected.length;
+  const pendingQueueCount = pendingVisits.length + pendingMachineActions.length + pendingAttendanceActions.length + pendingGpsCount;
 
-useEffect(() => {
-  if (!pendingQueueCount) return undefined;
-  const protectQueue = (event) => {
+  useEffect(() => {
+    if (!pendingQueueCount) return undefined;
+    const protectQueue = (event) => {
       event.preventDefault();
       event.returnValue = 'توجد عناصر بانتظار المزامنة؛ يمكن أن تضيع قبل خروجها.';
       return event.returnValue;
@@ -1632,68 +1634,68 @@ useEffect(() => {
     if (!pendingQueueCount) {
       setToast('لا توجد عناصر بانتظار المزامنة لتصديرها.');
       return;
-  }
-  setPendingExportBusy(true);
-  try {
-    const result = await exportPendingQueue(userId, user.username);
-    setToast(result.complete
-      ? `أُنشئت نسخة استرداد كاملة تضم ${result.totalItems} عنصراً: ${result.path}`
-      : `أُنشئت نسخة غير مكتملة؛ العناصر غير المقروءة: ${result.omittedItems}. راجع ملف الاسترداد قبل الاعتماد عليه: ${result.path}`);
-  } catch (error) {
-    setToast(error.message || 'تعذر إنشاء نسخة JSON من العمل المعلق.');
-  } finally {
-    setPendingExportBusy(false);
-  }
-};
+    }
+    setPendingExportBusy(true);
+    try {
+      const result = await exportPendingQueue(userId, user.username);
+      setToast(result.complete
+        ? `أُنشئت نسخة استرداد كاملة تضم ${result.totalItems} عنصراً: ${result.path}`
+        : `أُنشئت نسخة غير مكتملة؛ العناصر غير المقروءة: ${result.omittedItems}. راجع ملف الاسترداد قبل الاعتماد عليه: ${result.path}`);
+    } catch (error) {
+      setToast(error.message || 'تعذر إنشاء نسخة JSON من العمل المعلق.');
+    } finally {
+      setPendingExportBusy(false);
+    }
+  };
 
-const importRecovery = async (event) => {
-  const file = event.currentTarget.files?.[0];
-  event.currentTarget.value = '';
-  if (!file) return;
-  setPendingImportBusy(true);
-  try {
-    if (!nativeApp) throw new Error('استيراد نسخة الاسترداد متاح من تطبيق أندرويد؛ لا تفتح الملف في متصفح آخر.');
-    if (file.size < 1 || file.size > 128 * 1024 * 1024) throw new Error('حجم ملف الاسترداد يجب أن يكون بين 1 بايت و128 ميغابايت.');
-    const result = await importNativeRecoveryPackage(await file.text(), userId);
-    await loadLocalSnapshots();
-    await refreshPending();
-    setToast(`اكتمل الاسترداد المحلي: ${result.imported} عنصر جديد، ${result.duplicates} عنصر مطابق موجود مسبقاً. لم يُرفع أي ملف إلى الخادم.`);
-  } catch (error) {
-    setStorageError(error.message || 'تعذر التحقق من نسخة الاسترداد أو استيرادها.');
-  } finally {
-    setPendingImportBusy(false);
-  }
-};
-
-const retryMachineAction = async (action) => {
-  if (['rejected', 'pending_approval', 'approved'].includes(action.status)) {
-    setToast('قرار المراجعة لا يُعاد إرساله. أرسل تصحيحاً جديداً من بطاقة الماكينة بمعرّف إجراء جديد.');
-    return;
-  }
-  try {
-    if (nativeApp && action.source === 'native-sqlite') {
-      const nativeAction = await retryNativeMachineAction(action.actionUuid, userId);
-      await updatePendingMachineAction(action.actionUuid, {
-        status: nativeAction.status,
-        lastError: nativeAction.lastError ?? '',
-        attempts: nativeAction.attempts,
-      }).catch((error) => setStorageError(`أُعيد الإجراء في SQLite الأصلية، لكن تعذّر تحديث العرض المساعد: ${error.message}`));
+  const importRecovery = async (event) => {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = '';
+    if (!file) return;
+    setPendingImportBusy(true);
+    try {
+      if (!nativeApp) throw new Error('استيراد نسخة الاسترداد متاح من تطبيق أندرويد؛ لا تفتح الملف في متصفح آخر.');
+      if (file.size < 1 || file.size > 128 * 1024 * 1024) throw new Error('حجم ملف الاسترداد يجب أن يكون بين 1 بايت و128 ميغابايت.');
+      const result = await importNativeRecoveryPackage(await file.text(), userId);
+      await loadLocalSnapshots();
       await refreshPending();
-      setToast('أُعيد الإجراء الأصلي بنفس المعرّف والمحتوى؛ ستتم مزامنته من طابور أندرويد.');
+      setToast(`اكتمل الاسترداد المحلي: ${result.imported} عنصر جديد، ${result.duplicates} عنصر مطابق موجود مسبقاً. لم يُرفع أي ملف إلى الخادم.`);
+    } catch (error) {
+      setStorageError(error.message || 'تعذر التحقق من نسخة الاسترداد أو استيرادها.');
+    } finally {
+      setPendingImportBusy(false);
+    }
+  };
+
+  const retryMachineAction = async (action) => {
+    if (['rejected', 'pending_approval', 'approved'].includes(action.status)) {
+      setToast('قرار المراجعة لا يُعاد إرساله. أرسل تصحيحاً جديداً من بطاقة الماكينة بمعرّف إجراء جديد.');
       return;
     }
-    await updatePendingMachineAction(action.actionUuid, { status: 'queued', lastError: '' });
-    await refreshPending();
-    void drainQueue();
-  } catch (error) {
-    setStorageError(error.message || 'تعذرت إعادة إجراء الماكينة؛ بقي محفوظاً دون تغيير.');
-  }
-};
+    try {
+      if (nativeApp && action.source === 'native-sqlite') {
+        const nativeAction = await retryNativeMachineAction(action.actionUuid, userId);
+        await updatePendingMachineAction(action.actionUuid, {
+          status: nativeAction.status,
+          lastError: nativeAction.lastError ?? '',
+          attempts: nativeAction.attempts,
+        }).catch((error) => setStorageError(`أُعيد الإجراء في SQLite الأصلية، لكن تعذّر تحديث العرض المساعد: ${error.message}`));
+        await refreshPending();
+        setToast('أُعيد الإجراء الأصلي بنفس المعرّف والمحتوى؛ ستتم مزامنته من طابور أندرويد.');
+        return;
+      }
+      await updatePendingMachineAction(action.actionUuid, { status: 'queued', lastError: '' });
+      await refreshPending();
+      void drainQueue();
+    } catch (error) {
+      setStorageError(error.message || 'تعذرت إعادة إجراء الماكينة؛ بقي محفوظاً دون تغيير.');
+    }
+  };
 
-const finishTutorial = () => {
-  try { window.localStorage.setItem(`tutorial_seen:${userId}`, '1'); } catch { /* Tutorial is dismissed for this session. */ }
-  setTutorialOpen(false);
-};
+  const finishTutorial = () => {
+    try { window.localStorage.setItem(`tutorial_seen:${userId}`, '1'); } catch { /* Tutorial is dismissed for this session. */ }
+    setTutorialOpen(false);
+  };
 
   const logout = async () => {
     if (hasOpenAttendanceSession(attendance)) {
@@ -1800,22 +1802,22 @@ const finishTutorial = () => {
       createdAt: new Date().toISOString(),
       payload,
       status: 'queued',
-  attempts: 0,
-  lastError: '',
-};
-try {
-  if (nativeApp) {
-    try { await enqueueNativeMachineAction(queuedAction); }
-    catch (error) {
-      queuedAction.source = 'indexeddb';
-      setStorageError(`تعذر حفظ الإجراء في SQLite الأصلية؛ حُفظ في IndexedDB كمسار احتياطي وسيزامن من واجهة التطبيق فقط. ${error.message}`);
-    }
-  }
-  try { await addPendingMachineAction(queuedAction); }
-  catch (error) {
-    if (!nativeApp) throw error;
-    setStorageError(`حُفظ الإجراء في SQLite الأصلية، لكن تعذر حفظ نسخة العرض في IndexedDB: ${error.message}`);
-  }
+      attempts: 0,
+      lastError: '',
+    };
+    try {
+      if (nativeApp) {
+        try { await enqueueNativeMachineAction(queuedAction); }
+        catch (error) {
+          queuedAction.source = 'indexeddb';
+          setStorageError(`تعذر حفظ الإجراء في SQLite الأصلية؛ حُفظ في IndexedDB كمسار احتياطي وسيزامن من واجهة التطبيق فقط. ${error.message}`);
+        }
+      }
+      try { await addPendingMachineAction(queuedAction); }
+      catch (error) {
+        if (!nativeApp) throw error;
+        setStorageError(`حُفظ الإجراء في SQLite الأصلية، لكن تعذر حفظ نسخة العرض في IndexedDB: ${error.message}`);
+      }
       await refreshPending();
       const online = !offlineOnly && navigator.onLine && networkOnline && serverState === 'online';
       let result = null;
@@ -1893,7 +1895,7 @@ try {
   const submitSelectedMachineCorrection = async ({ reportedCode, reportedName, note, evidence, location, capturedAt }) => {
     if (!selectedMachine?.machineId) throw new Error('تعذر تحديد بطاقة الماكينة؛ حدّث المسار وحاول مجدداً.');
     if (evidence && (!(evidence instanceof Blob) || evidence.size > 4 * 1024 * 1024
-        || !['image/jpeg', 'image/png', 'image/webp'].includes(evidence.type))) {
+      || !['image/jpeg', 'image/png', 'image/webp'].includes(evidence.type))) {
       throw new Error('صورة الإثبات يجب أن تكون JPEG أو PNG أو WebP وألا تتجاوز 4 ميغابايت.');
     }
     const actionUuid = createVisitUuid();
@@ -1915,27 +1917,27 @@ try {
       payload,
       evidence: evidence ?? null,
       status: 'queued',
-  attempts: 0,
-  lastError: '',
-};
-try {
-  if (nativeApp) {
-    try { await enqueueNativeMachineAction(queuedAction, evidence ?? null); }
-    catch (error) {
-      queuedAction.source = 'indexeddb';
-      setStorageError(`تعذر حفظ البلاغ وإثباته في SQLite الأصلية؛ حُفظ في IndexedDB كمسار احتياطي وسيزامن من واجهة التطبيق فقط. ${error.message}`);
-    }
-  }
-  try { await addPendingMachineAction(queuedAction); }
-  catch (error) {
-    if (!nativeApp) throw error;
-    setStorageError(`حُفظ البلاغ وإثباته في SQLite الأصلية، لكن تعذر حفظ نسخة العرض في IndexedDB: ${error.message}`);
-  }
-  await refreshPending();
-  setRoute((current) => updateRouteMachineCorrection(current, selectedMachine.machineId));
-  setToast('حُفظ بلاغ اختلاف الماكينة على الهاتف؛ ستتم مزامنته مع صورة الإثبات عند عودة الاتصال.');
-  void drainQueue();
-} catch (error) {
+      attempts: 0,
+      lastError: '',
+    };
+    try {
+      if (nativeApp) {
+        try { await enqueueNativeMachineAction(queuedAction, evidence ?? null); }
+        catch (error) {
+          queuedAction.source = 'indexeddb';
+          setStorageError(`تعذر حفظ البلاغ وإثباته في SQLite الأصلية؛ حُفظ في IndexedDB كمسار احتياطي وسيزامن من واجهة التطبيق فقط. ${error.message}`);
+        }
+      }
+      try { await addPendingMachineAction(queuedAction); }
+      catch (error) {
+        if (!nativeApp) throw error;
+        setStorageError(`حُفظ البلاغ وإثباته في SQLite الأصلية، لكن تعذر حفظ نسخة العرض في IndexedDB: ${error.message}`);
+      }
+      await refreshPending();
+      setRoute((current) => updateRouteMachineCorrection(current, selectedMachine.machineId));
+      setToast('حُفظ بلاغ اختلاف الماكينة على الهاتف؛ ستتم مزامنته مع صورة الإثبات عند عودة الاتصال.');
+      void drainQueue();
+    } catch (error) {
       setStorageError(error.message || 'تعذر حفظ بلاغ التصحيح على الهاتف.');
       throw error;
     }
@@ -1986,11 +1988,11 @@ try {
         ? 'إنهاء جلسة الأوفرتايم ↧'
         : overtimeReady
           ? 'بدء جلسة الأوفرتايم ↥'
-        : attendanceIsRevoked
+          : attendanceIsRevoked
             ? 'تم إلغاء الحضور'
             : attendanceIsClosed
-            ? 'تم تسجيل الانصراف اليوم'
-            : 'تسجيل الحضور ↥';
+              ? 'تم تسجيل الانصراف اليوم'
+              : 'تسجيل الحضور ↥';
 
   return (
     <main className="rep-app" dir="rtl">
@@ -2404,7 +2406,7 @@ try {
 
       <footer className="rep-app-footer">
         <span>مَــدَارْ · تطبيق المندوب الميداني{appVersion ? ` · إصدار ${appVersion}` : ''}</span>
-        <span>{gps ? `آخر GPS: ${formatGps(gps)}` : visibleGpsError || (nativeApp ? 'فعّل الحضور لتسجيل GPS أثناء الوردية' : 'يُسجّل GPS مع الحضور والانصراف والزيارة')}</span>
+        <span>{gps ? `آخر GPS: ${formatGps(gps)}` : visibleGpsError || (nativeApp ? 'جاري تحديد موقع GPS...' : 'يُسجّل GPS مع الحضور والانصراف والزيارة')}</span>
       </footer>
 
       {selectedMachine && <MachineVisitSheet machine={{ ...selectedMachine, ...(route?.regions ?? []).flatMap((region) => region.machines).find((machine) => machine.cardId === selectedMachine.cardId) }} repId={userId} repName={user.fullName} reasons={reasons} gps={gps} gpsError={visibleGpsError} captureLocation={captureVisitLocation} onStartWork={startMachineWork} onStopWork={stopMachineWork} onClose={() => setSelectedMachine(null)} onSave={saveVisit} onConfirmLocation={confirmSelectedMachineLocation} onReportCorrection={submitSelectedMachineCorrection} onRequestLocationChange={submitSelectedMachineLocationChange} />}

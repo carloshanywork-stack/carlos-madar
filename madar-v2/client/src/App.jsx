@@ -94,6 +94,14 @@ function AuthenticatedApplication() {
     try {
       const status = await api.get('/api/auth/status');
       const authenticatedUser = status.authenticated ? status.user : null;
+      if (authenticatedUser?.role === 'rep') {
+        try { await api.post('/api/auth/logout'); } catch {}
+        setUser(null);
+        setOfflineOnly(false);
+        setSetupRequired(false);
+        setAuthError('هذا التطبيق مخصص للإدارة والمشرفين فقط. يرجى استخدام تطبيق مدار للمناديب.');
+        return;
+      }
       setUser(authenticatedUser);
       cacheRepProfile(authenticatedUser);
       setOfflineOnly(false);
@@ -224,7 +232,13 @@ function AuthenticatedApplication() {
 
   const toggleTheme = () => setTheme((current) => current === 'dark' ? 'light' : 'dark');
 
-  const loginSuccess = (authenticatedUser) => {
+  const loginSuccess = async (authenticatedUser) => {
+    if (authenticatedUser?.role === 'rep') {
+      try { await api.post('/api/auth/logout'); } catch {}
+      setUser(null);
+      setAuthError('هذا التطبيق مخصص للإدارة والمشرفين فقط. يرجى استخدام تطبيق مدار للمناديب.');
+      return;
+    }
     setUser(authenticatedUser);
     cacheRepProfile(authenticatedUser);
     setOfflineOnly(false);
@@ -261,9 +275,13 @@ function AuthenticatedApplication() {
             onThemeToggle={toggleTheme}
           />
       ) : user.role === 'rep' ? (
-        <Suspense fallback={<LoadingState label="جارٍ تحميل تطبيق المندوب" />}>
-          <RepApp user={user} offlineOnly={offlineOnly} onLogout={logout} />
-        </Suspense>
+        <SignInPage
+          setupRequired={false}
+          initialError="هذا التطبيق مخصص للإدارة والمشرفين فقط. يرجى استخدام تطبيق مدار للمناديب."
+          onLoginSuccess={loginSuccess}
+          theme={theme}
+          onThemeToggle={toggleTheme}
+        />
       ) : location.pathname === '/login' ? (
         <Navigate to="/" replace />
       ) : (
