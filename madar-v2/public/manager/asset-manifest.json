@@ -1,8 +1,8 @@
 {
-  "../../../MADAR/madar-v2/node_modules/@capacitor/app/dist/esm/web.js": {
-    "file": "assets/web-CyvFTGoZ.js",
+  "../../../MADAR/madar-v2/client/node_modules/@capacitor/app/dist/esm/web.js": {
+    "file": "assets/web-CzAomFo7.js",
     "name": "web",
-    "src": "../../../MADAR/madar-v2/node_modules/@capacitor/app/dist/esm/web.js",
+    "src": "../../../MADAR/madar-v2/client/node_modules/@capacitor/app/dist/esm/web.js",
     "isDynamicEntry": true,
     "imports": [
       "index.html",
@@ -13,14 +13,14 @@
       "_router-vendor-DViNsY-D.js"
     ]
   },
-  "../../../MADAR/madar-v2/node_modules/@capacitor/filesystem/dist/esm/web.js": {
-    "file": "assets/web-mlS1NMff.js",
+  "../../../MADAR/madar-v2/client/node_modules/@capacitor/filesystem/dist/esm/web.js": {
+    "file": "assets/web-lW1FZtKt.js",
     "name": "web",
-    "src": "../../../MADAR/madar-v2/node_modules/@capacitor/filesystem/dist/esm/web.js",
+    "src": "../../../MADAR/madar-v2/client/node_modules/@capacitor/filesystem/dist/esm/web.js",
     "isDynamicEntry": true,
     "imports": [
       "index.html",
-      "_RepApp-C2zHBaJG.js",
+      "_RepApp-kimSPQn-.js",
       "_react-vendor-9I2bQF37.js",
       "_react-dom-vendor-Bn6CVZw2.js",
       "_scheduler-vendor-CoSDG3-6.js",
@@ -29,10 +29,10 @@
       "_location-review-BdN-f7Ib.js"
     ]
   },
-  "../../../MADAR/madar-v2/node_modules/@capacitor/geolocation/dist/esm/web.js": {
-    "file": "assets/web-Dd0f92gA.js",
+  "../../../MADAR/madar-v2/client/node_modules/@capacitor/geolocation/dist/esm/web.js": {
+    "file": "assets/web-tK7vW_eg.js",
     "name": "web",
-    "src": "../../../MADAR/madar-v2/node_modules/@capacitor/geolocation/dist/esm/web.js",
+    "src": "../../../MADAR/madar-v2/client/node_modules/@capacitor/geolocation/dist/esm/web.js",
     "isDynamicEntry": true,
     "imports": [
       "index.html",
@@ -43,10 +43,10 @@
       "_router-vendor-DViNsY-D.js"
     ]
   },
-  "../../../MADAR/madar-v2/node_modules/@capacitor/network/dist/esm/web.js": {
-    "file": "assets/web-2Xw22O9h.js",
+  "../../../MADAR/madar-v2/client/node_modules/@capacitor/network/dist/esm/web.js": {
+    "file": "assets/web-BHwtuJzx.js",
     "name": "web",
-    "src": "../../../MADAR/madar-v2/node_modules/@capacitor/network/dist/esm/web.js",
+    "src": "../../../MADAR/madar-v2/client/node_modules/@capacitor/network/dist/esm/web.js",
     "isDynamicEntry": true,
     "imports": [
       "index.html",
@@ -57,12 +57,12 @@
       "_router-vendor-DViNsY-D.js"
     ]
   },
-  "_Badge-BTPpGP2l.js": {
-    "file": "assets/Badge-BTPpGP2l.js",
+  "_Badge-29lxJy3U.js": {
+    "file": "assets/Badge-29lxJy3U.js",
     "name": "Badge",
     "imports": [
       "_react-vendor-9I2bQF37.js",
-      "_PageHeader-CFoMR0Bf.js"
+      "_PageHeader-CDdIEAWc.js"
     ]
   },
   "_Checkbox-BSDxvA6E.js": {
@@ -72,14 +72,14 @@
       "_react-vendor-9I2bQF37.js"
     ]
   },
-  "_EmployeeCheckboxList-BHFRdctj.js": {
-    "file": "assets/EmployeeCheckboxList-BHFRdctj.js",
+  "_EmployeeCheckboxList-DKji0G85.js": {
+    "file": "assets/EmployeeCheckboxList-DKji0G85.js",
     "name": "EmployeeCheckboxList",
     "imports": [
       "_react-vendor-9I2bQF37.js",
       "index.html",
       "_Checkbox-BSDxvA6E.js",
-      "_PageHeader-CFoMR0Bf.js"
+      "_PageHeader-CDdIEAWc.js"
     ]
   },
   "_Field-BFoQnSBc.js": {
@@ -89,23 +89,23 @@
       "_react-vendor-9I2bQF37.js"
     ]
   },
-  "_MaintenancePptxExportModal-CetBRX3i.js": {
-    "file": "assets/MaintenancePptxExportModal-CetBRX3i.js",
+  "_MaintenancePptxExportModal-D4gCGt7-.js": {
+    "file": "assets/MaintenancePptxExportModal-D4gCGt7-.js",
     "name": "MaintenancePptxExportModal",
     "imports": [
       "_react-vendor-9I2bQF37.js",
-      "_PageHeader-CFoMR0Bf.js",
+      "_PageHeader-CDdIEAWc.js",
       "index.html",
       "_Field-BFoQnSBc.js",
-      "_Modal-CYeOhj6E.js",
+      "_Modal-DWHWP95q.js",
       "_export-vendor-CUGmjeGp.js"
     ],
     "dynamicImports": [
       "_export-vendor-CUGmjeGp.js"
     ]
   },
-  "_Modal-CYeOhj6E.js": {
-    "file": "assets/Modal-CYeOhj6E.js",
+  "_Modal-DWHWP95q.js": {
+    "file": "assets/Modal-DWHWP95q.js",
     "name": "Modal",
     "imports": [
       "_react-vendor-9I2bQF37.js",
@@ -120,16 +120,20 @@
       "_location-review-BdN-f7Ib.js"
     ]
   },
-  "_PageHeader-CFoMR0Bf.js": {
-    "file": "assets/PageHeader-CFoMR0Bf.js",
+  "_PageHeader-CDdIEAWc.js": {
+    "file": "assets/PageHeader-CDdIEAWc.js",
     "name": "PageHeader",
     "imports": [
       "_react-vendor-9I2bQF37.js",
       "index.html"
     ]
   },
-  "_RepApp-C2zHBaJG.js": {
-    "file": "assets/RepApp-C2zHBaJG.js",
+  "_RepApp-DZYH1ibk.css": {
+    "file": "assets/RepApp-DZYH1ibk.css",
+    "src": "_RepApp-DZYH1ibk.css"
+  },
+  "_RepApp-kimSPQn-.js": {
+    "file": "assets/RepApp-kimSPQn-.js",
     "name": "RepApp",
     "isDynamicEntry": true,
     "imports": [
@@ -139,20 +143,16 @@
       "_location-review-BdN-f7Ib.js"
     ],
     "dynamicImports": [
-      "../../../MADAR/madar-v2/node_modules/@capacitor/app/dist/esm/web.js",
-      "../../../MADAR/madar-v2/node_modules/@capacitor/filesystem/dist/esm/web.js",
-      "../../../MADAR/madar-v2/node_modules/@capacitor/geolocation/dist/esm/web.js",
-      "../../../MADAR/madar-v2/node_modules/@capacitor/network/dist/esm/web.js",
+      "../../../MADAR/madar-v2/client/node_modules/@capacitor/app/dist/esm/web.js",
+      "../../../MADAR/madar-v2/client/node_modules/@capacitor/filesystem/dist/esm/web.js",
+      "../../../MADAR/madar-v2/client/node_modules/@capacitor/geolocation/dist/esm/web.js",
+      "../../../MADAR/madar-v2/client/node_modules/@capacitor/network/dist/esm/web.js",
       "src/modules/rep/MachineVisitSheet.jsx",
       "src/modules/rep/OfflineMapPanel.jsx"
     ],
     "css": [
       "assets/RepApp-DZYH1ibk.css"
     ]
-  },
-  "_RepApp-DZYH1ibk.css": {
-    "file": "assets/RepApp-DZYH1ibk.css",
-    "src": "_RepApp-DZYH1ibk.css"
   },
   "_Tabs-CgCjCvBw.js": {
     "file": "assets/Tabs-CgCjCvBw.js",
@@ -161,8 +161,8 @@
       "_react-vendor-9I2bQF37.js"
     ]
   },
-  "_Toast-DPnxdr5y.js": {
-    "file": "assets/Toast-DPnxdr5y.js",
+  "_Toast-16cAGzil.js": {
+    "file": "assets/Toast-16cAGzil.js",
     "name": "Toast",
     "imports": [
       "_react-vendor-9I2bQF37.js",
@@ -220,7 +220,7 @@
     "name": "scheduler-vendor"
   },
   "index.html": {
-    "file": "assets/index-Bgk9ju9-.js",
+    "file": "assets/index-CzfH4cNA.js",
     "name": "index",
     "src": "index.html",
     "isEntry": true,
@@ -232,7 +232,7 @@
       "_scheduler-vendor-CoSDG3-6.js"
     ],
     "dynamicImports": [
-      "_RepApp-C2zHBaJG.js",
+      "_RepApp-kimSPQn-.js",
       "src/modules/supervisor/SupervisorRadarPage.jsx",
       "src/modules/system/RepSupportAdminPage.jsx",
       "src/modules/dashboard/OverviewPage.jsx",
@@ -253,18 +253,18 @@
     ]
   },
   "src/modules/accounting/AccountingPage.jsx": {
-    "file": "assets/AccountingPage-CTrE55pG.js",
+    "file": "assets/AccountingPage-BCti2BlT.js",
     "name": "AccountingPage",
     "src": "src/modules/accounting/AccountingPage.jsx",
     "isDynamicEntry": true,
     "imports": [
       "_react-vendor-9I2bQF37.js",
       "index.html",
-      "_PageHeader-CFoMR0Bf.js",
-      "_Toast-DPnxdr5y.js",
-      "_Badge-BTPpGP2l.js",
+      "_PageHeader-CDdIEAWc.js",
+      "_Toast-16cAGzil.js",
+      "_Badge-29lxJy3U.js",
       "_Field-BFoQnSBc.js",
-      "_Modal-CYeOhj6E.js",
+      "_Modal-DWHWP95q.js",
       "_Tabs-CgCjCvBw.js",
       "_router-vendor-DViNsY-D.js",
       "_react-dom-vendor-Bn6CVZw2.js",
@@ -276,19 +276,19 @@
     ]
   },
   "src/modules/archive/ArchivePage.jsx": {
-    "file": "assets/ArchivePage-BJidskXL.js",
+    "file": "assets/ArchivePage-CQPdsf6W.js",
     "name": "ArchivePage",
     "src": "src/modules/archive/ArchivePage.jsx",
     "isDynamicEntry": true,
     "imports": [
       "_react-vendor-9I2bQF37.js",
       "index.html",
-      "_PageHeader-CFoMR0Bf.js",
-      "_Badge-BTPpGP2l.js",
-      "_Modal-CYeOhj6E.js",
+      "_PageHeader-CDdIEAWc.js",
+      "_Badge-29lxJy3U.js",
+      "_Modal-DWHWP95q.js",
       "_Tabs-CgCjCvBw.js",
       "_Field-BFoQnSBc.js",
-      "_MaintenancePptxExportModal-CetBRX3i.js",
+      "_MaintenancePptxExportModal-D4gCGt7-.js",
       "_router-vendor-DViNsY-D.js",
       "_react-dom-vendor-Bn6CVZw2.js",
       "_scheduler-vendor-CoSDG3-6.js",
@@ -296,17 +296,17 @@
     ]
   },
   "src/modules/clients/ClientsPage.jsx": {
-    "file": "assets/ClientsPage-BMD1WkeI.js",
+    "file": "assets/ClientsPage-DlCZmK6n.js",
     "name": "ClientsPage",
     "src": "src/modules/clients/ClientsPage.jsx",
     "isDynamicEntry": true,
     "imports": [
       "_react-vendor-9I2bQF37.js",
       "index.html",
-      "_PageHeader-CFoMR0Bf.js",
-      "_Toast-DPnxdr5y.js",
+      "_PageHeader-CDdIEAWc.js",
+      "_Toast-16cAGzil.js",
       "_Field-BFoQnSBc.js",
-      "_Modal-CYeOhj6E.js",
+      "_Modal-DWHWP95q.js",
       "_react-dom-vendor-Bn6CVZw2.js",
       "_scheduler-vendor-CoSDG3-6.js",
       "_export-vendor-CUGmjeGp.js",
@@ -314,15 +314,15 @@
     ]
   },
   "src/modules/dashboard/OverviewPage.jsx": {
-    "file": "assets/OverviewPage-9kGpqR2D.js",
+    "file": "assets/OverviewPage-D72TKbgD.js",
     "name": "OverviewPage",
     "src": "src/modules/dashboard/OverviewPage.jsx",
     "isDynamicEntry": true,
     "imports": [
       "_react-vendor-9I2bQF37.js",
       "index.html",
-      "_PageHeader-CFoMR0Bf.js",
-      "_Badge-BTPpGP2l.js",
+      "_PageHeader-CDdIEAWc.js",
+      "_Badge-29lxJy3U.js",
       "_router-vendor-DViNsY-D.js",
       "_react-dom-vendor-Bn6CVZw2.js",
       "_scheduler-vendor-CoSDG3-6.js",
@@ -330,18 +330,18 @@
     ]
   },
   "src/modules/employees/StaffDirectoryPage.jsx": {
-    "file": "assets/StaffDirectoryPage-D1brEj6E.js",
+    "file": "assets/StaffDirectoryPage-CRaSeoJ2.js",
     "name": "StaffDirectoryPage",
     "src": "src/modules/employees/StaffDirectoryPage.jsx",
     "isDynamicEntry": true,
     "imports": [
       "_react-vendor-9I2bQF37.js",
       "index.html",
-      "_PageHeader-CFoMR0Bf.js",
-      "_Toast-DPnxdr5y.js",
-      "_Badge-BTPpGP2l.js",
+      "_PageHeader-CDdIEAWc.js",
+      "_Toast-16cAGzil.js",
+      "_Badge-29lxJy3U.js",
       "_Field-BFoQnSBc.js",
-      "_Modal-CYeOhj6E.js",
+      "_Modal-DWHWP95q.js",
       "_regions--NgafTtu.js",
       "_react-dom-vendor-Bn6CVZw2.js",
       "_scheduler-vendor-CoSDG3-6.js",
@@ -353,18 +353,18 @@
     ]
   },
   "src/modules/finance/FinancePage.jsx": {
-    "file": "assets/FinancePage-DX1LbNnM.js",
+    "file": "assets/FinancePage-BuxTUCCh.js",
     "name": "FinancePage",
     "src": "src/modules/finance/FinancePage.jsx",
     "isDynamicEntry": true,
     "imports": [
       "_react-vendor-9I2bQF37.js",
       "index.html",
-      "_PageHeader-CFoMR0Bf.js",
-      "_Toast-DPnxdr5y.js",
-      "_Badge-BTPpGP2l.js",
+      "_PageHeader-CDdIEAWc.js",
+      "_Toast-16cAGzil.js",
+      "_Badge-29lxJy3U.js",
       "_Field-BFoQnSBc.js",
-      "_Modal-CYeOhj6E.js",
+      "_Modal-DWHWP95q.js",
       "_Tabs-CgCjCvBw.js",
       "_router-vendor-DViNsY-D.js",
       "_react-dom-vendor-Bn6CVZw2.js",
@@ -373,7 +373,7 @@
     ]
   },
   "src/modules/maintenance/MaintenancePage.jsx": {
-    "file": "assets/MaintenancePage-B21jU8xu.js",
+    "file": "assets/MaintenancePage-jr-4FIus.js",
     "name": "MaintenancePage",
     "src": "src/modules/maintenance/MaintenancePage.jsx",
     "isDynamicEntry": true,
@@ -381,12 +381,12 @@
       "_react-vendor-9I2bQF37.js",
       "index.html",
       "_regions--NgafTtu.js",
-      "_PageHeader-CFoMR0Bf.js",
-      "_Toast-DPnxdr5y.js",
-      "_Badge-BTPpGP2l.js",
-      "_EmployeeCheckboxList-BHFRdctj.js",
+      "_PageHeader-CDdIEAWc.js",
+      "_Toast-16cAGzil.js",
+      "_Badge-29lxJy3U.js",
+      "_EmployeeCheckboxList-DKji0G85.js",
       "_Field-BFoQnSBc.js",
-      "_Modal-CYeOhj6E.js",
+      "_Modal-DWHWP95q.js",
       "_Tabs-CgCjCvBw.js",
       "_location-review-BdN-f7Ib.js",
       "_OfflineRouteMap-Dsj0pkSr.js",
@@ -401,7 +401,7 @@
     ]
   },
   "src/modules/maintenance/OrderDetail.jsx": {
-    "file": "assets/OrderDetail-CPeTVJ1w.js",
+    "file": "assets/OrderDetail-BMDObcZe.js",
     "name": "OrderDetail",
     "src": "src/modules/maintenance/OrderDetail.jsx",
     "isDynamicEntry": true,
@@ -409,13 +409,13 @@
       "_react-vendor-9I2bQF37.js",
       "index.html",
       "_regions--NgafTtu.js",
-      "_PageHeader-CFoMR0Bf.js",
-      "_Toast-DPnxdr5y.js",
-      "_Badge-BTPpGP2l.js",
+      "_PageHeader-CDdIEAWc.js",
+      "_Toast-16cAGzil.js",
+      "_Badge-29lxJy3U.js",
       "_Field-BFoQnSBc.js",
-      "_Modal-CYeOhj6E.js",
+      "_Modal-DWHWP95q.js",
       "_Tabs-CgCjCvBw.js",
-      "_MaintenancePptxExportModal-CetBRX3i.js",
+      "_MaintenancePptxExportModal-D4gCGt7-.js",
       "_router-vendor-DViNsY-D.js",
       "_react-dom-vendor-Bn6CVZw2.js",
       "_scheduler-vendor-CoSDG3-6.js",
@@ -423,13 +423,13 @@
     ]
   },
   "src/modules/rep/MachineVisitSheet.jsx": {
-    "file": "assets/MachineVisitSheet-BI6dEhbh.js",
+    "file": "assets/MachineVisitSheet-CYuoj4fI.js",
     "name": "MachineVisitSheet",
     "src": "src/modules/rep/MachineVisitSheet.jsx",
     "isDynamicEntry": true,
     "imports": [
       "_react-vendor-9I2bQF37.js",
-      "_RepApp-C2zHBaJG.js",
+      "_RepApp-kimSPQn-.js",
       "index.html",
       "_export-vendor-CUGmjeGp.js",
       "_location-review-BdN-f7Ib.js",
@@ -439,7 +439,7 @@
     ]
   },
   "src/modules/rep/OfflineMapPanel.jsx": {
-    "file": "assets/OfflineMapPanel-C0Wp5TVJ.js",
+    "file": "assets/OfflineMapPanel-A3O_zfwh.js",
     "name": "OfflineMapPanel",
     "src": "src/modules/rep/OfflineMapPanel.jsx",
     "isDynamicEntry": true,
@@ -455,19 +455,19 @@
     ]
   },
   "src/modules/settings/SettingsPage.jsx": {
-    "file": "assets/SettingsPage-CR4M8Gut.js",
+    "file": "assets/SettingsPage-DN-yfycj.js",
     "name": "SettingsPage",
     "src": "src/modules/settings/SettingsPage.jsx",
     "isDynamicEntry": true,
     "imports": [
       "_react-vendor-9I2bQF37.js",
       "index.html",
-      "_PageHeader-CFoMR0Bf.js",
+      "_PageHeader-CDdIEAWc.js",
       "_regions--NgafTtu.js",
-      "_Toast-DPnxdr5y.js",
-      "_Badge-BTPpGP2l.js",
+      "_Toast-16cAGzil.js",
+      "_Badge-29lxJy3U.js",
       "_Field-BFoQnSBc.js",
-      "_Modal-CYeOhj6E.js",
+      "_Modal-DWHWP95q.js",
       "_Tabs-CgCjCvBw.js",
       "_react-dom-vendor-Bn6CVZw2.js",
       "_scheduler-vendor-CoSDG3-6.js",
@@ -476,7 +476,7 @@
     ]
   },
   "src/modules/supervisor/SupervisorRadarPage.jsx": {
-    "file": "assets/SupervisorRadarPage-hvrYOiNR.js",
+    "file": "assets/SupervisorRadarPage-CljU2IoB.js",
     "name": "SupervisorRadarPage",
     "src": "src/modules/supervisor/SupervisorRadarPage.jsx",
     "isDynamicEntry": true,
@@ -494,14 +494,14 @@
     ]
   },
   "src/modules/system/RepSupportAdminPage.jsx": {
-    "file": "assets/RepSupportAdminPage-QbLOGHq8.js",
+    "file": "assets/RepSupportAdminPage-41wZe8f1.js",
     "name": "RepSupportAdminPage",
     "src": "src/modules/system/RepSupportAdminPage.jsx",
     "isDynamicEntry": true,
     "imports": [
       "_react-vendor-9I2bQF37.js",
-      "_PageHeader-CFoMR0Bf.js",
-      "_Badge-BTPpGP2l.js",
+      "_PageHeader-CDdIEAWc.js",
+      "_Badge-29lxJy3U.js",
       "index.html",
       "_react-dom-vendor-Bn6CVZw2.js",
       "_scheduler-vendor-CoSDG3-6.js",
@@ -510,19 +510,19 @@
     ]
   },
   "src/modules/warehouse/WarehousePage.jsx": {
-    "file": "assets/WarehousePage-D2fl71Ck.js",
+    "file": "assets/WarehousePage-dhDZ6z7c.js",
     "name": "WarehousePage",
     "src": "src/modules/warehouse/WarehousePage.jsx",
     "isDynamicEntry": true,
     "imports": [
       "_react-vendor-9I2bQF37.js",
       "index.html",
-      "_PageHeader-CFoMR0Bf.js",
-      "_Toast-DPnxdr5y.js",
-      "_Badge-BTPpGP2l.js",
+      "_PageHeader-CDdIEAWc.js",
+      "_Toast-16cAGzil.js",
+      "_Badge-29lxJy3U.js",
       "_Checkbox-BSDxvA6E.js",
       "_Field-BFoQnSBc.js",
-      "_Modal-CYeOhj6E.js",
+      "_Modal-DWHWP95q.js",
       "_Tabs-CgCjCvBw.js",
       "_router-vendor-DViNsY-D.js",
       "_react-dom-vendor-Bn6CVZw2.js",
@@ -531,16 +531,16 @@
     ]
   },
   "src/modules/workshop/WorkshopOrderDetail.jsx": {
-    "file": "assets/WorkshopOrderDetail-DQC1UF1W.js",
+    "file": "assets/WorkshopOrderDetail-C7wv4yfO.js",
     "name": "WorkshopOrderDetail",
     "src": "src/modules/workshop/WorkshopOrderDetail.jsx",
     "isDynamicEntry": true,
     "imports": [
       "_react-vendor-9I2bQF37.js",
       "index.html",
-      "_PageHeader-CFoMR0Bf.js",
-      "_Toast-DPnxdr5y.js",
-      "_Badge-BTPpGP2l.js",
+      "_PageHeader-CDdIEAWc.js",
+      "_Toast-16cAGzil.js",
+      "_Badge-29lxJy3U.js",
       "_Field-BFoQnSBc.js",
       "_router-vendor-DViNsY-D.js",
       "_react-dom-vendor-Bn6CVZw2.js",
@@ -549,20 +549,20 @@
     ]
   },
   "src/modules/workshop/WorkshopPage.jsx": {
-    "file": "assets/WorkshopPage-CvM1INdd.js",
+    "file": "assets/WorkshopPage-DPqIrlbW.js",
     "name": "WorkshopPage",
     "src": "src/modules/workshop/WorkshopPage.jsx",
     "isDynamicEntry": true,
     "imports": [
       "_react-vendor-9I2bQF37.js",
       "index.html",
-      "_PageHeader-CFoMR0Bf.js",
-      "_Toast-DPnxdr5y.js",
-      "_Badge-BTPpGP2l.js",
+      "_PageHeader-CDdIEAWc.js",
+      "_Toast-16cAGzil.js",
+      "_Badge-29lxJy3U.js",
       "_Checkbox-BSDxvA6E.js",
-      "_EmployeeCheckboxList-BHFRdctj.js",
+      "_EmployeeCheckboxList-DKji0G85.js",
       "_Field-BFoQnSBc.js",
-      "_Modal-CYeOhj6E.js",
+      "_Modal-DWHWP95q.js",
       "_Tabs-CgCjCvBw.js",
       "_router-vendor-DViNsY-D.js",
       "_react-dom-vendor-Bn6CVZw2.js",
