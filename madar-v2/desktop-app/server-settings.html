@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>إعدادات اتصال الخادم - MADAR</title>
+  <style>
+    :root {
+      --primary: #126b57;
+      --primary-hover: #0e5444;
+      --bg: #0f172a;
+      --surface: #1e293b;
+      --surface-border: #334155;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --error: #ef4444;
+      --error-bg: rgba(239, 68, 68, 0.15);
+      --success: #10b981;
+      --success-bg: rgba(16, 185, 129, 0.15);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Cairo", Tahoma, sans-serif;
+      background: var(--surface);
+      color: var(--text);
+      padding: 24px;
+      user-select: none;
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+    .logo {
+      width: 40px;
+      height: 40px;
+      border-radius: 10px;
+      background: var(--primary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .logo svg { width: 22px; height: 22px; fill: white; }
+    .title h1 { font-size: 18px; font-weight: 700; margin-bottom: 2px; }
+    .title p { font-size: 12px; color: var(--text-muted); }
+    .form-group { margin-bottom: 16px; }
+    label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+    input {
+      width: 100%;
+      padding: 10px 12px;
+      background: #0b1120;
+      border: 1px solid var(--surface-border);
+      border-radius: 8px;
+      color: var(--text);
+      font-size: 13px;
+      direction: ltr;
+      font-family: monospace;
+      outline: none;
+    }
+    input:focus { border-color: var(--primary); }
+    .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+    .chip {
+      background: #0b1120;
+      border: 1px solid var(--surface-border);
+      border-radius: 6px;
+      padding: 5px 9px;
+      font-size: 11px;
+      cursor: pointer;
+      color: var(--text-muted);
+    }
+    .chip:hover { border-color: var(--primary); color: var(--text); }
+    .status-box {
+      border-radius: 8px;
+      padding: 8px 12px;
+      font-size: 12px;
+      margin-bottom: 16px;
+      display: none;
+      line-height: 1.4;
+    }
+    .status-box.error { display: block; background: var(--error-bg); color: #fca5a5; }
+    .status-box.success { display: block; background: var(--success-bg); color: #6ee7b7; }
+    .actions { display: flex; gap: 10px; margin-top: 20px; }
+    button {
+      flex: 1;
+      padding: 10px 16px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+      font-family: inherit;
+    }
+    .btn-primary { background: var(--primary); color: white; }
+    .btn-primary:hover:not(:disabled) { background: var(--primary-hover); }
+    .btn-secondary { background: #334155; color: var(--text); }
+    .btn-secondary:hover:not(:disabled) { background: #475569; }
+    button:disabled { opacity: 0.6; cursor: not-allowed; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="logo">
+      <svg viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+    </div>
+    <div class="title">
+      <h1>إعدادات الاتصال بالخادم</h1>
+      <p>تحديد عنوان خادم MADAR للعمليات والمزامنة</p>
+    </div>
+  </div>
+
+  <div class="form-group">
+    <label for="serverUrl">عنوان الخادم (Server URL)</label>
+    <input type="text" id="serverUrl" placeholder="http://127.0.0.1:3000" spellcheck="false" autocomplete="off" />
+    <div class="chips">
+      <button type="button" class="chip" data-url="http://127.0.0.1:3000">خادم محلي (127.0.0.1:3000)</button>
+      <button type="button" class="chip" data-url="http://localhost:3000">Localhost:3000</button>
+      <button type="button" class="chip" data-url="https://carlos-pc.tail852ef0.ts.net">خادم سحابي (Tailscale)</button>
+    </div>
+  </div>
+
+  <div class="status-box" id="statusBox"></div>
+
+  <div class="actions">
+    <button type="button" class="btn-secondary" id="testBtn">فحص الاتصال</button>
+    <button type="button" class="btn-primary" id="saveBtn">حفظ وتطبيق</button>
+  </div>
+
+  <script>
+    const urlInput = document.getElementById('serverUrl');
+    const statusBox = document.getElementById('statusBox');
+    const testBtn = document.getElementById('testBtn');
+    const saveBtn = document.getElementById('saveBtn');
+
+    async function init() {
+      if (window.madarDesktop?.getServerConfig) {
+        try {
+          const cfg = await window.madarDesktop.getServerConfig();
+          if (cfg?.serverUrl) urlInput.value = cfg.serverUrl;
+        } catch (e) { console.error(e); }
+      }
+      if (!urlInput.value) urlInput.value = 'http://127.0.0.1:3000';
+    }
+
+    document.querySelectorAll('.chip').forEach(chip => {
+      chip.addEventListener('click', () => {
+        urlInput.value = chip.getAttribute('data-url');
+        statusBox.style.display = 'none';
+      });
+    });
+
+    testBtn.addEventListener('click', async () => {
+      const url = urlInput.value.trim();
+      if (!url) return;
+      testBtn.disabled = true;
+      testBtn.textContent = 'جارٍ الفحص…';
+      statusBox.style.display = 'none';
+      statusBox.className = 'status-box';
+
+      try {
+        const result = window.madarDesktop?.testServer
+          ? await window.madarDesktop.testServer(url)
+          : { ok: false, error: 'غير متاح خارج التطبيق' };
+
+        if (result.ok) {
+          statusBox.className = 'status-box success';
+          statusBox.innerHTML = `✓ الخادم متصل (${result.service || 'MADAR V2'}) · الاستجابة: ${result.latencyMs || 10}ms`;
+        } else {
+          statusBox.className = 'status-box error';
+          statusBox.innerHTML = `✕ تعذر الاتصال: ${result.error || 'رمز الحالة ' + result.status}`;
+        }
+      } catch (err) {
+        statusBox.className = 'status-box error';
+        statusBox.innerHTML = `✕ خطأ: ${err.message}`;
+      } finally {
+        testBtn.disabled = false;
+        testBtn.textContent = 'فحص الاتصال';
+      }
+    });
+
+    saveBtn.addEventListener('click', async () => {
+      const url = urlInput.value.trim();
+      if (!url) return;
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'جارٍ الحفظ…';
+
+      try {
+        if (window.madarDesktop?.setServerConfig) {
+          await window.madarDesktop.setServerConfig({ serverUrl: url });
+        }
+        window.close();
+      } catch (err) {
+        statusBox.className = 'status-box error';
+        statusBox.innerHTML = `✕ خطأ: ${err.message}`;
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'حفظ وتطبيق';
+      }
+    });
+
+    init();
+  </script>
+</body>
+</html>

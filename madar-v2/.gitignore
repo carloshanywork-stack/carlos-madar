@@ -4,6 +4,7 @@ client/dist/
 client/dist-next/
 client/dist-previous/
 desktop-app/runtime-config.json
+desktop-app/web/
 desktop-app/node_modules/
 desktop-build/node_modules/
 desktop/runtime-config.json

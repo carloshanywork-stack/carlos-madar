@@ -1,4 +1,4 @@
-import { writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { publishDesktopArtifacts } from './publish-desktop.js';
@@ -53,6 +53,21 @@ const desktopConfig = {
   releaseBuild,
 };
 writeFileSync(resolve(projectRoot, 'desktop-app/runtime-config.json'), `${JSON.stringify(desktopConfig, null, 2)}\n`, { mode: 0o600 });
+
+// Build the client web assets and bundle them into desktop-app/web for offline/local execution
+console.log('[BuildDesktop] Compiling web client bundle for desktop shell...');
+const clientBuild = spawnSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['run', 'build'], {
+  cwd: resolve(projectRoot, 'client'),
+  stdio: 'inherit',
+});
+if (clientBuild.error) throw clientBuild.error;
+if (clientBuild.status !== 0) process.exit(clientBuild.status ?? 1);
+
+const webTarget = resolve(projectRoot, 'desktop-app/web');
+rmSync(webTarget, { recursive: true, force: true });
+mkdirSync(webTarget, { recursive: true });
+cpSync(resolve(projectRoot, 'client/dist'), webTarget, { recursive: true });
+console.log('[BuildDesktop] Bundled local client into desktop-app/web successfully.');
 
 const install = spawnSync(process.execPath, [resolve(projectRoot, 'scripts/install-desktop-deps.js')], {
   cwd: projectRoot,

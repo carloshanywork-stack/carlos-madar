@@ -2,6 +2,12 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('madarDesktop', Object.freeze({
   platform: 'windows',
+  isLocalShell: true,
   getVersion: () => ipcRenderer.invoke('madar:desktop:version'),
   checkForUpdates: () => ipcRenderer.invoke('madar:desktop:check-updates'),
+  getServerConfig: () => ipcRenderer.invoke('madar:desktop:get-server-config'),
+  setServerConfig: (config) => ipcRenderer.invoke('madar:desktop:set-server-config', config),
+  testServer: (url) => ipcRenderer.invoke('madar:desktop:test-server', url),
+  openServerSettings: () => ipcRenderer.invoke('madar:desktop:open-server-settings'),
+  reloadApp: () => ipcRenderer.invoke('madar:desktop:reload'),
 }));
