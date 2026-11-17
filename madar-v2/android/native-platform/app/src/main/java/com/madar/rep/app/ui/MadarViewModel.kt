@@ -239,6 +239,14 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
             }
         }
         viewModelScope.launch {
+            attendance.collect { record ->
+                val current = session.value ?: return@collect
+                if (record?.envelope?.attendance?.hasOpenAttendance == true) {
+                    com.madar.rep.app.location.GpsBreadcrumbService.start(container.appContext, current.repId)
+                }
+            }
+        }
+        viewModelScope.launch {
             machineActions.collect { actions ->
                 val current = session.value ?: return@collect
                 var routeNeedsRefresh = false

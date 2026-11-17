@@ -32,7 +32,9 @@ class GpsBreadcrumbService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var locationManager: LocationManager? = null
     private var listener: LocationListener? = null
+    private var heartbeatJob: kotlinx.coroutines.Job? = null
     private var repId: Long = 0
+    private var lastPointRecordedMillis: Long = 0L
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
@@ -51,7 +53,11 @@ class GpsBreadcrumbService : Service() {
             return START_NOT_STICKY
         }
         repId = requestedOwner
-        startForeground(NOTIFICATION_ID, notification())
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(NOTIFICATION_ID, notification(), android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
+        } else {
+            startForeground(NOTIFICATION_ID, notification())
+        }
         startRecording()
         return START_STICKY
     }
@@ -64,13 +70,30 @@ class GpsBreadcrumbService : Service() {
         listener = callback
         try {
             if (manager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
-                manager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 60_000L, 25f, callback, mainLooper)
+                manager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 60_000L, 0f, callback, mainLooper)
             }
             if (manager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
-                manager.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 120_000L, 75f, callback, mainLooper)
+                manager.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 120_000L, 0f, callback, mainLooper)
             }
         } catch (_: SecurityException) {
             stopSelf()
+        }
+
+        heartbeatJob?.cancel()
+        heartbeatJob = serviceScope.launch {
+            while (kotlinx.coroutines.isActive) {
+                kotlinx.coroutines.delay(60_000L)
+                val now = System.currentTimeMillis()
+                if (now - lastPointRecordedMillis >= 60_000L && repId > 0) {
+                    val fallback = runCatching {
+                        manager.getLastKnownLocation(LocationManager.GPS_PROVIDER)
+                            ?: manager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
+                    }.getOrNull()
+                    if (fallback != null && !isMock(fallback)) {
+                        persistStationary(fallback)
+                    }
+                }
+            }
         }
     }
 
@@ -78,6 +101,7 @@ class GpsBreadcrumbService : Service() {
         if (repId <= 0 || location.hasAccuracy().not() || !location.latitude.isFinite() || !location.longitude.isFinite()
             || location.latitude !in -90.0..90.0 || location.longitude !in -180.0..180.0
             || location.accuracy < 0 || isMock(location)) return
+        lastPointRecordedMillis = System.currentTimeMillis()
         val id = "native-$repId-${UUID.randomUUID()}"
         val updatedAt = MadarTime.isoUtc(location.time)
         val accuracy = location.accuracy.toDouble()
@@ -95,6 +119,42 @@ class GpsBreadcrumbService : Service() {
             state = GpsPointState.QUEUED,
             contentHash = Hashing.sha256Hex(payload.toString().toByteArray()),
             createdAt = System.currentTimeMillis(),
+        )
+        serviceScope.launch {
+            val container = (application as MadarApplication).container
+            if (container.sessionGateway.current()?.repId != entity.repId) return@launch
+            runCatching { container.database.gpsPoints().insert(entity) }
+            val now = System.currentTimeMillis()
+            if (now - lastEnqueueMillis >= 60_000L) {
+                lastEnqueueMillis = now
+                container.scheduler.enqueueNow()
+            }
+        }
+    }
+
+    private fun persistStationary(location: Location) {
+        if (repId <= 0 || location.hasAccuracy().not() || !location.latitude.isFinite() || !location.longitude.isFinite()
+            || location.latitude !in -90.0..90.0 || location.longitude !in -180.0..180.0
+            || location.accuracy < 0 || isMock(location)) return
+        val nowMs = System.currentTimeMillis()
+        lastPointRecordedMillis = nowMs
+        val id = "native-$repId-${UUID.randomUUID()}"
+        val updatedAt = MadarTime.isoUtc(nowMs)
+        val accuracy = location.accuracy.toDouble()
+        val speed = 0.0
+        val payload = JSONObject().put("clientPointId", id).put("latitude", location.latitude)
+            .put("longitude", location.longitude).put("accuracy", accuracy).put("speed", speed).put("updatedAt", updatedAt)
+        val entity = GpsPointEntity(
+            clientPointId = id,
+            repId = repId,
+            latitude = location.latitude,
+            longitude = location.longitude,
+            accuracy = accuracy,
+            speed = speed,
+            updatedAt = updatedAt,
+            state = GpsPointState.QUEUED,
+            contentHash = Hashing.sha256Hex(payload.toString().toByteArray()),
+            createdAt = nowMs,
         )
         serviceScope.launch {
             val container = (application as MadarApplication).container
@@ -128,6 +188,8 @@ class GpsBreadcrumbService : Service() {
     }
 
     private fun stopRecording() {
+        heartbeatJob?.cancel()
+        heartbeatJob = null
         val current = listener
         if (current != null) runCatching { locationManager?.removeUpdates(current) }
         listener = null
