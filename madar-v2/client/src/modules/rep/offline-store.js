@@ -1,10 +1,11 @@
 const DATABASE_NAME = 'madar-rep-offline';
-export const DATABASE_VERSION = 5;
+export const DATABASE_VERSION = 6;
 export const REQUIRED_OFFLINE_STORES = Object.freeze([
   'route_snapshots',
   'reason_snapshots',
   'pending_visits',
   'pending_machine_actions',
+  'pending_support_reports',
   'gps_samples',
   'offline_map_packs',
   'offline_map_tiles',
@@ -16,6 +17,7 @@ const REQUIRED_OFFLINE_INDEXES = Object.freeze({
     by_rep_created: ['repId', 'createdAt'],
     by_machine_created: ['machineId', 'createdAt'],
   },
+  pending_support_reports: { by_rep_created: ['repId', 'createdAt'] },
   gps_samples: { by_rep_captured: ['repId', 'capturedAt'] },
   offline_map_tiles: { by_pack: 'packId', by_pack_zoom: ['packId', 'z'] },
 });
@@ -40,6 +42,9 @@ function migrateDatabase(request) {
   createStore(database, transaction, 'pending_machine_actions', 'actionUuid', [
     ['by_rep_created', ['repId', 'createdAt']],
     ['by_machine_created', ['machineId', 'createdAt']],
+  ]);
+  createStore(database, transaction, 'pending_support_reports', 'reportUuid', [
+    ['by_rep_created', ['repId', 'createdAt']],
   ]);
   createStore(database, transaction, 'gps_samples', 'sampleId', [['by_rep_captured', ['repId', 'capturedAt']]]);
   createStore(database, transaction, 'offline_map_packs', 'packId');
@@ -464,5 +469,34 @@ export async function markRouteCardSubmitted(repId, cardId, status = 'pending_re
     transaction.oncomplete = () => resolve(Boolean(request.result));
     transaction.onerror = () => reject(transaction.error ?? new Error('تعذر تحديث المسار المحلي.'));
     transaction.onabort = () => reject(transaction.error ?? new Error('أُلغي تحديث المسار المحلي.'));
+  });
+}
+
+/** Durable outbox for field representative support/bug reports while offline. */
+export async function addPendingSupportReport(report) {
+  const transaction = await createTransaction('pending_support_reports', 'readwrite');
+  transaction.objectStore('pending_support_reports').put(report);
+  return new Promise((resolve, reject) => {
+    transaction.oncomplete = () => resolve(report);
+    transaction.onerror = () => reject(transaction.error ?? new Error('تعذر حفظ البلاغ على الهاتف.'));
+    transaction.onabort = () => reject(transaction.error ?? new Error('أُلغي حفظ البلاغ على الهاتف.'));
+  });
+}
+
+export async function listPendingSupportReports(repId) {
+  const transaction = await createTransaction('pending_support_reports', 'readonly');
+  const reports = await requestValue(transaction.objectStore('pending_support_reports').index('by_rep_created').getAll(
+    IDBKeyRange.bound([Number(repId), ''], [Number(repId), '\uffff']),
+  ));
+  return reports.sort((left, right) => (right.createdAt || '').localeCompare(left.createdAt || ''));
+}
+
+export async function deletePendingSupportReport(reportUuid) {
+  const transaction = await createTransaction('pending_support_reports', 'readwrite');
+  transaction.objectStore('pending_support_reports').delete(reportUuid);
+  return new Promise((resolve, reject) => {
+    transaction.oncomplete = () => resolve(true);
+    transaction.onerror = () => reject(transaction.error ?? new Error('تعذر حذف البلاغ المزامن.'));
+    transaction.onabort = () => reject(transaction.error ?? new Error('أُلغي حذف البلاغ المزامن.'));
   });
 }

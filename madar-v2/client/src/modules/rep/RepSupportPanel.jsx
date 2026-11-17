@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../../lib/api.js';
+import { addPendingSupportReport, listPendingSupportReports } from './offline-store.js';
 
 function sanitizeClientLogs(value) {
   return String(value ?? '')
@@ -17,8 +18,9 @@ function createReportUuid() {
   });
 }
 
-export default function RepSupportPanel({ onClose, inline = false }) {
+export default function RepSupportPanel({ onClose, inline = false, repId = 0 }) {
   const [reports, setReports] = useState([]);
+  const [pendingReports, setPendingReports] = useState([]);
   const [category, setCategory] = useState('bug');
   const [severity, setSeverity] = useState('normal');
   const [description, setDescription] = useState('');
@@ -30,22 +32,51 @@ export default function RepSupportPanel({ onClose, inline = false }) {
 
   useEffect(() => {
     let active = true;
+    if (repId) {
+      listPendingSupportReports(repId).then((items) => {
+        if (active) setPendingReports(items);
+      }).catch(() => undefined);
+    }
     api.get('/api/rep/support/reports').then((payload) => { if (active) setReports(payload.reports ?? []); })
       .catch(() => undefined);
     return () => { active = false; };
-  }, []);
+  }, [repId]);
 
   async function submit(event) {
     event.preventDefault();
     setBusy(true); setError(''); setMessage('');
+    const reportUuid = createReportUuid();
+    const report = {
+      reportUuid,
+      category, severity, description,
+      screenName: 'مسار المندوب', appVersion: 'MADAR V2',
+      deviceModel: navigator.userAgent.slice(0, 150), androidVersion: 'غير معروف',
+      logs: sanitizeClientLogs(`online=${navigator.onLine}; language=${navigator.language}; platform=${navigator.platform}`),
+    };
+
+    if (!navigator.onLine) {
+      try {
+        await addPendingSupportReport({
+          reportUuid,
+          repId: Number(repId) || 0,
+          report,
+          attachment: attachment || null,
+          createdAt: new Date().toISOString(),
+          status: 'queued',
+        });
+        setPendingReports((current) => [{ reportUuid, report, status: 'queued', createdAt: new Date().toISOString() }, ...current]);
+        setDescription(''); setAttachment(null);
+        formRef.current?.reset();
+        setMessage('تم حفظ البلاغ محلياً في هاتفك بأمان. ستتم المزامنة تلقائياً عند عودة الاتصال بالإنترنت.');
+      } catch (storageErr) {
+        setError(storageErr?.message || 'تعذر حفظ البلاغ محلياً.');
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
+
     try {
-      const report = {
-        reportUuid: createReportUuid(),
-        category, severity, description,
-        screenName: 'مسار المندوب', appVersion: 'MADAR V2',
-        deviceModel: navigator.userAgent.slice(0, 150), androidVersion: 'غير معروف',
-        logs: sanitizeClientLogs(`online=${navigator.onLine}; language=${navigator.language}; platform=${navigator.platform}`),
-      };
       const form = new FormData();
       form.append('report', JSON.stringify(report));
       if (attachment) form.append('attachment', attachment);
@@ -54,8 +85,30 @@ export default function RepSupportPanel({ onClose, inline = false }) {
       setDescription(''); setAttachment(null);
       formRef.current?.reset();
       setMessage('تم حفظ البلاغ بأمان. يستطيع المدير مراجعته من لوحة الدعم.');
-    } catch (caught) { setError(caught?.message || 'تعذر إرسال البلاغ.'); }
-    finally { setBusy(false); }
+    } catch (caught) {
+      if (!caught?.status || caught.status === 0) {
+        try {
+          await addPendingSupportReport({
+            reportUuid,
+            repId: Number(repId) || 0,
+            report,
+            attachment: attachment || null,
+            createdAt: new Date().toISOString(),
+            status: 'queued',
+          });
+          setPendingReports((current) => [{ reportUuid, report, status: 'queued', createdAt: new Date().toISOString() }, ...current]);
+          setDescription(''); setAttachment(null);
+          formRef.current?.reset();
+          setMessage('انقطع الاتصال بالخادم؛ تم حفظ البلاغ محلياً في الهاتف وستتم مزامنته تلقائياً.');
+        } catch {
+          setError('تعذر إرسال البلاغ أو حفظه محلياً.');
+        }
+      } else {
+        setError(caught?.message || 'تعذر إرسال البلاغ.');
+      }
+    } finally {
+      setBusy(false);
+    }
   }
 
   const dialogContent = (
@@ -79,10 +132,16 @@ export default function RepSupportPanel({ onClose, inline = false }) {
           <button type="submit" disabled={busy}>{busy ? 'جارٍ الحفظ…' : 'حفظ وإرسال البلاغ 🚀'}</button>
         </div>
       </form>
-      {!!reports.length && (
+      {(pendingReports.length > 0 || reports.length > 0) && (
         <div className="rep-support-history">
-          <h3>بلاغاتك السابقة</h3>
+          <h3>بلاغاتك (المحلية والسابقة)</h3>
           <ul>
+            {pendingReports.map((item) => (
+              <li key={item.reportUuid} style={{ borderRight: '3px solid #d97706' }}>
+                <span>{item.report?.description || 'بلاغ محلي'}</span>
+                <b style={{ color: '#d97706' }}>بانتظار المزامنة ⏳</b>
+              </li>
+            ))}
             {reports.slice(0, 5).map((report) => (
               <li key={report.id}>
                 <span>{report.description}</span>

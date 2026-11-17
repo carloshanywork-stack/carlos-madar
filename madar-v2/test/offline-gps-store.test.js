@@ -2,11 +2,11 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { DATABASE_VERSION, REQUIRED_OFFLINE_STORES, selectGpsSamplesForSync } from '../client/src/modules/rep/offline-store.js';
 
-test('IndexedDB v5 includes every offline queue, map store, and the attendance cache RepApp reads', () => {
-  assert.equal(DATABASE_VERSION, 5);
+test('IndexedDB v6 includes every offline queue, map store, support reports, and attendance cache', () => {
+  assert.equal(DATABASE_VERSION, 6);
   for (const store of [
     'route_snapshots', 'reason_snapshots', 'pending_visits', 'pending_machine_actions',
-    'gps_samples', 'offline_map_packs', 'offline_map_tiles', 'attendance_snapshots',
+    'pending_support_reports', 'gps_samples', 'offline_map_packs', 'offline_map_tiles', 'attendance_snapshots',
   ]) assert.ok(REQUIRED_OFFLINE_STORES.includes(store), `missing IndexedDB store ${store}`);
 });
 
@@ -30,6 +30,9 @@ function fakeOfflineIndexedDB() {
     pending_machine_actions: ['actionUuid', {
       by_rep_created: ['repId', 'createdAt'],
       by_machine_created: ['machineId', 'createdAt'],
+    }],
+    pending_support_reports: ['reportUuid', {
+      by_rep_created: ['repId', 'createdAt'],
     }],
     gps_samples: ['sampleId', { by_rep_captured: ['repId', 'capturedAt'] }],
     offline_map_packs: ['packId', {}],
