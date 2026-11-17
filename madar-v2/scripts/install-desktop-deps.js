@@ -33,4 +33,33 @@ const electronInstall = spawnSync(process.execPath, [resolve(projectRoot, 'deskt
   env: childEnvironment,
 });
 if (electronInstall.error) throw electronInstall.error;
+
+// Ensure NSIS target extracts uninstaller via UninstallerReader on Linux without Wine
+try {
+  const { readFileSync, writeFileSync, existsSync } = await import('node:fs');
+  const nsisTargetFile = resolve(projectRoot, 'desktop-build/node_modules/app-builder-lib/out/targets/nsis/NsisTarget.js');
+  if (existsSync(nsisTargetFile)) {
+    let content = readFileSync(nsisTargetFile, 'utf8');
+    const targetBlock = '        if ((0, macosVersion_1.isMacOsCatalina)()) {\n            try {\n                await nsisUtil_1.UninstallerReader.exec(installerPath, uninstallerPath);';
+    if (content.includes(targetBlock) && !content.includes('let uninstallerExtracted = false;')) {
+      const replacementBlock = `        let uninstallerExtracted = false;
+        try {
+            await nsisUtil_1.UninstallerReader.exec(installerPath, uninstallerPath);
+            uninstallerExtracted = true;
+        } catch (e) {}
+        if (!uninstallerExtracted) {
+        if ((0, macosVersion_1.isMacOsCatalina)()) {
+            try {
+                await nsisUtil_1.UninstallerReader.exec(installerPath, uninstallerPath);`;
+      const oldTail = 'await wineVm.exec(installerPath, [], { env: { __COMPAT_LAYER: "RunAsInvoker" } });\n        }\n        await packager.signIf(uninstallerPath);';
+      const newTail = 'await wineVm.exec(installerPath, [], { env: { __COMPAT_LAYER: "RunAsInvoker" } });\n            }\n        }\n        await packager.signIf(uninstallerPath);';
+      content = content.replace(targetBlock, replacementBlock).replace(oldTail, newTail);
+      writeFileSync(nsisTargetFile, content, 'utf8');
+      console.log('[InstallDesktopDeps] Applied NSIS uninstaller extractor patch.');
+    }
+  }
+} catch (patchErr) {
+  console.warn('[InstallDesktopDeps] Could not patch NsisTarget.js:', patchErr.message);
+}
+
 process.exitCode = electronInstall.status ?? 1;

@@ -42,11 +42,16 @@ export function publishDesktopArtifacts() {
   const fileEntries = [];
   if (standaloneExe) {
     const p = resolve(windowsBuildDir, standaloneExe);
-    fileEntries.push({
+    const blockmapPath = `${p}.blockmap`;
+    const entry = {
       url: standaloneExe,
       sha512: createHash('sha512').update(readFileSync(p)).digest('base64'),
       size: statSync(p).size,
-    });
+    };
+    if (existsSync(blockmapPath)) {
+      entry.blockMapSize = statSync(blockmapPath).size;
+    }
+    fileEntries.push(entry);
   }
   for (const zip of zips) {
     const p = resolve(windowsBuildDir, zip);
@@ -60,7 +65,13 @@ export function publishDesktopArtifacts() {
     fileEntries.push({ url: chosenFile, sha512, size: stat.size });
   }
 
-  const filesYaml = fileEntries.map(e => `  - url: ${e.url}\n    sha512: ${e.sha512}\n    size: ${e.size}`).join('\n');
+  const filesYaml = fileEntries.map(e => {
+    let entryYaml = `  - url: ${e.url}\n    sha512: ${e.sha512}\n    size: ${e.size}`;
+    if (e.blockMapSize) {
+      entryYaml += `\n    blockMapSize: ${e.blockMapSize}`;
+    }
+    return entryYaml;
+  }).join('\n');
 
   const manifest = [
     `version: ${version}`,
@@ -79,8 +90,9 @@ export function publishDesktopArtifacts() {
   // Ensure dist-desktop directory exists
   mkdirSync(distDesktopDir, { recursive: true });
 
-  // Copy all built packages to dist-desktop
-  for (const pkg of [...zips, ...exes]) {
+  // Copy all built packages and blockmap files to dist-desktop
+  const blockmaps = files.filter(f => f.endsWith('.blockmap'));
+  for (const pkg of [...zips, ...exes, ...blockmaps]) {
     const pkgSrc = resolve(windowsBuildDir, pkg);
     const pkgDest = resolve(distDesktopDir, pkg);
     copyFileSync(pkgSrc, pkgDest);

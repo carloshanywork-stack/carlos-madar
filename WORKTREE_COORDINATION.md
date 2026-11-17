@@ -39,3 +39,5 @@
 | 2026-11-17 11:53 | Desktop Agent | `feat/desktop-system` | `madar-v2/desktop-app/*` | شهادات التوقيع، سكربتات التثبيت، وإشعارات الـ updater. |
 | 2026-11-17 13:40 | Mobile Agent | `feat/mobile-app` | `madar-v2/android/*` | بناء نسختي Release موثقتين للمندوب والمشرف، وحل مشكلة الـ serialization الافتراضية. |
 | 2026-11-17 14:12 | Coordinator | `main` | كامل النظام والـ Worktrees | تفعيل هيكلية الـ 3 Worktrees المعزولة رسمياً وتثبيت فروعها. |
+| 2026-11-17 14:40 | Desktop Agent | `feat/desktop-system` | `madar-v2/desktop/**`, `madar-v2/scripts/*` | بناء وتوقيع حزمة تثبيت ويندوز NSIS (.exe) وتوليد ملفات التحديث latest.yml و blockmap بنجاح. |
+| 2026-11-17 14:48 | Coordinator | `main` | دمج الفروع | دمج تعديلات الموبايل والديسكتوب بنجاح في الفرع الرئيسي main ونشرها على السيرفر. |
