@@ -97,7 +97,13 @@ test('desktop app bundles local web client, provides loopback proxy, offline fal
   assert.match(main, /madar:desktop:test-server/);
   assert.match(main, /madar:desktop:open-server-settings/);
   assert.match(main, /madar:desktop:reload/);
+  assert.match(main, /madar:desktop:get-printers/);
+  assert.match(main, /madar:desktop:print-silent/);
+  assert.match(main, /madar:desktop:notification/);
+  assert.match(main, /createTray/);
   assert.match(preload, /getServerConfig/);
+  assert.match(preload, /printSilent/);
+  assert.match(preload, /showNotification/);
   assert.match(preload, /setServerConfig/);
   assert.match(preload, /testServer/);
   assert.match(preload, /openServerSettings/);
