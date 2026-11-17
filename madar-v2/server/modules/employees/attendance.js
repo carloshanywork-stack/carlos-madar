@@ -284,10 +284,11 @@ function employeeForRep(userId, database) {
 
 function normalizeLocation(input) {
   const body = requireObject(input, 'location');
-  allowOnlyKeys(body, ['latitude', 'longitude', 'accuracy', 'updatedAt']);
+  allowOnlyKeys(body, ['latitude', 'longitude', 'accuracy', 'updatedAt', 'speed']);
   const latitude = body.latitude;
   const longitude = body.longitude;
   const accuracy = body.accuracy;
+  const speed = typeof body.speed === 'number' && Number.isFinite(body.speed) && body.speed >= 0 ? body.speed : 0;
   if (typeof latitude !== 'number' || !Number.isFinite(latitude) || latitude < -90 || latitude > 90
       || typeof longitude !== 'number' || !Number.isFinite(longitude) || longitude < -180 || longitude > 180
       || typeof accuracy !== 'number' || !Number.isFinite(accuracy) || accuracy < 0 || accuracy > 250) {
@@ -295,7 +296,7 @@ function normalizeLocation(input) {
   }
   const updatedAt = requireText(body.updatedAt, 'location.updatedAt', { maxLength: 64 });
   if (!Number.isFinite(Date.parse(updatedAt))) throw new HttpError(400, 'location.updatedAt must be a valid date and time.');
-  return { latitude, longitude, accuracy, updatedAt };
+  return { latitude, longitude, accuracy, speed, updatedAt };
 }
 
 function getAttendanceRecord(employeeId, date, database) {

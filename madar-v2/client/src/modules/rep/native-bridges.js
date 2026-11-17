@@ -40,8 +40,6 @@ export async function chooseNativePhotoArchiveFolder() { return RepEngine.choose
 
 export async function captureNativeCameraPhoto() {
   if (!isNativeRepApp()) throw new Error('الكاميرا الأصلية متاحة داخل تطبيق أندرويد فقط.');
-  const archive = await getNativePhotoArchiveStatus();
-  if (!archive?.configured) await chooseNativePhotoArchiveFolder();
   const photo = await Camera.getPhoto({
     source: CameraSource.Camera,
     resultType: CameraResultType.Uri,
@@ -60,8 +58,6 @@ export async function captureNativeCameraPhotos({
   maxPhotos = 20, phaseLabel = 'الصور',
 } = {}) {
   if (!isNativeRepApp()) throw new Error('التقاط مجموعة الصور متاح داخل تطبيق أندرويد فقط.');
-  const archive = await getNativePhotoArchiveStatus();
-  if (!archive?.configured) await chooseNativePhotoArchiveFolder();
   const result = await RepEngine.captureVisitPhotos({
     visitUuid, repId: Number(repId), cardId: Number(cardId), phase, startIndex,
     fallbackLocation, maxPhotos, phaseLabel,

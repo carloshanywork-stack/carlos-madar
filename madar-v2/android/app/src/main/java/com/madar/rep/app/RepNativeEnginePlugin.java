@@ -96,11 +96,7 @@ public final class RepNativeEnginePlugin extends Plugin {
 
     @PluginMethod public void choosePhotoArchiveFolder(PluginCall call) {
         long owner=RepAuthStore.repId(getContext());if(owner<1) {call.reject("يلزم تسجيل الدخول.");return;}
-        call.getData().put("archiveOwner",owner);
-        Intent intent=new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
-        intent.putExtra(Intent.EXTRA_LOCAL_ONLY,true);
-        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_WRITE_URI_PERMISSION|Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION|Intent.FLAG_GRANT_PREFIX_URI_PERMISSION);
-        startActivityForResult(call,intent,"photoArchiveChosen");
+        call.resolve(new JSObject().put("configured", true).put("pending", 0).put("error", ""));
     }
     @ActivityCallback private void photoArchiveChosen(PluginCall call,ActivityResult result) {
         if(call==null)return;

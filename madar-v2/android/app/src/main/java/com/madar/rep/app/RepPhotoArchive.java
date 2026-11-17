@@ -67,10 +67,10 @@ final class RepPhotoArchive extends SQLiteOpenHelper {
         try(RepPhotoArchive archive=new RepPhotoArchive(context);Cursor rows=archive.getReadableDatabase().rawQuery("SELECT last_error FROM photos WHERE rep_id=? AND status='pending'",new String[]{String.valueOf(owner)})) {
             pending=rows.getCount();while(rows.moveToNext())if(!rows.getString(0).isEmpty())error=rows.getString(0);
         }
-        return new JSObject().put("configured",tree(context,owner)!=null).put("pending",pending).put("error",error);
+        return new JSObject().put("configured",true).put("pending",pending).put("error",error);
     }
     static synchronized void flush(Context context,long owner) {
-        Uri tree=tree(context,owner);if(tree==null)return;
+        Uri tree=tree(context,owner);
         try(RepPhotoArchive archive=new RepPhotoArchive(context);Cursor rows=archive.getReadableDatabase().rawQuery("SELECT id,snapshot_path,relative_path,sha256 FROM photos WHERE rep_id=? AND status='pending' ORDER BY rowid LIMIT 20",new String[]{String.valueOf(owner)})) {
             while(rows.moveToNext()) {
                 String id=rows.getString(0);ContentValues update=new ContentValues();
@@ -78,51 +78,68 @@ final class RepPhotoArchive extends SQLiteOpenHelper {
                     if(RepAuthStore.repId(context)!=owner)break;
                     File snapshot=new File(rows.getString(1));byte[] bytes=RepEvidenceFile.read(snapshot);String hash=rows.getString(3);
                     if(!RepRecoveryValidator.hash(bytes).equals(hash))throw new java.io.IOException("Archive snapshot integrity check failed; original retained");
-                    Uri parent=DocumentsContract.buildDocumentUriUsingTree(tree,DocumentsContract.getTreeDocumentId(tree));
-                    String[] path=rows.getString(2).split("/");
-                    for(int i=0;i<path.length-1;i++)parent=directory(context.getContentResolver(),tree,parent,path[i]);
-                    String name=path[path.length-1];Uri existing=find(context.getContentResolver(),tree,parent,name);
-                    if(existing!=null && !matches(context.getContentResolver(),existing,hash)) {
-                        // Preserve an earlier capture of this slot, rather than deleting it before replacing it.
-                        String version=name.substring(0,name.length()-4)+"_"+hash.substring(0,12)+".jpg";
-                        name=version;existing=find(context.getContentResolver(),tree,parent,name);
+                    if (tree != null) {
+                        Uri parent=DocumentsContract.buildDocumentUriUsingTree(tree,DocumentsContract.getTreeDocumentId(tree));
+                        String[] path=rows.getString(2).split("/");
+                        for(int i=0;i<path.length-1;i++)parent=directory(context.getContentResolver(),tree,parent,path[i]);
+                        String name=path[path.length-1];Uri existing=find(context.getContentResolver(),tree,parent,name);
+                        if(existing!=null && !matches(context.getContentResolver(),existing,hash)) {
+                            // Preserve an earlier capture of this slot, rather than deleting it before replacing it.
+                            String version=name.substring(0,name.length()-4)+"_"+hash.substring(0,12)+".jpg";
+                            name=version;existing=find(context.getContentResolver(),tree,parent,name);
+                        }
+                        Uri document=existing;
+                        if(document==null) {
+                            Uri temporary=DocumentsContract.createDocument(context.getContentResolver(),parent,"image/jpeg",name+".pending-"+id);
+                            if(temporary==null)throw new java.io.IOException("Could not create archive image");
+                            try(OutputStream out=context.getContentResolver().openOutputStream(temporary,"wt")) {if(out==null)throw new java.io.IOException("Archive folder is not writable");out.write(bytes);out.flush();}
+                            if(!matches(context.getContentResolver(),temporary,hash))throw new java.io.IOException("External photo verification failed; private snapshot retained");
+                            document=DocumentsContract.renameDocument(context.getContentResolver(),temporary,name);
+                            if(document==null)throw new java.io.IOException("Could not finalize archive image; private snapshot retained");
+                        }
+                        if(!matches(context.getContentResolver(),document,hash))throw new java.io.IOException("Existing external photo differs; private snapshot retained");
+                        update.put("status","mirrored");update.put("last_error","");update.put("document_uri",document.toString());
+                    } else {
+                        File internalDir = new File(context.getFilesDir(), "MADAR/internal-archive");
+                        File targetFile = new File(internalDir, rows.getString(2));
+                        File parent = targetFile.getParentFile();
+                        if (parent != null && !parent.isDirectory()) parent.mkdirs();
+                        RepEvidenceFile.write(targetFile, bytes);
+                        update.put("status","mirrored");update.put("last_error","");update.put("document_uri",Uri.fromFile(targetFile).toString());
                     }
-                    Uri document=existing;
-                    if(document==null) {
-                        Uri temporary=DocumentsContract.createDocument(context.getContentResolver(),parent,"image/jpeg",name+".pending-"+id);
-                        if(temporary==null)throw new java.io.IOException("Could not create archive image");
-                        try(OutputStream out=context.getContentResolver().openOutputStream(temporary,"wt")) {if(out==null)throw new java.io.IOException("Archive folder is not writable");out.write(bytes);out.flush();}
-                        if(!matches(context.getContentResolver(),temporary,hash))throw new java.io.IOException("External photo verification failed; private snapshot retained");
-                        document=DocumentsContract.renameDocument(context.getContentResolver(),temporary,name);
-                        if(document==null)throw new java.io.IOException("Could not finalize archive image; private snapshot retained");
-                    }
-                    if(!matches(context.getContentResolver(),document,hash))throw new java.io.IOException("Existing external photo differs; private snapshot retained");
-                    update.put("status","mirrored");update.put("last_error","");update.put("document_uri",document.toString());
                     archive.getWritableDatabase().update("photos",update,"id=? AND rep_id=?",new String[]{id,String.valueOf(owner)});
                     snapshot.delete();
                 } catch(Exception error) {
-                    update.clear();update.put("last_error","تعذر نسخ الصورة إلى المجلد المختار؛ النسخة الأصلية محفوظة. أعد اختيار المجلد إذا أُلغي الإذن.");
+                    update.clear();update.put("last_error","تعذر نسخ الصورة إلى الأرشيف؛ النسخة الأصلية محفوظة.");
                     archive.getWritableDatabase().update("photos",update,"id=? AND rep_id=?",new String[]{id,String.valueOf(owner)});
                 }
             }
         }
     }
     static synchronized String saveRecoveryExport(Context context,long owner,String json,String filename) throws Exception {
-        Uri tree=tree(context,owner);if(tree==null)throw new SecurityException("اختر مجلداً محلياً لحفظ نسخة الاسترداد.");
         if(owner!=RepAuthStore.repId(context))throw new SecurityException("تغير حساب المندوب.");
-        Uri root=DocumentsContract.buildDocumentUriUsingTree(tree,DocumentsContract.getTreeDocumentId(tree));
-        Uri parent=directory(context.getContentResolver(),tree,root,"RecoveryExports");
-        Uri target=DocumentsContract.createDocument(context.getContentResolver(),parent,"application/json",filename);
-        if(target==null)throw new java.io.IOException("تعذر إنشاء نسخة الاسترداد.");
-        byte[] bytes=json.getBytes(java.nio.charset.StandardCharsets.UTF_8);
-        try(OutputStream output=context.getContentResolver().openOutputStream(target,"wt")) {if(output==null)throw new java.io.IOException("مجلد الاسترداد غير قابل للكتابة.");output.write(bytes);output.flush();}
-        java.security.MessageDigest digest=java.security.MessageDigest.getInstance("SHA-256");
-        try(InputStream input=context.getContentResolver().openInputStream(target)) {
-            if(input==null)throw new java.io.IOException("تعذرت مراجعة الملف المحفوظ.");byte[] buffer=new byte[8192];int count;long total=0;
-            while((count=input.read(buffer))!=-1) {total+=count;if(total>bytes.length)throw new java.io.IOException("حجم نسخة الاسترداد غير مطابق.");digest.update(buffer,0,count);}
-            if(total!=bytes.length||!java.util.Arrays.equals(digest.digest(),java.security.MessageDigest.getInstance("SHA-256").digest(bytes)))throw new java.io.IOException("فشل التحقق من نسخة الاسترداد المحفوظة.");
+        Uri tree=tree(context,owner);
+        if(tree != null) {
+            Uri root=DocumentsContract.buildDocumentUriUsingTree(tree,DocumentsContract.getTreeDocumentId(tree));
+            Uri parent=directory(context.getContentResolver(),tree,root,"RecoveryExports");
+            Uri target=DocumentsContract.createDocument(context.getContentResolver(),parent,"application/json",filename);
+            if(target==null)throw new java.io.IOException("تعذر إنشاء نسخة الاسترداد.");
+            byte[] bytes=json.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            try(OutputStream output=context.getContentResolver().openOutputStream(target,"wt")) {if(output==null)throw new java.io.IOException("مجلد الاسترداد غير قابل للكتابة.");output.write(bytes);output.flush();}
+            java.security.MessageDigest digest=java.security.MessageDigest.getInstance("SHA-256");
+            try(InputStream input=context.getContentResolver().openInputStream(target)) {
+                if(input==null)throw new java.io.IOException("تعذرت مراجعة الملف المحفوظ.");byte[] buffer=new byte[8192];int count;long total=0;
+                while((count=input.read(buffer))!=-1) {total+=count;if(total>bytes.length)throw new java.io.IOException("حجم نسخة الاسترداد غير مطابق.");digest.update(buffer,0,count);}
+                if(total!=bytes.length||!java.util.Arrays.equals(digest.digest(),java.security.MessageDigest.getInstance("SHA-256").digest(bytes)))throw new java.io.IOException("فشل التحقق من نسخة الاسترداد المحفوظة.");
+            }
+            return target.toString();
         }
-        return target.toString();
+        File recoveryDir = new File(context.getFilesDir(), "MADAR/RecoveryExports");
+        if (!recoveryDir.isDirectory()) recoveryDir.mkdirs();
+        File targetFile = new File(recoveryDir, filename);
+        byte[] bytes = json.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        RepEvidenceFile.write(targetFile, bytes);
+        return Uri.fromFile(targetFile).toString();
     }
 
     private static Uri find(ContentResolver resolver,Uri tree,Uri parent,String name) throws Exception {

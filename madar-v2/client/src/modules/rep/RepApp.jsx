@@ -442,7 +442,7 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
 
   const syncTracking = useCallback(async (options = {}) => {
     if (nativeApp) {
-      try { await requestNativeSync(); return true; } catch { return false; }
+      void requestNativeSync().catch(() => undefined);
     }
     const duty = options.duty ?? onDuty;
     const hasLocationOverride = Object.hasOwn(options, 'location');
@@ -1549,6 +1549,29 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
     }
   }, [nativeApp, networkOnline, offlineOnly, refreshData, refreshPending, serverState, userId]);
 
+  const handleFullRefresh = useCallback(async () => {
+    if (routeLoading) return;
+    setRouteLoading(true);
+    try {
+      await checkServer();
+      if (nativeApp) {
+        await requestNativeSync().catch(() => undefined);
+      }
+      await syncTracking({ duty: onDuty, location: gpsRef.current });
+      await drainQueue();
+      await Promise.all([
+        refreshData(),
+        refreshAttendance(),
+        refreshPending(),
+      ]);
+      setToast('تم تحديث البيانات والمزامنة الكاملة بنجاح');
+    } catch (err) {
+      console.warn('[RepApp] handleFullRefresh notice:', err?.message || err);
+    } finally {
+      setRouteLoading(false);
+    }
+  }, [checkServer, drainQueue, nativeApp, onDuty, refreshAttendance, refreshData, refreshPending, requestNativeSync, routeLoading, syncTracking]);
+
   useEffect(() => {
     if (!nativeApp) return undefined;
     let active = true;
@@ -2028,12 +2051,14 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
           <span className={`rep-connect-status ${serverState === 'online' && networkOnline ? 'connected' : ''} ${serverState === 'checking' ? 'checking' : ''}`}>
             <i aria-hidden="true" />{serverLabel}
           </span>
-          <button className={`rep-queue-count ${activeTab === 'sync' ? 'active' : ''}`} type="button" onClick={() => setActiveTab((value) => value === 'sync' ? 'route' : 'sync')} aria-expanded={activeTab === 'sync'}>
-            <span>⏳</span><b>{pendingQueueCount}</b><small>معلق</small>
-          </button>
+          {pendingQueueCount > 0 && (
+            <button className="rep-queue-count" type="button" onClick={() => void handleFullRefresh()} disabled={routeLoading} aria-label="مزامنة العناصر المعلقة" title="مزامنة فورية">
+              <span>⏳</span><b>{pendingQueueCount}</b><small>معلق · مزامنة ↻</small>
+            </button>
+          )}
           <NotificationBell user={user} online={serverState === 'online' && networkOnline && !offlineOnly} variant="rep" />
           <button className={`rep-icon-button ${activeTab === 'tickets' ? 'active' : ''}`} type="button" onClick={() => setActiveTab((value) => value === 'tickets' ? 'route' : 'tickets')} aria-label="إرسال بلاغ للدعم" title="إرسال بلاغ">؟</button>
-          <button className="rep-icon-button rep-refresh-button" type="button" onClick={() => { void checkServer(); void refreshData(); void refreshAttendance(); }} disabled={routeLoading} aria-label="تحديث مسار اليوم" title="تحديث المسار">
+          <button className="rep-icon-button rep-refresh-button" type="button" onClick={() => void handleFullRefresh()} disabled={routeLoading} aria-label="تحديث ومزامنة البيانات" title="تحديث ومزامنة كاملة">
             <span className={routeLoading ? 'rep-spinning' : ''}>↻</span>
           </button>
           <button className="rep-logout-button" type="button" onClick={() => void logout()}>خروج</button>
@@ -2221,7 +2246,6 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
               ))}
             </div>
 
-            {storagePersistent === false && <p className="rep-storage-hint">قد يقوم المتصفح بإخلاء بعض البيانات المحلية عند امتلاء الهاتف. اترك مساحة كافية ولا تمسح بيانات التطبيق قبل المزامنة.</p>}
             {storageError && <p className="rep-storage-error" role="alert">{storageError}</p>}
             {showOfflineMap && <OfflineMapPanel
               route={route}
@@ -2285,99 +2309,6 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
         </div>
       )}
 
-      {/* Tab 4: المزامنة والتخزين المحلي (Sync & Outbox Queue) */}
-      {(activeTab === 'sync' || showQueue) && (
-        <div className="rep-tab-view rep-tab-sync">
-          <section className="rep-queue-panel is-tab-view" aria-label="قائمة الإجراءات المعلقة">
-            <div className="rep-queue-panel-head">
-              <div>
-                <span className="rep-eyebrow">التخزين المحلي والمزامنة</span>
-                <h2>طابور الإجراءات المعلقة <small>{pendingQueueCount}</small></h2>
-              </div>
-              {showQueue && <button className="rep-icon-button" type="button" onClick={() => setShowQueue(false)} aria-label="إخفاء قائمة المزامنة">×</button>}
-            </div>
-            {!pendingQueueCount ? (
-              <div className="rep-empty-state">
-                <span className="rep-empty-icon">✓</span>
-                <h3>كل البيانات متزامنة بالكامل</h3>
-                <p>لا توجد زيارات أو بصمات حضور معلقة على هذا الجهاز.</p>
-              </div>
-            ) : (
-              <ul className="rep-queue-list">
-                {pendingMachineActions.map((action) => (
-                  <li key={action.actionUuid}>
-                    {['pending_approval', 'approved', 'rejected'].includes(action.status) && (
-                      <span>
-                        {({ pending_approval: action.type === 'confirm_location' ? 'تصحيح موقع بانتظار مراجعة الإدارة' : 'بانتظار المراجعة الإدارية', approved: 'معتمد', rejected: 'مرفوض؛ أعد الإرسال من بطاقة الماكينة' })[action.status]} {action.reviewNote || ''}
-                      </span>
-                    )}
-                    <span className={`rep-queue-state ${action.status === 'syncing' ? 'syncing' : ''} ${action.status === 'blocked' ? 'blocked' : ''}`} aria-hidden="true">{action.status === 'syncing' ? '↻' : action.status === 'blocked' ? '!' : '⏳'}</span>
-                    <div>
-                      <strong>{action.type === 'confirm_location' ? `مقترح موقع الماكينة · بطاقة ${action.payload?.cardId || ''}` : `بلاغ ماكينة مختلفة · ${action.payload?.reportedCode || ''}`}</strong>
-                      <small>حُفظ {formatTime(action.createdAt)}{action.attempts ? ` · محاولات ${action.attempts}` : ''} · {locationReviewLabel(action.status)}</small>
-                      {(action.evidence || action.evidenceAvailable) && <small>صورة الإثبات محفوظة محلياً · {action.evidence ? `${Math.ceil(action.evidence.size / 1024)} KB` : 'ملف أصلي'}</small>}
-                      {action.lastError && <small className="rep-queue-error">{action.lastError}</small>}
-                    </div>
-                    {action.status === 'blocked'
-                      ? <button type="button" className="rep-queue-retry" disabled={serverState !== 'online' || offlineOnly} onClick={() => void retryMachineAction(action)}>إعادة المحاولة</button>
-                      : <span className="rep-queue-local">محفوظ محلياً</span>}
-                  </li>
-                ))}
-                {pendingVisits.map((visit) => (
-                  <li key={visit.visitUuid}>
-                    <span className={`rep-queue-state ${visit.status === 'syncing' ? 'syncing' : ''} ${visit.status === 'blocked' ? 'blocked' : ''}`} aria-hidden="true">{visit.status === 'syncing' ? '↻' : visit.status === 'blocked' ? '!' : '⏳'}</span>
-                    <div>
-                      <strong>ماكينة {visit.payload.machineCode} · {visit.payload.regionName}</strong>
-                      <small>حُفظت {formatTime(visit.createdAt)}{visit.attempts ? ` · محاولات ${visit.attempts}` : ''} · {visit.status === 'blocked' ? 'تحتاج مراجعة' : visit.status === 'syncing' ? 'جارٍ الإرسال' : 'بانتظار المزامنة'}</small>
-                      {visit.lastError && <small className="rep-queue-error">{visit.lastError}</small>}
-                    </div>
-                    {visit.status === 'blocked'
-                      ? <button type="button" className="rep-queue-retry" disabled={serverState !== 'online' || offlineOnly} onClick={async () => { if (nativeApp && visit.nativeStoragePath?.startsWith('internal://visits/')) await retryNativeVisit(visit.visitUuid, userId); else await updatePendingVisit(visit.visitUuid, { status: 'queued', lastError: '' }); await refreshPending(); void drainQueue(); }}>إعادة المحاولة</button>
-                      : <span className="rep-queue-local">محفوظة محلياً</span>}
-                  </li>
-                ))}
-                {pendingAttendanceActions.map((action) => (
-                  <li key={action.actionUuid}>
-                    <span className="rep-queue-state" aria-hidden="true">⏳</span>
-                    <div>
-                      <strong>{action.action === 'in' ? 'تسجيل حضور محفوظ محلياً' : 'تسجيل انصراف محفوظ محلياً'}</strong>
-                      <small>{formatTime(action.occurredAt)} · دقة GPS ±{Math.round(action.location?.accuracy ?? 0)}م · {action.status === 'attendance_rejected' ? 'مرفوض؛ يحتاج مراجعة' : action.status || 'pending_attendance_sync'}</small>
-                      {action.attempts ? <small>محاولات المزامنة {action.attempts}</small> : null}
-                      {action.lastError && <small className="rep-queue-error">{action.lastError}</small>}
-                    </div>
-                    <span className="rep-queue-local">محفوظ محلياً</span>
-                  </li>
-                ))}
-                {pendingGpsQueue.pending.length > 0 && (
-                  <li>
-                    <span className="rep-queue-state" aria-hidden="true">⌖</span>
-                    <div><strong>نقاط GPS محفوظة محلياً · {pendingGpsQueue.pending.length}</strong><small>تبقى على الهاتف حتى تأكيد الخادم مزامنتها.</small></div>
-                    <span className="rep-queue-local">SQLite</span>
-                  </li>
-                )}
-                {pendingGpsQueue.rejected.map((point) => (
-                  <li key={`gps-rejected:${point.trackId}`}>
-                    <span className="rep-queue-state blocked" aria-hidden="true">!</span>
-                    <div><strong>نقطة GPS تحتاج مراجعة · {formatTime(point.capturedAt)}</strong><small className="rep-queue-error">{point.reason || 'رفض الخادم هذه النقطة دون رسالة.'}</small></div>
-                    <span className="rep-queue-local">محتفظ بها</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-            <div className="rep-queue-actions-bar">
-              <button type="button" className="rep-button rep-button-light rep-sync-now" disabled={!pendingQueueCount || pendingExportBusy} onClick={() => void exportPending()}>{pendingExportBusy ? 'جارٍ تجهيز نسخة JSON…' : 'تصدير نسخة JSON'}</button>
-              {nativeApp && (
-                <>
-                  <input type="file" accept="application/json,.json" className="rep-recovery-file-input" aria-label="اختيار نسخة استرداد محلية" onChange={(event) => void importRecovery(event)} />
-                  <button type="button" className="rep-button rep-button-light rep-sync-now" disabled={pendingImportBusy} onClick={(event) => event.currentTarget.previousElementSibling?.click()}>{pendingImportBusy ? 'جارٍ التحقق والاسترداد…' : 'استيراد نسخة استرداد محلية'}</button>
-                </>
-              )}
-              <button type="button" className="rep-button rep-button-primary rep-sync-now" disabled={!pendingQueueCount || serverState !== 'online' || offlineOnly} onClick={() => { if (nativeApp && pendingAttendanceActions.length) void requestNativeSync().catch(() => undefined); void drainQueue(); }}>{serverState === 'online' ? 'مزامنة الآن ↻' : 'ستتم المزامنة عند الاتصال'}</button>
-            </div>
-          </section>
-        </div>
-      )}
-
       {/* Fixed Mobile Bottom Navigation Bar */}
       <nav className="rep-bottom-nav" aria-label="شريط التنقل الرئيسي">
         <button
@@ -2409,18 +2340,6 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
         >
           <span className="rep-nav-icon">💬</span>
           <span className="rep-nav-label">البلاغات</span>
-        </button>
-        <button
-          type="button"
-          className={`rep-nav-item ${activeTab === 'sync' ? 'active' : ''}`}
-          onClick={() => { setShowQueue(false); setActiveTab('sync'); }}
-          aria-label="تبويب المزامنة"
-        >
-          <span className="rep-nav-icon">⚡</span>
-          <span className="rep-nav-label">المزامنة</span>
-          {pendingQueueCount > 0 && (
-            <span className="rep-nav-badge alert">{pendingQueueCount}</span>
-          )}
         </button>
       </nav>
 

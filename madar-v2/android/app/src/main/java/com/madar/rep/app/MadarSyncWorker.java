@@ -415,7 +415,29 @@ public final class MadarSyncWorker extends Worker {
         try (RepTrackStore trackStore = new RepTrackStore(context)) {
             // Wait for the chronological attendance prerequisite, without blocking independent visit queues.
             if (localStore.nextAttendanceAction(repId) != null) return Result.retry();
+            android.content.SharedPreferences preferences = context.getSharedPreferences(
+                RepLocationService.PREFERENCES_NAME,
+                Context.MODE_PRIVATE
+            );
+            boolean isDutyActive = preferences.getBoolean("duty_active", false) && RepLocationService.isRunning();
+            String lastLocStr = preferences.getString("last_location_json", null);
+            JSONObject lastLocationObj = null;
+            if (lastLocStr != null) {
+                try {
+                    lastLocationObj = new JSONObject(lastLocStr);
+                } catch (Exception ignored) {}
+            }
             JSONArray trail = trackStore.pendingTrail(repId);
+            if (trail.length() == 0 && isDutyActive) {
+                JSONObject payload = new JSONObject()
+                    .put("onDuty", true)
+                    .put("trail", new JSONArray());
+                if (lastLocationObj != null) {
+                    payload.put("location", lastLocationObj);
+                }
+                postTracking(client, baseUrl, payload);
+                return null;
+            }
             for (int offset = 0; offset < trail.length(); offset += 450) {
                 JSONArray batch = new JSONArray();
                 JSONArray batchSources = new JSONArray();
@@ -438,7 +460,12 @@ public final class MadarSyncWorker extends Worker {
                     batchSources.put(new JSONObject().put("trackId", trackId).put("clientPointId", clientPointId));
                     lastTrackId = trackId;
                 }
-                JSONObject payload = new JSONObject().put("trail", batch);
+                JSONObject payload = new JSONObject()
+                    .put("onDuty", isDutyActive)
+                    .put("trail", batch);
+                if (lastLocationObj != null) {
+                    payload.put("location", lastLocationObj);
+                }
                 JSONObject response = postTracking(client, baseUrl, payload);
                 if (response == null) return Result.retry();
                 acknowledgeTrackingBatch(trackStore, response, batchSources, batch.length(), lastTrackId, repId);

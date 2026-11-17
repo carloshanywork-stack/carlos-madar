@@ -153,6 +153,7 @@ public class RepLocationService extends Service implements LocationListener {
         }
         updateAdaptiveGpsMode(location);
         appendTrackPoint(location);
+        MadarSyncScheduler.enqueueNow(getApplicationContext(), false);
     }
 
     private void requestGpsUpdates(boolean lowPower) {
