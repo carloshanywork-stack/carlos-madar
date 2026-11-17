@@ -7,13 +7,36 @@
         <service
             android:name=".RepLocationService"
             tools:node="remove" />
+        <activity
+            android:name=".RepCameraSequenceActivity"
+            tools:node="remove" />
     </application>
 
-    <!-- Completely omit background location tracking permissions in Manager app -->
+    <!-- Completely omit camera and GPS tracking permissions in Manager app -->
+    <uses-permission
+        android:name="android.permission.CAMERA"
+        tools:node="remove" />
+    <uses-feature
+        android:name="android.hardware.camera"
+        tools:node="remove" />
+    <uses-permission
+        android:name="android.permission.ACCESS_FINE_LOCATION"
+        tools:node="remove" />
+    <uses-permission
+        android:name="android.permission.ACCESS_COARSE_LOCATION"
+        tools:node="remove" />
     <uses-permission
         android:name="android.permission.ACCESS_BACKGROUND_LOCATION"
         tools:node="remove" />
     <uses-permission
         android:name="android.permission.FOREGROUND_SERVICE_LOCATION"
         tools:node="remove" />
+    <uses-permission
+        android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"
+        tools:node="remove" />
+
+    <!-- Manager app requires network and push notifications -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 </manifest>

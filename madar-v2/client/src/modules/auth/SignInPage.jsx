@@ -10,6 +10,10 @@ export default function SignInPage({ setupRequired, initialError = '', onLoginSu
   const [serverState, setServerState] = useState('checking');
 
   useEffect(() => {
+    if (initialError) setError(initialError);
+  }, [initialError]);
+
+  useEffect(() => {
     let active = true;
     const checkServer = async () => {
       if (!navigator.onLine) {
@@ -62,8 +66,14 @@ export default function SignInPage({ setupRequired, initialError = '', onLoginSu
           username: form.username.trim(),
           password: form.password,
         });
-        if (result.user?.role === 'rep' && isNativeRepApp() && result.token) {
-          await saveNativeSession(result.token, result.user);
+        if (result.user?.role === 'rep') {
+          if (isNativeRepApp() && result.token) {
+            await saveNativeSession(result.token, result.user);
+          } else {
+            await api.post('/api/auth/logout').catch(() => {});
+            setError('هذا التطبيق مخصص للإدارة والمشرفين فقط. يرجى استخدام تطبيق مدار للمناديب.');
+            return;
+          }
         }
       }
       onLoginSuccess(result.user);
