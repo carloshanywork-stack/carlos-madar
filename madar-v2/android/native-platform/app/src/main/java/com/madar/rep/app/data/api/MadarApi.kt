@@ -39,7 +39,7 @@ class MadarApi(
     private val client: OkHttpClient = defaultClient(),
 ) {
     private val baseUrl = normalizeServerUrl(serverUrl)
-    private val json = Json { ignoreUnknownKeys = true; explicitNulls = false; encodeDefaults = false }
+    private val json = Json { ignoreUnknownKeys = true; explicitNulls = false; encodeDefaults = true }
 
     fun login(username: String, password: String): HttpResult {
         val payload = json.encodeToString(LoginRequest.serializer(), LoginRequest(username.trim(), password))

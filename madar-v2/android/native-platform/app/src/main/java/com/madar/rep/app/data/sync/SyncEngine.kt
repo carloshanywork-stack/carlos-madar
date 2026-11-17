@@ -48,7 +48,7 @@ class SyncEngine(
     private val apiFactory: (String) -> MadarApi = { MadarApi(it) },
     private val onSessionExpired: () -> Unit = {},
 ) {
-    private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
+    private val json = Json { ignoreUnknownKeys = true; explicitNulls = false; encodeDefaults = true }
 
     /**
      * The WorkManager worker and an explicit "sync now" tap can overlap. One
