@@ -63,6 +63,7 @@ export default defineConfig(({ mode }) => {
             if (/node_modules\/scheduler\//.test(id)) return 'scheduler-vendor';
             if (/node_modules\/react\//.test(id)) return 'react-vendor';
             if (/node_modules\/(react-router|react-router-dom|@remix-run\/router)\//.test(id)) return 'router-vendor';
+            if (/node_modules\/(pptxgenjs|xlsx|jszip)\//.test(id)) return 'export-vendor';
             return undefined;
           },
         },
