@@ -4,7 +4,7 @@
  * eliminating all server roundtrips and CPU load.
  */
 
-export async function exportToExcelClient(data, options = {}) {
+export async function createExcelWorkbook(data, options = {}) {
   const {
     sheetName = 'البيانات',
     fileName = `تقرير_مدار_${new Date().toISOString().slice(0, 10)}.xlsx`,
@@ -31,11 +31,18 @@ export async function exportToExcelClient(data, options = {}) {
   ws['!views'] = [{ rightToLeft: true }];
 
   XLSX.utils.book_append_sheet(wb, ws, sheetName);
-  XLSX.writeFile(wb, fileName);
-  return true;
+  return { wb, fileName, XLSX };
 }
 
-export async function exportMaintenanceCardsToExcel(order, cards = []) {
+export async function exportToExcelClient(data, options = {}) {
+  const { wb, fileName, XLSX } = await createExcelWorkbook(data, options);
+  if (typeof window !== 'undefined' || options.download) {
+    XLSX.writeFile(wb, fileName);
+  }
+  return { wb, fileName };
+}
+
+export async function exportMaintenanceCardsToExcel(order, cards = [], options = {}) {
   const columns = {
     machine_code: 'رمز الآلة',
     machine_name: 'اسم الآلة / الموديل',
@@ -64,5 +71,6 @@ export async function exportMaintenanceCardsToExcel(order, cards = []) {
     sheetName: 'كروت الصيانة',
     fileName: `كروت_صيانة_${order.code || order.id}_${new Date().toISOString().slice(0, 10)}.xlsx`,
     columns,
+    ...options,
   });
 }

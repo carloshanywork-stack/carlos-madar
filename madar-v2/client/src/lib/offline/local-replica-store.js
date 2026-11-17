@@ -8,12 +8,13 @@ const DB_NAME = 'madar-local-replica';
 const DB_VERSION = 1;
 
 function openDatabase() {
-  if (typeof window === 'undefined' || !window.indexedDB) {
+  const idb = typeof window !== 'undefined' ? window.indexedDB : globalThis.indexedDB;
+  if (!idb) {
     return Promise.reject(new Error('IndexedDB is not available in this environment.'));
   }
 
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
+    const request = idb.open(DB_NAME, DB_VERSION);
 
     request.onupgradeneeded = (event) => {
       const db = event.target.result;
