@@ -15,13 +15,6 @@ import Modal from '../../components/ui/Modal.jsx';
 import PageHeader from '../../components/ui/PageHeader.jsx';
 import Tabs from '../../components/ui/Tabs.jsx';
 import Toast from '../../components/ui/Toast.jsx';
-import {
-  clearFinanceQueue,
-  enqueueFinanceOperation,
-  getFinanceQueue,
-  removeFinanceQueueItem,
-  syncFinanceQueue,
-} from './finance-offline-queue.js';
 
 const tabs = [
   { value: 'treasury', label: 'الخزينة' },
@@ -52,15 +45,7 @@ export default function FinancePage() {
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState('');
   const [search, setSearch] = useState('');
-  const [financeQueue, setFinanceQueue] = useState(() => getFinanceQueue());
-  const [syncingQueue, setSyncingQueue] = useState(false);
   const { notice, showToast, clearToast } = useToast();
-
-  useEffect(() => {
-    const handler = () => setFinanceQueue(getFinanceQueue());
-    window.addEventListener('madar-finance-queue-updated', handler);
-    return () => window.removeEventListener('madar-finance-queue-updated', handler);
-  }, []);
 
   const currentInvoices = tab === 'sales' ? salesInvoices : purchaseInvoices;
   const currentLoading = tab === 'sales' ? salesLoading : purchaseLoading;
@@ -72,6 +57,11 @@ export default function FinancePage() {
     event.preventDefault();
     setSaving(true);
     setFormError('');
+    if (!navigator.onLine) {
+      setFormError('المعاملات المالية وأوامر الشراء تتطلب اتصالاً مباشراً بالخادم لحماية الأرصدة وتفادي تضارب الحسابات.');
+      setSaving(false);
+      return;
+    }
     const form = new FormData(event.currentTarget);
     const amountCents = egpToCents(form.get('amount'), { allowZero: false });
     const payload = {
@@ -83,19 +73,6 @@ export default function FinancePage() {
       notes: form.get('notes') || undefined,
     };
 
-    if (!navigator.onLine) {
-      enqueueFinanceOperation({
-        type: 'treasury_entry',
-        label: `حركة خزينة (${payload.kind === 'income' ? 'إيراد' : 'مصروف'} ${form.get('amount')} ج.م)`,
-        endpoint: '/api/finance/treasury/entries',
-        payload,
-      });
-      setModal('');
-      setSaving(false);
-      showToast('تم حفظ حركة الخزينة دون اتصال. ستتم المزامنة تلقائياً عند الاتصال بالخادم.');
-      return;
-    }
-
     try {
       await api.post('/api/finance/treasury/entries', payload);
       setModal('');
@@ -103,14 +80,7 @@ export default function FinancePage() {
       showToast('تم تسجيل الحركة النقدية وتحديث الرصيد.');
     } catch (caught) {
       if (!caught?.status || caught.status === 0) {
-        enqueueFinanceOperation({
-          type: 'treasury_entry',
-          label: `حركة خزينة (${payload.kind === 'income' ? 'إيراد' : 'مصروف'} ${form.get('amount')} ج.م)`,
-          endpoint: '/api/finance/treasury/entries',
-          payload,
-        });
-        setModal('');
-        showToast('الخادم غير متاح؛ تم حفظ الحركة في طابور العمليات دون اتصال.');
+        setFormError('تعذر الاتصال بالخادم. تتطلب المعاملات المالية اتصالاً مباشراً بالخادم لحماية الأرصدة.');
       } else {
         setFormError(errorMessage(caught));
       }
@@ -131,6 +101,11 @@ export default function FinancePage() {
     event.preventDefault();
     setSaving(true);
     setFormError('');
+    if (!navigator.onLine) {
+      setFormError('المعاملات المالية وأوامر الشراء تتطلب اتصالاً مباشراً بالخادم لحماية الأرصدة وتفادي تضارب الحسابات.');
+      setSaving(false);
+      return;
+    }
     const form = new FormData(event.currentTarget);
     const items = purchaseLines.map((line) => ({
       materialId: Number(line.materialId),
@@ -144,20 +119,6 @@ export default function FinancePage() {
       notes: form.get('notes') || undefined,
     };
 
-    if (!navigator.onLine) {
-      enqueueFinanceOperation({
-        type: 'purchase_invoice',
-        label: `فاتورة شراء: ${payload.supplier} (${items.length} أصناف)`,
-        endpoint: '/api/finance/invoices/purchase',
-        payload,
-      });
-      setModal('');
-      setPurchaseLines([{ materialId: '', quantity: '1', unitCost: '0.00' }]);
-      setSaving(false);
-      showToast('تم حفظ فاتورة الشراء دون اتصال. ستتم المزامنة تلقائياً عند الاتصال بالخادم.');
-      return;
-    }
-
     try {
       await api.post('/api/finance/invoices/purchase', payload);
       setModal('');
@@ -166,15 +127,7 @@ export default function FinancePage() {
       showToast('تم إنشاء فاتورة الشراء وتحديث المخزون.');
     } catch (caught) {
       if (!caught?.status || caught.status === 0) {
-        enqueueFinanceOperation({
-          type: 'purchase_invoice',
-          label: `فاتورة شراء: ${payload.supplier} (${items.length} أصناف)`,
-          endpoint: '/api/finance/invoices/purchase',
-          payload,
-        });
-        setModal('');
-        setPurchaseLines([{ materialId: '', quantity: '1', unitCost: '0.00' }]);
-        showToast('الخادم غير متاح؛ تم حفظ فاتورة الشراء في طابور العمليات دون اتصال.');
+        setFormError('تعذر الاتصال بالخادم. تتطلب المعاملات المالية اتصالاً مباشراً بالخادم لحماية الأرصدة.');
       } else {
         setFormError(errorMessage(caught));
       }
@@ -188,6 +141,11 @@ export default function FinancePage() {
     if (!selectedInvoice) return;
     setSaving(true);
     setFormError('');
+    if (!navigator.onLine) {
+      setFormError('المعاملات المالية وأوامر الشراء تتطلب اتصالاً مباشراً بالخادم لحماية الأرصدة وتفادي تضارب الحسابات.');
+      setSaving(false);
+      return;
+    }
     const form = new FormData(event.currentTarget);
     const isPurchase = selectedInvoice.kind === 'purchase';
     const operationType = isPurchase ? 'purchase_payment' : 'sales_receipt';
@@ -200,20 +158,6 @@ export default function FinancePage() {
       notes: notes || undefined,
       operationId,
     };
-
-    if (!navigator.onLine) {
-      enqueueFinanceOperation({
-        type: 'settlement',
-        label: `سند ${isPurchase ? 'صرف' : 'قبض'} فاتورة ${selectedInvoice.code} (${form.get('amount')} ج.م)`,
-        endpoint,
-        payload,
-      });
-      setModal('');
-      setSelectedInvoice(null);
-      setSaving(false);
-      showToast(`تم حفظ سند ${isPurchase ? 'الصرف' : 'القبض'} دون اتصال. ستتم المزامنة تلقائياً.`);
-      return;
-    }
 
     let operationKey;
     try {
@@ -228,15 +172,7 @@ export default function FinancePage() {
       showToast(`${isPurchase ? 'تم تسجيل سند الصرف' : 'تم تسجيل سند القبض'}. الرصيد المتبقي ${formatMoney(result.invoice.remaining_cents)}.`);
     } catch (caught) {
       if (!caught?.status || caught.status === 0) {
-        enqueueFinanceOperation({
-          type: 'settlement',
-          label: `سند ${isPurchase ? 'صرف' : 'قبض'} فاتورة ${selectedInvoice.code} (${form.get('amount')} ج.م)`,
-          endpoint,
-          payload,
-        });
-        setModal('');
-        setSelectedInvoice(null);
-        showToast(`الخادم غير متاح؛ تم حفظ سند ${isPurchase ? 'الصرف' : 'القبض'} في طابور العمليات دون اتصال.`);
+        setFormError('تعذر الاتصال بالخادم. تتطلب المعاملات المالية اتصالاً مباشراً بالخادم لحماية الأرصدة.');
       } else {
         if (caught?.status >= 400 && caught.status < 500
             && caught?.payload?.code !== 'FINANCE_OPERATION_ID_CONFLICT' && operationKey) {
@@ -254,49 +190,6 @@ export default function FinancePage() {
   return (
     <>
       <PageHeader kicker="الماليات · رقابة النقد" title="الخزينة والفواتير" description="رصيد النقدية لحظياً، مدفوعات المشتريات، وفواتير البيع والتحصيلات المرتبطة بها." actions={<><Button variant="secondary" icon="plus" onClick={() => { setFormError(''); setModal('treasury'); }}>حركة خزينة</Button><Button icon="plus" onClick={() => { setFormError(''); setPurchaseLines([{ materialId: '', quantity: '1', unitCost: '0.00' }]); setModal('purchase'); }}>فاتورة شراء</Button></>} />
-
-      {financeQueue.length > 0 && (
-        <section className="madar-panel madar-panel-pad madar-section" style={{ borderRight: '4px solid #126b57', background: 'var(--surface-color, #fffdf5)' }}>
-          <div className="madar-panel-header" style={{ marginBottom: 0 }}>
-            <div>
-              <h3 style={{ display: 'flex', alignItems: 'center', gap: 8, margin: 0 }}>
-                <Icon name="clock" size={18} />
-                طابور المعاملات المالية دون اتصال
-                <Badge tone="warning">{financeQueue.length}</Badge>
-              </h3>
-              <p style={{ margin: '4px 0 0', color: 'var(--text-muted)' }}>
-                هناك {financeQueue.length} معاملة محفوظة محلياً. ستتم المزامنة تلقائياً عند توفر الاتصال، أو اضغط مزامنة الآن.
-              </p>
-            </div>
-            <div className="madar-inline-wrap">
-              <Button size="small" variant="secondary" onClick={() => setModal('queue')}>عرض الطابور</Button>
-              <Button
-                size="small"
-                icon="refresh"
-                disabled={syncingQueue}
-                onClick={async () => {
-                  setSyncingQueue(true);
-                  try {
-                    const res = await syncFinanceQueue();
-                    if (res.syncedCount > 0) {
-                      showToast(`تمت مزامنة ${res.syncedCount} معاملة مالية بنجاح.`);
-                      await Promise.all([reloadTreasury(), reloadSales(), reloadPurchases()]);
-                    } else if (res.failedCount > 0) {
-                      showToast('تعذرت مزامنة بعض المعاملات بسبب أخطاء تحقق.');
-                    } else {
-                      showToast('الخادم غير متاح حالياً للمزامنة.');
-                    }
-                  } finally {
-                    setSyncingQueue(false);
-                  }
-                }}
-              >
-                {syncingQueue ? 'جارٍ المزامنة…' : 'مزامنة الآن'}
-              </Button>
-            </div>
-          </div>
-        </section>
-      )}
 
       <section className="madar-finance-balance madar-panel">
         <div className="madar-finance-balance-copy"><span className="madar-page-kicker">الرصيد النقدي الحالي</span><strong className="madar-money">{treasuryLoading && !treasury ? '—' : formatMoney(treasury?.cashBalanceCents)}</strong><span>يُحتسب من إجمالي الإيرادات مطروحاً منه المصروفات المسجلة.</span></div>
@@ -330,71 +223,6 @@ export default function FinancePage() {
 
       <Modal open={modal === 'receipt' || modal === 'payment'} onClose={() => { setModal(''); setSelectedInvoice(null); }} title={modal === 'payment' ? 'سند صرف' : 'سند قبض'} description={selectedInvoice ? `${selectedInvoice.code} · ${selectedInvoice.kind === 'purchase' ? selectedInvoice.supplier : selectedInvoice.client_name}` : ''}>
         {selectedInvoice && <form onSubmit={settleInvoice}><div className="madar-form-stack"><div className="madar-receipt-due"><span>المبلغ المتبقي</span><strong className="madar-money">{formatMoney(selectedInvoice.remaining_cents)}</strong></div><Input label={modal === 'payment' ? 'المبلغ المصروف (جنيه) *' : 'المبلغ المستلم (جنيه) *'} name="amount" type="text" inputMode="decimal" required placeholder="0.00" /><Textarea label={modal === 'payment' ? 'ملاحظات سند الصرف' : 'ملاحظات سند القبض'} name="notes" maxLength={2000} /></div>{formError && <div className="madar-form-error"><Alert tone="error">{formError}</Alert></div>}<div className="madar-form-actions"><Button variant="secondary" onClick={() => setModal('')}>إلغاء</Button><Button type="submit" disabled={saving}>{saving ? 'جارٍ التسجيل…' : modal === 'payment' ? 'تسجيل سند الصرف' : 'تسجيل سند القبض'}</Button></div></form>}
-      </Modal>
-
-      <Modal open={modal === 'queue'} onClose={() => setModal('')} title="طابور المعاملات المالية دون اتصال" description="المعاملات التي سُجلت أثناء انقطاع الاتصال بالسيرفر.">
-        <div className="madar-form-stack">
-          {financeQueue.length === 0 ? (
-            <p>لا توجد معاملات مالية معلقة.</p>
-          ) : (
-            <div className="madar-table-wrap">
-              <table className="madar-table">
-                <thead>
-                  <tr>
-                    <th>المعاملة</th>
-                    <th>الحالة</th>
-                    <th>تاريخ التسجيل</th>
-                    <th>إجراء</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {financeQueue.map((item) => (
-                    <tr key={item.id}>
-                      <td>
-                        <strong>{item.label}</strong>
-                        {item.lastError && (
-                          <div style={{ color: 'var(--color-danger, #ef4444)', fontSize: '11px', marginTop: '2px' }}>
-                            {item.lastError}
-                          </div>
-                        )}
-                      </td>
-                      <td>
-                        <Badge tone={item.status === 'failed' ? 'danger' : item.status === 'syncing' ? 'info' : 'warning'}>
-                          {item.status === 'failed' ? 'خطأ' : item.status === 'syncing' ? 'جارٍ الإرسال' : 'بانتظار المزامنة'}
-                        </Badge>
-                      </td>
-                      <td>{formatDate(item.createdAt)}</td>
-                      <td>
-                        <Button
-                          variant="ghost"
-                          size="small"
-                          onClick={() => removeFinanceQueueItem(item.id)}
-                        >
-                          حذف
-                        </Button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-          <div className="madar-form-actions">
-            {financeQueue.length > 0 && (
-              <Button
-                variant="ghost"
-                onClick={() => {
-                  if (confirm('هل أنت متأكد من مسح جميع المعاملات المعلّقة؟')) {
-                    clearFinanceQueue();
-                  }
-                }}
-              >
-                مسح الكل
-              </Button>
-            )}
-            <Button variant="secondary" onClick={() => setModal('')}>إغلاق</Button>
-          </div>
-        </div>
       </Modal>
 
       <Toast notice={notice} onClose={clearToast} />
