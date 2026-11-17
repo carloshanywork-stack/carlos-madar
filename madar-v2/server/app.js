@@ -519,21 +519,22 @@ app.get('/download/desktop/install.ps1', (req, res) => {
   const host = req.get('x-forwarded-host') || req.get('host') || '127.0.0.1:3000';
   const serverUrl = `${protocol}://${host}`;
   const artifact = resolveDesktopArtifact();
-  const exeFilename = artifact?.filename?.endsWith('.exe') ? artifact.filename : 'MADAR-Windows-1.0.0-Setup.exe';
+  const filename = artifact?.filename || 'MADAR-Windows-1.0.0-Setup.zip';
+  const isZip = Boolean(artifact?.isZip || filename.endsWith('.zip'));
 
   const script = [
     '# MADAR Windows Automated Installer',
     '[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls13',
     '$ProgressPreference = "SilentlyContinue"',
     `$serverUrl = "${serverUrl}"`,
-    `$installerUrl = "$serverUrl/download/desktop/${exeFilename}"`,
+    `$downloadUrl = "$serverUrl/download/desktop/${filename}"`,
     '$certUrl = "$serverUrl/download/desktop/madar-codesign.cer"',
     '$tempCert = "$env:TEMP\\madar-codesign.cer"',
-    '$tempPath = "$env:TEMP\\MADAR-Windows-Setup.exe"',
     '',
     'Write-Host "==============================================" -ForegroundColor Cyan',
-    'Write-Host "       جارٍ تنزيل وتثبيت تطبيق MADAR         " -ForegroundColor Cyan',
+    'Write-Host "       جارٍ تثبيت تطبيق MADAR للويندوز        " -ForegroundColor Cyan',
     'Write-Host "==============================================" -ForegroundColor Cyan',
+    '',
     'Write-Host "1/4 تثبيت شهادة أمان الناشر المعتمد لـ MADAR..." -ForegroundColor Yellow',
     'try {',
     '    Invoke-WebRequest -Uri $certUrl -OutFile $tempCert -UseBasicParsing',
@@ -542,30 +543,80 @@ app.get('/download/desktop/install.ps1', (req, res) => {
     '    Remove-Item -Path $tempCert -Force -ErrorAction SilentlyContinue',
     '} catch {}',
     '',
-    'Write-Host "2/4 جارٍ تنزيل أحدث إصدار من الخادم..." -ForegroundColor Yellow',
-    'try {',
-    '    Invoke-WebRequest -Uri $installerUrl -OutFile $tempPath -UseBasicParsing',
-    '} catch {',
-    '    Write-Host "فشل التنزيل المباشر، جارٍ المحاولة عبر مسار التثبيت الرئيسي..." -ForegroundColor Yellow',
-    '    Invoke-WebRequest -Uri "$serverUrl/download/desktop" -OutFile $tempPath -UseBasicParsing',
-    '}',
-    '',
-    'Write-Host "3/4 فك قيود الحماية (Unblock)..." -ForegroundColor Yellow',
-    'Unblock-File -Path $tempPath -ErrorAction SilentlyContinue',
-    '',
-    'Write-Host "4/4 تشغيل معالج التثبيت..." -ForegroundColor Green',
-    'Start-Process -FilePath $tempPath -Wait',
-    '',
-    'Remove-Item -Path $tempPath -Force -ErrorAction SilentlyContinue',
-    'Write-Host "تم تثبيت تطبيق MADAR بنجاح!" -ForegroundColor Green',
-    '',
-  ].join('\r\n');
+  ];
+
+  if (isZip) {
+    script.push(
+      '$tempZip = "$env:TEMP\\MADAR-Package.zip"',
+      '$installDir = "$env:LOCALAPPDATA\\Programs\\MADAR"',
+      '',
+      'Write-Host "2/4 جارٍ تنزيل حزمة برنامج MADAR الكاملة من الخادم..." -ForegroundColor Yellow',
+      'try {',
+      '    Invoke-WebRequest -Uri $downloadUrl -OutFile $tempZip -UseBasicParsing',
+      '} catch {',
+      '    Invoke-WebRequest -Uri "$serverUrl/download/desktop" -OutFile $tempZip -UseBasicParsing',
+      '}',
+      '',
+      'Write-Host "3/4 فك ضغط وتثبيت الملفات إلى دليل البرامج..." -ForegroundColor Yellow',
+      'if (!(Test-Path $installDir)) { New-Item -ItemType Directory -Path $installDir -Force | Out-Null }',
+      'Expand-Archive -Path $tempZip -DestinationPath $installDir -Force',
+      'Remove-Item -Path $tempZip -Force -ErrorAction SilentlyContinue',
+      'Get-ChildItem -Path $installDir -Recurse | Unblock-File -ErrorAction SilentlyContinue',
+      '',
+      'Write-Host "4/4 إنشاء اختصارات سطح المكتب وقائمة ابدأ..." -ForegroundColor Green',
+      '$targetExe = "$installDir\\MADAR.exe"',
+      '$wshShell = New-Object -ComObject WScript.Shell',
+      '$desktopPath = [Environment]::GetFolderPath("Desktop")',
+      '$shortcut = $wshShell.CreateShortcut("$desktopPath\\MADAR ERP.lnk")',
+      '$shortcut.TargetPath = $targetExe',
+      '$shortcut.WorkingDirectory = $installDir',
+      '$shortcut.IconLocation = "$targetExe,0"',
+      '$shortcut.Description = "نظام MADAR لإدارة العمليات والمخزون"',
+      '$shortcut.Save()',
+      '',
+      '$startMenuDir = [Environment]::GetFolderPath("Programs")',
+      '$shortcutStart = $wshShell.CreateShortcut("$startMenuDir\\MADAR ERP.lnk")',
+      '$shortcutStart.TargetPath = $targetExe',
+      '$shortcutStart.WorkingDirectory = $installDir',
+      '$shortcutStart.IconLocation = "$targetExe,0"',
+      '$shortcutStart.Description = "نظام MADAR لإدارة العمليات والمخزون"',
+      '$shortcutStart.Save()',
+      '',
+      'Write-Host "==============================================" -ForegroundColor Green',
+      'Write-Host "تم تثبيت تطبيق MADAR بنجاح!" -ForegroundColor Green',
+      'Write-Host "تم إنشاء اختصار على سطح المكتب وقائمة ابدأ." -ForegroundColor Green',
+      'Write-Host "جارٍ تشغيل التطبيق الآن..." -ForegroundColor Cyan',
+      'Write-Host "==============================================" -ForegroundColor Green',
+      'Start-Process -FilePath $targetExe',
+      '',
+    );
+  } else {
+    script.push(
+      '$tempPath = "$env:TEMP\\MADAR-Windows-Setup.exe"',
+      'Write-Host "2/4 جارٍ تنزيل أحدث إصدار من الخادم..." -ForegroundColor Yellow',
+      'try {',
+      '    Invoke-WebRequest -Uri $downloadUrl -OutFile $tempPath -UseBasicParsing',
+      '} catch {',
+      '    Invoke-WebRequest -Uri "$serverUrl/download/desktop" -OutFile $tempPath -UseBasicParsing',
+      '}',
+      '',
+      'Write-Host "3/4 فك قيود الحماية (Unblock)..." -ForegroundColor Yellow',
+      'Unblock-File -Path $tempPath -ErrorAction SilentlyContinue',
+      '',
+      'Write-Host "4/4 تشغيل معالج التثبيت..." -ForegroundColor Green',
+      'Start-Process -FilePath $tempPath -Wait',
+      '',
+      'Remove-Item -Path $tempPath -Force -ErrorAction SilentlyContinue',
+      'Write-Host "تم تثبيت تطبيق MADAR بنجاح!" -ForegroundColor Green',
+      '',
+    );
+  }
 
   res.set({
     'Cache-Control': 'no-cache, no-store, must-revalidate',
     'Content-Type': 'text/plain; charset=utf-8',
   });
-  res.send(script);
+  res.send(script.join('\r\n'));
 });
 
 app.get(['/download/desktop/latest.yml', '/download/latest.yml'], (req, res, next) => {

@@ -70,7 +70,7 @@ export default function SignInPage({ setupRequired, initialError = '', onLoginSu
           if (isNativeRepApp() && result.token) {
             await saveNativeSession(result.token, result.user);
           } else {
-            await api.post('/api/auth/logout').catch(() => {});
+            await api.post('/api/auth/logout').catch(() => { });
             setError('هذا التطبيق مخصص للإدارة والمشرفين فقط. يرجى استخدام تطبيق مدار للمناديب.');
             return;
           }
@@ -220,7 +220,7 @@ export default function SignInPage({ setupRequired, initialError = '', onLoginSu
 
             <div className="auth-security-note">
               <span className="auth-security-icon" aria-hidden="true">⌑</span>
-                <span><strong>جلسة محمية</strong><small>يُحفظ تسجيل الدخول في ملف ارتباط محمي من نوع HTTP-only. لا يُخزّن التوكن في الهاتف.</small></span>
+              <span><strong>جلسة محمية</strong><small>يُحفظ تسجيل الدخول في ملف ارتباط محمي من نوع HTTP-only. لا يُخزّن التوكن في الهاتف.</small></span>
             </div>
           </div>
           <p className="auth-local-note"><span /> مساحة عمل خاصة <b>·</b> بيانات محلية</p>
