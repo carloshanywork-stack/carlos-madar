@@ -17,9 +17,11 @@ echo ""
 echo "=== Step 1: Build desktop installer (release mode) ==="
 export MADAR_DESKTOP_SERVER_URL="https://${REMOTE_HOST}"
 export MADAR_DESKTOP_UPDATE_URL="https://${REMOTE_HOST}/download/desktop/"
-export MADAR_WINDOWS_PUBLISHER_NAME="Madar Desktop"
-export CSC_LINK="${CERTS}/madar-codesign.pfx"
-export CSC_KEY_PASSWORD="madar-selfsign-2026"
+export MADAR_WINDOWS_PUBLISHER_NAME="MADAR ERP"
+export CSC_LINK="${PROJECT_ROOT}/desktop/madar-codesign.pfx"
+export CSC_KEY_PASSWORD="madar-codesign-2026"
+export MADAR_WINDOWS_TARGET="nsis"
+export USE_SYSTEM_OSSLSIGNCODE="true"
 
 cd "${PROJECT_ROOT}"
 node scripts/build-desktop.js --release
@@ -27,7 +29,7 @@ node scripts/build-desktop.js --release
 echo ""
 echo "=== Step 2: Locate built artifacts ==="
 BUILD_DIR="${PROJECT_ROOT}/build/windows"
-EXE=$(ls -t "${BUILD_DIR}"/*.exe 2>/dev/null | head -n1)
+EXE=$(ls -t "${BUILD_DIR}"/*.exe 2>/dev/null | grep -v "signed" | head -n1)
 YML=$(ls -t "${BUILD_DIR}"/latest.yml 2>/dev/null | head -n1)
 BLOCKMAP=$(ls -t "${BUILD_DIR}"/*.blockmap 2>/dev/null | head -n1)
 
@@ -40,17 +42,23 @@ echo "  YML:      $YML"
 echo "  BLOCKMAP: $BLOCKMAP"
 
 echo ""
-echo "=== Step 3: Sign with osslsigncode (self-signed cert) ==="
+echo "=== Step 3: Verify or sign with osslsigncode ==="
 SIGNED_EXE="${EXE%.exe}-signed.exe"
-osslsigncode sign \
-  -certs "${CERTS}/cert.crt" \
-  -key "${CERTS}/cert.key" \
-  -n "MADAR Desktop" \
-  -i "https://${REMOTE_HOST}" \
-  -t "http://timestamp.digicert.com" \
-  -in "$EXE" \
-  -out "$SIGNED_EXE"
-echo "✅ Signed: $SIGNED_EXE"
+if osslsigncode verify -in "$EXE" 2>/dev/null; then
+  echo "✅ Executable is already signed: $EXE"
+  SIGNED_EXE="$EXE"
+else
+  osslsigncode sign \
+    -pkcs12 "${PROJECT_ROOT}/desktop/madar-codesign.pfx" \
+    -pass "madar-codesign-2026" \
+    -h sha256 \
+    -n "MADAR Desktop" \
+    -i "https://${REMOTE_HOST}" \
+    -t "http://timestamp.digicert.com" \
+    -in "$EXE" \
+    -out "$SIGNED_EXE"
+  echo "✅ Signed: $SIGNED_EXE"
+fi
 
 echo ""
 echo "=== Step 4: Upload to ${REMOTE_HOST}:~/${REMOTE_PATH} ==="

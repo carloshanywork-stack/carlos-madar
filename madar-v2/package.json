@@ -20,7 +20,7 @@
     "desktop:build": "node scripts/build-desktop.js",
     "desktop:release": "node scripts/build-desktop.js --release",
     "desktop:cert": "node scripts/generate-desktop-cert.js",
-    "desktop:build:signed": "MADAR_DESKTOP_SERVER_URL=https://carlos-pc.tail852ef0.ts.net MADAR_DESKTOP_UPDATE_URL=https://carlos-pc.tail852ef0.ts.net/download/desktop MADAR_WINDOWS_PUBLISHER_NAME='MADAR ERP' MADAR_WINDOWS_TARGET=zip CSC_LINK=desktop/madar-codesign.pfx CSC_KEY_PASSWORD=madar-codesign-2026 node scripts/build-desktop.js --release",
+    "desktop:build:signed": "MADAR_DESKTOP_SERVER_URL=https://carlos-pc.tail852ef0.ts.net MADAR_DESKTOP_UPDATE_URL=https://carlos-pc.tail852ef0.ts.net/download/desktop/ MADAR_WINDOWS_PUBLISHER_NAME='MADAR ERP' MADAR_WINDOWS_TARGET=nsis CSC_LINK=desktop/madar-codesign.pfx CSC_KEY_PASSWORD=madar-codesign-2026 node scripts/build-desktop.js --release",
     "desktop:stage": "node scripts/publish-desktop.js",
     "desktop:deploy:firebase": "npx -y firebase-tools deploy --only hosting",
     "db:init": "node server/database/init.js",

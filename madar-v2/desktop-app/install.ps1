@@ -15,8 +15,11 @@ if (-not (Test-Path $installPath)) {
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
 Copy-Item -Recurse -Force "${scriptDir}\app\*" $installPath
 
-# Add the self‑signed certificate to Trusted Root (requires admin rights)
-$certPath = "${scriptDir}\cert.cer"
+# Add the code signing certificate to Trusted Root (requires admin rights)
+$certPath = Join-Path $scriptDir "madar-codesign.cer"
+if (-not (Test-Path $certPath)) {
+    $certPath = Join-Path $scriptDir "cert.cer"
+}
 if (Test-Path $certPath) {
     Write-Host "Adding certificate to Trusted Root…"
     certutil -addstore -f "Root" $certPath
