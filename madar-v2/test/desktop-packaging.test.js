@@ -79,3 +79,33 @@ test('desktop release build requires HTTPS endpoints and a Windows signing ident
   assert.equal(icon.readUInt16LE(4), 1);
   assert.equal(icon.readUInt32LE(18), 22);
 });
+
+test('desktop app bundles local web client, provides loopback proxy, offline fallback, and persistent server config', () => {
+  const main = read('desktop-app/main.cjs');
+  const preload = read('desktop-app/preload.cjs');
+  const offline = read('desktop-app/offline.html');
+  const serverSettings = read('desktop-app/server-settings.html');
+  const build = read('scripts/build-desktop.js');
+
+  assert.match(main, /startLoopbackServer/);
+  assert.match(main, /server-config\.json/);
+  assert.match(main, /offline\.html/);
+  assert.match(main, /server-settings\.html/);
+  assert.match(main, /did-fail-load/);
+  assert.match(main, /madar:desktop:get-server-config/);
+  assert.match(main, /madar:desktop:set-server-config/);
+  assert.match(main, /madar:desktop:test-server/);
+  assert.match(main, /madar:desktop:open-server-settings/);
+  assert.match(main, /madar:desktop:reload/);
+  assert.match(preload, /getServerConfig/);
+  assert.match(preload, /setServerConfig/);
+  assert.match(preload, /testServer/);
+  assert.match(preload, /openServerSettings/);
+  assert.match(offline, /الاتصال بالخادم/);
+  assert.match(offline, /serverUrl/);
+  assert.match(offline, /testBtn/);
+  assert.match(offline, /saveBtn/);
+  assert.match(serverSettings, /إعدادات الاتصال بالخادم/);
+  assert.match(build, /desktop-app\/web/);
+  assert.match(build, /client\/dist/);
+});
