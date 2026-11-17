@@ -1,12 +1,12 @@
 {
-  "sourceRevision": "a34d51ce41cd8e7515e7dc8a7d4ed782f1ddf4ea",
+  "sourceRevision": "37a30488da7a4a7235874f1010e5cb3f33da54c6",
   "sourceTreeDirty": false,
-  "builtAt": "2026-11-17T09:29:12.759Z",
+  "builtAt": "2026-11-17T12:37:38.008Z",
   "versionCode": 25,
   "versionName": "2.4.5",
   "buildType": "release",
   "serverUrl": "https://carlos-pc.tail852ef0.ts.net",
   "artifactOnly": false,
-  "apkSha256": "bdbf410f708aa09b8d05b85a6eed30032ba3bfe3db3b99b6a7c4f47a77e21829",
+  "apkSha256": "c3bf411ae09eaac08e1bb252ffd3bbf814a30fec4498fe319010e2cbb5a89339",
   "signerCertificateSha256": "f4c8bffc9f852ea6056e350b65156eb880d05629991682492159b9e3937c02a1"
 }

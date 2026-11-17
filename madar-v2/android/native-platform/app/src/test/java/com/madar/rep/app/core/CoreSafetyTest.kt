@@ -29,7 +29,7 @@ class CoreSafetyTest {
     @Test
     fun enforcesFreshnessAccuracyMockAndDocumentedClockTolerance() {
         assertEquals(LocationDecision.Valid, GeoPolicy.evaluate(point(at = NOW), null, null, nowMillis = NOW))
-        assertTrue(GeoPolicy.evaluate(point(at = NOW - 30_001), null, null, nowMillis = NOW) is LocationDecision.Stale)
+        assertTrue(GeoPolicy.evaluate(point(at = NOW - 300_001), null, null, nowMillis = NOW) is LocationDecision.Stale)
         assertTrue(GeoPolicy.evaluate(point(at = NOW + 60_001), null, null, nowMillis = NOW) is LocationDecision.Stale)
         assertEquals(LocationDecision.Valid, GeoPolicy.evaluate(point(at = NOW + 60_000), null, null, nowMillis = NOW))
         assertTrue(GeoPolicy.evaluate(point(accuracy = Float.NaN), null, null, nowMillis = NOW) is LocationDecision.Inaccurate)

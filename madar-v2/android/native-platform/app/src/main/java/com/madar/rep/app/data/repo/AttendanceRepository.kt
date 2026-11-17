@@ -28,7 +28,7 @@ data class AttendanceView(
  * that crosses midnight keeps its true start.
  */
 class AttendanceRepository(private val database: MadarDatabase) {
-    private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
+    private val json = Json { ignoreUnknownKeys = true; explicitNulls = false; encodeDefaults = true }
 
     fun observe(repId: Long): Flow<AttendanceView?> = database.attendanceSnapshots().observe(repId).map { row ->
         row?.let { decode(it) }

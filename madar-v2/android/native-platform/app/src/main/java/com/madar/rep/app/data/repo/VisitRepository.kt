@@ -34,7 +34,7 @@ class VisitRepository(
     private val database: MadarDatabase,
     private val governorates: com.madar.rep.app.core.GovernorateIndex,
 ) {
-    private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
+    private val json = Json { ignoreUnknownKeys = true; explicitNulls = false; encodeDefaults = true }
     private val lineSerializer = ListSerializer(MaintenanceLine.serializer())
 
     fun observeVisits(repId: Long): Flow<List<VisitEntity>> = database.visits().observeForOwner(repId)
