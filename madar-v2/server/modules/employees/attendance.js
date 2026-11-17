@@ -284,7 +284,11 @@ function employeeForRep(userId, database) {
 
 function normalizeLocation(input) {
   const body = requireObject(input, 'location');
-  allowOnlyKeys(body, ['latitude', 'longitude', 'accuracy', 'updatedAt', 'speed']);
+  allowOnlyKeys(body, ['latitude', 'longitude', 'accuracy', 'updatedAt', 'speed', 'isMock', 'is_mock', 'mocked', 'mock_flag']);
+  const isMock = body.isMock === true || body.is_mock === true || body.mocked === true || body.mock_flag === true;
+  if (isMock) {
+    throw new HttpError(400, 'تحديد الموقع الجغرافي الوهمي (Mock GPS) غير مسموح به في تسجيل الحضور.');
+  }
   const latitude = body.latitude;
   const longitude = body.longitude;
   const accuracy = body.accuracy;

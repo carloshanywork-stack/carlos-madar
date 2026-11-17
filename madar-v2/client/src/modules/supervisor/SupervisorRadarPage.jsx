@@ -461,7 +461,13 @@ export default function SupervisorRadarPage() {
             <button
               type="button"
               className={`radar-heatmap-btn ${showHeatmap ? 'is-active' : ''}`}
-              onClick={() => setShowHeatmap(!showHeatmap)}
+              onClick={() => {
+                const next = !showHeatmap;
+                setShowHeatmap(next);
+                if (next && selectedRep === null && representatives.length > 0) {
+                  setSelectedRep(representatives[0].id);
+                }
+              }}
               title="تبديل عرض خريطة الكثافة والتوقفات الحرارية"
             >
               🔥 {showHeatmap ? 'إخفاء الخريطة الحرارية' : 'خريطة الكثافة والوقفات (Heat Map)'}
@@ -470,17 +476,42 @@ export default function SupervisorRadarPage() {
             <span>{selectedRep === null ? `${representatives.length} مندوب · الحالة وآخر إشارة على الخريطة` : routeLoading ? 'جارٍ تحميل كامل نقاط المسار…' : `${visibleRoute?.polyline?.length ?? 0} نقطة مسجلة · ${visibleRoute?.stops?.length ?? 0} توقف · ${visibleRoute?.visitedMachines?.length ?? 0} زيارة`}</span>
           </div>
           <TrackMap representatives={representatives} selectedId={selectedRep} onSelect={setSelectedRep} selectedRoute={visibleRoute} showHeatmap={showHeatmap} />
+          {visibleRoute && showHeatmap && (
+            <div className="radar-heatmap-analytics">
+              <div className="heatmap-metric-card">
+                <span className="metric-icon">⏱️</span>
+                <div>
+                  <strong>{Math.floor((visibleRoute.stops?.reduce((sum, s) => sum + (Number(s.durationMinutes) || 0), 0) || 0) / 60)} س {(visibleRoute.stops?.reduce((sum, s) => sum + (Number(s.durationMinutes) || 0), 0) || 0) % 60} د</strong>
+                  <small>إجمالي فترات التوقف والانتظار</small>
+                </div>
+              </div>
+              <div className="heatmap-metric-card">
+                <span className="metric-icon">📍</span>
+                <div>
+                  <strong>{visibleRoute.stops?.length ?? 0} نقطة</strong>
+                  <small>إجمالي الوقفات المسجلة</small>
+                </div>
+              </div>
+              <div className="heatmap-metric-card">
+                <span className="metric-icon">🛑</span>
+                <div>
+                  <strong>{visibleRoute.stops?.length ? Math.max(...visibleRoute.stops.map((s) => Number(s.durationMinutes) || 0)) : 0} دقيقة</strong>
+                  <small>أطول فترة توقف متصلة</small>
+                </div>
+              </div>
+            </div>
+          )}
           {visibleRoute && <div className="radar-speed-summary" aria-label="سرعة المندوب في اليوم المختار">
             <span>متوسط السرعة أثناء الحركة · {visibleRoute.date}: <strong>{formatSpeed(visibleRoute.speedSummary?.averageKmh)}</strong></span>
             <span>أعلى قراءة: <strong>{formatSpeed(visibleRoute.speedSummary?.maxKmh)}</strong></span>
             <small>من {visibleRoute.speedSummary?.sampleCount ?? 0} قراءة GPS صالحة أثناء الحركة</small>
           </div>}
           {visibleRoute && <div className="radar-stops-list" aria-label="توقفات المندوب المحدد">
-            <strong>التوقفات · {visibleRoute.date}</strong>
-            {visibleRoute.stops.length ? visibleRoute.stops.map((stop, index) => <span key={`${stop.arrivedAt}-${index}`}>
+            <strong>التوقفات والوقفات · {visibleRoute.date}</strong>
+            {visibleRoute.stops.length ? visibleRoute.stops.map((stop, index) => <span key={`${stop.arrivedAt}-${index}`} className={showHeatmap ? 'heatmap-active-stop' : ''}>
               <b>{stop.name || `توقف ${index + 1}`}</b>
               <small>وصول {formatTime(stop.arrivedAt)} · مغادرة {formatTime(stop.departedAt)} · {stop.durationMinutes} دقيقة</small>
-            </span>) : <small>لم تُسجّل توقفات متصلة لأكثر من 5 دقائق في هذا اليوم.</small>}
+            </span>) : <small>لم تُسجّل توقفات متصلة لأكثر من 3 دقائق في هذا اليوم.</small>}
           </div>}
           {visibleRoute && <div className="radar-visited-list" aria-label="الماكينات التي زارها المندوب">
             <strong>الماكينات التي زارها · {visibleRoute.visitedMachines?.length ?? 0}</strong>

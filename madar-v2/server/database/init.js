@@ -1657,7 +1657,7 @@ export function migrateRepNativeSupportWorkflows(database) {
         id INTEGER PRIMARY KEY,
         report_id INTEGER NOT NULL REFERENCES rep_bug_reports(id) ON DELETE CASCADE,
         actor_user_id INTEGER REFERENCES users(id),
-        event_type TEXT NOT NULL CHECK (event_type IN ('created', 'status_changed', 'note_added', 'github_requested', 'github_created', 'github_failed', 'attachments_purged')),
+        event_type TEXT NOT NULL CHECK (event_type IN ('created', 'status_changed', 'note_added', 'github_requested', 'github_created', 'github_failed', 'attachments_purged', 'ai_diagnosed', 'self_healed')),
         old_values_json TEXT CHECK (old_values_json IS NULL OR json_valid(old_values_json)),
         new_values_json TEXT CHECK (new_values_json IS NULL OR json_valid(new_values_json)),
         note TEXT,

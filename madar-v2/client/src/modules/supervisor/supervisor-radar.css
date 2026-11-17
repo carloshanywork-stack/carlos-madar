@@ -224,3 +224,11 @@
   #madar-app .location-review-comparison { grid-template-columns: 1fr; }
   #madar-app .location-reviews-header { flex-wrap: wrap; }
 }
+
+#madar-app .radar-heatmap-analytics { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; margin: 10px 14px 4px; }
+#madar-app .heatmap-metric-card { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border: 1px solid #ffd8a8; border-radius: 10px; background: linear-gradient(135deg, #fff9db, #fff4e6); box-shadow: 0 2px 6px rgba(217, 72, 15, 0.06); }
+#madar-app .heatmap-metric-card .metric-icon { font-size: 22px; }
+#madar-app .heatmap-metric-card strong { display: block; color: #d9480f; font-size: 14px; font-weight: 900; }
+#madar-app .heatmap-metric-card small { color: #495057; font-size: 9px; font-weight: 700; }
+#madar-app .radar-stops-list > span.heatmap-active-stop { border-color: #f76707; background: #fff4e6; }
+#madar-app .radar-stops-list > span.heatmap-active-stop b { color: #d9480f; }

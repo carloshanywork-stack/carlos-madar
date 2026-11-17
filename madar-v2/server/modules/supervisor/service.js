@@ -4,6 +4,7 @@ import { HttpError, allowOnlyKeys, optionalText, positiveId, requireObject, requ
 import { resolveStorageFile } from '../storage.js';
 import { recordAudit } from '../audit.js';
 import { getPendingCardPhotoReviews, reviewCardPhotos } from '../maintenance/photo-review.js';
+import { calculateDistanceMeters } from '../rep/service.js';
 
 const DEFAULT_TIME_ZONE = 'Africa/Cairo';
 const MAX_SPEED_METERS_PER_SECOND = 200 / 3.6;
@@ -191,6 +192,42 @@ export function getSupervisorRadar(database = defaultDatabase, now = new Date())
   return { success: true, generatedAt: now.toISOString(), businessDate: todayRange.day, representatives: result };
 }
 
+function detectStopsFromPoints(points) {
+  const stops = [];
+  let segment = [];
+  const finish = () => {
+    if (segment.length < 2) return;
+    const first = segment[0];
+    const last = segment.at(-1);
+    const durationMinutes = Math.round((Date.parse(last.recorded_at) - Date.parse(first.recorded_at)) / 60000);
+    if (durationMinutes >= 3) {
+      const avgLat = segment.reduce((sum, p) => sum + Number(p.latitude), 0) / segment.length;
+      const avgLng = segment.reduce((sum, p) => sum + Number(p.longitude), 0) / segment.length;
+      stops.push({
+        latitude: Number(avgLat.toFixed(7)),
+        longitude: Number(avgLng.toFixed(7)),
+        arrived_at: first.recorded_at,
+        departed_at: last.recorded_at,
+        duration_minutes: durationMinutes,
+        stop_name: `توقف (${durationMinutes} دقيقة)`,
+      });
+    }
+  };
+  for (const point of points) {
+    const anchor = segment[0];
+    const prev = segment.at(-1);
+    const gap = prev ? Date.parse(point.recorded_at) - Date.parse(prev.recorded_at) : 0;
+    const distance = anchor ? calculateDistanceMeters(anchor.latitude, anchor.longitude, point.latitude, point.longitude) : 0;
+    if (segment.length && (gap > 15 * 60 * 1000 || distance > 60)) {
+      finish();
+      segment = [];
+    }
+    segment.push(point);
+  }
+  finish();
+  return stops;
+}
+
 export function getSupervisorRepRoute(repIdInput, dateInput, database = defaultDatabase) {
   const repId = positiveId(Number(repIdInput), 'repId');
   const day = dateInput ?? dayRange(undefined, database).day;
@@ -253,14 +290,21 @@ export function getSupervisorRepRoute(repIdInput, dateInput, database = defaultD
     })),
     speedSummary,
     visitedMachines,
-    stops: stopRows.map((stop) => ({
-      latitude: Number(stop.latitude),
-      longitude: Number(stop.longitude),
-      arrivedAt: stop.arrived_at,
-      departedAt: stop.departed_at,
-      durationMinutes: Number(stop.duration_minutes),
-      name: stop.stop_name,
-    })),
+    stops: (stopRows.length > 0 ? stopRows : detectStopsFromPoints(points)).map((stop) => {
+      const nearbyVisit = visitedMachines.find((vm) =>
+        vm.latitude !== null && vm.longitude !== null
+        && calculateDistanceMeters(Number(stop.latitude), Number(stop.longitude), vm.latitude, vm.longitude) <= 120
+      );
+      const name = stop.stop_name || (nearbyVisit ? `موقع ماكينة ${nearbyVisit.machineCode}` : `نقطة توقف`);
+      return {
+        latitude: Number(stop.latitude),
+        longitude: Number(stop.longitude),
+        arrivedAt: stop.arrived_at,
+        departedAt: stop.departed_at,
+        durationMinutes: Number(stop.duration_minutes),
+        name,
+      };
+    }),
   };
 }
 

@@ -64,7 +64,7 @@ function actionUuid(value, label = 'actionUuid') {
 
 function normalizeRepLocation(value, label = 'location') {
   const point = requireObject(value, label);
-  allowOnlyKeys(point, ['latitude', 'longitude', 'accuracy', 'updatedAt', 'isMock']);
+  allowOnlyKeys(point, ['latitude', 'longitude', 'accuracy', 'updatedAt', 'speed', 'isMock', 'is_mock', 'mocked', 'mock_flag']);
   const { latitude, longitude, accuracy } = point;
   if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90
       || !Number.isFinite(longitude) || longitude < -180 || longitude > 180
@@ -74,15 +74,19 @@ function normalizeRepLocation(value, label = 'location') {
   const updatedAt = requireText(point.updatedAt, `${label}.updatedAt`, { maxLength: 64 });
   const captured = new Date(updatedAt);
   if (Number.isNaN(captured.valueOf())) throw new HttpError(400, `${label}.updatedAt must be a valid date and time.`);
-  if (point.isMock !== undefined && typeof point.isMock !== 'boolean') {
-    throw new HttpError(400, `${label}.isMock must be a boolean when provided.`);
+  for (const flag of ['isMock', 'is_mock', 'mocked', 'mock_flag']) {
+    if (point[flag] !== undefined && typeof point[flag] !== 'boolean') {
+      throw new HttpError(400, `${label}.${flag} must be a boolean when provided.`);
+    }
   }
+  const isMock = point.isMock === true || point.is_mock === true || point.mocked === true || point.mock_flag === true;
   return {
     latitude,
     longitude,
     accuracy,
+    ...(point.speed !== undefined && point.speed !== null && typeof point.speed === 'number' && Number.isFinite(point.speed) ? { speed: point.speed } : {}),
     updatedAt: captured.toISOString(),
-    ...(point.isMock === undefined ? {} : { isMock: point.isMock }),
+    ...(isMock ? { isMock: true } : {}),
   };
 }
 
@@ -1661,8 +1665,8 @@ export async function syncRepVisit(rep, input, files, database = db) {
 /** Roll back interrupted file/DB handoffs before the API starts accepting requests. */
 function normalizeTrackPoint(value, label = 'location') {
   const point = requireObject(value, label);
-  allowOnlyKeys(point, ['clientPointId', 'latitude', 'longitude', 'accuracy', 'speed', 'updatedAt', 'timestamp', 'mocked', 'is_mock', 'mock_flag']);
-  for (const flag of ['mocked', 'is_mock', 'mock_flag']) {
+  allowOnlyKeys(point, ['clientPointId', 'latitude', 'longitude', 'accuracy', 'speed', 'updatedAt', 'timestamp', 'isMock', 'mocked', 'is_mock', 'mock_flag']);
+  for (const flag of ['isMock', 'mocked', 'is_mock', 'mock_flag']) {
     if (point[flag] !== undefined && typeof point[flag] !== 'boolean') {
       throw new HttpError(400, `${label}.${flag} must be a boolean.`);
     }
@@ -1686,7 +1690,7 @@ function normalizeTrackPoint(value, label = 'location') {
   const updatedAt = requireText(rawTimestamp, `${label}.updatedAt`, { maxLength: 64 });
   const timestamp = new Date(updatedAt);
   if (Number.isNaN(timestamp.valueOf())) throw new HttpError(400, `${label}.updatedAt must be a valid date and time.`);
-  if (point.mocked === true || point.is_mock === true || point.mock_flag === true) {
+  if (point.isMock === true || point.mocked === true || point.is_mock === true || point.mock_flag === true) {
     throw new HttpError(400, 'Mock GPS locations cannot be synchronized.');
   }
   return { clientPointId, latitude, longitude, accuracy, speed, updatedAt: timestamp.toISOString() };

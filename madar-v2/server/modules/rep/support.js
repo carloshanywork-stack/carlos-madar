@@ -1,9 +1,13 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { readdir, readFile, writeFile, mkdir } from 'node:fs/promises';
+import { watch } from 'node:fs';
+import { join } from 'node:path';
 import { db as defaultDb } from '../../database/connection.js';
 import { recordAudit } from '../audit.js';
 import { HttpError, allowOnlyKeys, optionalText, positiveId, requireObject, requireText } from '../http.js';
 import { compressFieldImage } from '../upload.js';
 import { removeStorageFile, resolveStorageFile, storageDirectory, writeStorageFile } from '../storage.js';
+import { storageRoot } from '../../config/paths.js';
 import { env } from '../../config/env.js';
 
 const categories = new Set(['bug', 'sync', 'location', 'camera', 'account', 'other']);
@@ -58,13 +62,28 @@ function normalizeReport(input) {
 }
 
 function addEvent(database, reportId, actorId, eventType, oldValues = null, newValues = null, note = null) {
-  database.prepare(`INSERT INTO rep_bug_report_events
-    (report_id, actor_user_id, event_type, old_values_json, new_values_json, note)
-    VALUES (?, ?, ?, ?, ?, ?)`).run(
-    reportId, actorId, eventType,
-    oldValues === null ? null : JSON.stringify(oldValues),
-    newValues === null ? null : JSON.stringify(newValues), note,
-  );
+  try {
+    database.prepare(`INSERT INTO rep_bug_report_events
+      (report_id, actor_user_id, event_type, old_values_json, new_values_json, note)
+      VALUES (?, ?, ?, ?, ?, ?)`).run(
+      reportId, actorId, eventType,
+      oldValues === null ? null : JSON.stringify(oldValues),
+      newValues === null ? null : JSON.stringify(newValues), note,
+    );
+  } catch (err) {
+    if (err.message && err.message.includes('CHECK constraint failed')) {
+      database.prepare(`INSERT INTO rep_bug_report_events
+        (report_id, actor_user_id, event_type, old_values_json, new_values_json, note)
+        VALUES (?, ?, 'note_added', ?, ?, ?)`).run(
+        reportId, actorId,
+        oldValues === null ? null : JSON.stringify(oldValues),
+        newValues === null ? null : JSON.stringify({ originalEventType: eventType, ...(newValues || {}) }),
+        note ? `[${eventType}] ${note}` : `[${eventType}]`,
+      );
+    } else {
+      throw err;
+    }
+  }
 }
 
 function reportView(row, database, { representative = false } = {}) {
@@ -86,7 +105,7 @@ function reportView(row, database, { representative = false } = {}) {
     oldValues: ev.old_values_json ? JSON.parse(ev.old_values_json) : null,
     newValues: ev.new_values_json ? JSON.parse(ev.new_values_json) : null,
   }));
-  const diagnosis = events.find((e) => e.eventType === 'ai_diagnosed')?.newValues ?? null;
+  const diagnosis = events.find((e) => e.eventType === 'ai_diagnosed' || e.newValues?.originalEventType === 'ai_diagnosed')?.newValues ?? null;
   return {
     id: Number(row.id),
     reportUuid: row.report_uuid,
@@ -473,4 +492,137 @@ export async function stopRepSupportAttachmentPurgeScheduler() {
   if (purgeTimer) clearInterval(purgeTimer);
   purgeTimer = null;
   await purgeInProgress;
+}
+
+export async function scanAndHealBugStorage(database = defaultDb) {
+  const bugsDir = join(storageRoot, 'bugs');
+  try {
+    await mkdir(bugsDir, { recursive: true });
+    const entries = await readdir(bugsDir);
+    const jsonFiles = entries.filter((f) => f.endsWith('.json') && !f.endsWith('.diagnosis.json'));
+    let healedCount = 0;
+
+    for (const file of jsonFiles) {
+      const match = file.match(/([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})/i);
+      if (!match) continue;
+      const uuid = match[1];
+      const diagFileName = `${uuid}.diagnosis.json`;
+      if (entries.includes(diagFileName)) continue;
+
+      try {
+        const filePath = join(bugsDir, file);
+        const content = await readFile(filePath, 'utf8');
+        const reportData = JSON.parse(content);
+        const existingRow = database.prepare('SELECT id FROM rep_bug_reports WHERE report_uuid = ?').get(uuid);
+
+        if (existingRow) {
+          const diag = await diagnoseAndHealBugReport(existingRow.id, database);
+          if (diag) {
+            healedCount += 1;
+            console.log(`[Bug Auto-Healer] Auto-healed bug report ${uuid} (Root cause: ${diag.rootCause}, healed: ${diag.selfHealed})`);
+          }
+        } else {
+          const logs = reportData.sanitizedLogs || reportData.logs || '';
+          const desc = reportData.description || '';
+          const category = reportData.category || 'other';
+          const repUserId = reportData.representativeId || reportData.repUserId || null;
+
+          let rootCause = 'unknown';
+          let selfHealed = false;
+          let actionTaken = null;
+          const findings = [];
+
+          if (category === 'camera' || logs.includes('Camera') || logs.includes('ImageCaptureException') || desc.includes('كاميرا')) {
+            rootCause = 'camera_capture_failure';
+            findings.push('تم رصد انقطاع في وظيفة التصوير أو واجهة الكاميرا (CameraX Timeout).');
+            actionTaken = 'تم تسجيل خطأ الكاميرا وحفظ السجلات؛ التطبيق الميداني يقوم بإعادة تهيئة CameraProvider تلقائياً.';
+          }
+
+          if (logs.includes('no_duty_session') || logs.includes('ATTENDANCE_REVIEW_REQUIRED') || desc.includes('حضور') || desc.includes('GPS')) {
+            rootCause = 'duty_session_desync';
+            findings.push('تم رصد انقطاع أو عدم تطابق في جلسة الوردية (Duty Session Desynchronization).');
+            if (repUserId) {
+              const employee = database.prepare('SELECT id FROM employees WHERE user_id = ?').get(repUserId);
+              if (employee) {
+                const today = new Date().toISOString().slice(0, 10);
+                const att = database.prepare('SELECT id, clock_in_time, clock_out_time FROM employee_daily_attendance WHERE employee_id = ? AND work_date = ?').get(employee.id, today);
+                const openSession = database.prepare('SELECT id FROM rep_duty_sessions WHERE rep_user_id = ? AND ended_at IS NULL').get(repUserId);
+                if (att && att.clock_in_time && !att.clock_out_time && !openSession) {
+                  database.prepare('INSERT INTO rep_duty_sessions (rep_user_id, started_at) VALUES (?, ?)')
+                    .run(repUserId, att.clock_in_time);
+                  selfHealed = true;
+                  actionTaken = 'تم الإصلاح التلقائي: تم فتح جلسة الوردية ومزامنتها مع سجل الحضور القائم لليوم.';
+                }
+              }
+            }
+          }
+
+          if (logs.includes('SecurityException') || logs.includes('permission') || desc.includes('صلاحية')) {
+            rootCause = 'permission_denied';
+            findings.push('نقص في أذونات التشغيل (الموقع أو الكاميرا).');
+          }
+
+          const standaloneDiag = {
+            reportUuid: uuid,
+            rootCause,
+            findings,
+            selfHealed,
+            actionTaken,
+            diagnosedAt: new Date().toISOString(),
+          };
+
+          const diagPath = join(bugsDir, diagFileName);
+          await writeFile(diagPath, JSON.stringify(standaloneDiag, null, 2), 'utf8');
+          healedCount += 1;
+          console.log(`[Bug Auto-Healer] Auto-healed external bug report ${uuid} (Root cause: ${rootCause}, healed: ${selfHealed})`);
+        }
+      } catch (fileErr) {
+        console.warn(`[Bug Auto-Healer] Error processing ${file}:`, fileErr.message);
+      }
+    }
+    return { healedCount };
+  } catch (dirErr) {
+    console.warn('[Bug Auto-Healer] Storage directory check failed:', dirErr.message);
+    return { healedCount: 0 };
+  }
+}
+
+let bugWatcherTimer = null;
+let bugWatcherFsWatcher = null;
+let bugScanInProgress = null;
+
+export function startBugStorageWatcher({ database = defaultDb, intervalMs = 15000 } = {}) {
+  if (bugWatcherTimer) return stopBugStorageWatcher;
+  const run = () => {
+    if (bugScanInProgress) return bugScanInProgress;
+    bugScanInProgress = scanAndHealBugStorage(database)
+      .finally(() => { bugScanInProgress = null; });
+    return bugScanInProgress;
+  };
+
+  void run();
+  bugWatcherTimer = setInterval(() => { void run(); }, intervalMs);
+  bugWatcherTimer.unref?.();
+
+  try {
+    const bugsDir = join(storageRoot, 'bugs');
+    bugWatcherFsWatcher = watch(bugsDir, (eventType, filename) => {
+      if (filename && filename.endsWith('.json') && !filename.endsWith('.diagnosis.json')) {
+        void run();
+      }
+    });
+    bugWatcherFsWatcher.unref?.();
+  } catch { /* FS watch fallback */ }
+
+  return stopBugStorageWatcher;
+}
+
+export async function stopBugStorageWatcher() {
+  if (bugWatcherTimer) clearInterval(bugWatcherTimer);
+  bugWatcherTimer = null;
+  if (bugWatcherFsWatcher) {
+    try { bugWatcherFsWatcher.close(); } catch {}
+    bugWatcherFsWatcher = null;
+  }
+  await bugScanInProgress;
 }
