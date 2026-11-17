@@ -100,6 +100,11 @@ class GpsBreadcrumbService : Service() {
             val container = (application as MadarApplication).container
             if (container.sessionGateway.current()?.repId != entity.repId) return@launch
             runCatching { container.database.gpsPoints().insert(entity) }
+            val now = System.currentTimeMillis()
+            if (now - lastEnqueueMillis >= 60_000L) {
+                lastEnqueueMillis = now
+                container.scheduler.enqueueNow()
+            }
         }
     }
 
@@ -144,6 +149,8 @@ class GpsBreadcrumbService : Service() {
         const val EXTRA_REP_ID = "repId"
         private const val CHANNEL_ID = "madar-duty-location"
         private const val NOTIFICATION_ID = 4107
+        @Volatile
+        private var lastEnqueueMillis = 0L
 
         fun start(context: android.content.Context, repId: Long) {
             val intent = Intent(context, GpsBreadcrumbService::class.java).setAction(ACTION_START).putExtra(EXTRA_REP_ID, repId)

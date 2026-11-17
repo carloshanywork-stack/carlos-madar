@@ -64,6 +64,9 @@ import androidx.core.content.ContextCompat
 import com.madar.rep.app.MadarApplication
 import com.madar.rep.app.core.MadarError
 import com.madar.rep.app.core.PhotoPolicy
+import com.madar.rep.app.core.SupportDiagnostics
+import com.madar.rep.app.data.db.SupportReportEntity
+import com.madar.rep.app.data.db.SupportReportState
 import com.madar.rep.app.data.db.VisitState
 import java.util.concurrent.Executors
 import kotlinx.coroutines.Dispatchers
@@ -195,12 +198,48 @@ class CameraActivity : ComponentActivity() {
 
                 override fun onError(exception: ImageCaptureException) {
                     captureFile.delete()
+                    autoReportCameraError(exception)
                     runOnUiThread {
                         assignCaptureState(CaptureUiState.error(exception.message ?: "تعذر التصوير"))
                     }
                 }
             }
         )
+    }
+
+    private fun autoReportCameraError(exception: Exception) {
+        SupportDiagnostics.record("camera", "capture_err")
+        executor.execute {
+            runCatching {
+                val container = (application as MadarApplication).container
+                val session = container.sessionGateway.current() ?: return@runCatching
+                val uuid = java.util.UUID.randomUUID().toString()
+                val payload = org.json.JSONObject()
+                    .put("reportUuid", uuid)
+                    .put("category", "camera")
+                    .put("severity", "high")
+                    .put("description", "عطل تلقائي في الكاميرا أثناء التقاط الصورة: ${exception.message ?: "ImageCaptureException"}")
+                    .put("screenName", "camera/capture")
+                    .put("appVersion", "${com.madar.rep.app.BuildConfig.VERSION_NAME} (${com.madar.rep.app.BuildConfig.VERSION_CODE})")
+                    .put("deviceModel", android.os.Build.MANUFACTURER + " " + android.os.Build.MODEL)
+                    .put("androidVersion", android.os.Build.VERSION.RELEASE ?: "unknown")
+                    .put("logs", SupportDiagnostics.recentLines())
+                kotlinx.coroutines.runBlocking {
+                    container.database.supportReports().insert(
+                        SupportReportEntity(
+                            reportUuid = uuid,
+                            ownerRepId = session.ownerScopeId,
+                            payloadJson = payload.toString(),
+                            attachmentPath = null,
+                            state = SupportReportState.QUEUED,
+                            createdAt = System.currentTimeMillis(),
+                            updatedAt = System.currentTimeMillis(),
+                        )
+                    )
+                }
+                container.scheduler.enqueueNow()
+            }
+        }
     }
 
     @Suppress("DEPRECATION")

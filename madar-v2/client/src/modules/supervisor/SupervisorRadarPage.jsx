@@ -46,7 +46,7 @@ function projectToWorld(location, zoom) {
   };
 }
 
-function TrackMap({ representatives, selectedId, onSelect, selectedRoute }) {
+function TrackMap({ representatives, selectedId, onSelect, selectedRoute, showHeatmap = false }) {
   const routeMatchesSelection = selectedId !== null && selectedRoute?.representative?.id === selectedId;
   const positions = [
     ...(selectedId === null
@@ -137,6 +137,25 @@ function TrackMap({ representatives, selectedId, onSelect, selectedRoute }) {
           <pattern id="radar-minor-grid" width="12" height="12" patternUnits="userSpaceOnUse">
             <path d="M 12 0 L 0 0 0 12" fill="none" stroke="#edf1f0" strokeWidth=".7" />
           </pattern>
+          <radialGradient id="heat-grad-high" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stopColor="#d32f2f" stopOpacity="0.85" />
+            <stop offset="40%" stopColor="#f57c00" stopOpacity="0.6" />
+            <stop offset="70%" stopColor="#fbc02d" stopOpacity="0.35" />
+            <stop offset="100%" stopColor="#388e3c" stopOpacity="0" />
+          </radialGradient>
+          <radialGradient id="heat-grad-med" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stopColor="#f57c00" stopOpacity="0.8" />
+            <stop offset="50%" stopColor="#fbc02d" stopOpacity="0.5" />
+            <stop offset="100%" stopColor="#388e3c" stopOpacity="0" />
+          </radialGradient>
+          <radialGradient id="heat-grad-low" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stopColor="#2e7d32" stopOpacity="0.75" />
+            <stop offset="60%" stopColor="#81c784" stopOpacity="0.4" />
+            <stop offset="100%" stopColor="#388e3c" stopOpacity="0" />
+          </radialGradient>
+          <filter id="heat-blur" x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur stdDeviation="14" />
+          </filter>
         </defs>
         <rect x="0" y="0" width="900" height="500" fill="#f7faf8" />
         {tileImages.map((tile) => <image key={tile.key} href={tile.href} x={tile.x} y={tile.y} width={tile.size} height={tile.size} preserveAspectRatio="none" />)}
@@ -157,6 +176,31 @@ function TrackMap({ representatives, selectedId, onSelect, selectedRoute }) {
           fill="none" stroke="#1769e0" strokeWidth="5" strokeLinecap="round" strokeLinejoin="round"
           strokeDasharray="1 0" opacity=".9"
         />}
+        {showHeatmap && (routeMatchesSelection ? selectedRoute.stops ?? [] : []).map((stop, index) => {
+          const xy = point(stop);
+          const duration = Number(stop.durationMinutes) || 0;
+          const radius = Math.min(85, Math.max(26, 20 + duration * 1.3));
+          const gradId = duration >= 30 ? 'heat-grad-high' : duration >= 10 ? 'heat-grad-med' : 'heat-grad-low';
+          return <g key={`heatmap-${stop.arrivedAt}-${index}`} className="radar-heatmap-node">
+            <circle cx={xy.x} cy={xy.y} r={radius} fill={`url(#${gradId})`} filter="url(#heat-blur)" />
+            <circle cx={xy.x} cy={xy.y} r={radius * 0.45} fill={`url(#${gradId})`} filter="url(#heat-blur)" opacity="0.9" />
+            <circle cx={xy.x} cy={xy.y} r="15" fill="#182d38" fillOpacity="0.85" stroke="#fff" strokeWidth="2" />
+            <text x={xy.x} y={xy.y + 4} textAnchor="middle" fill="#fff" fontSize="9" fontWeight="bold">{duration}د</text>
+            <title>{`${stop.name || 'موقع توقف'} · ${duration} دقيقة`}</title>
+          </g>;
+        })}
+        {showHeatmap && (
+          <g className="radar-heatmap-legend" transform="translate(710, 20)">
+            <rect width="170" height="96" rx="8" fill="#ffffff" fillOpacity="0.94" stroke="#d2dddf" strokeWidth="1" />
+            <text x="85" y="19" textAnchor="middle" fontSize="11" fontWeight="bold" fill="#182d38">مقياس زمن التوقف</text>
+            <circle cx="20" cy="39" r="6" fill="#d32f2f" />
+            <text x="35" y="42" fontSize="9" fontWeight="600" fill="#333">توقف طويل (&gt; 30 دقيقة)</text>
+            <circle cx="20" cy="59" r="6" fill="#f57c00" />
+            <text x="35" y="62" fontSize="9" fontWeight="600" fill="#333">توقف متوسط (10 - 30 دقيقة)</text>
+            <circle cx="20" cy="79" r="6" fill="#2e7d32" />
+            <text x="35" y="82" fontSize="9" fontWeight="600" fill="#333">توقف قصير (&lt; 10 دقائق)</text>
+          </g>
+        )}
         {(routeMatchesSelection ? selectedRoute.stops ?? [] : []).map((stop, index) => {
           const xy = point(stop);
           return <g key={`${stop.arrivedAt}-${index}`} className="radar-stop-pin">
@@ -218,6 +262,7 @@ export default function SupervisorRadarPage() {
   const [routeLoading, setRouteLoading] = useState(false);
   const [routeRevision, setRouteRevision] = useState(0);
   const [selectedVisit, setSelectedVisit] = useState(null);
+  const [showHeatmap, setShowHeatmap] = useState(false);
   const [reviewNotes, setReviewNotes] = useState({});
   const [loading, setLoading] = useState(true);
   const [mobileTab, setMobileTab] = useState('map');
@@ -413,10 +458,18 @@ export default function SupervisorRadarPage() {
               {representatives.map((rep) => <option key={rep.id} value={rep.id}>{rep.fullName}</option>)}
             </select></label>
             <label>التاريخ<input type="date" value={routeDate} onChange={(event) => { manuallySelectedRouteDate.current = true; setRouteDate(event.target.value); }} /></label>
+            <button
+              type="button"
+              className={`radar-heatmap-btn ${showHeatmap ? 'is-active' : ''}`}
+              onClick={() => setShowHeatmap(!showHeatmap)}
+              title="تبديل عرض خريطة الكثافة والتوقفات الحرارية"
+            >
+              🔥 {showHeatmap ? 'إخفاء الخريطة الحرارية' : 'خريطة الكثافة والوقفات (Heat Map)'}
+            </button>
             {selectedRep !== null && <button type="button" className="radar-overview-button" onClick={() => setSelectedRep(null)}>العودة إلى كل المندوبين</button>}
             <span>{selectedRep === null ? `${representatives.length} مندوب · الحالة وآخر إشارة على الخريطة` : routeLoading ? 'جارٍ تحميل كامل نقاط المسار…' : `${visibleRoute?.polyline?.length ?? 0} نقطة مسجلة · ${visibleRoute?.stops?.length ?? 0} توقف · ${visibleRoute?.visitedMachines?.length ?? 0} زيارة`}</span>
           </div>
-          <TrackMap representatives={representatives} selectedId={selectedRep} onSelect={setSelectedRep} selectedRoute={visibleRoute} />
+          <TrackMap representatives={representatives} selectedId={selectedRep} onSelect={setSelectedRep} selectedRoute={visibleRoute} showHeatmap={showHeatmap} />
           {visibleRoute && <div className="radar-speed-summary" aria-label="سرعة المندوب في اليوم المختار">
             <span>متوسط السرعة أثناء الحركة · {visibleRoute.date}: <strong>{formatSpeed(visibleRoute.speedSummary?.averageKmh)}</strong></span>
             <span>أعلى قراءة: <strong>{formatSpeed(visibleRoute.speedSummary?.maxKmh)}</strong></span>

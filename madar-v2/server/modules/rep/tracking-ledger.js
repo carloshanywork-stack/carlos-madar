@@ -22,14 +22,25 @@ export function persistTrackingPoint(database, userId, sessionId, workDate, poin
 
 /** Historical ingestion never changes duty state. Ambiguous or unknown ownership/session requires review. */
 export function trackingSessionForPoint(database, userId, point) {
-  const sessions = database.prepare(`SELECT id FROM rep_duty_sessions WHERE rep_user_id=?
-    AND julianday(started_at)<=julianday(?) AND (ended_at IS NULL OR julianday(ended_at)>=julianday(?))
-    ORDER BY started_at DESC LIMIT 2`).all(userId, point.updatedAt, point.updatedAt);
-  return sessions.length === 1 ? sessions[0].id : null;
+  // Allow up to 10 minutes grace window before started_at
+  const sessions = database.prepare(`SELECT id, started_at, ended_at FROM rep_duty_sessions WHERE rep_user_id=?
+    AND (julianday(started_at) - (10.0 / 1440.0)) <= julianday(?)
+    AND (ended_at IS NULL OR (julianday(ended_at) + (5.0 / 1440.0)) >= julianday(?))
+    ORDER BY started_at DESC`).all(userId, point.updatedAt, point.updatedAt);
+  if (sessions.length === 0) return null;
+  if (sessions.length === 1) return sessions[0].id;
+  // If multiple sessions overlap, choose the open one first, then the latest started
+  const openSession = sessions.find((s) => s.ended_at === null);
+  return openSession ? openSession.id : sessions[0].id;
 }
 
 export function recordAttendanceDuty(database, userId, action, occurredAt, location) {
   if (action === 'in') {
+    // Auto-close any stale open duty sessions older than 20 hours (0.83 days) for this rep
+    database.prepare(`UPDATE rep_duty_sessions SET ended_at = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE rep_user_id = ? AND ended_at IS NULL AND (julianday(?) - julianday(started_at)) > 0.83`)
+      .run(occurredAt, userId, occurredAt);
+
     let open = database.prepare('SELECT id FROM rep_duty_sessions WHERE rep_user_id=? AND ended_at IS NULL').get(userId);
     let sessionId = open?.id;
     if (!open) {

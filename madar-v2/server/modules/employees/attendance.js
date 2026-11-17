@@ -674,9 +674,16 @@ export function clockOutForEmployee(employeeId, actorId, database = db, options 
   const adminNote = customTime || options.adminNote !== undefined
     ? requireText(options.adminNote, 'adminNote', { maxLength: 1000 })
     : 'تسجيل انصراف يدوي من الإدارة.';
-  return clockOut(employeeId, 'admin', null, actorId, database, {
-    now, adminNote, customTime,
-  });
+  return database.transaction(() => {
+    const updated = clockOut(employeeId, 'admin', null, actorId, database, {
+      now, adminNote, customTime,
+    });
+    const employee = database.prepare('SELECT user_id FROM employees WHERE id = ?').get(employeeId);
+    if (employee?.user_id) {
+      recordAttendanceDuty(database, employee.user_id, 'out', (updated.last_clock_out_time ?? updated.clock_out_time) || now.toISOString(), null);
+    }
+    return updated;
+  })();
 }
 
 export function clockInForRep(userId, input, database = db, options = {}) {

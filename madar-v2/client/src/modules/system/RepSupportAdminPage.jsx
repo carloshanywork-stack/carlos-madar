@@ -46,6 +46,14 @@ export default function RepSupportAdminPage() {
     finally { setBusy(''); }
   }
 
+  async function runDiagnosis(report) {
+    const key = `diag-${report.id}`;
+    setBusy(key); setError('');
+    try { await api.post(`/api/system/rep-support/reports/${report.id}/diagnose`, {}); await reloadReports(); }
+    catch (caught) { setError(errorMessage(caught)); }
+    finally { setBusy(''); }
+  }
+
   async function exportWorkbook() {
     setBusy('export-xlsx'); setError('');
     try {
@@ -116,7 +124,19 @@ export default function RepSupportAdminPage() {
           {reportsError && <div className="madar-panel-body"><Alert tone="error">{reportsError}</Alert></div>}
           {reportsLoading ? <LoadingState label="جارٍ تحميل البلاغات" /> : reports.length ? <div className="madar-table-wrap"><table className="madar-table"><thead><tr><th>البلاغ</th><th>المندوب</th><th>التطبيق والجهاز</th><th>المرفقات</th><th>الحالة / GitHub</th><th>الإجراء</th></tr></thead><tbody>
             {reports.map((report) => <tr key={report.id}>
-              <td><strong>{report.category} · {SEVERITY_LABELS[report.severity] ?? report.severity}</strong><p>{report.description}</p><small>{new Date(report.createdAt).toLocaleString('ar')}</small></td>
+              <td>
+                <strong>{report.category} · {SEVERITY_LABELS[report.severity] ?? report.severity}</strong>
+                <p>{report.description}</p>
+                {report.diagnosis && (
+                  <div style={{ margin: '6px 0', padding: '6px 8px', background: '#e0f2f1', borderRadius: '6px', fontSize: '11px', color: '#004d40' }}>
+                    <strong>🤖 تشخيص AI:</strong> {report.diagnosis.rootCause}
+                    {report.diagnosis.selfHealed && <span style={{ marginRight: '6px', padding: '1px 5px', background: '#c8e6c9', borderRadius: '4px', color: '#1b5e20', fontSize: '10px' }}>تم الإصلاح ذاتياً</span>}
+                    {report.diagnosis.findings?.map((f, i) => <div key={i} style={{ marginTop: '2px' }}>• {f}</div>)}
+                    {report.diagnosis.actionTaken && <div style={{ marginTop: '2px', fontStyle: 'italic' }}>الإجراء: {report.diagnosis.actionTaken}</div>}
+                  </div>
+                )}
+                <small>{new Date(report.createdAt).toLocaleString('ar')}</small>
+              </td>
               <td>{report.representativeName || report.username}</td>
               <td>{report.appVersion}<br />{report.deviceModel} · Android {report.androidVersion}</td>
               <td>{report.attachments.map((attachment) => attachment.downloadUrl ? <a key={attachment.id} href={attachment.downloadUrl} target="_blank" rel="noreferrer">صورة ({Math.ceil(attachment.byteSize / 1024)} KB)</a> : <span key={attachment.id}>انتهت مدة الاحتفاظ</span>)}</td>
@@ -124,6 +144,7 @@ export default function RepSupportAdminPage() {
               <td><div style={{ display: 'grid', gap: 6 }}>
                 <Button size="small" variant="secondary" disabled={busy === `export-${report.id}`} onClick={() => exportPackage(report)}>{busy === `export-${report.id}` ? 'جارٍ التجهيز…' : 'تنزيل ZIP'}</Button>
                 <select aria-label="تغيير حالة البلاغ" value={report.status} disabled={busy === `report-${report.id}`} onChange={(event) => updateReport(report, event.target.value)}>{Object.entries(STATUS_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
+                <Button size="small" variant="secondary" disabled={busy === `diag-${report.id}`} onClick={() => runDiagnosis(report)}>{busy === `diag-${report.id}` ? 'جارٍ الفحص…' : '🤖 تشخيص ذكي'}</Button>
                 {report.githubStatus !== 'created' && <Button size="small" variant="secondary" disabled={busy === `github-${report.id}`} onClick={() => createIssue(report)}>{busy === `github-${report.id}` ? 'جارٍ الإرسال…' : 'إنشاء GitHub issue'}</Button>}
               </div></td>
             </tr>)}

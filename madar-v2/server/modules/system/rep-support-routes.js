@@ -6,6 +6,7 @@ import { requireSupervisorOrAdmin } from '../auth/authorization.js';
 import { asyncHandler, HttpError } from '../http.js';
 import {
   createGitHubIssueForRepBugReport,
+  diagnoseAndHealBugReport,
   downloadRepBugAttachment,
   exportRepBugReports,
   getRepBugReport,
@@ -149,6 +150,11 @@ router.patch('/rep-support/reports/:reportId', (req, res) => {
 router.post('/rep-support/reports/:reportId/github-issue', githubIssueLimiter, asyncHandler(async (req, res) => {
   res.set({ 'Cache-Control': 'private, no-store', Pragma: 'no-cache' });
   res.json({ success: true, report: await createGitHubIssueForRepBugReport(req.params.reportId, req.user.id) });
+}));
+
+router.post('/rep-support/reports/:reportId/diagnose', asyncHandler(async (req, res) => {
+  res.set({ 'Cache-Control': 'private, no-store', Pragma: 'no-cache' });
+  res.json({ success: true, diagnosis: await diagnoseAndHealBugReport(req.params.reportId) });
 }));
 
 router.get('/rep-support/:reportId/attachments/:attachmentId', asyncHandler(async (req, res) => {

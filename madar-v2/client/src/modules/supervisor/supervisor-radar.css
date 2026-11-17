@@ -38,6 +38,9 @@
 #madar-app .radar-route-controls select, #madar-app .radar-route-controls input { min-width: 150px; height: 34px; padding: 0 9px; border: 1px solid #d2dddf; border-radius: 8px; color: #263f53; background: #fff; font: inherit; font-size: 10px; }
 #madar-app .radar-route-controls > span { margin-inline-start: auto; padding-bottom: 8px; color: #58717d; font-size: 9px; font-weight: 800; }
 #madar-app .radar-overview-button { min-height: 34px; padding: 0 10px; border: 1px solid #9dcaba; border-radius: 8px; color: #17664f; background: #eff8f3; cursor: pointer; font-size: 9px; font-weight: 900; }
+#madar-app .radar-heatmap-btn { min-height: 34px; padding: 0 12px; border: 1px solid #dcd0a1; border-radius: 8px; color: #844c00; background: #fffbe6; cursor: pointer; font-size: 10px; font-weight: 800; transition: all 0.2s ease; display: inline-flex; align-items: center; gap: 5px; }
+#madar-app .radar-heatmap-btn:hover { background: #fff3bf; }
+#madar-app .radar-heatmap-btn.is-active { border-color: #d32f2f; color: #fff; background: #e53935; box-shadow: 0 2px 8px rgba(229, 57, 53, 0.35); }
 #madar-app .radar-stops-list { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; padding: 0 15px 12px; color: #566972; font-size: 9px; }
 #madar-app .radar-speed-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 14px; padding: 10px 15px; color: #315466; background: #f0f7fa; font-size: 10px; }
 #madar-app .radar-speed-summary strong { color: #173e57; }
