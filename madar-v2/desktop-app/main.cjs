@@ -599,6 +599,17 @@ autoUpdater.autoDownload = false;
 autoUpdater.autoInstallOnAppQuit = true;
 autoUpdater.on('update-available', (info) => { void showUpdateAvailable(info); });
 autoUpdater.on('error', (error) => console.error('MADAR desktop updater:', error));
+
+// Toast notifications for update lifecycle
+autoUpdater.on('checking-for-update', () => {
+  new Notification({ title: 'MADAR', body: 'Checking for updates…' }).show();
+});
+autoUpdater.on('update-available', (info) => {
+  new Notification({ title: 'MADAR', body: `Update ${info.version} available` }).show();
+});
+autoUpdater.on('update-downloaded', (info) => {
+  new Notification({ title: 'MADAR', body: `Update ${info.version} downloaded – restarting` }).show();
+});
 configureAutoUpdater();
 
 app.whenReady().then(async () => {
