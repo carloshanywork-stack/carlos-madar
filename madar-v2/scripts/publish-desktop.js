@@ -16,7 +16,16 @@ export function publishDesktopArtifacts() {
   const zips = files.filter(f => f.startsWith('MADAR-Windows-') && f.endsWith('.zip')).sort().reverse();
   const exes = files.filter(f => f.startsWith('MADAR-Windows-') && f.endsWith('.exe') && !f.includes('signed')).sort().reverse();
 
-  const chosenFile = zips[0] || exes[0];
+  // Find standalone exe (> 1MB)
+  const standaloneExe = exes.find(f => {
+    try {
+      return statSync(resolve(windowsBuildDir, f)).size > 1024 * 1024;
+    } catch {
+      return false;
+    }
+  });
+
+  const chosenFile = standaloneExe || zips[0] || exes[0];
   if (!chosenFile) {
     throw new Error('No built Windows package found in build/windows.');
   }
@@ -30,12 +39,33 @@ export function publishDesktopArtifacts() {
   const versionMatch = chosenFile.match(/MADAR-Windows-([0-9]+\.[0-9]+\.[0-9]+)/);
   const version = versionMatch ? versionMatch[1] : '1.0.0';
 
+  const fileEntries = [];
+  if (standaloneExe) {
+    const p = resolve(windowsBuildDir, standaloneExe);
+    fileEntries.push({
+      url: standaloneExe,
+      sha512: createHash('sha512').update(readFileSync(p)).digest('base64'),
+      size: statSync(p).size,
+    });
+  }
+  for (const zip of zips) {
+    const p = resolve(windowsBuildDir, zip);
+    fileEntries.push({
+      url: zip,
+      sha512: createHash('sha512').update(readFileSync(p)).digest('base64'),
+      size: statSync(p).size,
+    });
+  }
+  if (!fileEntries.length) {
+    fileEntries.push({ url: chosenFile, sha512, size: stat.size });
+  }
+
+  const filesYaml = fileEntries.map(e => `  - url: ${e.url}\n    sha512: ${e.sha512}\n    size: ${e.size}`).join('\n');
+
   const manifest = [
     `version: ${version}`,
     `files:`,
-    `  - url: ${chosenFile}`,
-    `    sha512: ${sha512}`,
-    `    size: ${stat.size}`,
+    filesYaml,
     `path: ${chosenFile}`,
     `sha512: ${sha512}`,
     `releaseDate: '${new Date().toISOString()}'`,
@@ -54,6 +84,13 @@ export function publishDesktopArtifacts() {
     const pkgSrc = resolve(windowsBuildDir, pkg);
     const pkgDest = resolve(distDesktopDir, pkg);
     copyFileSync(pkgSrc, pkgDest);
+  }
+
+  // Copy public code signing certificate so clients can download and trust it
+  const certSrc = resolve(projectRoot, 'desktop/madar-codesign.cer');
+  if (existsSync(certSrc)) {
+    copyFileSync(certSrc, resolve(distDesktopDir, 'madar-codesign.cer'));
+    copyFileSync(certSrc, resolve(distDesktopDir, 'madar-ca.cer'));
   }
 
   const distManifestPath = resolve(distDesktopDir, 'latest.yml');

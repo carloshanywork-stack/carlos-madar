@@ -411,6 +411,20 @@ app.get('/download/apk/status', apkDownloadLimiter, (req, res) => {
 });
 
 function resolveDesktopArtifact(requestedFilename) {
+  if (requestedFilename) {
+    const base = basename(requestedFilename);
+    if (['madar-codesign.cer', 'madar-ca.cer'].includes(base)) {
+      const candidatePaths = [
+        join(desktopDistDir, base),
+        join(desktopWindowsDir, base),
+        join(projectRoot, 'desktop/madar-codesign.cer'),
+      ];
+      for (const p of candidatePaths) {
+        if (existsSync(p)) return { path: p, filename: base, isZip: false };
+      }
+    }
+  }
+
   const searchDirs = [desktopDistDir, desktopWindowsDir];
   for (const dir of searchDirs) {
     if (!existsSync(dir)) continue;
@@ -418,7 +432,7 @@ function resolveDesktopArtifact(requestedFilename) {
       const files = readdirSync(dir);
       if (requestedFilename) {
         const base = basename(requestedFilename);
-        if (files.includes(base) && /^MADAR-Windows-.*(\.exe|\.zip|\.blockmap|\.yml)$/i.test(base)) {
+        if (files.includes(base) && /^MADAR-Windows-.*(\.exe|\.zip|\.blockmap|\.yml|\.7z)$/i.test(base)) {
           return {
             path: join(dir, base),
             filename: base,
@@ -427,9 +441,15 @@ function resolveDesktopArtifact(requestedFilename) {
         }
       } else {
         const exe = files.find((f) => /^MADAR-Windows-.*-Setup\.exe$/.test(f) || f === 'MADAR-Windows-Setup.exe');
-        if (exe) return { path: join(dir, exe), filename: exe, isZip: false };
+        if (exe) {
+          try {
+            const size = statSync(join(dir, exe)).size;
+            if (size > 1024 * 1024) return { path: join(dir, exe), filename: exe, isZip: false };
+          } catch {}
+        }
         const zip = files.find((f) => /^MADAR-Windows-.*-Setup\.zip$/.test(f) || f === 'MADAR-Windows-Setup.zip');
         if (zip) return { path: join(dir, zip), filename: zip, isZip: true };
+        if (exe) return { path: join(dir, exe), filename: exe, isZip: false };
       }
     } catch {}
   }
@@ -462,6 +482,8 @@ function sendDesktopFile(res, next, artifact) {
     contentType = 'application/vnd.microsoft.portable-executable';
   } else if (artifact.filename.endsWith('.yml') || artifact.filename.endsWith('.yaml')) {
     contentType = 'text/yaml; charset=utf-8';
+  } else if (artifact.filename.endsWith('.cer') || artifact.filename.endsWith('.crt')) {
+    contentType = 'application/x-x509-ca-cert';
   }
   res.attachment(artifact.filename);
   res.set({
@@ -505,13 +527,22 @@ app.get('/download/desktop/install.ps1', (req, res) => {
     '$ProgressPreference = "SilentlyContinue"',
     `$serverUrl = "${serverUrl}"`,
     `$installerUrl = "$serverUrl/download/desktop/${exeFilename}"`,
+    '$certUrl = "$serverUrl/download/desktop/madar-codesign.cer"',
+    '$tempCert = "$env:TEMP\\madar-codesign.cer"',
     '$tempPath = "$env:TEMP\\MADAR-Windows-Setup.exe"',
     '',
     'Write-Host "==============================================" -ForegroundColor Cyan',
     'Write-Host "       جارٍ تنزيل وتثبيت تطبيق MADAR         " -ForegroundColor Cyan',
     'Write-Host "==============================================" -ForegroundColor Cyan',
-    'Write-Host "1/3 جارٍ تنزيل أحدث إصدار من الخادم..." -ForegroundColor Yellow',
+    'Write-Host "1/4 تثبيت شهادة أمان الناشر المعتمد لـ MADAR..." -ForegroundColor Yellow',
+    'try {',
+    '    Invoke-WebRequest -Uri $certUrl -OutFile $tempCert -UseBasicParsing',
+    '    Import-Certificate -FilePath $tempCert -CertStoreLocation "Cert:\\CurrentUser\\Root" -ErrorAction SilentlyContinue | Out-Null',
+    '    Import-Certificate -FilePath $tempCert -CertStoreLocation "Cert:\\CurrentUser\\TrustedPublisher" -ErrorAction SilentlyContinue | Out-Null',
+    '    Remove-Item -Path $tempCert -Force -ErrorAction SilentlyContinue',
+    '} catch {}',
     '',
+    'Write-Host "2/4 جارٍ تنزيل أحدث إصدار من الخادم..." -ForegroundColor Yellow',
     'try {',
     '    Invoke-WebRequest -Uri $installerUrl -OutFile $tempPath -UseBasicParsing',
     '} catch {',
@@ -519,10 +550,10 @@ app.get('/download/desktop/install.ps1', (req, res) => {
     '    Invoke-WebRequest -Uri "$serverUrl/download/desktop" -OutFile $tempPath -UseBasicParsing',
     '}',
     '',
-    'Write-Host "2/3 فك قيود الحماية (Unblock)..." -ForegroundColor Yellow',
+    'Write-Host "3/4 فك قيود الحماية (Unblock)..." -ForegroundColor Yellow',
     'Unblock-File -Path $tempPath -ErrorAction SilentlyContinue',
     '',
-    'Write-Host "3/3 تشغيل معالج التثبيت..." -ForegroundColor Green',
+    'Write-Host "4/4 تشغيل معالج التثبيت..." -ForegroundColor Green',
     'Start-Process -FilePath $tempPath -Wait',
     '',
     'Remove-Item -Path $tempPath -Force -ErrorAction SilentlyContinue',
@@ -537,7 +568,7 @@ app.get('/download/desktop/install.ps1', (req, res) => {
   res.send(script);
 });
 
-app.get('/download/desktop/latest.yml', (req, res, next) => {
+app.get(['/download/desktop/latest.yml', '/download/latest.yml'], (req, res, next) => {
   const manifestPath = resolveDesktopUpdateManifest();
   if (!manifestPath) {
     res.status(404).json({ error: 'No desktop update manifest found.' });
@@ -601,7 +632,7 @@ app.get('/download/desktop/status', (req, res) => {
   }
 });
 
-app.get('/download/desktop/:filename', (req, res, next) => {
+app.get(['/download/desktop/:filename', '/download/:filename'], (req, res, next) => {
   const requested = req.params.filename;
   const cdnUrl = process.env.MADAR_DESKTOP_CDN_URL?.trim();
   if (cdnUrl) {

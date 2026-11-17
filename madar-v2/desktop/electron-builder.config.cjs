@@ -12,6 +12,9 @@ module.exports = {
   appId: 'com.madar.desktop',
   productName: 'MADAR',
   electronVersion,
+  toolsets: {
+    wine: '1.0.1',
+  },
   directories: {
     app: 'desktop-app',
     output: 'build/windows',
@@ -26,7 +29,10 @@ module.exports = {
     ],
   } : {}),
   win: {
-    target: [{ target: process.env.MADAR_WINDOWS_TARGET || 'nsis', arch: ['x64'] }],
+    target: [
+      { target: 'nsis', arch: ['x64'] },
+      { target: 'zip', arch: ['x64'] },
+    ],
     artifactName: 'MADAR-Windows-${version}-Setup.${ext}',
     icon: 'desktop/madar.ico',
     forceCodeSigning: releaseBuild,
@@ -35,6 +41,7 @@ module.exports = {
     installerIcon: 'desktop/madar.ico',
     uninstallerIcon: 'desktop/madar.ico',
     oneClick: false,
+    differentialPackage: false,
     allowElevation: true,
     allowToChangeInstallationDirectory: true,
     deleteAppDataOnUninstall: false,
@@ -45,7 +52,7 @@ module.exports = {
   ...(publishUrl ? {
     publish: [{
       provider: 'generic',
-      url: publishUrl,
+      url: publishUrl.endsWith('/') ? publishUrl : `${publishUrl}/`,
       ...(publisherName ? { publisherName: [publisherName] } : {}),
     }],
   } : {}),

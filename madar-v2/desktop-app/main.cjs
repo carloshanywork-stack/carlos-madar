@@ -90,6 +90,8 @@ function readConfig() {
   currentServerOrigin = validateServerUrl(baseConfig.serverUrl).origin;
   if (!baseConfig.updateUrl && currentServerOrigin) {
     baseConfig.updateUrl = `${currentServerOrigin}/download/desktop/`;
+  } else if (baseConfig.updateUrl && !baseConfig.updateUrl.endsWith('/')) {
+    baseConfig.updateUrl = `${baseConfig.updateUrl}/`;
   }
   return baseConfig;
 }
@@ -97,8 +99,9 @@ function readConfig() {
 const config = readConfig();
 
 function configureAutoUpdater() {
-  const targetUpdateUrl = config.updateUrl || (currentServerOrigin ? `${currentServerOrigin}/download/desktop/` : '');
+  let targetUpdateUrl = config.updateUrl || (currentServerOrigin ? `${currentServerOrigin}/download/desktop/` : '');
   if (!targetUpdateUrl) return false;
+  if (!targetUpdateUrl.endsWith('/')) targetUpdateUrl = `${targetUpdateUrl}/`;
   try {
     autoUpdater.setFeedURL({
       provider: 'generic',

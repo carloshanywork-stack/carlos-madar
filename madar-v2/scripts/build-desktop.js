@@ -47,14 +47,15 @@ if (releaseBuild) {
   }
 }
 
+const normalizedUpdateUrl = updateUrl ? (updateUrl.endsWith('/') ? updateUrl : `${updateUrl}/`) : '';
 const desktopConfig = {
   serverUrl,
-  updateUrl,
+  updateUrl: normalizedUpdateUrl,
   releaseBuild,
 };
 writeFileSync(resolve(projectRoot, 'desktop-app/runtime-config.json'), `${JSON.stringify(desktopConfig, null, 2)}\n`, { mode: 0o600 });
-if (updateUrl) {
-  const ymlContent = `provider: generic\nurl: '${updateUrl}'\n`;
+if (normalizedUpdateUrl) {
+  const ymlContent = `provider: generic\nurl: '${normalizedUpdateUrl}'\n`;
   writeFileSync(resolve(projectRoot, 'desktop-app/dev-app-update.yml'), ymlContent);
   writeFileSync(resolve(projectRoot, 'desktop-app/app-update.yml'), ymlContent);
 }
@@ -81,8 +82,11 @@ const install = spawnSync(process.execPath, [resolve(projectRoot, 'scripts/insta
 if (install.error) throw install.error;
 if (install.status !== 0) process.exit(install.status ?? 1);
 
-const targetType = process.env.MADAR_WINDOWS_TARGET || 'nsis';
-const args = ['--win', targetType, '--config', 'desktop/electron-builder.config.cjs', '--publish', 'never'];
+const targetType = process.env.MADAR_WINDOWS_TARGET;
+const targetArgs = targetType
+  ? (targetType === 'all' ? ['nsis', 'zip'] : [targetType])
+  : ['nsis', 'zip'];
+const args = ['--win', ...targetArgs, '--config', 'desktop/electron-builder.config.cjs', '--publish', 'never'];
 const result = spawnSync(process.execPath, [resolve(projectRoot, 'desktop-build/node_modules/electron-builder/cli.js'), ...args], {
   cwd: projectRoot,
   stdio: 'inherit',
