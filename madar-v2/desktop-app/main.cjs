@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, Menu, shell } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, Menu, shell, Tray, Notification } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const http = require('node:http');
 const https = require('node:https');
@@ -493,6 +493,77 @@ ipcMain.handle('madar:desktop:reload', () => {
   return true;
 });
 
+let appTray = null;
+
+function createTray() {
+  const iconPath = join(__dirname, 'web/icon-192.png');
+  if (!existsSync(iconPath)) return;
+  try {
+    appTray = new Tray(iconPath);
+    const contextMenu = Menu.buildFromTemplate([
+      { label: 'فتح MADAR ERP', click: () => { if (mainWindow) { mainWindow.show(); mainWindow.focus(); } } },
+      { label: 'إعدادات الاتصال بالخادم...', click: () => openServerSettingsWindow() },
+      { type: 'separator' },
+      { label: 'خروج', click: () => { app.isQuitting = true; app.quit(); } },
+    ]);
+    appTray.setToolTip('MADAR ERP - نظام مدار لإدارة العمليات');
+    appTray.setContextMenu(contextMenu);
+    appTray.on('double-click', () => {
+      if (mainWindow) {
+        mainWindow.show();
+        mainWindow.focus();
+      }
+    });
+  } catch (err) {
+    console.warn('Could not initialize system tray:', err.message);
+  }
+}
+
+ipcMain.handle('madar:desktop:get-printers', async () => {
+  if (!mainWindow || mainWindow.isDestroyed()) return [];
+  return mainWindow.webContents.getPrintersAsync();
+});
+
+ipcMain.handle('madar:desktop:print-silent', async (_event, options = {}) => {
+  if (!mainWindow || mainWindow.isDestroyed()) throw new Error('لا توجد نافذة نشطة للطباعة.');
+  return new Promise((resolve, reject) => {
+    mainWindow.webContents.print(
+      {
+        silent: options.silent !== false,
+        printBackground: true,
+        deviceName: options.deviceName || '',
+        margins: options.margins || { marginType: 'printableArea' },
+        copies: options.copies || 1,
+      },
+      (success, failureReason) => {
+        if (!success) reject(new Error(failureReason || 'تعذرت الطباعة المباشرة.'));
+        else resolve({ success: true });
+      },
+    );
+  });
+});
+
+ipcMain.handle('madar:desktop:notification', (_event, payload = {}) => {
+  if (Notification && Notification.isSupported()) {
+    const notif = new Notification({
+      title: payload.title || 'MADAR ERP',
+      body: payload.body || '',
+      icon: join(__dirname, 'web/icon-192.png'),
+      silent: Boolean(payload.silent),
+    });
+    notif.on('click', () => {
+      if (mainWindow) {
+        if (mainWindow.isMinimized()) mainWindow.restore();
+        mainWindow.show();
+        mainWindow.focus();
+      }
+    });
+    notif.show();
+    return { shown: true };
+  }
+  return { shown: false };
+});
+
 autoUpdater.autoDownload = false;
 autoUpdater.autoInstallOnAppQuit = true;
 autoUpdater.on('update-available', (info) => { void showUpdateAvailable(info); });
@@ -500,6 +571,7 @@ autoUpdater.on('error', (error) => console.error('MADAR desktop updater:', error
 
 app.whenReady().then(async () => {
   createMenu();
+  createTray();
   try {
     await startLoopbackServer();
   } catch (err) {
