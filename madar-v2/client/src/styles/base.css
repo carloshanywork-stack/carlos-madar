@@ -130,7 +130,7 @@
 #madar-app .madar-page-heading { margin: 0; color: var(--madar-text); font-size: clamp(21px, 2.3vw, 27px); font-weight: 850; letter-spacing: -.025em; }
 #madar-app .madar-page-description { max-width: 720px; margin: 7px 0 0; color: var(--madar-muted); font-size: 12px; }
 #madar-app .madar-page-actions { display: flex; align-items: center; gap: 9px; }
-#madar-app .madar-page-kicker { display: block; margin-bottom: 6px; color: var(--madar-accent); font-size: 10px; font-weight: 850; letter-spacing: .1em; }
+#madar-app .madar-page-kicker { display: block; margin-bottom: 6px; color: var(--madar-kicker, var(--madar-accent)); font-size: 10px; font-weight: 850; letter-spacing: .1em; }
 #madar-app .madar-section { margin-top: 24px; }
 #madar-app .madar-section-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 #madar-app .madar-section-title { margin: 0; font-size: 14px; font-weight: 800; }

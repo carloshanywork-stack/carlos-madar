@@ -9,6 +9,7 @@
   --madar-accent-strong: #116754;
   --madar-accent-pale: #e7f4ef;
   --madar-gold: #dcaa52;
+  --madar-kicker: #187b68;
   --madar-text: #17263c;
   --madar-muted: #748197;
   --madar-border: #e4e9ef;
@@ -40,10 +41,11 @@
   --madar-ink-soft: #172232;
   --madar-border: #233044;
   --madar-border-subtle: rgba(255, 255, 255, 0.07);
-  --madar-accent: #2dd4bf;
-  --madar-accent-strong: #14b8a6;
-  --madar-accent-pale: rgba(45, 212, 191, 0.12);
+  --madar-accent: #14b8a6;
+  --madar-accent-strong: #0d9488;
+  --madar-accent-pale: rgba(20, 184, 166, 0.14);
   --madar-gold: #fbbf24;
+  --madar-kicker: #e5b869;
   --madar-text: #f1f5f9;
   --madar-text-bright: #ffffff;
   --madar-muted: #94a3b8;
