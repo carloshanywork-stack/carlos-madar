@@ -3,6 +3,8 @@ import { api } from '../../lib/api.js';
 import { errorMessage } from '../../lib/format.js';
 import { useApi } from '../../lib/useApi.js';
 import { useToast } from '../../lib/useToast.js';
+import { cacheReplicaMachines, getReplicaMachines } from '../../lib/offline/local-replica-store.js';
+import { searchItemsLocally } from '../../lib/search/local-search.js';
 import Alert from '../../components/ui/Alert.jsx';
 import Button from '../../components/ui/Button.jsx';
 import EmptyState from '../../components/ui/EmptyState.jsx';
@@ -46,8 +48,23 @@ export default function MachinesDirectory({ isAdmin = false, initialCorrections 
   const [geofenceError, setGeofenceError] = useState('');
   const [capturingLocation, setCapturingLocation] = useState(false);
   const { notice, showToast, clearToast } = useToast();
-  const machines = data?.machines ?? [];
-  const pages = Math.max(1, Math.ceil((data?.total ?? 0) / PAGE_SIZE));
+  const [offlineMachines, setOfflineMachines] = useState([]);
+
+  useEffect(() => {
+    if (data?.machines?.length) {
+      cacheReplicaMachines(data.machines);
+    } else if (error || !navigator.onLine) {
+      getReplicaMachines().then((items) => setOfflineMachines(items || []));
+    }
+  }, [data?.machines, error]);
+
+  const rawMachines = data?.machines?.length ? data.machines : offlineMachines;
+  const machines = useMemo(() => {
+    if (!offlineMachines.length || data?.machines?.length) return rawMachines;
+    return searchItemsLocally(rawMachines, search, ['code', 'name_ar', 'name_en', 'area']);
+  }, [rawMachines, offlineMachines.length, data?.machines?.length, search]);
+
+  const pages = Math.max(1, Math.ceil((data?.total ?? rawMachines.length) / PAGE_SIZE));
   const areaOptions = useMemo(() => data?.areas ?? [], [data?.areas]);
 
   useEffect(() => {
@@ -200,7 +217,10 @@ export default function MachinesDirectory({ isAdmin = false, initialCorrections 
         </Select>
         <div className="madar-inline-wrap"><Button variant="secondary" icon="upload" onClick={() => { setModal('import'); setFormError(''); }}>استيراد Excel / CSV</Button><Button icon="plus" onClick={() => { setEditing(null); setFormError(''); setModal('machine'); }}>إضافة ماكينة جديدة</Button></div>
       </div>
-      {error && <div className="madar-section"><Alert tone="error">{error}</Alert></div>}
+      {error && !offlineMachines.length && <div className="madar-section"><Alert tone="error">{error}</Alert></div>}
+      {Boolean(!data?.machines?.length && offlineMachines.length) && (
+        <div className="madar-section"><Alert tone="warning">أنت في وضع العمل دون اتصال؛ يتم عرض بيانات الماكينات المحفوظة محلياً.</Alert></div>
+      )}
       {isAdmin && <MachineDirectoryMap machines={mapData?.machines ?? []} counts={mapData?.counts} locationStatus={locationStatus} />}
       <section className="madar-panel madar-section">
         {loading ? <LoadingState label="جارٍ تحميل دليل الماكينات" /> : machines.length ? <>
