@@ -1,4 +1,4 @@
-﻿## Install script for MADAR Windows desktop
+## Install script for MADAR Windows desktop
 # Prompt user for installation folder (default to %LOCALAPPDATA%\Madar)
 $default = "$env:LOCALAPPDATA\Madar"
 $installPath = Read-Host "Enter installation folder (default: $default)"
