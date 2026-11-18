@@ -46,3 +46,4 @@
 | 2026-11-17 11:53 | Agent 1 (Desktop) | `feat/desktop-system` | `WORKTREE_COORDINATION.md` | تهيئة وتفعيل نظام الـ Worktrees المعزول وتوثيق البروتوكول. |
 | 2026-11-17 11:53 | Agent 2 (Mobile) | `feat/mobile-app` | `madar-v2/android/*` | بدء العمل المستقل على تطبيق الموبايل في `/home/carlos/Desktop/MADAR-mobile`. |
 | 2026-11-17 14:40 | Agent 1 (Desktop) | `feat/desktop-system` | `madar-v2/desktop/**`, `madar-v2/scripts/*` | بناء وتوقيع حزمة تثبيت ويندوز NSIS (.exe) وتوليد ملفات التحديث latest.yml و blockmap بنجاح. |
+| 2026-11-18 14:05 | Agent 1 (Desktop) | `feat/desktop-system` | `madar-v2/desktop-app/**`, `madar-v2/dist-desktop/latest.yml` | تفعيل Live Web Sync مع كاش appData، دعم التنزيل المباشر للـ APK لمجلد Downloads، ترقية الإصدار إلى 1.0.1، وبناء حزمة التثبيت الموقعة وتحديث المانيفست. |

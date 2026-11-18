@@ -2,8 +2,8 @@ const { app, BrowserWindow, dialog, ipcMain, Menu, shell, Tray, Notification } =
 const { autoUpdater } = require('electron-updater');
 const http = require('node:http');
 const https = require('node:https');
-const { existsSync, readFileSync, writeFileSync } = require('node:fs');
-const { join, extname } = require('node:path');
+const { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } = require('node:fs');
+const { join, extname, dirname } = require('node:path');
 
 const APP_ID = 'com.madar.desktop';
 let mainWindow;
@@ -123,7 +123,22 @@ function isTrustedUrl(value) {
   }
 }
 
-function getWebDirectory() {
+function getUserWebCacheDir() {
+  try {
+    if (app && typeof app.getPath === 'function') {
+      try {
+        const appData = app.getPath('appData');
+        if (appData) return join(appData, 'madar-web-cache');
+      } catch {}
+      return join(app.getPath('userData'), 'madar-web-cache');
+    }
+    return join(__dirname, 'web');
+  } catch {
+    return join(__dirname, 'web');
+  }
+}
+
+function getPackagedWebDirectory() {
   const packagedWeb = join(__dirname, 'web');
   if (existsSync(packagedWeb)) return packagedWeb;
   const devClientDist = join(__dirname, '../client/dist');
@@ -131,7 +146,116 @@ function getWebDirectory() {
   return packagedWeb;
 }
 
-function proxyRequest(req, res, targetOrigin) {
+function getWebDirectory() {
+  const cacheDir = getUserWebCacheDir();
+  if (existsSync(join(cacheDir, 'index.html'))) {
+    return cacheDir;
+  }
+  return getPackagedWebDirectory();
+}
+
+function initWebCache() {
+  try {
+    const cacheDir = getUserWebCacheDir();
+    if (!existsSync(cacheDir)) {
+      mkdirSync(cacheDir, { recursive: true });
+    }
+    const indexCachePath = join(cacheDir, 'index.html');
+    if (!existsSync(indexCachePath)) {
+      const packagedDir = getPackagedWebDirectory();
+      if (existsSync(join(packagedDir, 'index.html'))) {
+        cpSync(packagedDir, cacheDir, { recursive: true });
+        console.log('[WebCache] Initialized cache from bundled web assets.');
+      }
+    }
+  } catch (err) {
+    console.warn('[WebCache] Could not initialize web cache:', err.message);
+  }
+}
+
+async function fetchLiveIndexHtml(targetOrigin, timeoutMs = 2500) {
+  try {
+    const url = new URL('/', targetOrigin).toString();
+    const res = await fetch(url, {
+      signal: AbortSignal.timeout(timeoutMs),
+      headers: {
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'User-Agent': `MADAR-Desktop/${app.getVersion() || '1.0.1'}`,
+      },
+    });
+    if (!res.ok) return null;
+    const contentType = res.headers.get('content-type') || '';
+    if (!contentType.includes('text/html')) return null;
+    const html = await res.text();
+    if (html && (html.includes('<!DOCTYPE html') || html.includes('<html'))) {
+      return html;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchLiveAsset(pathname, targetOrigin, timeoutMs = 8000) {
+  try {
+    const cleanPath = pathname.startsWith('/') ? pathname : `/${pathname}`;
+    const url = new URL(cleanPath, targetOrigin).toString();
+    const res = await fetch(url, {
+      signal: AbortSignal.timeout(timeoutMs),
+      headers: {
+        'User-Agent': `MADAR-Desktop/${app.getVersion() || '1.0.1'}`,
+      },
+    });
+    if (!res.ok) return null;
+    const buffer = Buffer.from(await res.arrayBuffer());
+    const contentType = res.headers.get('content-type') || '';
+    return { buffer, contentType };
+  } catch {
+    return null;
+  }
+}
+
+const prefetchInProgress = new Set();
+
+function triggerBackgroundAssetPrefetch(htmlContent, targetOrigin) {
+  if (!htmlContent || !targetOrigin) return;
+  const assetRegex = /(?:src|href)=["'](\/assets\/[^"'\s>]+)["']/g;
+  const matchedAssets = new Set();
+  let match;
+  while ((match = assetRegex.exec(htmlContent)) !== null) {
+    matchedAssets.add(match[1]);
+  }
+
+  const cacheDir = getUserWebCacheDir();
+  for (const assetPath of matchedAssets) {
+    const localFile = join(cacheDir, assetPath.replace(/^\//, ''));
+    if (existsSync(localFile) || prefetchInProgress.has(assetPath)) {
+      continue;
+    }
+    prefetchInProgress.add(assetPath);
+    fetchLiveAsset(assetPath, targetOrigin, 10000)
+      .then((result) => {
+        if (result && result.buffer) {
+          mkdirSync(dirname(localFile), { recursive: true });
+          writeFileSync(localFile, result.buffer);
+          console.log(`[Live Web Sync] Prefetched & cached: ${assetPath}`);
+        }
+      })
+      .catch((err) => {
+        console.warn(`[Live Web Sync] Failed to prefetch ${assetPath}:`, err.message);
+      })
+      .finally(() => {
+        prefetchInProgress.delete(assetPath);
+      });
+  }
+}
+
+function proxyRequest(req, res, targetOrigin, redirectCount = 0) {
+  if (redirectCount > 3) {
+    res.writeHead(502, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'TOO_MANY_REDIRECTS' }));
+    return;
+  }
   let target;
   try {
     target = new URL(req.url, targetOrigin);
@@ -152,6 +276,18 @@ function proxyRequest(req, res, targetOrigin) {
     method: req.method,
     headers,
   }, (proxyRes) => {
+    if ([301, 302, 307, 308].includes(proxyRes.statusCode) && proxyRes.headers.location && ['GET', 'HEAD'].includes(req.method)) {
+      try {
+        const nextTarget = new URL(proxyRes.headers.location, target);
+        if (nextTarget.origin === new URL(targetOrigin).origin) {
+          req.url = nextTarget.pathname + nextTarget.search;
+          proxyRes.resume();
+          return proxyRequest(req, res, targetOrigin, redirectCount + 1);
+        }
+      } catch {
+        // Fall back to piping redirect directly
+      }
+    }
     res.writeHead(proxyRes.statusCode || 500, proxyRes.headers);
     proxyRes.pipe(res);
   });
@@ -171,63 +307,194 @@ function proxyRequest(req, res, targetOrigin) {
 
 function startLoopbackServer() {
   return new Promise((resolve, reject) => {
-    const webDir = getWebDirectory();
+    loopbackServer = http.createServer(async (req, res) => {
+      const parsedUrl = new URL(req.url || '/', 'http://127.0.0.1');
+      const pathname = parsedUrl.pathname;
 
-    loopbackServer = http.createServer((req, res) => {
-      const pathname = (req.url || '/').split('?')[0];
-
-      // Proxy API, storage, and update endpoints to the configured backend server
+      // 1. Proxy API, storage, and update endpoints to the configured backend server
       if (pathname.startsWith('/api/') || pathname.startsWith('/storage/') || pathname.startsWith('/download/')) {
         proxyRequest(req, res, currentServerOrigin);
         return;
       }
 
-      // Serve static client assets
-      let candidatePath = join(webDir, pathname === '/' ? 'index.html' : pathname.replace(/^\//, ''));
-      if (!candidatePath.startsWith(webDir)) {
-        res.writeHead(403);
-        res.end('Forbidden');
+      const cacheDir = getUserWebCacheDir();
+      const packagedDir = getPackagedWebDirectory();
+
+      // 2. Asset request (/assets/*)
+      if (pathname.startsWith('/assets/')) {
+        const relAsset = pathname.replace(/^\//, '');
+        const cachedAssetPath = join(cacheDir, relAsset);
+        const packagedAssetPath = join(packagedDir, relAsset);
+
+        // Priority 1: User Web Cache
+        if (existsSync(cachedAssetPath) && !cachedAssetPath.endsWith('/')) {
+          try {
+            const content = readFileSync(cachedAssetPath);
+            const ext = extname(cachedAssetPath).toLowerCase();
+            res.writeHead(200, {
+              'Content-Type': MIME_TYPES[ext] || 'application/octet-stream',
+              'Cache-Control': 'public, max-age=31536000, immutable',
+            });
+            res.end(content);
+            return;
+          } catch (err) {
+            console.warn('Error reading cached asset:', err.message);
+          }
+        }
+
+        // Priority 2: Packaged Web Assets
+        if (existsSync(packagedAssetPath) && !packagedAssetPath.endsWith('/')) {
+          try {
+            const content = readFileSync(packagedAssetPath);
+            const ext = extname(packagedAssetPath).toLowerCase();
+            res.writeHead(200, {
+              'Content-Type': MIME_TYPES[ext] || 'application/octet-stream',
+              'Cache-Control': 'public, max-age=31536000, immutable',
+            });
+            res.end(content);
+            return;
+          } catch (err) {
+            console.warn('Error reading packaged asset:', err.message);
+          }
+        }
+
+        // Priority 3: Live fetch from server if connected
+        if (currentServerOrigin) {
+          try {
+            const liveAsset = await fetchLiveAsset(pathname, currentServerOrigin, 8000);
+            if (liveAsset && liveAsset.buffer) {
+              try {
+                mkdirSync(dirname(cachedAssetPath), { recursive: true });
+                writeFileSync(cachedAssetPath, liveAsset.buffer);
+              } catch (writeErr) {
+                console.warn('Could not cache live asset to disk:', writeErr.message);
+              }
+              const ext = extname(cachedAssetPath).toLowerCase();
+              res.writeHead(200, {
+                'Content-Type': liveAsset.contentType || MIME_TYPES[ext] || 'application/octet-stream',
+                'Cache-Control': 'public, max-age=31536000, immutable',
+              });
+              res.end(liveAsset.buffer);
+              return;
+            }
+          } catch (fetchErr) {
+            console.warn('Live asset fetch failed for', pathname, fetchErr.message);
+          }
+        }
+
+        res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+        res.end('Asset not found');
         return;
       }
 
-      if (existsSync(candidatePath) && !candidatePath.endsWith('/')) {
-        try {
-          const content = readFileSync(candidatePath);
-          const ext = extname(candidatePath).toLowerCase();
-          const contentType = MIME_TYPES[ext] || 'application/octet-stream';
+      // 3. Static files with extensions (e.g. /favicon.ico, /icon-192.png, /manifest.webmanifest)
+      const ext = extname(pathname).toLowerCase();
+      if (ext && ext !== '.html') {
+        const relFile = pathname.replace(/^\//, '');
+        const cachedFile = join(cacheDir, relFile);
+        const packagedFile = join(packagedDir, relFile);
+
+        if (existsSync(cachedFile) && !cachedFile.endsWith('/')) {
           res.writeHead(200, {
-            'Content-Type': contentType,
-            'Cache-Control': candidatePath.endsWith('index.html') ? 'no-cache' : 'public, max-age=31536000, immutable',
+            'Content-Type': MIME_TYPES[ext] || 'application/octet-stream',
+            'Cache-Control': 'public, max-age=86400',
           });
-          res.end(content);
+          res.end(readFileSync(cachedFile));
           return;
-        } catch (readErr) {
-          console.error('Error reading asset:', candidatePath, readErr.message);
         }
+        if (existsSync(packagedFile) && !packagedFile.endsWith('/')) {
+          res.writeHead(200, {
+            'Content-Type': MIME_TYPES[ext] || 'application/octet-stream',
+            'Cache-Control': 'public, max-age=86400',
+          });
+          res.end(readFileSync(packagedFile));
+          return;
+        }
+        if (currentServerOrigin) {
+          try {
+            const liveFile = await fetchLiveAsset(pathname, currentServerOrigin, 5000);
+            if (liveFile && liveFile.buffer) {
+              try {
+                mkdirSync(dirname(cachedFile), { recursive: true });
+                writeFileSync(cachedFile, liveFile.buffer);
+              } catch { }
+              res.writeHead(200, {
+                'Content-Type': liveFile.contentType || MIME_TYPES[ext] || 'application/octet-stream',
+                'Cache-Control': 'public, max-age=86400',
+              });
+              res.end(liveFile.buffer);
+              return;
+            }
+          } catch { }
+        }
+        res.writeHead(404);
+        res.end('Not found');
+        return;
       }
 
-      // SPA Navigation fallback: any non-file request routes to index.html
-      const indexPath = join(webDir, 'index.html');
-      if (existsSync(indexPath)) {
-        try {
-          const html = readFileSync(indexPath, 'utf8');
+      // 4. HTML / SPA Navigation (/ or /index.html or client routes)
+      // Attempt live web sync if server is reachable
+      let html = null;
+      if (currentServerOrigin) {
+        html = await fetchLiveIndexHtml(currentServerOrigin, 2500);
+        if (html) {
+          try {
+            const cachedIndexPath = join(cacheDir, 'index.html');
+            mkdirSync(cacheDir, { recursive: true });
+            writeFileSync(cachedIndexPath, html, 'utf8');
+            triggerBackgroundAssetPrefetch(html, currentServerOrigin);
+          } catch (cacheWriteErr) {
+            console.warn('Failed to write index.html to cache:', cacheWriteErr.message);
+          }
           res.writeHead(200, {
             'Content-Type': 'text/html; charset=utf-8',
-            'Cache-Control': 'no-cache',
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'X-Madar-Source': 'live-sync',
           });
           res.end(html);
           return;
-        } catch (indexErr) {
-          console.error('Error reading index.html:', indexErr.message);
         }
       }
 
-      // If no bundled web client exists, serve offline diagnostics
+      // Fallback 1: User Web Cache
+      const cachedIndexPath = join(cacheDir, 'index.html');
+      if (existsSync(cachedIndexPath)) {
+        try {
+          html = readFileSync(cachedIndexPath, 'utf8');
+          res.writeHead(200, {
+            'Content-Type': 'text/html; charset=utf-8',
+            'Cache-Control': 'no-cache',
+            'X-Madar-Source': 'offline-cache',
+          });
+          res.end(html);
+          return;
+        } catch (err) {
+          console.warn('Failed to read cached index.html:', err.message);
+        }
+      }
+
+      // Fallback 2: Packaged Web Assets
+      const packagedIndexPath = join(packagedDir, 'index.html');
+      if (existsSync(packagedIndexPath)) {
+        try {
+          html = readFileSync(packagedIndexPath, 'utf8');
+          res.writeHead(200, {
+            'Content-Type': 'text/html; charset=utf-8',
+            'Cache-Control': 'no-cache',
+            'X-Madar-Source': 'packaged-fallback',
+          });
+          res.end(html);
+          return;
+        } catch (err) {
+          console.warn('Failed to read packaged index.html:', err.message);
+        }
+      }
+
+      // Fallback 3: Offline Diagnostic page
       const offlinePath = join(__dirname, 'offline.html');
       if (existsSync(offlinePath)) {
-        const fallback = readFileSync(offlinePath, 'utf8');
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-        res.end(fallback);
+        res.end(readFileSync(offlinePath, 'utf8'));
       } else {
         res.writeHead(503, { 'Content-Type': 'text/plain; charset=utf-8' });
         res.end('تطبيق MADAR - الواجهة المحلية قيد التجهيز.');
@@ -414,6 +681,10 @@ function createWindow() {
   mainWindow.once('ready-to-show', () => mainWindow.show());
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.includes('.apk') || url.includes('/download/apk')) {
+      mainWindow.webContents.downloadURL(url);
+      return { action: 'deny' };
+    }
     if (isTrustedUrl(url)) {
       void mainWindow.loadURL(url);
     } else if (url.startsWith('https://')) {
@@ -423,6 +694,11 @@ function createWindow() {
   });
 
   mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (url.includes('.apk') || url.includes('/download/apk')) {
+      event.preventDefault();
+      mainWindow.webContents.downloadURL(url);
+      return;
+    }
     if (!isTrustedUrl(url)) event.preventDefault();
   });
 
@@ -524,6 +800,60 @@ ipcMain.handle('madar:desktop:reload', () => {
   return true;
 });
 
+ipcMain.handle('madar:desktop:download-apk', async (_event, target) => {
+  if (!mainWindow || mainWindow.isDestroyed()) throw new Error('لا توجد نافذة نشطة.');
+  let targetUrl = target;
+  if (!targetUrl || typeof targetUrl !== 'string') {
+    targetUrl = `${currentServerOrigin}/download/apk`;
+  } else if (targetUrl.startsWith('/')) {
+    targetUrl = `${currentServerOrigin}${targetUrl}`;
+  }
+  mainWindow.webContents.downloadURL(targetUrl);
+  return { ok: true, started: true, url: targetUrl };
+});
+
+function setupDownloadManager() {
+  const { session } = require('electron');
+  session.defaultSession.on('will-download', (event, item) => {
+    const defaultFilename = item.getFilename() || 'madar-rep.apk';
+    const filename = defaultFilename.endsWith('.apk') ? defaultFilename : `${defaultFilename}.apk`;
+    const downloadsFolder = app.getPath('downloads');
+    const savePath = join(downloadsFolder, filename);
+
+    // Save directly to the user's Downloads folder without prompting
+    item.setSavePath(savePath);
+
+    item.on('updated', (_event, state) => {
+      if (state === 'progressing') {
+        if (!item.isPaused() && item.getTotalBytes() > 0 && mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.setProgressBar(item.getReceivedBytes() / item.getTotalBytes());
+        }
+      }
+    });
+
+    item.once('done', (_event, state) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.setProgressBar(-1);
+      }
+      if (state === 'completed') {
+        if (Notification && Notification.isSupported()) {
+          const notif = new Notification({
+            title: 'اكتمل تنزيل تطبيق المندوب (APK)',
+            body: `تم حفظ ${filename} بنجاح في مجلد التنزيلات.`,
+            icon: join(__dirname, 'web/icon-192.png'),
+          });
+          notif.on('click', () => {
+            shell.showItemInFolder(savePath);
+          });
+          notif.show();
+        }
+      } else {
+        console.error(`Download ended with state: ${state}`);
+      }
+    });
+  });
+}
+
 let appTray = null;
 
 function createTray() {
@@ -613,6 +943,8 @@ autoUpdater.on('update-downloaded', (info) => {
 configureAutoUpdater();
 
 app.whenReady().then(async () => {
+  initWebCache();
+  setupDownloadManager();
   createMenu();
   createTray();
   try {
