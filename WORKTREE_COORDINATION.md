@@ -43,3 +43,5 @@
 | 2026-11-17 14:48 | Coordinator | `main` | دمج الفروع | دمج تعديلات الموبايل والديسكتوب بنجاح في الفرع الرئيسي main ونشرها على السيرفر. |
 | 2026-11-18 14:05 | Desktop Agent | `feat/desktop-system` | `madar-v2/desktop-app/**`, `madar-v2/dist-desktop/latest.yml` | تفعيل Live Web Sync مع كاش appData، دعم التنزيل المباشر للـ APK لمجلد Downloads، ترقية الإصدار إلى 1.0.1، وبناء حزمة التثبيت الموقعة وتحديث المانيفست. |
 | 2026-11-18 14:45 | Desktop Agent | `feat/desktop-system` | `madar-v2/desktop-app/main.cjs`, `madar-v2/dist-desktop/latest.yml` | تأمين خادم الـ Loopback المحلي برمز جلسة داخلي عشوائي (INTERNAL_TOKEN) وحقن هيدر x-madar-internal-token مع حجب المتصلين غير المصرح لهم بكود 403. |
+| 2026-11-18 15:00 | Mobile Agent | `feat/mobile-app` | `madar-v2/android/*` | تطبيق كشف الروت وتزييف الـ GPS، وتثبيت شهادات الجذر (Root CA Pins) لـ Tailscale، وبناء وتوقيع Release APK v2.4.6. |
+| 2026-11-18 15:08 | Coordinator | `main` | كامل النظام والإنتاج | دمج فروع الديسكتوب والموبايل، قفل صيانة الاستعادة للسيرفر، بناء واجهة الويب، تحديث جدول الإصدارات، واجتياز الاختبارات بالكامل. |
