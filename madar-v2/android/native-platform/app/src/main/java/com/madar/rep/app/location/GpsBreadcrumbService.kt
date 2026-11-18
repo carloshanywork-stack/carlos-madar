@@ -24,6 +24,7 @@ import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 
@@ -81,7 +82,7 @@ class GpsBreadcrumbService : Service() {
 
         heartbeatJob?.cancel()
         heartbeatJob = serviceScope.launch {
-            while (kotlinx.coroutines.isActive) {
+            while (isActive) {
                 kotlinx.coroutines.delay(60_000L)
                 val now = System.currentTimeMillis()
                 if (now - lastPointRecordedMillis >= 60_000L && repId > 0) {

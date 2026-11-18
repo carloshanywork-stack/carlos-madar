@@ -39,6 +39,30 @@ sealed interface LocationDecision {
 object GeoPolicy {
     const val MAX_FIX_AGE_MILLIS = 300_000L
     const val MAX_ACCURACY_METERS = 250f
+    const val REJECTION_COMPROMISED_ENVIRONMENT = "تم رفض تسجيل الموقع: تم اكتشاف بيئة نظام غير موثوقة أو أداة تزييف موقع"
+
+    val COMMON_ROOT_PATHS: List<String> = listOf(
+        "/system/bin/su",
+        "/system/xbin/su",
+        "/sbin/su",
+        "/data/local/xbin/su",
+        "/system/app/Superuser.apk",
+    )
+
+    fun isEnvironmentCompromised(
+        rootPaths: List<String> = COMMON_ROOT_PATHS,
+        buildTags: String? = try { android.os.Build.TAGS } catch (_: Throwable) { null },
+    ): Boolean {
+        if (buildTags != null && buildTags.contains("test-keys")) return true
+        for (path in rootPaths) {
+            try {
+                if (java.io.File(path).exists()) return true
+            } catch (_: Throwable) {
+                // Ignore access errors on individual paths
+            }
+        }
+        return false
+    }
 
     /** The server uses the same effective-distance rule: distance minus reported accuracy. */
     fun evaluate(
@@ -49,8 +73,12 @@ object GeoPolicy {
         nowMillis: Long = System.currentTimeMillis(),
         maxAgeMillis: Long = MAX_FIX_AGE_MILLIS,
         maxAccuracyMeters: Float = MAX_ACCURACY_METERS,
+        environmentCompromised: Boolean = isEnvironmentCompromised(),
     ): LocationDecision {
         if (point == null) return LocationDecision.Missing
+        if (environmentCompromised) {
+            return LocationDecision.Invalid(REJECTION_COMPROMISED_ENVIRONMENT)
+        }
         if (!point.latitude.isFinite() || point.latitude !in -90.0..90.0 ||
             !point.longitude.isFinite() || point.longitude !in -180.0..180.0 ||
             (machineLatitude == null) != (machineLongitude == null) ||

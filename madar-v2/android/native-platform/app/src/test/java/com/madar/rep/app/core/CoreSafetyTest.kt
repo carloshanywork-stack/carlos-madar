@@ -37,6 +37,37 @@ class CoreSafetyTest {
     }
 
     @Test
+    fun detectsCompromisedEnvironmentAndRejectsLocation() {
+        // Test-keys flag detection
+        assertTrue(GeoPolicy.isEnvironmentCompromised(emptyList(), buildTags = "test-keys"))
+        assertTrue(GeoPolicy.isEnvironmentCompromised(emptyList(), buildTags = "userdebug,test-keys"))
+        assertFalse(GeoPolicy.isEnvironmentCompromised(emptyList(), buildTags = "release-keys"))
+
+        // Root file detection
+        val tempSu = java.io.File.createTempFile("mock_su", ".bin")
+        try {
+            assertTrue(GeoPolicy.isEnvironmentCompromised(listOf(tempSu.absolutePath), buildTags = "release-keys"))
+            assertFalse(GeoPolicy.isEnvironmentCompromised(listOf("/non/existent/su/binary"), buildTags = "release-keys"))
+        } finally {
+            tempSu.delete()
+        }
+
+        // Evaluation rejection
+        val decision = GeoPolicy.evaluate(
+            point(at = NOW),
+            null,
+            null,
+            nowMillis = NOW,
+            environmentCompromised = true,
+        )
+        assertTrue(decision is LocationDecision.Invalid)
+        assertEquals(
+            "تم رفض تسجيل الموقع: تم اكتشاف بيئة نظام غير موثوقة أو أداة تزييف موقع",
+            (decision as LocationDecision.Invalid).reason
+        )
+    }
+
+    @Test
     fun geofenceUsesDistanceMinusAccuracy() {
         val target = point(latitude = 30.0, longitude = 31.0, accuracy = 25f)
         assertEquals(LocationDecision.Valid, GeoPolicy.evaluate(target, 30.0, 31.0006, 50.0, NOW))
