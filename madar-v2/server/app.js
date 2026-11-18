@@ -13,7 +13,7 @@ import { errorHandler, notFoundHandler } from './middleware/error-handler.js';
 import { getSessionUserFromRequest, requireAuthentication } from './modules/auth/service.js';
 import authRouter from './modules/auth/routes.js';
 import usersRouter from './modules/auth/users.js';
-import systemRouter from './modules/system/backup.js';
+import systemRouter, { isSystemRestoreActive } from './modules/system/backup.js';
 import auditRouter from './modules/system/audit-routes.js';
 import repSupportRouter from './modules/system/rep-support-routes.js';
 import repReleaseRouter from './modules/system/rep-release-routes.js';
@@ -705,6 +705,13 @@ app.get(['/download/desktop/:filename', '/download/:filename'], (req, res, next)
 
 app.use('/api/auth', authRouter);
 app.use('/api/rep', repRouter);
+app.use('/api', (req, res, next) => {
+  if (isSystemRestoreActive() && req.path !== '/system/backup/restore' && req.path !== '/system/health') {
+    res.status(503).json({ error: 'System maintenance in progress: database restore is active.' });
+    return;
+  }
+  next();
+});
 app.use('/api', requireAuthentication);
 // Representatives may read and update only their own notification inbox, so
 // this router stays ahead of the business-route restriction below.

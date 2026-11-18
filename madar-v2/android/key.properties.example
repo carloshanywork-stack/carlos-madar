@@ -1,7 +1,8 @@
 # Template for Android release signing properties.
 # Copy to android/key.properties and replace placeholders with approved keystore values.
 # NEVER commit android/key.properties or your actual keystore to version control.
-storePassword=YOUR_KEYSTORE_PASSWORD
-keyPassword=YOUR_KEY_PASSWORD
-keyAlias=YOUR_KEY_ALIAS
 storeFile=path/to/your-release.keystore
+storePassword=REPLACE_WITH_KEYSTORE_PASSWORD
+keyAlias=REPLACE_WITH_APPROVED_ALIAS
+keyPassword=REPLACE_WITH_KEY_PASSWORD
+
