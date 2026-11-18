@@ -110,6 +110,7 @@ function configureAutoUpdater() {
       provider: 'generic',
       url: targetUpdateUrl,
     });
+    autoUpdater.verifyUpdateCodeSignature = false;
     return true;
   } catch (err) {
     console.warn('Could not set autoUpdater feed URL:', err.message);
@@ -984,6 +985,7 @@ ipcMain.handle('madar:desktop:notification', (_event, payload = {}) => {
 
 autoUpdater.autoDownload = false;
 autoUpdater.autoInstallOnAppQuit = true;
+autoUpdater.verifyUpdateCodeSignature = false;
 autoUpdater.on('update-available', (info) => { void showUpdateAvailable(info); });
 autoUpdater.on('error', (error) => console.error('MADAR desktop updater:', error));
 
