@@ -172,7 +172,7 @@ class CameraActivity : ComponentActivity() {
                             )
                             kotlinx.coroutines.runBlocking { container.visitRepo.addPhoto(visitUuid, photo) }
                             val galleryExportFailed = runCatching {
-                                container.photoStore.publishOriginalToGallery(photo)
+                                container.photoStore.publishOriginalToGallery(photo, visit.machineCode)
                             }.isFailure
                             runOnUiThread {
                                 setResult(

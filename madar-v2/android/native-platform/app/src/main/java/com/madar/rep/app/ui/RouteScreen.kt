@@ -49,6 +49,7 @@ import com.madar.rep.app.core.MadarTime
 import com.madar.rep.app.data.api.RouteMachine
 import com.madar.rep.app.data.api.RouteResponse
 import com.madar.rep.app.data.db.VisitEntity
+import com.madar.rep.app.data.db.VisitState
 import com.madar.rep.app.data.repo.RouteView
 import com.madar.rep.app.ui.theme.MadarDanger
 import com.madar.rep.app.ui.theme.MadarGold
@@ -304,7 +305,13 @@ private fun RegionHeader(name: String, count: Int, expanded: Boolean, onToggle: 
 
 @Composable
 private fun MachineCard(machine: RouteMachine, localVisit: VisitEntity?, onClick: () -> Unit) {
+    val isDraft = localVisit != null && localVisit.state == VisitState.DRAFT
     val (status, tone) = when {
+        isDraft -> "draft" to PillStyle(
+            MadarTeal.copy(alpha = 0.2f),
+            MadarTeal,
+            "مسودة مفتوحة - صور قبل الصيانة جاهزة"
+        )
         localVisit != null -> localVisit.state to visitPill(localVisit.state)
         machine.reviewStatus == "reshoot" -> "reshoot" to PillStyle(MadarDanger.copy(alpha = 0.12f), MadarDanger, "إعادة تصوير")
         machine.isCompleted -> "done" to PillStyle(MadarTeal.copy(alpha = 0.14f), MadarTeal, "مكتملة")
