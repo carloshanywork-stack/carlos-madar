@@ -142,7 +142,7 @@ export function getSupervisorRadar(database = defaultDatabase, now = new Date())
       SELECT point.latitude, point.longitude, point.accuracy, point.speed,
         point.duty_session_id, point.recorded_at AS captured_at
       FROM rep_tracking_breadcrumbs point
-      JOIN rep_duty_sessions duty ON duty.id = point.duty_session_id
+      LEFT JOIN rep_duty_sessions duty ON duty.id = point.duty_session_id
       WHERE point.user_id = ? AND datetime(point.recorded_at) >= datetime(?) AND datetime(point.recorded_at) < datetime(?)
       ORDER BY datetime(point.recorded_at), point.id
     `).all(rep.id, start, end);
@@ -161,7 +161,13 @@ export function getSupervisorRadar(database = defaultDatabase, now = new Date())
       WHERE visit.rep_user_id = ? AND review.status = 'pending'
         AND datetime(visit.created_at) >= datetime('now', '-45 minutes') LIMIT 1
     `).get(rep.id);
-    const onDuty = Boolean(rep.duty_session_id);
+    const activeAttendance = database.prepare(`
+      SELECT 1 FROM employee_daily_attendance attendance
+      JOIN employees employee ON employee.id = attendance.employee_id
+      WHERE employee.user_id = ? AND attendance.clock_in_time IS NOT NULL AND attendance.clock_out_time IS NULL
+      LIMIT 1
+    `).get(rep.id);
+    const onDuty = Boolean(rep.duty_session_id || activeAttendance);
     let status = 'offline';
     if (onDuty) {
       if (recentPending) {

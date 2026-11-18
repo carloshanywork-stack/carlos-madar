@@ -1882,15 +1882,22 @@ export function syncRepTracking(rep, input, database = db, { transitionDuty = tr
     let locationResult = null;
     if (location) {
       locationResult = storePoint(location, location.clientPointId ?? 'location');
-      if (locationResult.status !== 'rejected') {
-        database.prepare(`
-          UPDATE users SET is_online = 1,
-            last_location_json = CASE
-              WHEN last_location_json IS NULL OR datetime(json_extract(last_location_json, '$.updatedAt')) <= datetime(?)
-                THEN ? ELSE last_location_json END
-          WHERE id = ? AND role = 'rep' AND active = 1 AND deleted_at IS NULL
-        `).run(location.updatedAt, JSON.stringify(location), rep.id);
-      }
+    }
+
+    const validTrailPoints = trail
+      .filter((entry) => !entry.error && entry.point && Number.isFinite(entry.point.latitude) && Number.isFinite(entry.point.longitude))
+      .map((entry) => entry.point)
+      .sort((a, b) => new Date(b.updatedAt).valueOf() - new Date(a.updatedAt).valueOf());
+    const latestSignal = location || validTrailPoints[0] || null;
+
+    if (latestSignal) {
+      database.prepare(`
+        UPDATE users SET is_online = 1,
+          last_location_json = CASE
+            WHEN last_location_json IS NULL OR datetime(json_extract(last_location_json, '$.updatedAt')) <= datetime(?)
+              THEN ? ELSE last_location_json END
+        WHERE id = ? AND role = 'rep' AND active = 1 AND deleted_at IS NULL
+      `).run(latestSignal.updatedAt, JSON.stringify(latestSignal), rep.id);
     }
     for (const workDate of changedDates) refreshRepStops(rep.id, workDate, database);
     return {
@@ -1910,8 +1917,38 @@ export function syncRepTracking(rep, input, database = db, { transitionDuty = tr
 export function syncRepLocationPing(rep, input, database = db) {
   const body = requireObject(input);
   allowOnlyKeys(body, ['onDuty', 'location', 'trail', 'is_mock', 'mock_flag']);
-  const session = database.prepare(`SELECT 1 FROM rep_duty_sessions
+  let session = database.prepare(`SELECT id, started_at FROM rep_duty_sessions
     WHERE rep_user_id = ? AND ended_at IS NULL`).get(rep?.id);
+
+  if (!session && rep?.id) {
+    const activeAttendance = database.prepare(`
+      SELECT attendance.id, attendance.work_date, attendance.clock_in_time
+      FROM employee_daily_attendance attendance
+      JOIN employees employee ON employee.id = attendance.employee_id
+      WHERE employee.user_id = ? AND attendance.clock_in_time IS NOT NULL AND attendance.clock_out_time IS NULL
+      ORDER BY attendance.work_date DESC, attendance.id DESC LIMIT 1
+    `).get(rep.id);
+
+    if (activeAttendance) {
+      const now = new Date().toISOString();
+      const startedAt = activeAttendance.clock_in_time || now;
+      const pointLocation = body.location || (Array.isArray(body.trail) && body.trail[0]) || null;
+      const result = database.prepare(`
+        INSERT INTO rep_duty_sessions (rep_user_id, started_at, start_location_json)
+        VALUES (?, ?, ?)
+      `).run(rep.id, startedAt, pointLocation ? JSON.stringify(pointLocation) : null);
+      session = { id: Number(result.lastInsertRowid), started_at: startedAt };
+      recordAudit({
+        database,
+        actorId: rep.id,
+        action: 'start_duty',
+        entityType: 'rep_duty_session',
+        entityId: session.id,
+        newValues: { started_at: startedAt, auto_healed: true, from_attendance: true },
+      });
+    }
+  }
+
   return syncRepTracking(rep, { ...body, onDuty: Boolean(session) }, database, { transitionDuty: false });
 }
 

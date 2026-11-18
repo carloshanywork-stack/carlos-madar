@@ -666,7 +666,19 @@ function clockOut(employeeIdValue, source, location, actorId, database = db,
 }
 
 export function clockInForEmployee(employeeId, actorId, database = db, options = {}) {
-  return clockIn(employeeId, 'admin', null, actorId, database, { ...options, markOnTime: true });
+  return database.transaction(() => {
+    const attendance = clockIn(employeeId, 'admin', null, actorId, database, { ...options, markOnTime: true });
+    const employee = database.prepare('SELECT user_id FROM employees WHERE id = ?').get(employeeId);
+    if (employee?.user_id) {
+      const user = database.prepare('SELECT role FROM users WHERE id = ?').get(employee.user_id);
+      if (user?.role === 'rep') {
+        recordAttendanceDuty(database, employee.user_id, 'in',
+          attendance.overtime_session_status === 'open' ? attendance.overtime_clock_in_time : attendance.clock_in_time,
+          null);
+      }
+    }
+    return attendance;
+  })();
 }
 
 export function clockOutForEmployee(employeeId, actorId, database = db, options = {}) {
