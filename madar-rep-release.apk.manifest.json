@@ -1,12 +1,12 @@
 {
-  "sourceRevision": "ec99ba0f96e5aa5cadbe3f0794a3b3cf47f16693",
+  "sourceRevision": "8333e92f15d6663dec87ab9f92bf789d5a401ebe",
   "sourceTreeDirty": false,
-  "builtAt": "2026-11-17T16:02:03.217Z",
+  "builtAt": "2026-11-18T12:58:38.722Z",
   "versionCode": 26,
   "versionName": "2.4.6",
   "buildType": "release",
   "serverUrl": "https://carlos-pc.tail852ef0.ts.net",
   "artifactOnly": false,
-  "apkSha256": "70daa176e92d7be11885ec6757ecd9d0c09762d0e08ca84bd9983baba69038c5",
+  "apkSha256": "abe49650a4d89dda80686c53c845ce9a415d37b0e065d19abc588e628b983b2e",
   "signerCertificateSha256": "f4c8bffc9f852ea6056e350b65156eb880d05629991682492159b9e3937c02a1"
 }
