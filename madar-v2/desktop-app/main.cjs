@@ -2,14 +2,17 @@ const { app, BrowserWindow, dialog, ipcMain, Menu, shell, Tray, Notification } =
 const { autoUpdater } = require('electron-updater');
 const http = require('node:http');
 const https = require('node:https');
+const crypto = require('node:crypto');
 const { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } = require('node:fs');
 const { join, extname, dirname } = require('node:path');
 
 const APP_ID = 'com.madar.desktop';
+const INTERNAL_TOKEN = crypto.randomBytes(32).toString('hex');
 let mainWindow;
 let settingsWindow;
 let loopbackServer;
 let loopbackOrigin = '';
+let loopbackPort = 0;
 let currentServerOrigin = '';
 let defaultServerOrigin = '';
 let updateCheckInProgress = false;
@@ -268,6 +271,7 @@ function proxyRequest(req, res, targetOrigin, redirectCount = 0) {
   const client = target.protocol === 'https:' ? https : http;
   const headers = { ...req.headers };
   delete headers.host;
+  delete headers['x-madar-internal-token'];
   headers['x-forwarded-for'] = req.socket.remoteAddress || '127.0.0.1';
   headers['x-forwarded-proto'] = 'http';
   headers['x-forwarded-host'] = req.headers.host || '127.0.0.1';
@@ -313,6 +317,11 @@ function startLoopbackServer() {
 
       // 1. Proxy API, storage, and update endpoints to the configured backend server
       if (pathname.startsWith('/api/') || pathname.startsWith('/storage/') || pathname.startsWith('/download/')) {
+        if (req.headers['x-madar-internal-token'] !== INTERNAL_TOKEN) {
+          res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
+          res.end('Forbidden: Unauthorized local caller');
+          return;
+        }
         proxyRequest(req, res, currentServerOrigin);
         return;
       }
@@ -503,6 +512,7 @@ function startLoopbackServer() {
 
     loopbackServer.listen(0, '127.0.0.1', () => {
       const port = loopbackServer.address().port;
+      loopbackPort = port;
       loopbackOrigin = `http://127.0.0.1:${port}`;
       resolve(loopbackOrigin);
     });
@@ -854,6 +864,25 @@ function setupDownloadManager() {
   });
 }
 
+function setupSecurityHeaders() {
+  const { session } = require('electron');
+  session.defaultSession.webRequest.onBeforeSendHeaders((details, callback) => {
+    try {
+      const url = new URL(details.url);
+      const isLoopback = loopbackOrigin && (
+        url.origin === loopbackOrigin ||
+        ((url.hostname === '127.0.0.1' || url.hostname === 'localhost') && Number(url.port) === loopbackPort)
+      );
+      if (isLoopback) {
+        details.requestHeaders['x-madar-internal-token'] = INTERNAL_TOKEN;
+      }
+    } catch {
+      // Ignore URL parsing errors
+    }
+    callback({ requestHeaders: details.requestHeaders });
+  });
+}
+
 let appTray = null;
 
 function createTray() {
@@ -949,6 +978,7 @@ app.whenReady().then(async () => {
   createTray();
   try {
     await startLoopbackServer();
+    setupSecurityHeaders();
   } catch (err) {
     console.error('Could not start internal loopback server:', err);
   }
