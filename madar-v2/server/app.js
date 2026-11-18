@@ -470,7 +470,7 @@ function resolveDesktopUpdateManifest() {
   return null;
 }
 
-function sendDesktopFile(res, next, artifact) {
+function sendDesktopFile(req, res, next, artifact) {
   let descriptor;
   try {
     ({ descriptor } = openRegularFileNoFollow(artifact.path));
@@ -489,19 +489,51 @@ function sendDesktopFile(res, next, artifact) {
   } else if (artifact.filename.endsWith('.cer') || artifact.filename.endsWith('.crt')) {
     contentType = 'application/x-x509-ca-cert';
   }
+
+  const fileSize = metadata.size;
+  const rangeHeader = req.headers.range;
+
   res.attachment(artifact.filename);
   res.set({
     'Cache-Control': 'private, no-cache',
     'X-Content-Type-Options': 'nosniff',
     'Content-Type': contentType,
-    'Content-Length': String(metadata.size),
+    'Accept-Ranges': 'bytes',
   });
-  const stream = createReadStream(artifact.path, { fd: descriptor, autoClose: true });
-  stream.on('error', (error) => {
-    if (res.headersSent) res.destroy(error);
-    else next(error);
-  });
-  stream.pipe(res);
+
+  if (rangeHeader && rangeHeader.startsWith('bytes=')) {
+    const parts = rangeHeader.replace(/bytes=/, '').split('-');
+    const start = parseInt(parts[0], 10);
+    const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+
+    if (isNaN(start) || isNaN(end) || start > end || start >= fileSize || end >= fileSize) {
+      closeSync(descriptor);
+      res.status(416).set('Content-Range', `bytes */${fileSize}`).end();
+      return;
+    }
+
+    const chunkLength = end - start + 1;
+    res.status(206);
+    res.set({
+      'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+      'Content-Length': String(chunkLength),
+    });
+
+    const stream = createReadStream(artifact.path, { fd: descriptor, start, end, autoClose: true });
+    stream.on('error', (error) => {
+      if (res.headersSent) res.destroy(error);
+      else next(error);
+    });
+    stream.pipe(res);
+  } else {
+    res.set('Content-Length', String(fileSize));
+    const stream = createReadStream(artifact.path, { fd: descriptor, autoClose: true });
+    stream.on('error', (error) => {
+      if (res.headersSent) res.destroy(error);
+      else next(error);
+    });
+    stream.pipe(res);
+  }
 }
 
 app.get('/download/desktop', (req, res, next) => {
@@ -515,7 +547,7 @@ app.get('/download/desktop', (req, res, next) => {
     res.status(404).json({ error: 'The MADAR Windows desktop installer is currently unavailable on the server.' });
     return;
   }
-  sendDesktopFile(res, next, artifact);
+  sendDesktopFile(req, res, next, artifact);
 });
 
 app.get('/download/desktop/install.ps1', (req, res) => {
@@ -704,7 +736,7 @@ app.get(['/download/desktop/:filename', '/download/:filename'], (req, res, next)
     res.status(404).json({ error: `File '${requested}' not found in desktop distribution.` });
     return;
   }
-  sendDesktopFile(res, next, artifact);
+  sendDesktopFile(req, res, next, artifact);
 });
 
 app.use('/api/auth', authRouter);
