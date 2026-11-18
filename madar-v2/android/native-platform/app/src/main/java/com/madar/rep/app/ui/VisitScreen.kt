@@ -33,8 +33,11 @@ import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -44,6 +47,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -103,6 +108,13 @@ fun VisitScreen(
     val blockedMessage by vm.claimBlockedMessage.collectAsStateWithLifecycle()
     val machineLocationApprovalBusyId by vm.machineLocationApprovalBusy.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    LaunchedEffect(vm) {
+        vm.messages.collect { message ->
+            snackbarHostState.showSnackbar(message)
+        }
+    }
 
     var initialized by remember(visitUuid) { mutableStateOf(false) }
     var condition by remember(visitUuid) { mutableStateOf("working") }
@@ -111,6 +123,7 @@ fun VisitScreen(
     var notes by remember(visitUuid) { mutableStateOf("") }
     var previewPhoto by remember(visitUuid) { mutableStateOf<PhotoEntity?>(null) }
     var showLocationChange by rememberSaveable(visitUuid) { mutableStateOf(false) }
+    var showBeforeOnlyDialog by rememberSaveable(visitUuid) { mutableStateOf(false) }
 
     val visit = detail?.visit
     val editable = visit?.state == VisitState.DRAFT
@@ -202,6 +215,7 @@ fun VisitScreen(
     BackHandler(enabled = true) { if (!busy) closeScreen() }
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             MadarTopBar(
                 title = visit?.machineCode ?: "الزيارة",
@@ -454,6 +468,13 @@ fun VisitScreen(
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Button(
                             onClick = {
+                                val beforeCount = detail?.before?.size ?: 0
+                                val afterCount = detail?.after?.size ?: 0
+                                if (beforeCount > 0 && afterCount == 0) {
+                                    vm.saveDraft(visitUuid, currentForm())
+                                    showBeforeOnlyDialog = true
+                                    return@Button
+                                }
                                 vm.submitVisit(visitUuid, currentForm()) { success ->
                                     if (success) onClose()
                                 }
@@ -477,11 +498,20 @@ fun VisitScreen(
                             }
                         }
                         OutlinedButton(
-                            onClick = { vm.saveDraft(visitUuid, currentForm()) },
+                            onClick = {
+                                vm.saveDraft(visitUuid, currentForm()) { ok ->
+                                    if (ok) {
+                                        vm.showMessage("تم حفظ مسودة الزيارة والصور بنجاح. يمكنك العودة إليها في أي وقت.")
+                                    }
+                                }
+                            },
                             enabled = !busy,
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier.fillMaxWidth().height(48.dp),
+                            shape = RoundedCornerShape(14.dp),
                         ) {
-                            Text("حفظ المسودة دون إرسال")
+                            Icon(Icons.Default.Save, contentDescription = null, tint = MadarTeal)
+                            Spacer(Modifier.width(8.dp))
+                            Text("حفظ كمسودة", fontWeight = FontWeight.SemiBold)
                         }
                         Text(
                             "لن تُحذف الصور أو المسودة عند تعذر الموقع أو الشبكة. تبقى الزيارة في قائمة المزامنة حتى تأكيد الخادم.",
@@ -523,6 +553,41 @@ fun VisitScreen(
     }
     if (showLocationChange && visit != null) {
         LocationChangeDialog(vm = vm, visit = visit, onDismiss = { showLocationChange = false })
+    }
+    if (showBeforeOnlyDialog) {
+        AlertDialog(
+            onDismissRequest = { showBeforeOnlyDialog = false },
+            shape = RoundedCornerShape(18.dp),
+            title = {
+                Text("حفظ مرحلة ما قبل الصيانة", fontWeight = FontWeight.Bold)
+            },
+            text = {
+                Text(
+                    "تم حفظ صور (قبل الصيانة) كمسودة بنجاح. لاعتماد الزيارة وإرسالها للمزامنة النهائية، يجب التقاط صورة واحدة على الأقل لمرحلة (بعد الصيانة) عند انتهاء أعمال الصيانة.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = { showBeforeOnlyDialog = false },
+                    colors = ButtonDefaults.buttonColors(containerColor = MadarTeal),
+                    shape = RoundedCornerShape(12.dp),
+                ) {
+                    Text("استكمال التصوير", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                OutlinedButton(
+                    onClick = {
+                        showBeforeOnlyDialog = false
+                        closeScreen()
+                    },
+                    shape = RoundedCornerShape(12.dp),
+                ) {
+                    Text("حفظ كمسودة والرجوع")
+                }
+            }
+        )
     }
 }
 

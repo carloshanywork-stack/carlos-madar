@@ -25,10 +25,16 @@ class PhotoStore(private val context:Context,private val governorates:Governorat
     }
 
     /** Publishes an unchanged original to the public MADAR album while retaining the private evidence copy. */
-    fun publishOriginalToGallery(photo: PhotoEntity) {
+    fun publishOriginalToGallery(photo: PhotoEntity, machineCode: String = "") {
         val source = File(photo.originalPath)
         require(source.isFile && source.length() > 0L) { "الصورة الأصلية غير متاحة للتصدير" }
-        val displayName = "MADAR_${photo.phase}_${photo.id}.jpg"
+        val code = machineCode.ifBlank {
+            runCatching {
+                val journal = File(File(photo.originalPath).parentFile, "capture.json")
+                if (journal.isFile) JSONObject(journal.readText()).optString("machineCode") else ""
+            }.getOrDefault("")
+        }.ifBlank { "UNKNOWN" }
+        val displayName = "MADAR_${code}_${photo.phase}_${photo.position + 1}_${photo.id.take(8)}.jpg"
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val values = ContentValues().apply {
                 put(MediaStore.Images.Media.DISPLAY_NAME, displayName)
