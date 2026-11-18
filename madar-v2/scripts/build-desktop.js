@@ -90,11 +90,21 @@ const targetArgs = targetType
   ? (targetType === 'all' ? ['nsis', 'zip'] : [targetType])
   : ['nsis'];
 const args = ['--win', ...targetArgs, '--config', 'desktop/electron-builder.config.cjs', '--publish', 'never'];
-const result = spawnSync(process.execPath, [resolve(projectRoot, 'desktop-build/node_modules/electron-builder/cli.js'), ...args], {
+let result = spawnSync(process.execPath, [resolve(projectRoot, 'desktop-build/node_modules/electron-builder/cli.js'), ...args], {
   cwd: projectRoot,
   stdio: 'inherit',
   env: { ...process.env, MADAR_DESKTOP_RELEASE_BUILD: releaseBuild ? 'true' : 'false' },
 });
+
+if (result.status !== 0) {
+  console.warn('[BuildDesktop] Build attempt encountered an error (likely transient timestamp network timeout). Retrying in 3s...');
+  spawnSync('sleep', ['3']);
+  result = spawnSync(process.execPath, [resolve(projectRoot, 'desktop-build/node_modules/electron-builder/cli.js'), ...args], {
+    cwd: projectRoot,
+    stdio: 'inherit',
+    env: { ...process.env, MADAR_DESKTOP_RELEASE_BUILD: releaseBuild ? 'true' : 'false' },
+  });
+}
 
 if (result.error) throw result.error;
 if (result.status === 0) {

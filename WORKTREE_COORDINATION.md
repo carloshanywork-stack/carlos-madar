@@ -45,3 +45,4 @@
 | 2026-11-18 14:45 | Desktop Agent | `feat/desktop-system` | `madar-v2/desktop-app/main.cjs`, `madar-v2/dist-desktop/latest.yml` | تأمين خادم الـ Loopback المحلي برمز جلسة داخلي عشوائي (INTERNAL_TOKEN) وحقن هيدر x-madar-internal-token مع حجب المتصلين غير المصرح لهم بكود 403. |
 | 2026-11-18 15:00 | Mobile Agent | `feat/mobile-app` | `madar-v2/android/*` | تطبيق كشف الروت وتزييف الـ GPS، وتثبيت شهادات الجذر (Root CA Pins) لـ Tailscale، وبناء وتوقيع Release APK v2.4.6. |
 | 2026-11-18 15:08 | Coordinator | `main` | كامل النظام والإنتاج | دمج فروع الديسكتوب والموبايل، قفل صيانة الاستعادة للسيرفر، بناء واجهة الويب، تحديث جدول الإصدارات، واجتياز الاختبارات بالكامل. |
+| 2026-11-18 16:40 | Desktop Agent | `feat/desktop-system` | `madar-v2/desktop-app/main.cjs`, `madar-v2/dist-desktop/latest.yml`, `madar-v2/scripts/build-desktop.js` | تعزيز Auto-Updater بدعم التنزيل الكامل عند تعثر التنزيل التفاضلي، رصد download-progress لشريط المهام، ونافذة حوارية لإعادة التشغيل الفوري. |

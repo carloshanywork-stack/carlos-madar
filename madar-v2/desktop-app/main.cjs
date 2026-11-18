@@ -132,7 +132,7 @@ function getUserWebCacheDir() {
       try {
         const appData = app.getPath('appData');
         if (appData) return join(appData, 'madar-web-cache');
-      } catch {}
+      } catch { }
       return join(app.getPath('userData'), 'madar-web-cache');
     }
     return join(__dirname, 'web');
@@ -536,21 +536,49 @@ async function showUpdateAvailable(info) {
       noLink: true,
     });
     if (result.response === 0) {
-      await autoUpdater.downloadUpdate();
-      await dialog.showMessageBox(mainWindow, {
+      if (Notification && Notification.isSupported()) {
+        new Notification({
+          title: 'تحديث MADAR',
+          body: `جارٍ تنزيل تحديث MADAR (${info.version})...`,
+          icon: join(__dirname, 'web/icon-192.png'),
+        }).show();
+      }
+
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.setProgressBar(0.01);
+      }
+
+      try {
+        await autoUpdater.downloadUpdate();
+      } catch (diffErr) {
+        console.warn('Differential download failed, retrying with full package download:', diffErr.message);
+        autoUpdater.disableDifferentialDownload = true;
+        await autoUpdater.downloadUpdate();
+      }
+
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.setProgressBar(-1);
+      }
+
+      const choice = await dialog.showMessageBox(mainWindow, {
         type: 'info',
-        title: 'اكتمل تنزيل التحديث',
-        message: 'تم تنزيل التحديث والتحقق منه.',
-        detail: 'سيُثبّت عند إغلاق التطبيق أو يمكنك إعادة تشغيل MADAR الآن.',
+        title: 'اكتمل تنزيل تحديث MADAR',
+        message: `تم تنزيل الإصدار الجديد (${info.version}) وجاهز للتثبيت.`,
+        detail: 'هل ترغب في إعادة تشغيل تطبيق MADAR الآن لتطبيق التحديث؟',
         buttons: ['إعادة التشغيل الآن', 'لاحقاً'],
         defaultId: 0,
         cancelId: 1,
         noLink: true,
-      }).then((choice) => {
-        if (choice.response === 0) autoUpdater.quitAndInstall(false, true);
       });
+
+      if (choice.response === 0) {
+        autoUpdater.quitAndInstall(false, true);
+      }
     }
   } catch (error) {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.setProgressBar(-1);
+    }
     await dialog.showMessageBox(mainWindow, {
       type: 'warning',
       title: 'تعذر تنزيل التحديث',
@@ -959,15 +987,26 @@ autoUpdater.autoInstallOnAppQuit = true;
 autoUpdater.on('update-available', (info) => { void showUpdateAvailable(info); });
 autoUpdater.on('error', (error) => console.error('MADAR desktop updater:', error));
 
-// Toast notifications for update lifecycle
-autoUpdater.on('checking-for-update', () => {
-  new Notification({ title: 'MADAR', body: 'Checking for updates…' }).show();
+autoUpdater.on('download-progress', (progressObj) => {
+  const percent = progressObj.percent || 0;
+  console.log(`[AutoUpdater] Download progress: ${percent.toFixed(1)}%`);
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.setProgressBar(Math.max(0, Math.min(1, percent / 100)));
+  }
 });
-autoUpdater.on('update-available', (info) => {
-  new Notification({ title: 'MADAR', body: `Update ${info.version} available` }).show();
-});
+
 autoUpdater.on('update-downloaded', (info) => {
-  new Notification({ title: 'MADAR', body: `Update ${info.version} downloaded – restarting` }).show();
+  console.log(`[AutoUpdater] Update ${info.version} downloaded successfully.`);
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.setProgressBar(-1);
+  }
+  if (Notification && Notification.isSupported()) {
+    new Notification({
+      title: 'MADAR ERP',
+      body: `تم تنزيل تحديث ${info.version} بنجاح.`,
+      icon: join(__dirname, 'web/icon-192.png'),
+    }).show();
+  }
 });
 configureAutoUpdater();
 
