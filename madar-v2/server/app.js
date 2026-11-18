@@ -440,14 +440,18 @@ function resolveDesktopArtifact(requestedFilename) {
           };
         }
       } else {
-        const exe = files.find((f) => /^MADAR-Windows-.*-Setup\.exe$/.test(f) || f === 'MADAR-Windows-Setup.exe');
+        const matchingExes = files.filter((f) => /^MADAR-Windows-.*-Setup\.exe$/.test(f) || f === 'MADAR-Windows-Setup.exe')
+          .sort((a, b) => b.localeCompare(a, undefined, { numeric: true, sensitivity: 'base' }));
+        const exe = matchingExes[0];
         if (exe) {
           try {
             const size = statSync(join(dir, exe)).size;
             if (size > 1024 * 1024) return { path: join(dir, exe), filename: exe, isZip: false };
           } catch {}
         }
-        const zip = files.find((f) => /^MADAR-Windows-.*-Setup\.zip$/.test(f) || f === 'MADAR-Windows-Setup.zip');
+        const matchingZips = files.filter((f) => /^MADAR-Windows-.*-Setup\.zip$/.test(f) || f === 'MADAR-Windows-Setup.zip')
+          .sort((a, b) => b.localeCompare(a, undefined, { numeric: true, sensitivity: 'base' }));
+        const zip = matchingZips[0];
         if (zip) return { path: join(dir, zip), filename: zip, isZip: true };
         if (exe) return { path: join(dir, exe), filename: exe, isZip: false };
       }
