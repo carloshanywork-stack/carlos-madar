@@ -5,4 +5,17 @@
             <certificates src="system" />
         </trust-anchors>
     </base-config>
+
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">carlos-pc.tail852ef0.ts.net</domain>
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+        <pin-set expiration="2035-06-04">
+            <!-- ISRG Root X1 (Let's Encrypt Root CA) SubjectPublicKeyInfo SHA-256 pin -->
+            <pin digest="SHA-256">C5+lpZ7tcVwmwQIMcRtPbsQtWLABXhQzejna0wHFr8M=</pin>
+            <!-- ISRG Root X2 (Let's Encrypt Backup Root CA) SubjectPublicKeyInfo SHA-256 pin -->
+            <pin digest="SHA-256">diGVwiVYbubAI3RW4hB9xU8e/CH2GnkuvVFZE8zmgzI=</pin>
+        </pin-set>
+    </domain-config>
 </network-security-config>

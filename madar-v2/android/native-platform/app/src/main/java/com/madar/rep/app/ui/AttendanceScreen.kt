@@ -102,6 +102,7 @@ fun AttendanceScreen(
                     is LocationDecision.Stale -> "إشارة الموقع قديمة. حدّث الموقع أولًا."
                     is LocationDecision.Inaccurate -> "دقة الموقع غير كافية. انتظر إشارة أدق."
                     is LocationDecision.Mocked -> "الموقع مزيف ولا يمكن اعتماده."
+                    is LocationDecision.Invalid -> decision.reason
                     else -> "الموقع غير صالح لتسجيل الحضور."
                 }
             )

@@ -1094,6 +1094,7 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
                             is LocationDecision.Stale -> "إشارة الموقع قديمة؛ انتظر تحديث GPS."
                             is LocationDecision.Inaccurate -> "دقة الموقع غير كافية لتسجيل الحضور."
                             is LocationDecision.Mocked -> "الموقع مزيف؛ لا يمكن تسجيل الحضور."
+                            is LocationDecision.Invalid -> decision.reason
                             else -> "تعذر اعتماد الموقع."
                         }
                         _messages.tryEmit(message)
