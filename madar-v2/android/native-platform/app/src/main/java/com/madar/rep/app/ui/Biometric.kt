@@ -1,11 +1,12 @@
 package com.madar.rep.app.ui
 
+import android.app.KeyguardManager
 import android.content.Context
 import android.content.ContextWrapper
+import android.os.Build
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.platform.LocalContext
@@ -13,9 +14,8 @@ import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 
 /**
- * Real BiometricPrompt gate used before a clock-in/out action. There is no
- * software bypass: if the device has no enrolled biometric the action is refused
- * and no attendance row is queued.
+ * Biometric & Device Credential (PIN / Pattern / Password) gate used before a clock-in/out action.
+ * Allows authentication via fingerprint, face, or the device screen lock credential (phone password).
  */
 @Composable
 fun rememberBiometricGate(onResult: (Boolean, String?) -> Unit): (String, String) -> Unit {
@@ -25,19 +25,26 @@ fun rememberBiometricGate(onResult: (Boolean, String?) -> Unit): (String, String
     return remember(activity) {
         { title, subtitle ->
             if (activity == null) {
-                callback(false, "تعذر فتح المصادقة الحيوية على هذا الجهاز.")
+                callback(false, "تعذر فتح نافذة المصادقة على هذا الجهاز.")
             } else {
+                val keyguardManager = activity.getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
+                val isDeviceSecure = keyguardManager?.isDeviceSecure == true
                 val manager = BiometricManager.from(activity)
-                val authenticators = BiometricManager.Authenticators.BIOMETRIC_STRONG
-                val status = manager.canAuthenticate(authenticators)
-                if (status != BiometricManager.BIOMETRIC_SUCCESS) {
-                    val message = when (status) {
-                        BiometricManager.BIOMETRIC_ERROR_NO_HARDWARE -> "لا يوجد مستشعر بصمة على هذا الجهاز."
-                        BiometricManager.BIOMETRIC_ERROR_HW_UNAVAILABLE -> "مستشعر البصمة غير متاح حاليًا."
-                        BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED -> "لا توجد بصمة مسجلة على الجهاز. أضف بصمة من إعدادات النظام."
-                        else -> "المصادقة الحيوية غير متاحة على هذا الجهاز."
-                    }
-                    callback(false, message)
+
+                val canAuthWithCreds = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    val authenticators = BiometricManager.Authenticators.BIOMETRIC_STRONG or
+                        BiometricManager.Authenticators.DEVICE_CREDENTIAL
+                    val status = manager.canAuthenticate(authenticators)
+                    status == BiometricManager.BIOMETRIC_SUCCESS || isDeviceSecure
+                } else {
+                    manager.canAuthenticate() == BiometricManager.BIOMETRIC_SUCCESS || isDeviceSecure
+                }
+
+                if (!canAuthWithCreds) {
+                    callback(
+                        false,
+                        "يلزم تفعيل بصمة أو تعيين قفل للشاشة (رمز PIN أو كلمة مرور) على الهاتف لتسجيل الحضور."
+                    )
                 } else {
                     val executor = ContextCompat.getMainExecutor(activity)
                     val prompt = BiometricPrompt(
@@ -49,21 +56,42 @@ fun rememberBiometricGate(onResult: (Boolean, String?) -> Unit): (String, String
                             }
 
                             override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
-                                callback(false, errString.toString())
+                                if (errorCode == BiometricPrompt.ERROR_USER_CANCELED ||
+                                    errorCode == BiometricPrompt.ERROR_NEGATIVE_BUTTON ||
+                                    errorCode == BiometricPrompt.ERROR_CANCELED
+                                ) {
+                                    callback(false, null)
+                                } else {
+                                    callback(false, errString.toString())
+                                }
                             }
 
                             override fun onAuthenticationFailed() {
-                                // The prompt stays open; the user can retry the fingerprint.
+                                // The prompt stays open; the user can retry fingerprint or use screen lock.
                             }
                         },
                     )
-                    val info = BiometricPrompt.PromptInfo.Builder()
+
+                    val promptInfoBuilder = BiometricPrompt.PromptInfo.Builder()
                         .setTitle(title)
                         .setSubtitle(subtitle)
-                        .setAllowedAuthenticators(authenticators)
-                        .setNegativeButtonText("إلغاء")
-                        .build()
-                    prompt.authenticate(info)
+
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        promptInfoBuilder.setAllowedAuthenticators(
+                            BiometricManager.Authenticators.BIOMETRIC_STRONG or
+                                BiometricManager.Authenticators.DEVICE_CREDENTIAL
+                        )
+                    } else {
+                        @Suppress("DEPRECATION")
+                        promptInfoBuilder.setDeviceCredentialAllowed(true)
+                    }
+
+                    try {
+                        val info = promptInfoBuilder.build()
+                        prompt.authenticate(info)
+                    } catch (e: Exception) {
+                        callback(false, "تعذر بدء المصادقة: ${e.message}")
+                    }
                 }
             }
         }
