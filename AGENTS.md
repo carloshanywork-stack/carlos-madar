@@ -21,3 +21,10 @@ You own and modify ONLY:
 - Use the local Gradle wrapper at `madar-v2/android/gradlew`.
 - Release builds must be signed with the configured `madar-v2/android/key.properties`.
 - Output APKs belong in `android/app/build/outputs/apk/` and `madar-v2/*.apk`.
+- **Room Persistence & Cascade Safety**: Never use `@Insert(onConflict = OnConflictStrategy.REPLACE)` for parent entities with `CASCADE` foreign keys (such as `visits` -> `photos`). Always use `@Upsert` to prevent SQLite from deleting child records during form saves.
+- **Version Code Invariant**: Always bump `versionCode` in `version.properties` before making a release build (`npm run android:release`), ensuring client auto-updater detection.
+- **Real-Device Testing Protocol**: When testing on physical devices via ADB:
+  - Test permission resets: `adb shell pm reset-permissions com.madar.rep.app`
+  - Test kill-persistence: `adb shell am force-stop com.madar.rep.app` and ensure drafts and photos survive.
+  - Verify gallery backup format: `/sdcard/Pictures/MADAR/MADAR_<machineCode>_<phase>_<pos>_<id>.jpg`.
+  - Monitor logcat for exceptions: `adb logcat -s MadarRep:* AndroidRuntime:E *:S`.
