@@ -15,7 +15,7 @@ const TILE_PRESETS = {
     name: 'القمر الصناعي',
     icon: '🛰️',
     url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-    attribution: 'Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community',
+    attribution: 'Tiles &copy; Esri &mdash; High-Resolution Satellite',
     maxZoom: 19,
     labelsUrl: 'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
   },
@@ -60,30 +60,74 @@ function formatSpeed(value) {
   return typeof value === 'number' && Number.isFinite(value) ? `${value.toFixed(1)} كم/س` : '0 كم/س';
 }
 
-function createRepMarkerHtml(rep, isSelected) {
+/**
+ * Filter out stationary GPS jitter from the polyline so it doesn't draw
+ * an unreadable starburst of zigzag lines while the representative is at a stop.
+ */
+function smoothPolyline(rawPoints) {
+  if (!rawPoints || rawPoints.length <= 2) return rawPoints || [];
+  const smoothed = [rawPoints[0]];
+  for (let i = 1; i < rawPoints.length; i += 1) {
+    const prev = smoothed[smoothed.length - 1];
+    const curr = rawPoints[i];
+    const lat1 = Number(prev.latitude);
+    const lon1 = Number(prev.longitude);
+    const lat2 = Number(curr.latitude);
+    const lon2 = Number(curr.longitude);
+    if (!Number.isFinite(lat1) || !Number.isFinite(lat2)) continue;
+
+    // Approximate distance in meters
+    const dLat = (lat2 - lat1) * 111139;
+    const dLon = (lon2 - lon1) * 111139 * Math.cos((lat1 * Math.PI) / 180);
+    const distMeters = Math.sqrt(dLat * dLat + dLon * dLon);
+
+    // If points are within 12 meters of each other, collapse them during a stop
+    if (distMeters >= 12 || i === rawPoints.length - 1) {
+      smoothed.push(curr);
+    }
+  }
+  return smoothed;
+}
+
+/**
+ * Creates high-precision HTML marker with a razor-sharp target needle and reticle
+ */
+function createPrecisionRepMarkerHtml(rep, isSelected, offsetIndex = 0) {
   const status = STATUS[rep.status] ?? STATUS.offline;
   const pulseClass = rep.status === 'active' ? 'radar-pulse-anim' : '';
   const selectedClass = isSelected ? 'is-selected' : '';
 
+  // Lateral shift when multiple reps are at the same spot to prevent overlapping badges
+  const lateralShift = offsetIndex === 0 ? 0 : offsetIndex % 2 === 1 ? (Math.ceil(offsetIndex / 2) * 36) : (-Math.ceil(offsetIndex / 2) * 36);
+
   return `
-    <div class="radar-leaflet-rep-marker ${pulseClass} ${selectedClass}" style="--rep-color: ${status.color};">
-      <div class="radar-rep-pin-body">
-        <div class="radar-rep-avatar">${(rep.fullName || 'م').slice(0, 1)}</div>
-        <div class="radar-rep-pill">
-          <span class="rep-name">${(rep.fullName || 'مندوب').slice(0, 16)}</span>
-          <span class="rep-badge" style="background: ${status.bg}; color: ${status.text};">${status.label}</span>
+    <div class="radar-precision-rep-marker ${pulseClass} ${selectedClass}" style="--rep-color: ${status.color};">
+      <!-- Target Reticle & Crosshair (Exact Coordinate Point) -->
+      <div class="radar-reticle-center">
+        <div class="reticle-pulse"></div>
+        <div class="reticle-dot"></div>
+      </div>
+
+      <!-- Needle Pointer Stem (Connects target to badge) -->
+      <div class="radar-needle-stem" style="transform: translateX(${lateralShift}px);">
+        <div class="needle-line"></div>
+        <div class="radar-rep-pin-body">
+          <div class="radar-rep-avatar">${(rep.fullName || 'م').slice(0, 1)}</div>
+          <div class="radar-rep-pill">
+            <span class="rep-name">${(rep.fullName || 'مندوب').slice(0, 16)}</span>
+            <span class="rep-badge" style="background: ${status.bg}; color: ${status.text};">${status.label}</span>
+          </div>
         </div>
       </div>
-      <div class="radar-rep-pin-arrow"></div>
     </div>
   `;
 }
 
-function createStopMarkerHtml(stop, index) {
+function createStopMarkerHtml(stop) {
   return `
     <div class="radar-leaflet-stop-marker">
-      <div class="radar-stop-pin-badge">${stop.durationMinutes || 0} د</div>
       <div class="radar-stop-pin-dot"></div>
+      <div class="radar-stop-pin-badge">${stop.durationMinutes || 0} د</div>
     </div>
   `;
 }
@@ -115,15 +159,18 @@ export default function SupervisorRadarMap({
   const stopsLayerRef = useRef(null);
   const heatmapLayerRef = useRef(null);
   const isFirstFitRef = useRef(true);
+  const addressCacheRef = useRef({});
 
-  const [activeTileType, setActiveTileType] = useState('satellite'); // Default: Satellite per user approval!
+  const [activeTileType, setActiveTileType] = useState('satellite'); // Default: Satellite
   const [showLabelsOnSatellite, setShowLabelsOnSatellite] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [copyFeedback, setCopyFeedback] = useState('');
+  const [selectedAddress, setSelectedAddress] = useState(null);
+  const [addressLoading, setAddressLoading] = useState(false);
 
-  // Extract all currently valid rep locations
+  // Extract all valid rep locations with spatial clustering keys
   const activeRepLocations = useMemo(() => {
-    return representatives
+    const list = representatives
       .filter((rep) => rep.lastLocation && Number.isFinite(rep.lastLocation.latitude) && Number.isFinite(rep.lastLocation.longitude))
       .map((rep) => ({
         ...rep,
@@ -131,6 +178,23 @@ export default function SupervisorRadarMap({
         lng: Number(rep.lastLocation.longitude),
         accuracy: Number(rep.lastLocation.accuracy) || 20,
       }));
+
+    // Detect overlapping points (within ~15 meters) and assign offsetIndex
+    const groups = new Map();
+    list.forEach((item) => {
+      const key = `${item.lat.toFixed(4)},${item.lng.toFixed(4)}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(item);
+    });
+
+    list.forEach((item) => {
+      const key = `${item.lat.toFixed(4)},${item.lng.toFixed(4)}`;
+      const cluster = groups.get(key) || [];
+      item.clusterIndex = cluster.indexOf(item);
+      item.clusterSize = cluster.length;
+    });
+
+    return list;
   }, [representatives]);
 
   // Copy coordinates helper
@@ -144,26 +208,57 @@ export default function SupervisorRadarMap({
     });
   }, []);
 
-  // Initialize Map Instance
+  // Reverse geocode to get exact Arabic street and neighborhood name
+  const fetchAddress = useCallback(async (lat, lng) => {
+    const key = `${lat.toFixed(5)},${lng.toFixed(5)}`;
+    if (addressCacheRef.current[key]) {
+      setSelectedAddress(addressCacheRef.current[key]);
+      return;
+    }
+
+    setAddressLoading(true);
+    try {
+      const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&accept-language=ar`, {
+        headers: { 'Accept': 'application/json' },
+      });
+      if (!res.ok) throw new Error('Geocoding failed');
+      const data = await res.json();
+      const addr = data.address || {};
+      const road = addr.road || addr.pedestrian || addr.suburb || data.name || '';
+      const district = addr.neighbourhood || addr.suburb || addr.city_district || '';
+      const city = addr.city || addr.town || addr.state || '';
+      const full = [road, district, city].filter(Boolean).join('، ');
+
+      const resolved = {
+        road: road || 'شارع بدون اسم مسجل',
+        district: district || city || 'القاهرة',
+        display: full || data.display_name || 'موقع محدد بالإحداثيات',
+      };
+      addressCacheRef.current[key] = resolved;
+      setSelectedAddress(resolved);
+    } catch {
+      setSelectedAddress({ road: 'شارع محدد بالإحداثيات', district: '', display: `${lat.toFixed(5)}, ${lng.toFixed(5)}` });
+    } finally {
+      setAddressLoading(false);
+    }
+  }, []);
+
+  // Initialize Leaflet Map Instance
   useEffect(() => {
     if (!mapContainerRef.current || mapInstanceRef.current) return;
 
-    // Default center Cairo, Egypt
     const defaultCenter = [30.0444, 31.2357];
     const map = L.map(mapContainerRef.current, {
       center: defaultCenter,
-      zoom: 12,
+      zoom: 13,
+      maxZoom: 19,
       zoomControl: false,
       attributionControl: false,
     });
 
-    // Add zoom control in bottom-left
     L.control.zoom({ position: 'bottomleft' }).addTo(map);
-
-    // Attribution control in bottom-right
     L.control.attribution({ position: 'bottomright', prefix: false }).addTo(map);
 
-    // Layer groups for markers, routes, and stops
     markersLayerRef.current = L.layerGroup().addTo(map);
     routeLayerRef.current = L.layerGroup().addTo(map);
     stopsLayerRef.current = L.layerGroup().addTo(map);
@@ -177,7 +272,7 @@ export default function SupervisorRadarMap({
     };
   }, []);
 
-  // Switch Base Tile Layer (Satellite vs Streets vs Carto)
+  // Switch Tile Layer (Satellite vs Streets vs Carto)
   useEffect(() => {
     const map = mapInstanceRef.current;
     if (!map) return;
@@ -200,7 +295,6 @@ export default function SupervisorRadarMap({
     baseLayer.addTo(map);
     tileLayerRef.current = baseLayer;
 
-    // Optional labels overlay for Satellite view
     if (preset.labelsUrl && showLabelsOnSatellite) {
       const labelsLayer = L.tileLayer(preset.labelsUrl, {
         maxZoom: preset.maxZoom || 19,
@@ -211,20 +305,19 @@ export default function SupervisorRadarMap({
     }
   }, [activeTileType, showLabelsOnSatellite]);
 
-  // Fit Bounds to all representatives
+  // Fit Bounds
   const fitAllReps = useCallback(() => {
     const map = mapInstanceRef.current;
     if (!map) return;
 
     if (activeRepLocations.length > 0) {
       const bounds = L.latLngBounds(activeRepLocations.map((r) => [r.lat, r.lng]));
-      map.fitBounds(bounds, { padding: [50, 50], maxZoom: 16 });
+      map.fitBounds(bounds, { padding: [60, 60], maxZoom: 16 });
     } else {
       map.setView([30.0444, 31.2357], 11);
     }
   }, [activeRepLocations]);
 
-  // Initial fit bounds when representatives first load
   useEffect(() => {
     if (isFirstFitRef.current && activeRepLocations.length > 0 && mapInstanceRef.current) {
       fitAllReps();
@@ -232,7 +325,7 @@ export default function SupervisorRadarMap({
     }
   }, [activeRepLocations, fitAllReps]);
 
-  // Render Representative Markers
+  // Render Representative Precision Markers
   useEffect(() => {
     const map = mapInstanceRef.current;
     const markersLayer = markersLayerRef.current;
@@ -244,29 +337,33 @@ export default function SupervisorRadarMap({
       const isSelected = selectedId !== null && Number(rep.id) === Number(selectedId);
       const status = STATUS[rep.status] ?? STATUS.offline;
 
-      // Accuracy Circle
-      const circle = L.circle([rep.lat, rep.lng], {
-        radius: Math.max(15, rep.accuracy),
+      // Subtle, non-intrusive Accuracy Ring
+      const displayRadius = Math.min(80, Math.max(12, rep.accuracy));
+      const accuracyCircle = L.circle([rep.lat, rep.lng], {
+        radius: displayRadius,
         color: status.color,
         fillColor: status.color,
-        fillOpacity: isSelected ? 0.22 : 0.12,
-        weight: isSelected ? 2 : 1,
+        fillOpacity: isSelected ? 0.12 : 0.05,
+        weight: 1.5,
+        dashArray: '3, 4',
       });
-      circle.addTo(markersLayer);
+      accuracyCircle.addTo(markersLayer);
 
-      // Custom DivIcon
+      // Precision Reticle DivIcon (Laser Needle pointing to exact pixel)
       const icon = L.divIcon({
-        className: 'custom-rep-div-icon',
-        html: createRepMarkerHtml(rep, isSelected),
-        iconSize: [120, 48],
-        iconAnchor: [60, 48],
-        popupAnchor: [0, -50],
+        className: 'custom-precision-rep-icon',
+        html: createPrecisionRepMarkerHtml(rep, isSelected, rep.clusterIndex),
+        iconSize: [24, 24],
+        iconAnchor: [12, 12], // Centered right on the crosshair dot!
+        popupAnchor: [0, -38],
       });
 
-      const marker = L.marker([rep.lat, rep.lng], { icon, zIndexOffset: isSelected ? 1000 : 100 });
+      const marker = L.marker([rep.lat, rep.lng], { icon, zIndexOffset: isSelected ? 2000 : 200 });
 
       // Rich Interactive Popup
       const googleMapsUrl = `https://www.google.com/maps?q=${rep.lat.toFixed(6)},${rep.lng.toFixed(6)}`;
+      const streetViewUrl = `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${rep.lat.toFixed(6)},${rep.lng.toFixed(6)}`;
+
       const popupHtml = `
         <div class="radar-popup-content" dir="rtl">
           <div class="radar-popup-head">
@@ -277,46 +374,54 @@ export default function SupervisorRadarMap({
             </div>
           </div>
           <div class="radar-popup-grid">
-            <div><small>آخر إشارة:</small> <b>${formatTime(rep.lastSignal)} (${timeSince(rep.lastSignal)})</b></div>
+            <div class="address-row">
+              <small>📍 الموقع الحالي:</small>
+              <b id="popup-addr-val">${selectedAddress?.display || 'جارٍ تحديد اسم الشارع...'}</b>
+            </div>
+            <div><small>آخر إشارة GPS:</small> <b>${formatTime(rep.lastSignal)} (${timeSince(rep.lastSignal)})</b></div>
             <div><small>السرعة اللحظية:</small> <b>${formatSpeed(rep.speedKmh)}</b></div>
-            <div><small>متوسط اليوم:</small> <b>${formatSpeed(rep.averageSpeedKmh)}</b></div>
-            <div><small>دقة الـ GPS:</small> <b>±${Math.round(rep.accuracy)} متر</b></div>
-            <div class="coords-line"><small>الإحداثيات:</small> <code dir="ltr">${rep.lat.toFixed(5)}, ${rep.lng.toFixed(5)}</code></div>
+            <div><small>دقة الـ GPS:</small> <b>±${Math.round(rep.accuracy)} متر (دقة عالية)</b></div>
+            <div class="coords-line"><small>الإحداثيات الدقيقة:</small> <code dir="ltr">${rep.lat.toFixed(6)}, ${rep.lng.toFixed(6)}</code></div>
           </div>
           <div class="radar-popup-actions">
             <a href="${googleMapsUrl}" target="_blank" rel="noopener noreferrer" class="btn-popup-gmaps">
-              📍 فتح في Google Maps ↗
+              🗺️ فتح الموقع على Google Maps ↗
             </a>
-            <button type="button" class="btn-popup-copy" onclick="window.__madar_copy_coords(${rep.lat}, ${rep.lng})">
-              📋 نسخ الإحداثيات
-            </button>
-            <button type="button" class="btn-popup-focus" onclick="window.__madar_focus_rep(${rep.lat}, ${rep.lng})">
-              🔍 تكبير الشارع
-            </button>
+            <a href="${streetViewUrl}" target="_blank" rel="noopener noreferrer" class="btn-popup-streetview">
+              🚶 رؤية الشارع ثلاثية الأبعاد (Street View) ↗
+            </a>
+            <div class="popup-sub-actions">
+              <button type="button" class="btn-popup-copy" onclick="window.__madar_copy_coords(${rep.lat}, ${rep.lng})">
+                📋 نسخ الإحداثيات
+              </button>
+              <button type="button" class="btn-popup-focus" onclick="window.__madar_focus_rep(${rep.lat}, ${rep.lng})">
+                🔍 تكبير الشارع (Zoom 19)
+              </button>
+            </div>
           </div>
         </div>
       `;
 
-      marker.bindPopup(popupHtml, { maxWidth: 320, className: 'radar-leaflet-popup' });
+      marker.bindPopup(popupHtml, { maxWidth: 340, className: 'radar-leaflet-popup' });
 
       marker.on('click', () => {
         onSelect(rep.id);
+        fetchAddress(rep.lat, rep.lng);
       });
 
       marker.addTo(markersLayer);
 
-      // Auto-open popup if selected
       if (isSelected) {
         marker.openPopup();
       }
     });
-  }, [activeRepLocations, selectedId, onSelect]);
+  }, [activeRepLocations, selectedId, onSelect, selectedAddress, fetchAddress]);
 
-  // Expose global callback for popup buttons safely
+  // Expose global callbacks
   useEffect(() => {
     window.__madar_copy_coords = (lat, lng) => handleCopyCoords(lat, lng);
     window.__madar_focus_rep = (lat, lng) => {
-      mapInstanceRef.current?.flyTo([lat, lng], 18, { duration: 1.2 });
+      mapInstanceRef.current?.flyTo([lat, lng], 19, { duration: 1.2 });
     };
     return () => {
       delete window.__madar_copy_coords;
@@ -324,16 +429,20 @@ export default function SupervisorRadarMap({
     };
   }, [handleCopyCoords]);
 
-  // Smooth FlyTo when selectedRep changes
+  // Smooth FlyTo and fetch address on rep selection
   useEffect(() => {
-    if (!selectedId || !mapInstanceRef.current) return;
+    if (!selectedId || !mapInstanceRef.current) {
+      setSelectedAddress(null);
+      return;
+    }
     const target = activeRepLocations.find((r) => Number(r.id) === Number(selectedId));
     if (target) {
-      mapInstanceRef.current.flyTo([target.lat, target.lng], 17, { duration: 1.2 });
+      mapInstanceRef.current.flyTo([target.lat, target.lng], 18, { duration: 1.2 });
+      fetchAddress(target.lat, target.lng);
     }
-  }, [selectedId, activeRepLocations]);
+  }, [selectedId, activeRepLocations, fetchAddress]);
 
-  // Render Route Polyline, Stops, Visited Machines, and Heatmap
+  // Render Clean Polyline (No jitter), Stops, Visited Machines, and Focused Heatmap
   useEffect(() => {
     const map = mapInstanceRef.current;
     const routeLayer = routeLayerRef.current;
@@ -347,63 +456,62 @@ export default function SupervisorRadarMap({
 
     if (!selectedRoute) return;
 
-    // 1. Polyline of today's movement
-    const polylineCoords = (selectedRoute.polyline || [])
+    // 1. Cleaned Polyline with Jitter Filtering
+    const rawCoords = selectedRoute.polyline || [];
+    const cleanedCoords = smoothPolyline(rawCoords)
       .filter((p) => Number.isFinite(p.latitude) && Number.isFinite(p.longitude))
       .map((p) => [Number(p.latitude), Number(p.longitude)]);
 
-    if (polylineCoords.length > 1) {
-      // Glow background line
-      L.polyline(polylineCoords, {
-        color: '#1d4ed8',
-        weight: 8,
-        opacity: 0.35,
+    if (cleanedCoords.length > 1) {
+      // Background glow
+      L.polyline(cleanedCoords, {
+        color: '#1e40af',
+        weight: 6,
+        opacity: 0.4,
         lineCap: 'round',
         lineJoin: 'round',
       }).addTo(routeLayer);
 
       // Main route polyline
-      const routeLine = L.polyline(polylineCoords, {
+      L.polyline(cleanedCoords, {
         color: '#38bdf8',
-        weight: 4,
-        opacity: 0.9,
+        weight: 3.5,
+        opacity: 0.95,
         lineCap: 'round',
         lineJoin: 'round',
-      });
-      routeLine.addTo(routeLayer);
+      }).addTo(routeLayer);
     }
 
     // 2. Stop Points
     const stops = selectedRoute.stops || [];
-    stops.forEach((stop, index) => {
+    stops.forEach((stop) => {
       if (!Number.isFinite(stop.latitude) || !Number.isFinite(stop.longitude)) return;
       const lat = Number(stop.latitude);
       const lng = Number(stop.longitude);
       const duration = Number(stop.durationMinutes) || 0;
 
-      // Stop Marker
       const stopIcon = L.divIcon({
         className: 'custom-stop-div-icon',
-        html: createStopMarkerHtml(stop, index),
-        iconSize: [44, 44],
-        iconAnchor: [22, 22],
+        html: createStopMarkerHtml(stop),
+        iconSize: [28, 28],
+        iconAnchor: [14, 14],
       });
-      const stopMarker = L.marker([lat, lng], { icon: stopIcon, zIndexOffset: 300 });
+      const stopMarker = L.marker([lat, lng], { icon: stopIcon, zIndexOffset: 400 });
       stopMarker.bindTooltip(`🛑 توقف: ${duration} دقيقة<br/>من ${formatTime(stop.arrivedAt)} إلى ${formatTime(stop.departedAt)}`, {
         direction: 'top',
         className: 'radar-stop-tooltip',
       });
       stopMarker.addTo(stopsLayer);
 
-      // Heatmap circles if enabled
+      // Heatmap circles: Focused & subtle (max 45m, not 250m!)
       if (showHeatmap) {
-        const radius = Math.min(250, Math.max(50, 40 + duration * 6));
+        const radius = Math.min(45, Math.max(16, 12 + duration * 0.9));
         const heatColor = duration >= 30 ? '#ef4444' : duration >= 10 ? '#f59e0b' : '#10b981';
         L.circle([lat, lng], {
           radius,
           color: heatColor,
           fillColor: heatColor,
-          fillOpacity: 0.38,
+          fillOpacity: 0.22,
           weight: 1,
         }).addTo(heatmapLayer);
       }
@@ -419,14 +527,14 @@ export default function SupervisorRadarMap({
       const machineIcon = L.divIcon({
         className: 'custom-machine-div-icon',
         html: createMachineMarkerHtml(machine),
-        iconSize: [36, 36],
-        iconAnchor: [18, 18],
+        iconSize: [28, 28],
+        iconAnchor: [14, 14],
       });
-      const machineMarker = L.marker([lat, lng], { icon: machineIcon, zIndexOffset: 400 });
+      const machineMarker = L.marker([lat, lng], { icon: machineIcon, zIndexOffset: 500 });
       machineMarker.bindPopup(`
         <div class="radar-machine-popup" dir="rtl">
           <strong>ماكينة ${machine.machineCode}</strong>
-          <div>${machine.machineName || 'ماكينة صراف / موقع'}</div>
+          <div>${machine.machineName || 'ماكينة صراف'}</div>
           <div>المنطقة: <b>${machine.regionName || '—'}</b></div>
           <div>التوقيت: <b>${formatTime(machine.capturedAt)}</b></div>
           <div>حالة الزيارة: <b>${machine.reviewStatus === 'approved' ? 'معتمدة ✓' : 'بانتظار المراجعة'}</b></div>
@@ -436,7 +544,6 @@ export default function SupervisorRadarMap({
     });
   }, [selectedRoute, showHeatmap]);
 
-  // Fullscreen toggle handler
   const toggleFullscreen = () => {
     if (!mapContainerRef.current) return;
     const elem = mapContainerRef.current.parentElement;
@@ -447,9 +554,11 @@ export default function SupervisorRadarMap({
     }
   };
 
+  const selectedRepObj = activeRepLocations.find((r) => Number(r.id) === Number(selectedId));
+
   return (
     <div className={`radar-interactive-map-wrapper ${isFullscreen ? 'is-fullscreen' : ''}`}>
-      {/* Top Controls Toolbar */}
+      {/* Top Floating Controls Bar */}
       <div className="radar-map-floating-bar" dir="rtl">
         {/* Layer Switcher */}
         <div className="radar-map-layer-selector">
@@ -466,7 +575,7 @@ export default function SupervisorRadarMap({
             </button>
           ))}
           {activeTileType === 'satellite' && (
-            <label className="satellite-labels-toggle" title="إظهار أسماء الشوارع والمدن على القمر الصناعي">
+            <label className="satellite-labels-toggle" title="إظهار أسماء الشوارع والمعالم على القمر الصناعي">
               <input
                 type="checkbox"
                 checked={showLabelsOnSatellite}
@@ -497,6 +606,60 @@ export default function SupervisorRadarMap({
           </button>
         </div>
       </div>
+
+      {/* Prominent Address Banner (Answers 'هو واقف فين بظبط') */}
+      {selectedRepObj && (
+        <div className="radar-map-address-banner" dir="rtl">
+          <div className="address-banner-content">
+            <span className="address-pin-icon">📍</span>
+            <div className="address-text-block">
+              <strong>{selectedRepObj.fullName} واقف في:</strong>
+              <span className="street-highlight">
+                {addressLoading ? 'جارٍ تحديد الشارع بدقة من القمر الصناعي...' : (selectedAddress?.display || 'موقع محدد بالإحداثيات')}
+              </span>
+              <code dir="ltr" className="coords-tag">
+                {selectedRepObj.lat.toFixed(6)}, {selectedRepObj.lng.toFixed(6)}
+              </code>
+            </div>
+          </div>
+          <div className="address-banner-actions">
+            <a
+              href={`https://www.google.com/maps?q=${selectedRepObj.lat.toFixed(6)},${selectedRepObj.lng.toFixed(6)}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn-banner-gmaps"
+              title="عرض الموقع على Google Maps"
+            >
+              🗺️ خرائط Google ↗
+            </a>
+            <a
+              href={`https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${selectedRepObj.lat.toFixed(6)},${selectedRepObj.lng.toFixed(6)}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn-banner-streetview"
+              title="فتح رؤية الشارع البانورامية ثلاثية الأبعاد (Google Street View)"
+            >
+              🚶 رؤية الشارع 360° ↗
+            </a>
+            <button
+              type="button"
+              className="btn-banner-copy"
+              onClick={() => handleCopyCoords(selectedRepObj.lat, selectedRepObj.lng)}
+              title="نسخ الإحداثيات للحافظة"
+            >
+              📋 نسخ
+            </button>
+            <button
+              type="button"
+              className="btn-banner-zoom"
+              onClick={() => mapInstanceRef.current?.flyTo([selectedRepObj.lat, selectedRepObj.lng], 19, { duration: 1.0 })}
+              title="تكبير لأقصى دقة شارع ومبنى"
+            >
+              🔍 أقصى تكبير (19)
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Copy Feedback Toast */}
       {copyFeedback && (
