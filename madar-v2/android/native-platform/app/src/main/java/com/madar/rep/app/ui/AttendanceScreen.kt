@@ -111,7 +111,7 @@ fun AttendanceScreen(
         }
         biometricGate(
             if (action == "in") "تسجيل الحضور" else "تسجيل الانصراف",
-            "أكد بصمتك لتسجيل ${if (action == "in") "الحضور" else "الانصراف"} بالوقت الحالي.",
+            "أكد هويتك بالبصمة أو رمز قفل الشاشة لتسجيل ${if (action == "in") "الحضور" else "الانصراف"} بالوقت الحالي.",
         )
     }
 
@@ -247,7 +247,7 @@ fun AttendanceScreen(
                     ) {
                         Icon(Icons.Default.Fingerprint, contentDescription = null)
                         Spacer(Modifier.size(8.dp))
-                        Text("تسجيل الحضور بالبصمة", fontWeight = FontWeight.Bold)
+                        Text("تسجيل الحضور (بصمة / رمز الهاتف)", fontWeight = FontWeight.Bold)
                     }
                 }
                 if (open && pendingOut == null) {
@@ -259,14 +259,14 @@ fun AttendanceScreen(
                     ) {
                         Icon(Icons.Default.Logout, contentDescription = null)
                         Spacer(Modifier.size(8.dp))
-                        Text("تسجيل الانصراف بالبصمة", fontWeight = FontWeight.Bold)
+                        Text("تسجيل الانصراف (بصمة / رمز الهاتف)", fontWeight = FontWeight.Bold)
                     }
                 }
                 if (pendingOut != null) {
                     InlineMessage("الانصراف مسجل محليًا وبانتظار تأكيد الخادم.", MessageTone.Info)
                 }
                 Text(
-                    "لن يُسجّل أي إجراء دون مصادقة حيوية ناجحة. عند تعذر الشبكة يحتفظ الجهاز بالوقت الأصلي ويعيد المحاولة.",
+                    "لن يُسجّل أي إجراء دون مصادقة بالبصمة أو قفل الشاشة بنجاح. عند تعذر الشبكة يحتفظ الجهاز بالوقت الأصلي ويعيد المحاولة.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MadarMuted,
                     textAlign = TextAlign.Center,

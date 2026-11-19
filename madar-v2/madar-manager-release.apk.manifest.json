@@ -1,9 +1,9 @@
 {
-  "sourceRevision": "b3f8662826cbcd4e91a326a679bae721c6dda607",
+  "sourceRevision": "baaeda9034604c044dafc815666a9bab51885100",
   "sourceTreeDirty": false,
-  "builtAt": "2026-11-18T16:35:35.946Z",
-  "versionCode": 27,
-  "versionName": "2.4.7",
+  "builtAt": "2026-11-19T07:34:02.738Z",
+  "versionCode": 28,
+  "versionName": "2.4.8",
   "buildType": "release",
   "serverUrl": "https://carlos-pc.tail852ef0.ts.net",
   "artifactOnly": true,

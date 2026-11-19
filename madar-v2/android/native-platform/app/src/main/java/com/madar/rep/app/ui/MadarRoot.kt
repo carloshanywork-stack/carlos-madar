@@ -201,7 +201,7 @@ private fun SignedInShell(
         else -> "مدار"
     }
     val subtitle = when (tab) {
-        Tabs.ATTENDANCE -> "تسجيل الحضور والانصراف بالبصمة"
+        Tabs.ATTENDANCE -> "تسجيل الحضور والانصراف (بصمة / رمز الهاتف)"
         Tabs.SUPPORT -> "إرسال بلاغ فوري للإدارة"
         Tabs.SYNC -> "طابور العمليات غير المرفوعة"
         Tabs.MAP -> "بلاطات مرخصة بدون خدمات جوجل"
