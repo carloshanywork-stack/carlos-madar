@@ -214,3 +214,56 @@ test('admin clock-in for employee creates duty session for representative users'
   const repOnRadar = radar.representatives.find((r) => r.id === 103);
   assert.equal(repOnRadar.onDuty, true);
 });
+
+test('location-ping auto-heals duty session and today attendance even when rep had NO prior attendance record at all', () => {
+  const db = createTestDatabase();
+  const now = new Date();
+  const dateIso = now.toISOString();
+
+  // Create rep user and employee with NO prior attendance
+  db.prepare(`
+    INSERT INTO users (id, username, full_name, role, active, is_online, password_hash)
+    VALUES (104, 'rep-auto-gps', 'مندوب التتبع التلقائي', 'rep', 1, 0, 'hash')
+  `).run();
+  db.prepare(`
+    INSERT INTO employees (id, user_id, name, department, phone)
+    VALUES (204, 104, 'مندوب التتبع التلقائي', 'Maintenance', '+201211111111')
+  `).run();
+
+  // Rep opens app and sends location ping without touching any attendance button
+  const trackPoint = {
+    clientPointId: 'rep-104-auto-1',
+    latitude: 30.1234,
+    longitude: 31.5678,
+    accuracy: 5,
+    speed: 0,
+    updatedAt: dateIso,
+  };
+  const pingResult = syncRepLocationPing({ id: 104, role: 'rep' }, {
+    onDuty: true,
+    location: trackPoint,
+    trail: [trackPoint],
+  }, db);
+
+  assert.equal(pingResult.onDuty, true);
+  assert.equal(pingResult.acceptedPoints, 1);
+  assert.equal(pingResult.rejectedPoints, 0);
+
+  // Duty session must exist and be open
+  const dutySession = db.prepare('SELECT id, ended_at FROM rep_duty_sessions WHERE rep_user_id = 104 AND ended_at IS NULL').get();
+  assert.ok(dutySession, 'rep_duty_sessions must be auto-created');
+
+  // Attendance for employee must also be auto-recorded for today
+  const today = dateIso.slice(0, 10);
+  const attendance = db.prepare('SELECT id, clock_in_time, clock_in_source FROM employee_daily_attendance WHERE employee_id = 204 AND work_date = ?').get(today);
+  assert.ok(attendance, 'employee_daily_attendance must be auto-created for today');
+  assert.equal(attendance.clock_in_source, 'app');
+
+  // Supervisor radar must show rep onDuty and active
+  const radar = getSupervisorRadar(db, now);
+  const repOnRadar = radar.representatives.find((r) => r.id === 104);
+  assert.equal(repOnRadar.onDuty, true);
+  assert.equal(repOnRadar.status, 'active');
+  assert.equal(repOnRadar.lastLocation.latitude, 30.1234);
+  assert.equal(repOnRadar.lastLocation.longitude, 31.5678);
+});

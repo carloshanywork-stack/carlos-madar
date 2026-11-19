@@ -34,7 +34,10 @@ export function trackingSessionForPoint(database, userId, point) {
     return openSession ? openSession.id : sessions[0].id;
   }
 
-  // Graceful auto-healing: if point has no matched session, check if rep is clocked in today
+  // Graceful auto-healing: if point has no matched session, check if rep has an open session or attendance
+  let open = database.prepare('SELECT id FROM rep_duty_sessions WHERE rep_user_id=? AND ended_at IS NULL ORDER BY id DESC LIMIT 1').get(userId);
+  if (open) return open.id;
+
   const activeAttendance = database.prepare(`
     SELECT attendance.id, attendance.clock_in_time
     FROM employee_daily_attendance attendance
@@ -43,15 +46,33 @@ export function trackingSessionForPoint(database, userId, point) {
     ORDER BY attendance.work_date DESC, attendance.id DESC LIMIT 1
   `).get(userId);
 
-  if (activeAttendance) {
-    let open = database.prepare('SELECT id FROM rep_duty_sessions WHERE rep_user_id=? AND ended_at IS NULL').get(userId);
-    if (open) return open.id;
-    const result = database.prepare('INSERT INTO rep_duty_sessions(rep_user_id, started_at) VALUES (?, ?)')
-      .run(userId, activeAttendance.clock_in_time || point.updatedAt);
-    return Number(result.lastInsertRowid);
+  const sessionStart = activeAttendance?.clock_in_time || point.updatedAt || new Date().toISOString();
+  const result = database.prepare('INSERT INTO rep_duty_sessions(rep_user_id, started_at) VALUES (?, ?)')
+    .run(userId, sessionStart);
+  const sessionId = Number(result.lastInsertRowid);
+
+  // Auto-record today's attendance for the employee if not already recorded
+  const emp = database.prepare('SELECT id FROM employees WHERE user_id=?').get(userId);
+  if (emp) {
+    const today = (sessionStart || new Date().toISOString()).slice(0, 10);
+    const existingAtt = database.prepare('SELECT id FROM employee_daily_attendance WHERE employee_id=? AND work_date=?').get(emp.id, today);
+    if (!existingAtt) {
+      database.prepare(`INSERT INTO employee_daily_attendance
+        (employee_id, work_date, status, overtime_hours, notes, clock_in_time, clock_in_source,
+         clock_in_lat, clock_in_lng, clock_in_accuracy, clock_in_location_at,
+         clock_out_time, clock_out_source, total_hours, regular_hours,
+         overtime_status, overtime_approved_by, clock_in_biometric_verified, clock_out_biometric_verified)
+        VALUES (?, ?, 'present', 0, 'Auto GPS (App)', ?, 'app', ?, ?, ?, ?, NULL, NULL, 0, 0, 'none', NULL, 1, 0)
+        ON CONFLICT(employee_id, work_date) DO UPDATE SET
+          status = 'present',
+          clock_in_time = COALESCE(employee_daily_attendance.clock_in_time, excluded.clock_in_time)`).run(
+        emp.id, today, sessionStart,
+        point.latitude ?? null, point.longitude ?? null, point.accuracy ?? null, sessionStart
+      );
+    }
   }
 
-  return null;
+  return sessionId;
 }
 
 export function recordAttendanceDuty(database, userId, action, occurredAt, location) {
