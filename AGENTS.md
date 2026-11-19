@@ -28,3 +28,10 @@ You own and modify ONLY:
   - Test kill-persistence: `adb shell am force-stop com.madar.rep.app` and ensure drafts and photos survive.
   - Verify gallery backup format: `/sdcard/Pictures/MADAR/MADAR_<machineCode>_<phase>_<pos>_<id>.jpg`.
   - Monitor logcat for exceptions: `adb logcat -s MadarRep:* AndroidRuntime:E *:S`.
+
+## Field Operations Architecture Standards (Amazon Flex Paradigm)
+- **Declarative Finite State Machine (FSM):** All multi-step field operations (visits, inspections, collections) must be modeled as strict FSMs where every transition persists state immediately to Room DB before updating UI.
+- **Offline Action Queue Pattern:** All field submissions must be appended to an immutable `action_queue` table locally before network dispatch. WorkManager handles idempotent delivery with retry backoff and deduplication.
+- **Geofenced Arrival Verification:** Machine work requires explicit geofence confirmation ("I've Arrived") with anti-mock GPS detection before unlocking service forms, logging any supervisor-authorized manual bypasses.
+- **Zero-Data-Loss Camera Pipeline:** Photos must be committed to application private storage and referenced in Room before memory-intensive transformations (watermarking, compression) take place.
+
