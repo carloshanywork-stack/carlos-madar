@@ -14,6 +14,11 @@ object MadarTime {
     val cairo: TimeZone = TimeZone.getTimeZone("Africa/Cairo")
     val utc: TimeZone = TimeZone.getTimeZone("UTC")
 
+    @Volatile
+    var serverClockOffsetMs: Long = 0L
+
+    fun nowCalibrated(): Long = System.currentTimeMillis() + serverClockOffsetMs
+
     fun isoUtc(epochMillis: Long): String {
         val format = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US)
         format.timeZone = utc

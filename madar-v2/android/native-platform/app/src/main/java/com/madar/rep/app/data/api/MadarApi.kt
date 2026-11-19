@@ -1,6 +1,9 @@
 package com.madar.rep.app.data.api
 
 import com.madar.rep.app.core.MadarError
+import com.madar.rep.app.core.MadarTime
+import java.text.SimpleDateFormat
+import java.util.Locale
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
@@ -532,6 +535,17 @@ class MadarApi(
                     .build()
                 chain.proceed(request).also { response ->
                     if (response.code == 426) VersionGate.requireUpdate()
+                    response.header("Date")?.let { dateStr ->
+                        runCatching {
+                            val serverTime = SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss z", Locale.US).parse(dateStr)?.time
+                            if (serverTime != null) {
+                                val offset = serverTime - System.currentTimeMillis()
+                                if (kotlin.math.abs(offset) > 2000L) {
+                                    MadarTime.serverClockOffsetMs = offset
+                                }
+                            }
+                        }
+                    }
                 }
             })
             .connectTimeout(20, TimeUnit.SECONDS)
