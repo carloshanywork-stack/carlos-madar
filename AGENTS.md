@@ -45,3 +45,10 @@
 - **Geofenced Arrival Verification:** Machine work requires explicit geofence confirmation ("I've Arrived") with anti-mock GPS detection before unlocking service forms, logging any supervisor-authorized manual bypasses.
 - **Zero-Data-Loss Camera Pipeline:** Photos must be committed to application private storage and referenced in Room before memory-intensive transformations (watermarking, compression) take place.
 
+## Field Operations & GIS Architecture Standards
+- **GPS Acquisition Threshold:** On Android devices, when GPS hardware is active, location listeners must NOT terminate early on coarse network/cellular fixes (>15m). Always await a high-precision satellite fix (<=15m) or allow the full hardware timeout before falling back to coarse candidates.
+- **Stationary Jitter Suppression:** Polylines and breadcrumb tracking rendered on operational maps must pass through jitter filtering (collapsing points <12m apart during stationary stops) to prevent starburst/spiderweb visual artifacts.
+- **GIS Leaflet Marker Invariants:** When defining Leaflet `L.divIcon`, never combine `iconAnchor` with CSS `transform: translate(-50%, -100%)` on the container, which doubles coordinate offset. Use a centered reticle `[w/2, h/2]` or pin-base anchor `[w/2, h]` exclusively.
+- **Operational Heatmaps & Overlays:** Heatmap stop circles and accuracy rings must never obscure street labels (cap radius at 35-45m max, use hairline borders <=1.5px and fill opacity <=0.05).
+- **Cellular Binary Streaming:** Network downloads on mobile (APKs, large assets) must use buffer sizes of at least 64KB and throttle Compose state updates (minimum 5% intervals or 300ms) to prevent UI thread starvation.
+
