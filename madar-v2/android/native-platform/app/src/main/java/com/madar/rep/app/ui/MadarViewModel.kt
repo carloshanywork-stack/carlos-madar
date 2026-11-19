@@ -514,6 +514,66 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
+    fun confirmArrival(visit: VisitEntity) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val fix = container.locationProvider.lastKnown()
+                ?: (container.locationProvider.currentFix(5000L) as? LocationResult.Success)?.point
+            if (fix != null) {
+                applyLocationPoint(fix, "تم تأكيد الوصول إلى موقع الماكينة بنجاح.")
+            }
+            _messages.tryEmit("تم تأكيد وصولك إلى موقع الماكينة (${visit.machineCode}).")
+        }
+    }
+
+    fun reportUnableToService(
+        visit: VisitEntity,
+        reasonCode: String,
+        reasonLabel: String,
+        notes: String,
+        onComplete: (Boolean) -> Unit = {},
+    ) {
+        val current = session.value ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val now = System.currentTimeMillis()
+                val actionUuid = UUID.randomUUID().toString()
+                val fix = container.locationProvider.lastKnown()
+                val payload = JSONObject()
+                    .put("actionUuid", actionUuid)
+                    .put("cardId", visit.cardId)
+                    .put("machineCode", visit.machineCode)
+                    .put("reasonCode", reasonCode)
+                    .put("reasonLabel", reasonLabel)
+                    .put("notes", notes)
+                    .put("reportedAt", MadarTime.isoUtc(now))
+                if (fix != null) {
+                    payload.put("location", JSONObject()
+                        .put("latitude", fix.latitude)
+                        .put("longitude", fix.longitude)
+                        .put("accuracy", fix.accuracyMeters.toDouble())
+                        .put("updatedAt", MadarTime.isoUtc(fix.capturedAtMillis)))
+                }
+                val entity = MachineActionEntity(
+                    actionUuid = actionUuid,
+                    ownerRepId = current.ownerScopeId,
+                    type = "unable_to_service",
+                    machineId = visit.machineLatitude?.toLong() ?: visit.cardId,
+                    cardId = visit.cardId,
+                    payloadJson = payload.toString(),
+                    createdAt = now,
+                    updatedAt = now,
+                )
+                container.database.machineActions().upsert(entity)
+                container.scheduler.enqueueNow()
+                _messages.tryEmit("تم تسجيل تقرير تعذر الزيارة ($reasonLabel) وحفظه بنجاح للمشرف.")
+                withContext(Dispatchers.Main) { onComplete(true) }
+            } catch (error: Exception) {
+                _messages.tryEmit(human(error))
+                withContext(Dispatchers.Main) { onComplete(false) }
+            }
+        }
+    }
+
     fun approveFirstMachineLocation(visit: VisitEntity) {
         val current = session.value ?: return
         if (visit.state != VisitState.DRAFT || visit.locationLocked || _machineLocationApprovalBusy.value != null) return
