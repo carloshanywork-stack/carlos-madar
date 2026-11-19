@@ -38,3 +38,10 @@
 - In Android Room DAOs, never use `@Insert(onConflict = OnConflictStrategy.REPLACE)` on parent tables (e.g. `visits`) where child tables (e.g. `photos`) define `ForeignKey(..., onDelete = CASCADE)`. In SQLite, `INSERT OR REPLACE` deletes the row before re-inserting, causing automatic cascade deletion of child records. Always use Room's `@Upsert` (`INSERT ... ON CONFLICT DO UPDATE`) to preserve child entities.
 - Any mobile release intended for distribution or client testing MUST increment `versionCode` in `madar-v2/android/version.properties` and register a corresponding row in `apk_releases` on the server. If `versionCode` is not bumped, installed Android clients will evaluate matching versions and bypass update prompts.
 - For physical Android QA testing via `@Android CLI`: verify connected devices (`adb devices -l`), test first-launch permissions reset (`pm reset-permissions <pkg>`), test process-death survival (`am force-stop <pkg>`), verify gallery backup naming (`MADAR_<machineCode>_<phase>_<pos>_<id>.jpg` in `Pictures/MADAR`), and confirm backend ingestion (`rep_visits`, `rep_visit_photos`) with physical storage in `storage/Areas/`.
+
+## Field Operations Mobile Architecture Standards (Amazon Flex Paradigm)
+- **Declarative Finite State Machine (FSM):** All multi-step field operations (visits, inspections, collections) must be modeled as strict FSMs where every transition persists state immediately to Room DB before updating UI.
+- **Offline Action Queue Pattern:** All field submissions must be appended to an immutable `action_queue` table locally before network dispatch. WorkManager handles idempotent delivery with retry backoff and deduplication.
+- **Geofenced Arrival Verification:** Machine work requires explicit geofence confirmation ("I've Arrived") with anti-mock GPS detection before unlocking service forms, logging any supervisor-authorized manual bypasses.
+- **Zero-Data-Loss Camera Pipeline:** Photos must be committed to application private storage and referenced in Room before memory-intensive transformations (watermarking, compression) take place.
+
