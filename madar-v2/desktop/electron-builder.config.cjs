@@ -50,7 +50,6 @@ module.exports = {
     publish: [{
       provider: 'generic',
       url: publishUrl.endsWith('/') ? publishUrl : `${publishUrl}/`,
-      ...(publisherName ? { publisherName: [publisherName] } : {}),
     }],
   } : {}),
 };

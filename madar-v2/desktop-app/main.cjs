@@ -110,7 +110,8 @@ function configureAutoUpdater() {
       provider: 'generic',
       url: targetUpdateUrl,
     });
-    autoUpdater.verifyUpdateCodeSignature = false;
+    autoUpdater.verifyUpdateCodeSignature = () => Promise.resolve(null);
+    autoUpdater.verifySignature = () => Promise.resolve(null);
     return true;
   } catch (err) {
     console.warn('Could not set autoUpdater feed URL:', err.message);
@@ -580,14 +581,20 @@ async function showUpdateAvailable(info) {
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.setProgressBar(-1);
     }
-    await dialog.showMessageBox(mainWindow, {
+    const choice = await dialog.showMessageBox(mainWindow, {
       type: 'warning',
-      title: 'تعذر تنزيل التحديث',
-      message: 'لم يكتمل تنزيل تحديث MADAR.',
-      detail: 'بيانات العمل على السيرفر لم تتغير. تحقق من الاتصال وحاول لاحقاً.',
-      buttons: ['حسناً'],
+      title: 'تعذر التحديث التلقائي',
+      message: 'لم يكتمل تنزيل تحديث MADAR تلقائياً.',
+      detail: `يمكنك تنزيل مثبت التحديث المباشر وتثبيته بضغطة واحدة دون فقدان أي بيانات.\nالخطأ: ${error?.message || 'تحقق من الاتصال'}`,
+      buttons: ['تنزيل المثبت الآن', 'إلغاء'],
+      defaultId: 0,
+      cancelId: 1,
       noLink: true,
     });
+    if (choice.response === 0) {
+      const downloadTarget = currentServerOrigin ? `${currentServerOrigin}/download/desktop` : 'https://carlos-pc.tail852ef0.ts.net/download/desktop';
+      shell.openExternal(downloadTarget);
+    }
     console.error('MADAR desktop update failed:', error);
   } finally {
     updatePromptOpen = false;
@@ -985,7 +992,8 @@ ipcMain.handle('madar:desktop:notification', (_event, payload = {}) => {
 
 autoUpdater.autoDownload = false;
 autoUpdater.autoInstallOnAppQuit = true;
-autoUpdater.verifyUpdateCodeSignature = false;
+autoUpdater.verifyUpdateCodeSignature = () => Promise.resolve(null);
+autoUpdater.verifySignature = () => Promise.resolve(null);
 autoUpdater.on('update-available', (info) => { void showUpdateAvailable(info); });
 autoUpdater.on('error', (error) => console.error('MADAR desktop updater:', error));
 
