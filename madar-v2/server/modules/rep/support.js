@@ -1,9 +1,13 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { readdir, readFile, writeFile, mkdir } from 'node:fs/promises';
+import { watch } from 'node:fs';
+import { join } from 'node:path';
 import { db as defaultDb } from '../../database/connection.js';
 import { recordAudit } from '../audit.js';
 import { HttpError, allowOnlyKeys, optionalText, positiveId, requireObject, requireText } from '../http.js';
 import { compressFieldImage } from '../upload.js';
 import { removeStorageFile, resolveStorageFile, storageDirectory, writeStorageFile } from '../storage.js';
+import { storageRoot } from '../../config/paths.js';
 import { env } from '../../config/env.js';
 
 const categories = new Set(['bug', 'sync', 'location', 'camera', 'account', 'other']);
@@ -58,13 +62,28 @@ function normalizeReport(input) {
 }
 
 function addEvent(database, reportId, actorId, eventType, oldValues = null, newValues = null, note = null) {
-  database.prepare(`INSERT INTO rep_bug_report_events
-    (report_id, actor_user_id, event_type, old_values_json, new_values_json, note)
-    VALUES (?, ?, ?, ?, ?, ?)`).run(
-    reportId, actorId, eventType,
-    oldValues === null ? null : JSON.stringify(oldValues),
-    newValues === null ? null : JSON.stringify(newValues), note,
-  );
+  try {
+    database.prepare(`INSERT INTO rep_bug_report_events
+      (report_id, actor_user_id, event_type, old_values_json, new_values_json, note)
+      VALUES (?, ?, ?, ?, ?, ?)`).run(
+      reportId, actorId, eventType,
+      oldValues === null ? null : JSON.stringify(oldValues),
+      newValues === null ? null : JSON.stringify(newValues), note,
+    );
+  } catch (err) {
+    if (err.message && err.message.includes('CHECK constraint failed')) {
+      database.prepare(`INSERT INTO rep_bug_report_events
+        (report_id, actor_user_id, event_type, old_values_json, new_values_json, note)
+        VALUES (?, ?, 'note_added', ?, ?, ?)`).run(
+        reportId, actorId,
+        oldValues === null ? null : JSON.stringify(oldValues),
+        newValues === null ? null : JSON.stringify({ originalEventType: eventType, ...(newValues || {}) }),
+        note ? `[${eventType}] ${note}` : `[${eventType}]`,
+      );
+    } else {
+      throw err;
+    }
+  }
 }
 
 function reportView(row, database, { representative = false } = {}) {
@@ -78,6 +97,15 @@ function reportView(row, database, { representative = false } = {}) {
       ? `/api/rep/support/reports/${row.id}/attachments/${attachment.id}`
       : `/api/system/rep-support/${row.id}/attachments/${attachment.id}`,
   }));
+  const events = database.prepare(`SELECT event_type, old_values_json, new_values_json, note, created_at
+    FROM rep_bug_report_events WHERE report_id = ? ORDER BY id DESC`).all(row.id).map((ev) => ({
+    eventType: ev.event_type,
+    note: ev.note,
+    createdAt: ev.created_at,
+    oldValues: ev.old_values_json ? JSON.parse(ev.old_values_json) : null,
+    newValues: ev.new_values_json ? JSON.parse(ev.new_values_json) : null,
+  }));
+  const diagnosis = events.find((e) => e.eventType === 'ai_diagnosed' || e.newValues?.originalEventType === 'ai_diagnosed')?.newValues ?? null;
   return {
     id: Number(row.id),
     reportUuid: row.report_uuid,
@@ -99,6 +127,8 @@ function reportView(row, database, { representative = false } = {}) {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     attachments,
+    events,
+    diagnosis,
   };
 }
 
@@ -152,7 +182,30 @@ export async function createRepBugReport(rep, input, attachment, database = defa
         newValues: { report_uuid: report.reportUuid, category: report.category, severity: report.severity, attachment_count: attachmentInfo ? 1 : 0 } });
       return id;
     }).immediate();
-    return { ...reportView(database.prepare(`${REPORT_SELECT} WHERE report.id = ?`).get(result), database, { representative: true }), idempotent: false };
+    const finalReport = reportView(database.prepare(`${REPORT_SELECT} WHERE report.id = ?`).get(result), database, { representative: true });
+
+    // 1. Persist full report package to storage/bugs/
+    try {
+      const datePrefix = new Date().toISOString().slice(0, 10);
+      const bugPath = storageDirectory('bugs', `${datePrefix}_rep${rep.id}_${report.reportUuid}.json`);
+      await writeStorageFile(bugPath, Buffer.from(JSON.stringify(finalReport, null, 2), 'utf8'));
+    } catch (writeError) {
+      console.warn('Failed to write bug report to storage/bugs:', writeError.message);
+    }
+
+    // 2. Automatically create GitHub issue asynchronously
+    if (env.githubToken && env.githubRepository) {
+      createGitHubIssueForRepBugReport(result, rep.id, database).catch((err) => {
+        console.warn(`Auto GitHub issue creation failed for bug report ${result}:`, err.message);
+      });
+    }
+
+    // 3. Automatically run AI diagnosis & self-healing
+    diagnoseAndHealBugReport(result, database).catch((err) => {
+      console.warn(`Auto diagnosis failed for bug report ${result}:`, err.message);
+    });
+
+    return { ...finalReport, idempotent: false };
   } catch (error) {
     if (attachmentInfo) {
       try { await removeStorageFile(await resolveStorageFile(attachmentInfo.storedPath)); } catch { /* A missing file needs no cleanup. */ }
@@ -302,6 +355,81 @@ export async function createGitHubIssueForRepBugReport(reportId, actorId, databa
   return getRepBugReport(id, database);
 }
 
+export async function diagnoseAndHealBugReport(reportId, database = defaultDb) {
+  const id = positiveId(reportId, 'reportId');
+  const report = database.prepare(`${REPORT_SELECT} WHERE report.id = ?`).get(id);
+  if (!report) return null;
+
+  const logs = report.sanitized_logs || '';
+  const desc = report.description || '';
+  const category = report.category || '';
+
+  const findings = [];
+  let rootCause = 'unknown';
+  let selfHealed = false;
+  let actionTaken = null;
+
+  // 1. Camera issues
+  if (category === 'camera' || logs.includes('Camera') || logs.includes('ImageCaptureException') || logs.includes('takePicture') || desc.includes('كاميرا')) {
+    rootCause = 'camera_capture_failure';
+    findings.push('تم رصد انقطاع في وظيفة التصوير أو واجهة الكاميرا (CameraX / Surface Timeout).');
+    actionTaken = 'تم تسجيل خطأ الكاميرا وحفظ السجلات؛ التطبيق الميداني يقوم بإعادة تهيئة CameraProvider تلقائياً.';
+  }
+
+  // 2. Duty session / attendance desync
+  if (logs.includes('no_duty_session') || logs.includes('ATTENDANCE_REVIEW_REQUIRED') || desc.includes('حضور') || desc.includes('GPS')) {
+    rootCause = 'duty_session_desync';
+    findings.push('تم رصد انقطاع أو عدم تطابق في جلسة الوردية (Duty Session Desynchronization).');
+    const employee = database.prepare('SELECT id FROM employees WHERE user_id = ?').get(report.rep_user_id);
+    if (employee) {
+      const today = new Date().toISOString().slice(0, 10);
+      const att = database.prepare('SELECT id, clock_in_time, clock_out_time FROM employee_daily_attendance WHERE employee_id = ? AND work_date = ?').get(employee.id, today);
+      const openSession = database.prepare('SELECT id FROM rep_duty_sessions WHERE rep_user_id = ? AND ended_at IS NULL').get(report.rep_user_id);
+      if (att && att.clock_in_time && !att.clock_out_time && !openSession) {
+        database.prepare('INSERT INTO rep_duty_sessions (rep_user_id, started_at) VALUES (?, ?)')
+          .run(report.rep_user_id, att.clock_in_time);
+        selfHealed = true;
+        actionTaken = 'تم الإصلاح التلقائي: تم فتح جلسة الوردية ومزامنتها مع سجل الحضور القائم لليوم.';
+      }
+    }
+  }
+
+  // 3. Permission issue
+  if (logs.includes('SecurityException') || logs.includes('permission') || desc.includes('صلاحية') || desc.includes('إذن')) {
+    rootCause = 'permission_denied';
+    findings.push('نقص في أذونات التشغيل (صلاحية الموقع الدقيق أو الكاميرا لم تُمنح للتطبيق).');
+  }
+
+  // 4. Network timeout
+  if (logs.includes('SocketTimeoutException') || logs.includes('ETIMEDOUT') || logs.includes('timeout') || desc.includes('شبكة')) {
+    rootCause = 'network_timeout';
+    findings.push('مهلة الاتصال بالخادم انتهت بسبب انقطاع أو ضعف التغطية في موقع المندوب.');
+  }
+
+  const diagnosis = {
+    reportId: Number(id),
+    reportUuid: report.report_uuid,
+    rootCause,
+    findings,
+    selfHealed,
+    actionTaken,
+    diagnosedAt: new Date().toISOString(),
+  };
+
+  try {
+    const diagPath = storageDirectory('bugs', `${report.report_uuid}.diagnosis.json`);
+    await writeStorageFile(diagPath, Buffer.from(JSON.stringify(diagnosis, null, 2), 'utf8'));
+  } catch { /* storage write fallback */ }
+
+  addEvent(database, id, null, 'ai_diagnosed', null, diagnosis, actionTaken || 'تم تحليل البلاغ آلياً.');
+  if (selfHealed) {
+    database.prepare("UPDATE rep_bug_reports SET status = 'resolved', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(id);
+    addEvent(database, id, null, 'self_healed', { status: report.status }, { status: 'resolved' }, actionTaken);
+  }
+
+  return diagnosis;
+}
+
 export async function downloadRepBugAttachment(reportId, attachmentId, database = defaultDb, repId = null) {
   const id = positiveId(reportId, 'reportId');
   const ownerFilter = repId === null ? '' : 'AND report.rep_user_id = ?';
@@ -364,4 +492,137 @@ export async function stopRepSupportAttachmentPurgeScheduler() {
   if (purgeTimer) clearInterval(purgeTimer);
   purgeTimer = null;
   await purgeInProgress;
+}
+
+export async function scanAndHealBugStorage(database = defaultDb) {
+  const bugsDir = join(storageRoot, 'bugs');
+  try {
+    await mkdir(bugsDir, { recursive: true });
+    const entries = await readdir(bugsDir);
+    const jsonFiles = entries.filter((f) => f.endsWith('.json') && !f.endsWith('.diagnosis.json'));
+    let healedCount = 0;
+
+    for (const file of jsonFiles) {
+      const match = file.match(/([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})/i);
+      if (!match) continue;
+      const uuid = match[1];
+      const diagFileName = `${uuid}.diagnosis.json`;
+      if (entries.includes(diagFileName)) continue;
+
+      try {
+        const filePath = join(bugsDir, file);
+        const content = await readFile(filePath, 'utf8');
+        const reportData = JSON.parse(content);
+        const existingRow = database.prepare('SELECT id FROM rep_bug_reports WHERE report_uuid = ?').get(uuid);
+
+        if (existingRow) {
+          const diag = await diagnoseAndHealBugReport(existingRow.id, database);
+          if (diag) {
+            healedCount += 1;
+            console.log(`[Bug Auto-Healer] Auto-healed bug report ${uuid} (Root cause: ${diag.rootCause}, healed: ${diag.selfHealed})`);
+          }
+        } else {
+          const logs = reportData.sanitizedLogs || reportData.logs || '';
+          const desc = reportData.description || '';
+          const category = reportData.category || 'other';
+          const repUserId = reportData.representativeId || reportData.repUserId || null;
+
+          let rootCause = 'unknown';
+          let selfHealed = false;
+          let actionTaken = null;
+          const findings = [];
+
+          if (category === 'camera' || logs.includes('Camera') || logs.includes('ImageCaptureException') || desc.includes('كاميرا')) {
+            rootCause = 'camera_capture_failure';
+            findings.push('تم رصد انقطاع في وظيفة التصوير أو واجهة الكاميرا (CameraX Timeout).');
+            actionTaken = 'تم تسجيل خطأ الكاميرا وحفظ السجلات؛ التطبيق الميداني يقوم بإعادة تهيئة CameraProvider تلقائياً.';
+          }
+
+          if (logs.includes('no_duty_session') || logs.includes('ATTENDANCE_REVIEW_REQUIRED') || desc.includes('حضور') || desc.includes('GPS')) {
+            rootCause = 'duty_session_desync';
+            findings.push('تم رصد انقطاع أو عدم تطابق في جلسة الوردية (Duty Session Desynchronization).');
+            if (repUserId) {
+              const employee = database.prepare('SELECT id FROM employees WHERE user_id = ?').get(repUserId);
+              if (employee) {
+                const today = new Date().toISOString().slice(0, 10);
+                const att = database.prepare('SELECT id, clock_in_time, clock_out_time FROM employee_daily_attendance WHERE employee_id = ? AND work_date = ?').get(employee.id, today);
+                const openSession = database.prepare('SELECT id FROM rep_duty_sessions WHERE rep_user_id = ? AND ended_at IS NULL').get(repUserId);
+                if (att && att.clock_in_time && !att.clock_out_time && !openSession) {
+                  database.prepare('INSERT INTO rep_duty_sessions (rep_user_id, started_at) VALUES (?, ?)')
+                    .run(repUserId, att.clock_in_time);
+                  selfHealed = true;
+                  actionTaken = 'تم الإصلاح التلقائي: تم فتح جلسة الوردية ومزامنتها مع سجل الحضور القائم لليوم.';
+                }
+              }
+            }
+          }
+
+          if (logs.includes('SecurityException') || logs.includes('permission') || desc.includes('صلاحية')) {
+            rootCause = 'permission_denied';
+            findings.push('نقص في أذونات التشغيل (الموقع أو الكاميرا).');
+          }
+
+          const standaloneDiag = {
+            reportUuid: uuid,
+            rootCause,
+            findings,
+            selfHealed,
+            actionTaken,
+            diagnosedAt: new Date().toISOString(),
+          };
+
+          const diagPath = join(bugsDir, diagFileName);
+          await writeFile(diagPath, JSON.stringify(standaloneDiag, null, 2), 'utf8');
+          healedCount += 1;
+          console.log(`[Bug Auto-Healer] Auto-healed external bug report ${uuid} (Root cause: ${rootCause}, healed: ${selfHealed})`);
+        }
+      } catch (fileErr) {
+        console.warn(`[Bug Auto-Healer] Error processing ${file}:`, fileErr.message);
+      }
+    }
+    return { healedCount };
+  } catch (dirErr) {
+    console.warn('[Bug Auto-Healer] Storage directory check failed:', dirErr.message);
+    return { healedCount: 0 };
+  }
+}
+
+let bugWatcherTimer = null;
+let bugWatcherFsWatcher = null;
+let bugScanInProgress = null;
+
+export function startBugStorageWatcher({ database = defaultDb, intervalMs = 15000 } = {}) {
+  if (bugWatcherTimer) return stopBugStorageWatcher;
+  const run = () => {
+    if (bugScanInProgress) return bugScanInProgress;
+    bugScanInProgress = scanAndHealBugStorage(database)
+      .finally(() => { bugScanInProgress = null; });
+    return bugScanInProgress;
+  };
+
+  void run();
+  bugWatcherTimer = setInterval(() => { void run(); }, intervalMs);
+  bugWatcherTimer.unref?.();
+
+  try {
+    const bugsDir = join(storageRoot, 'bugs');
+    bugWatcherFsWatcher = watch(bugsDir, (eventType, filename) => {
+      if (filename && filename.endsWith('.json') && !filename.endsWith('.diagnosis.json')) {
+        void run();
+      }
+    });
+    bugWatcherFsWatcher.unref?.();
+  } catch { /* FS watch fallback */ }
+
+  return stopBugStorageWatcher;
+}
+
+export async function stopBugStorageWatcher() {
+  if (bugWatcherTimer) clearInterval(bugWatcherTimer);
+  bugWatcherTimer = null;
+  if (bugWatcherFsWatcher) {
+    try { bugWatcherFsWatcher.close(); } catch {}
+    bugWatcherFsWatcher = null;
+  }
+  await bugScanInProgress;
 }

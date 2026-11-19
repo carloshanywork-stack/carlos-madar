@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { schemaPath } from '../server/config/paths.js';
 import { initializeDatabase } from '../server/database/init.js';
 import { getSupervisorRadar } from '../server/modules/supervisor/service.js';
-import { syncRepAttendanceAction } from '../server/modules/employees/attendance.js';
+import { clockInForEmployee, syncRepAttendanceAction } from '../server/modules/employees/attendance.js';
 import { syncRepLocationPing } from '../server/modules/rep/service.js';
 
 function createTestDatabase() {
@@ -120,4 +120,97 @@ test('representative attendance clock-in immediately opens duty session, sets on
   rep = radar.representatives.find((r) => r.id === 101);
   assert.equal(rep.onDuty, false, 'Rep must not be onDuty after clock-out');
   assert.equal(rep.status, 'offline', 'Rep status must be offline after clock-out');
+});
+
+test('location-ping auto-heals duty session and accepts trail when rep has open attendance but duty session was missing', () => {
+  const db = createTestDatabase();
+  const now = new Date();
+  const dateIso = now.toISOString();
+
+  // Create rep user and employee with open attendance today
+  db.prepare(`
+    INSERT INTO users (id, username, full_name, role, active, is_online, password_hash)
+    VALUES (102, 'rep-autoheal-test', 'مندوب الاستشفاء', 'rep', 1, 0, 'hash')
+  `).run();
+  db.prepare(`
+    INSERT INTO employees (id, user_id, name, department, phone)
+    VALUES (202, 102, 'مندوب الاستشفاء', 'Maintenance', '+201100000000')
+  `).run();
+  db.prepare(`
+    INSERT INTO employee_daily_attendance (employee_id, work_date, status, clock_in_time)
+    VALUES (202, ?, 'present', ?)
+  `).run(dateIso.slice(0, 10), dateIso);
+
+  // Notice: rep_duty_sessions has NO records!
+  const sessionBefore = db.prepare('SELECT COUNT(*) AS count FROM rep_duty_sessions WHERE rep_user_id = 102').get();
+  assert.equal(sessionBefore.count, 0);
+
+  // Rep sends location ping with trail only (exact Android payload shape)
+  const trackPoint = {
+    clientPointId: 'rep-102-point-1',
+    latitude: 30.0500,
+    longitude: 31.2400,
+    accuracy: 10,
+    speed: 1.2,
+    updatedAt: dateIso,
+  };
+  const pingResult = syncRepLocationPing({ id: 102, role: 'rep' }, {
+    onDuty: true,
+    trail: [trackPoint],
+  }, db);
+
+  // Must auto-heal duty session and accept point
+  assert.equal(pingResult.onDuty, true);
+  assert.equal(pingResult.acceptedPoints, 1);
+  assert.equal(pingResult.rejectedPoints, 0);
+
+  // rep_duty_sessions must now have an active session
+  const sessionAfter = db.prepare('SELECT id, ended_at FROM rep_duty_sessions WHERE rep_user_id = 102 AND ended_at IS NULL').get();
+  assert.ok(sessionAfter, 'rep_duty_sessions must have auto-healed');
+
+  // users.last_location_json and is_online must be populated from trail
+  const userRow = db.prepare('SELECT is_online, last_location_json FROM users WHERE id = 102').get();
+  assert.equal(userRow.is_online, 1, 'users.is_online must be 1');
+  assert.ok(userRow.last_location_json, 'users.last_location_json must be populated from trail');
+  const parsedLoc = JSON.parse(userRow.last_location_json);
+  assert.equal(parsedLoc.latitude, 30.0500);
+  assert.equal(parsedLoc.longitude, 31.2400);
+
+  // Supervisor radar must show rep as onDuty and active
+  const radar = getSupervisorRadar(db, now);
+  const repOnRadar = radar.representatives.find((r) => r.id === 102);
+  assert.equal(repOnRadar.onDuty, true);
+  assert.equal(repOnRadar.status, 'active');
+  assert.equal(repOnRadar.lastLocation.latitude, 30.0500);
+});
+
+test('admin clock-in for employee creates duty session for representative users', () => {
+  const db = createTestDatabase();
+  const now = new Date();
+
+  // Create admin, rep user, and employee
+  db.prepare(`
+    INSERT INTO users (id, username, full_name, role, active, is_online, password_hash)
+    VALUES (1, 'admin', 'مدير النظام', 'admin', 1, 1, 'hash')
+  `).run();
+  db.prepare(`
+    INSERT INTO users (id, username, full_name, role, active, is_online, password_hash)
+    VALUES (103, 'rep-admin-clockin', 'مندوب الحضور الإداري', 'rep', 1, 0, 'hash')
+  `).run();
+  db.prepare(`
+    INSERT INTO employees (id, user_id, name, department, phone)
+    VALUES (203, 103, 'مندوب الحضور الإداري', 'Maintenance', '+201200000000')
+  `).run();
+
+  // Admin clocks in employee
+  clockInForEmployee(203, 1, db, { now });
+
+  // rep_duty_sessions must have an active session for the rep user
+  const dutySession = db.prepare('SELECT id, ended_at FROM rep_duty_sessions WHERE rep_user_id = 103 AND ended_at IS NULL').get();
+  assert.ok(dutySession, 'rep_duty_sessions must be created when admin clocks in rep employee');
+
+  // Supervisor radar must show rep onDuty
+  const radar = getSupervisorRadar(db, now);
+  const repOnRadar = radar.representatives.find((r) => r.id === 103);
+  assert.equal(repOnRadar.onDuty, true);
 });

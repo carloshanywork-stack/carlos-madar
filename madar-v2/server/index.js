@@ -14,7 +14,7 @@ import {
 } from './modules/maintenance/service.js';
 import { recoverRepVisitUploads } from './modules/rep/service.js';
 import { startOperationsOutboxScheduler, publishOperationsEvent } from './modules/operations-events.js';
-import { startRepSupportAttachmentPurgeScheduler, stopRepSupportAttachmentPurgeScheduler } from './modules/rep/support.js';
+import { startRepSupportAttachmentPurgeScheduler, stopRepSupportAttachmentPurgeScheduler, startBugStorageWatcher, stopBugStorageWatcher } from './modules/rep/support.js';
 
 const initialization = initializeDatabase();
 try {
@@ -68,6 +68,7 @@ const server = app.listen(env.port, env.host, () => {
   startSystemBackupScheduler();
   startDatabaseMaintenanceScheduler();
   startRepSupportAttachmentPurgeScheduler();
+  startBugStorageWatcher({ database: db });
 });
 
 let shuttingDown = false;
@@ -76,6 +77,7 @@ function shutdown(signal) {
   shuttingDown = true;
   const scheduledBackup = stopSystemBackupScheduler();
   const attachmentPurge = stopRepSupportAttachmentPurgeScheduler();
+  const bugWatcher = stopBugStorageWatcher();
   stopDatabaseMaintenanceScheduler();
   console.log(`${signal} received; shutting down MADAR V2.`);
   publishOperationsEvent('system.shutdown');
@@ -84,7 +86,7 @@ function shutdown(signal) {
       console.error('HTTP server shutdown failed:', error);
       process.exitCode = 1;
     }
-    void Promise.all([scheduledBackup, attachmentPurge]).finally(() => {
+    void Promise.all([scheduledBackup, attachmentPurge, bugWatcher]).finally(() => {
       if (db.open) db.close();
     });
   });

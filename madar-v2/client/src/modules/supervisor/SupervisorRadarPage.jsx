@@ -3,11 +3,13 @@ import { api } from '../../lib/api.js';
 import { regionAccessLabel } from '../../lib/regions.js';
 import './supervisor-radar.css';
 import LocationReviews from './LocationReviews.jsx';
+import SupervisorRadarMap from './SupervisorRadarMap.jsx';
 
 const STATUS = {
   active: { label: 'على المسار', color: '#168569' },
   onsite: { label: 'في موقع صيانة', color: '#d3931b' },
-  offline: { label: 'أوفلاين / خارج التغطية', color: '#88939d' },
+  stationary: { label: 'في الوردية · ثابت', color: '#2563eb' },
+  offline: { label: 'خارج الوردية / أوفلاين', color: '#88939d' },
 };
 
 function formatTime(value) {
@@ -35,178 +37,6 @@ function currentLocalDate() {
   return `${parts.year}-${parts.month}-${parts.day}`;
 }
 
-function projectToWorld(location, zoom) {
-  const latitude = Math.max(-85.051129, Math.min(85.051129, Number(location.latitude)));
-  const longitude = Number(location.longitude);
-  const size = 256 * (2 ** zoom);
-  const sine = Math.sin(latitude * Math.PI / 180);
-  return {
-    x: ((longitude + 180) / 360) * size,
-    y: (0.5 - Math.log((1 + sine) / (1 - sine)) / (4 * Math.PI)) * size,
-  };
-}
-
-function TrackMap({ representatives, selectedId, onSelect, selectedRoute }) {
-  const routeMatchesSelection = selectedId !== null && selectedRoute?.representative?.id === selectedId;
-  const positions = [
-    ...(selectedId === null
-      ? representatives.flatMap((rep) => rep.trail?.length ? rep.trail : rep.lastLocation ? [rep.lastLocation] : [])
-      : routeMatchesSelection
-        ? selectedRoute.polyline ?? []
-        : representatives.filter((rep) => rep.id === selectedId)
-          .flatMap((rep) => rep.trail?.length ? rep.trail : rep.lastLocation ? [rep.lastLocation] : [])),
-    ...(routeMatchesSelection ? selectedRoute.stops ?? [] : []),
-    ...(routeMatchesSelection ? selectedRoute.visitedMachines ?? [] : []).filter((visit) => Number.isFinite(visit.latitude) && Number.isFinite(visit.longitude)),
-  ];
-  const [mapStatus, setMapStatus] = useState(null);
-  useEffect(() => {
-    let active = true;
-    api.get('/api/supervisor/map/status', { timeoutMs: 4000 })
-      .then((result) => { if (active) setMapStatus(result); })
-      .catch(() => { if (active) setMapStatus({ available: false, renderable: false }); });
-    return () => { active = false; };
-  }, []);
-
-  const geometry = useMemo(() => {
-    const focus = positions.length ? positions : [{ latitude: 30.0444, longitude: 31.2357 }];
-    const atZero = focus.map((location) => projectToWorld(location, 0));
-    const minX0 = Math.min(...atZero.map((item) => item.x));
-    const maxX0 = Math.max(...atZero.map((item) => item.x));
-    const minY0 = Math.min(...atZero.map((item) => item.y));
-    const maxY0 = Math.max(...atZero.map((item) => item.y));
-    const spanX0 = Math.max(maxX0 - minX0, 0.45);
-    const spanY0 = Math.max(maxY0 - minY0, 0.45);
-    const desiredZoom = Math.floor(Math.log2(Math.min(812 / spanX0, 412 / spanY0)));
-    const minZoom = mapStatus?.renderable ? mapStatus.minZoom : 0;
-    const maxZoom = mapStatus?.renderable ? mapStatus.maxZoom : 18;
-    const zoom = Math.max(minZoom, Math.min(maxZoom, desiredZoom));
-    const projected = focus.map((location) => projectToWorld(location, zoom));
-    const minX = Math.min(...projected.map((item) => item.x));
-    const maxX = Math.max(...projected.map((item) => item.x));
-    const minY = Math.min(...projected.map((item) => item.y));
-    const maxY = Math.max(...projected.map((item) => item.y));
-    const spanX = Math.max(maxX - minX, 24);
-    const spanY = Math.max(maxY - minY, 24);
-    const scale = Math.min(812 / (spanX * 1.3), 412 / (spanY * 1.3));
-    return { zoom, centerX: (minX + maxX) / 2, centerY: (minY + maxY) / 2, scale };
-  }, [mapStatus, positions]);
-
-  const point = (location) => {
-    const projected = projectToWorld(location, geometry.zoom);
-    return {
-      x: 450 + (projected.x - geometry.centerX) * geometry.scale,
-      y: 250 + (projected.y - geometry.centerY) * geometry.scale,
-    };
-  };
-  const tileImages = useMemo(() => {
-    if (!mapStatus?.renderable || !geometry.scale) return [];
-    const worldTiles = 2 ** geometry.zoom;
-    const left = geometry.centerX - 450 / geometry.scale;
-    const right = geometry.centerX + 450 / geometry.scale;
-    const top = geometry.centerY - 250 / geometry.scale;
-    const bottom = geometry.centerY + 250 / geometry.scale;
-    const images = [];
-    for (let tileY = Math.max(0, Math.floor(top / 256)); tileY <= Math.min(worldTiles - 1, Math.floor(bottom / 256)); tileY += 1) {
-      for (let tileX = Math.floor(left / 256); tileX <= Math.floor(right / 256); tileX += 1) {
-        const wrappedX = ((tileX % worldTiles) + worldTiles) % worldTiles;
-        images.push({
-          key: `${geometry.zoom}/${tileX}/${tileY}`,
-          href: `/api/supervisor/map/tiles/${geometry.zoom}/${wrappedX}/${tileY}`,
-          x: 450 + (tileX * 256 - geometry.centerX) * geometry.scale,
-          y: 250 + (tileY * 256 - geometry.centerY) * geometry.scale,
-          size: 256 * geometry.scale,
-        });
-      }
-    }
-    return images;
-  }, [geometry, mapStatus]);
-  const bounds = useMemo(() => {
-    const focus = positions.length ? positions : [{ latitude: 30.0444, longitude: 31.2357 }];
-    const lats = focus.map((item) => Number(item.latitude));
-    const lons = focus.map((item) => Number(item.longitude));
-    return { minLat: Math.min(...lats), maxLat: Math.max(...lats), minLon: Math.min(...lons), maxLon: Math.max(...lons) };
-  }, [positions]);
-
-  return (
-    <div className="radar-map-wrap">
-      <svg className="radar-map" viewBox="0 0 900 500" role="img" aria-label="مسارات GPS للمندوبين على شبكة إحداثيات محلية">
-        <defs>
-          <pattern id="radar-grid" width="60" height="60" patternUnits="userSpaceOnUse">
-            <path d="M 60 0 L 0 0 0 60" fill="none" stroke="#dce5e5" strokeWidth="1" />
-          </pattern>
-          <pattern id="radar-minor-grid" width="12" height="12" patternUnits="userSpaceOnUse">
-            <path d="M 12 0 L 0 0 0 12" fill="none" stroke="#edf1f0" strokeWidth=".7" />
-          </pattern>
-        </defs>
-        <rect x="0" y="0" width="900" height="500" fill="#f7faf8" />
-        {tileImages.map((tile) => <image key={tile.key} href={tile.href} x={tile.x} y={tile.y} width={tile.size} height={tile.size} preserveAspectRatio="none" />)}
-        {!mapStatus?.renderable && <>
-          <rect x="0" y="0" width="900" height="500" fill="url(#radar-minor-grid)" />
-          <rect x="0" y="0" width="900" height="500" fill="url(#radar-grid)" />
-          <path d="M0 375 C180 330 245 404 415 350 S690 287 900 325" fill="none" stroke="#e2e9e5" strokeWidth="24" />
-          <path d="M90 0 C130 145 210 231 190 500 M570 0 C520 151 630 324 590 500 M0 130 C230 165 420 120 900 183" fill="none" stroke="#fff" strokeWidth="10" />
-          <path d="M90 0 C130 145 210 231 190 500 M570 0 C520 151 630 324 590 500 M0 130 C230 165 420 120 900 183" fill="none" stroke="#e2e9e5" strokeWidth="1.2" />
-        </>}
-        <text x="18" y="481" className="radar-map-caption">{mapStatus?.renderable ? `${mapStatus.name} · خريطة محلية بلا اتصال` : 'لا توجد حزمة MBTiles محلية · لا اتصال بمزوّد خرائط خارجي'}</text>
-        {!positions.length && <text x="450" y="250" textAnchor="middle" className="radar-map-empty">بانتظار أول إشارة GPS</text>}
-        {routeMatchesSelection && selectedRoute.polyline?.length > 1 && <polyline
-          points={selectedRoute.polyline.map((location) => {
-            const xy = point(location);
-            return `${xy.x},${xy.y}`;
-          }).join(' ')}
-          fill="none" stroke="#1769e0" strokeWidth="5" strokeLinecap="round" strokeLinejoin="round"
-          strokeDasharray="1 0" opacity=".9"
-        />}
-        {(routeMatchesSelection ? selectedRoute.stops ?? [] : []).map((stop, index) => {
-          const xy = point(stop);
-          return <g key={`${stop.arrivedAt}-${index}`} className="radar-stop-pin">
-            <circle cx={xy.x} cy={xy.y} r="11" fill="#fff" stroke="#ce5a31" strokeWidth="4" />
-            <circle cx={xy.x} cy={xy.y} r="3" fill="#ce5a31" />
-            <title>{`${stop.name || 'توقف'} · ${stop.durationMinutes} دقيقة`}</title>
-            <rect x={xy.x + 11} y={xy.y - 23} width="48" height="17" rx="7" fill="#7d351e" />
-            <text x={xy.x + 35} y={xy.y - 11} textAnchor="middle" className="radar-stop-label">{stop.durationMinutes} د</text>
-          </g>;
-        })}
-        {(routeMatchesSelection ? selectedRoute.visitedMachines ?? [] : []).filter((visit) => Number.isFinite(visit.latitude) && Number.isFinite(visit.longitude)).map((visit, index) => {
-          const xy = point(visit);
-          return <g key={`visit-${visit.visitUuid ?? index}`}>
-            <circle cx={xy.x} cy={xy.y} r="10" fill="#fff" stroke="#6944a3" strokeWidth="3" />
-            <text x={xy.x} y={xy.y + 3.5} textAnchor="middle" className="radar-stop-label">م</text>
-            <title>{`${visit.machineCode} · ${visit.machineName || ''} · ${formatTime(visit.capturedAt)}`}</title>
-          </g>;
-        })}
-        {representatives.filter((rep) => selectedId === null || rep.id === selectedId).map((rep) => {
-          const points = routeMatchesSelection && selectedRoute.representative?.id === rep.id
-            ? selectedRoute.polyline ?? []
-            : rep.trail?.length ? rep.trail : rep.lastLocation ? [rep.lastLocation] : [];
-          const status = STATUS[rep.status] ?? STATUS.offline;
-          const xy = points.map(point);
-          const last = xy.at(-1);
-          if (!last) return null;
-          const line = xy.map((item) => `${item.x},${item.y}`).join(' ');
-          return (
-            <g key={rep.id} className="radar-map-rep" onClick={() => onSelect(rep.id)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelect(rep.id); } }} role="button" tabIndex="0" aria-pressed={selectedId === rep.id} aria-label={`عرض مسار ${rep.fullName} · ${status.label}`}>
-              {xy.length > 1 && <polyline points={line} fill="none" stroke={status.color} strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" opacity=".73" />}
-              {xy.filter((_, index) => index % Math.max(1, Math.ceil(xy.length / 18)) === 0).map((stop, index) => (
-                <circle key={`${rep.id}-trail-${index}`} cx={stop.x} cy={stop.y} r="2.7" fill={status.color} opacity=".48" />
-              ))}
-              <circle cx={last.x} cy={last.y} r="13" fill={status.color} opacity=".15" />
-              <circle cx={last.x} cy={last.y} r="7" fill={status.color} stroke="#fff" strokeWidth="2.5" />
-              <title>{`${rep.fullName} · ${status.label} · ${formatTime(rep.lastSignal)}`}</title>
-              <rect x={last.x - 46} y={last.y - 53} width="92" height="16" rx="7" fill={status.color} />
-              <text x={last.x} y={last.y - 42} textAnchor="middle" className="radar-map-status">{status.label}</text>
-              <rect x={last.x - 42} y={last.y - 34} width="84" height="17" rx="7" fill="#173148" />
-              <text x={last.x} y={last.y - 22} textAnchor="middle" className="radar-map-name">{rep.fullName.slice(0, 14)}</text>
-              {selectedId === rep.id && <circle cx={last.x} cy={last.y} r="17" fill="none" stroke="#183a53" strokeWidth="1.5" strokeDasharray="3 3" />}
-            </g>
-          );
-        })}
-      </svg>
-      <div className="radar-coordinate-legend"><span>خط العرض {bounds.minLat.toFixed(3)}° – {bounds.maxLat.toFixed(3)}°</span><span>خط الطول {bounds.minLon.toFixed(3)}° – {bounds.maxLon.toFixed(3)}°</span></div>
-    </div>
-  );
-}
-
 export default function SupervisorRadarPage() {
   const [radar, setRadar] = useState(null);
   const [visits, setVisits] = useState([]);
@@ -218,6 +48,7 @@ export default function SupervisorRadarPage() {
   const [routeLoading, setRouteLoading] = useState(false);
   const [routeRevision, setRouteRevision] = useState(0);
   const [selectedVisit, setSelectedVisit] = useState(null);
+  const [showHeatmap, setShowHeatmap] = useState(false);
   const [reviewNotes, setReviewNotes] = useState({});
   const [loading, setLoading] = useState(true);
   const [mobileTab, setMobileTab] = useState('map');
@@ -376,9 +207,10 @@ export default function SupervisorRadarPage() {
       </div>}
 
       <section className="supervisor-kpis" aria-label="ملخص الوردية">
-        <article><span>المناديب المسجلون</span><strong>{representatives.length}</strong><small>حسابات ميدانية فعالة أو محفوظة</small></article>
-        <article><span>على المسار الآن</span><strong>{representatives.filter((rep) => rep.status === 'active').length}</strong><small>إشارة حديثة ووردية مفتوحة</small></article>
-        <article><span>في موقع صيانة</span><strong>{representatives.filter((rep) => rep.status === 'onsite').length}</strong><small>زيارة تنتظر الفحص الميداني</small></article>
+        <article><span>المناديب المسجلون</span><strong>{representatives.length}</strong><small>إجمالي حسابات المناديب</small></article>
+        <article><span>في الوردية اليوم</span><strong>{representatives.filter((rep) => rep.onDuty).length}</strong><small>تم تسجيل الحضور ومتابعة اليوم</small></article>
+        <article><span>على المسار الآن</span><strong>{representatives.filter((rep) => rep.status === 'active').length}</strong><small>إشارة حديثة وحركة مستمرة</small></article>
+        <article><span>في موقع صيانة / ثابت</span><strong>{representatives.filter((rep) => rep.status === 'onsite' || rep.status === 'stationary').length}</strong><small>في موقع عميل أو انتظار إشارة</small></article>
         <article className="qa-kpi"><span>طابور مراجعة الصور</span><strong>{visits.length}</strong><small>لا تدخل التقارير قبل الاعتماد</small></article>
       </section>
 
@@ -413,21 +245,60 @@ export default function SupervisorRadarPage() {
               {representatives.map((rep) => <option key={rep.id} value={rep.id}>{rep.fullName}</option>)}
             </select></label>
             <label>التاريخ<input type="date" value={routeDate} onChange={(event) => { manuallySelectedRouteDate.current = true; setRouteDate(event.target.value); }} /></label>
+            <button
+              type="button"
+              className={`radar-heatmap-btn ${showHeatmap ? 'is-active' : ''}`}
+              onClick={() => {
+                const next = !showHeatmap;
+                setShowHeatmap(next);
+                if (next && selectedRep === null && representatives.length > 0) {
+                  setSelectedRep(representatives[0].id);
+                }
+              }}
+              title="تبديل عرض خريطة الكثافة والتوقفات الحرارية"
+            >
+              🔥 {showHeatmap ? 'إخفاء الخريطة الحرارية' : 'خريطة الكثافة والوقفات (Heat Map)'}
+            </button>
             {selectedRep !== null && <button type="button" className="radar-overview-button" onClick={() => setSelectedRep(null)}>العودة إلى كل المندوبين</button>}
             <span>{selectedRep === null ? `${representatives.length} مندوب · الحالة وآخر إشارة على الخريطة` : routeLoading ? 'جارٍ تحميل كامل نقاط المسار…' : `${visibleRoute?.polyline?.length ?? 0} نقطة مسجلة · ${visibleRoute?.stops?.length ?? 0} توقف · ${visibleRoute?.visitedMachines?.length ?? 0} زيارة`}</span>
           </div>
-          <TrackMap representatives={representatives} selectedId={selectedRep} onSelect={setSelectedRep} selectedRoute={visibleRoute} />
+          <SupervisorRadarMap representatives={representatives} selectedId={selectedRep} onSelect={setSelectedRep} selectedRoute={visibleRoute} showHeatmap={showHeatmap} />
+          {visibleRoute && showHeatmap && (
+            <div className="radar-heatmap-analytics">
+              <div className="heatmap-metric-card">
+                <span className="metric-icon">⏱️</span>
+                <div>
+                  <strong>{Math.floor((visibleRoute.stops?.reduce((sum, s) => sum + (Number(s.durationMinutes) || 0), 0) || 0) / 60)} س {(visibleRoute.stops?.reduce((sum, s) => sum + (Number(s.durationMinutes) || 0), 0) || 0) % 60} د</strong>
+                  <small>إجمالي فترات التوقف والانتظار</small>
+                </div>
+              </div>
+              <div className="heatmap-metric-card">
+                <span className="metric-icon">📍</span>
+                <div>
+                  <strong>{visibleRoute.stops?.length ?? 0} نقطة</strong>
+                  <small>إجمالي الوقفات المسجلة</small>
+                </div>
+              </div>
+              <div className="heatmap-metric-card">
+                <span className="metric-icon">🛑</span>
+                <div>
+                  <strong>{visibleRoute.stops?.length ? Math.max(...visibleRoute.stops.map((s) => Number(s.durationMinutes) || 0)) : 0} دقيقة</strong>
+                  <small>أطول فترة توقف متصلة</small>
+                </div>
+              </div>
+            </div>
+          )}
           {visibleRoute && <div className="radar-speed-summary" aria-label="سرعة المندوب في اليوم المختار">
             <span>متوسط السرعة أثناء الحركة · {visibleRoute.date}: <strong>{formatSpeed(visibleRoute.speedSummary?.averageKmh)}</strong></span>
             <span>أعلى قراءة: <strong>{formatSpeed(visibleRoute.speedSummary?.maxKmh)}</strong></span>
             <small>من {visibleRoute.speedSummary?.sampleCount ?? 0} قراءة GPS صالحة أثناء الحركة</small>
           </div>}
           {visibleRoute && <div className="radar-stops-list" aria-label="توقفات المندوب المحدد">
-            <strong>التوقفات · {visibleRoute.date}</strong>
-            {visibleRoute.stops.length ? visibleRoute.stops.map((stop, index) => <span key={`${stop.arrivedAt}-${index}`}>
+            <strong>التوقفات والوقفات · {visibleRoute.date}</strong>
+            {visibleRoute.stops.length ? visibleRoute.stops.map((stop, index) => <span key={`${stop.arrivedAt}-${index}`} className={showHeatmap ? 'heatmap-active-stop' : ''}>
               <b>{stop.name || `توقف ${index + 1}`}</b>
               <small>وصول {formatTime(stop.arrivedAt)} · مغادرة {formatTime(stop.departedAt)} · {stop.durationMinutes} دقيقة</small>
-            </span>) : <small>لم تُسجّل توقفات متصلة لأكثر من 5 دقائق في هذا اليوم.</small>}
+            </span>) : <small>لم تُسجّل توقفات متصلة لأكثر من 3 دقائق في هذا اليوم.</small>}
           </div>}
           {visibleRoute && <div className="radar-visited-list" aria-label="الماكينات التي زارها المندوب">
             <strong>الماكينات التي زارها · {visibleRoute.visitedMachines?.length ?? 0}</strong>

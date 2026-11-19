@@ -10,6 +10,9 @@ if (!process.env.ELECTRON_MIRROR) {
 if (!process.env.ELECTRON_BUILDER_BINARIES_MIRROR) {
   process.env.ELECTRON_BUILDER_BINARIES_MIRROR = 'https://npmmirror.com/mirrors/electron-builder-binaries/';
 }
+if (!process.env.USE_SYSTEM_OSSLSIGNCODE) {
+  process.env.USE_SYSTEM_OSSLSIGNCODE = 'true';
+}
 const releaseBuild = process.argv.includes('--release');
 const serverUrlValue = process.env.MADAR_DESKTOP_SERVER_URL?.trim()
   || (releaseBuild ? '' : 'http://127.0.0.1:3000');
@@ -85,13 +88,23 @@ if (install.status !== 0) process.exit(install.status ?? 1);
 const targetType = process.env.MADAR_WINDOWS_TARGET;
 const targetArgs = targetType
   ? (targetType === 'all' ? ['nsis', 'zip'] : [targetType])
-  : ['nsis', 'zip'];
+  : ['nsis'];
 const args = ['--win', ...targetArgs, '--config', 'desktop/electron-builder.config.cjs', '--publish', 'never'];
-const result = spawnSync(process.execPath, [resolve(projectRoot, 'desktop-build/node_modules/electron-builder/cli.js'), ...args], {
+let result = spawnSync(process.execPath, [resolve(projectRoot, 'desktop-build/node_modules/electron-builder/cli.js'), ...args], {
   cwd: projectRoot,
   stdio: 'inherit',
   env: { ...process.env, MADAR_DESKTOP_RELEASE_BUILD: releaseBuild ? 'true' : 'false' },
 });
+
+if (result.status !== 0) {
+  console.warn('[BuildDesktop] Build attempt encountered an error (likely transient timestamp network timeout). Retrying in 3s...');
+  spawnSync('sleep', ['3']);
+  result = spawnSync(process.execPath, [resolve(projectRoot, 'desktop-build/node_modules/electron-builder/cli.js'), ...args], {
+    cwd: projectRoot,
+    stdio: 'inherit',
+    env: { ...process.env, MADAR_DESKTOP_RELEASE_BUILD: releaseBuild ? 'true' : 'false' },
+  });
+}
 
 if (result.error) throw result.error;
 if (result.status === 0) {

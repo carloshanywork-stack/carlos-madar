@@ -16,6 +16,7 @@ import { initializeDatabase } from '../../database/init.js';
 import { backupRoot, dataDirectory, repApkPath, storageMountPath, storageRoot } from '../../config/paths.js';
 import { recordAudit } from '../audit.js';
 import { requestActorId } from '../actor.js';
+import { requireAdmin } from '../auth/authorization.js';
 import { asyncHandler, HttpError } from '../http.js';
 import { withMaintenanceOrderStorageLock } from '../maintenance/deletion-lock.js';
 import { getStorageHealth } from './health.js';
@@ -784,18 +785,29 @@ router.get('/health', asyncHandler(async (req, res) => {
   };
   res.status(status === 'error' ? 503 : 200).json(health);
 }));
-router.post('/backup', asyncHandler(async (req, res) => {
+let isRestoreInProgress = false;
+
+export function isSystemRestoreActive() {
+  return isRestoreInProgress;
+}
+
+router.post('/backup', requireAdmin, asyncHandler(async (req, res) => {
   const backup = await createSystemBackup();
   recordAudit({ actorId: requestActorId(req), action: 'create', entityType: 'system_backup', entityId: 1, newValues: backup });
   res.status(201).json(backup);
 }));
-router.get('/backups', asyncHandler(async (req, res) => res.json(await listSystemBackups())));
-router.get('/backups/:filename/download', asyncHandler(sendBackup));
-router.post('/backup/restore', restoreUpload, asyncHandler(async (req, res) => {
+router.get('/backups', requireAdmin, asyncHandler(async (req, res) => res.json(await listSystemBackups())));
+router.get('/backups/:filename/download', requireAdmin, asyncHandler(sendBackup));
+router.post('/backup/restore', requireAdmin, restoreUpload, asyncHandler(async (req, res) => {
+  if (isRestoreInProgress) {
+    throw new HttpError(409, 'A system restore is already in progress.');
+  }
   if (!req.file) throw new HttpError(400, 'A ZIP backup file is required.');
+  isRestoreInProgress = true;
   try {
     res.json(await restoreBackupFile(req.file.path, requestActorId(req)));
   } finally {
+    isRestoreInProgress = false;
     await rm(req.file.path, { force: true });
   }
 }));

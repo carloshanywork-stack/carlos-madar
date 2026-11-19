@@ -12,9 +12,6 @@ module.exports = {
   appId: 'com.madar.desktop',
   productName: 'MADAR',
   electronVersion,
-  toolsets: {
-    wine: '1.0.1',
-  },
   directories: {
     app: 'desktop-app',
     output: 'build/windows',
@@ -41,7 +38,7 @@ module.exports = {
     installerIcon: 'desktop/madar.ico',
     uninstallerIcon: 'desktop/madar.ico',
     oneClick: false,
-    differentialPackage: false,
+    differentialPackage: true,
     allowElevation: true,
     allowToChangeInstallationDirectory: true,
     deleteAppDataOnUninstall: false,
@@ -53,7 +50,6 @@ module.exports = {
     publish: [{
       provider: 'generic',
       url: publishUrl.endsWith('/') ? publishUrl : `${publishUrl}/`,
-      ...(publisherName ? { publisherName: [publisherName] } : {}),
     }],
   } : {}),
 };

@@ -4,6 +4,7 @@ import { HttpError, allowOnlyKeys, optionalText, positiveId, requireObject, requ
 import { resolveStorageFile } from '../storage.js';
 import { recordAudit } from '../audit.js';
 import { getPendingCardPhotoReviews, reviewCardPhotos } from '../maintenance/photo-review.js';
+import { calculateDistanceMeters } from '../rep/service.js';
 
 const DEFAULT_TIME_ZONE = 'Africa/Cairo';
 const MAX_SPEED_METERS_PER_SECOND = 200 / 3.6;
@@ -141,7 +142,7 @@ export function getSupervisorRadar(database = defaultDatabase, now = new Date())
       SELECT point.latitude, point.longitude, point.accuracy, point.speed,
         point.duty_session_id, point.recorded_at AS captured_at
       FROM rep_tracking_breadcrumbs point
-      JOIN rep_duty_sessions duty ON duty.id = point.duty_session_id
+      LEFT JOIN rep_duty_sessions duty ON duty.id = point.duty_session_id
       WHERE point.user_id = ? AND datetime(point.recorded_at) >= datetime(?) AND datetime(point.recorded_at) < datetime(?)
       ORDER BY datetime(point.recorded_at), point.id
     `).all(rep.id, start, end);
@@ -160,10 +161,29 @@ export function getSupervisorRadar(database = defaultDatabase, now = new Date())
       WHERE visit.rep_user_id = ? AND review.status = 'pending'
         AND datetime(visit.created_at) >= datetime('now', '-45 minutes') LIMIT 1
     `).get(rep.id);
-    const onDuty = Boolean(rep.duty_session_id);
-    const status = !onDuty || staleMs > 2 * 60 * 1000
-      ? 'offline'
-      : recentPending ? 'onsite' : 'active';
+    const activeAttendance = database.prepare(`
+      SELECT 1 FROM employee_daily_attendance attendance
+      JOIN employees employee ON employee.id = attendance.employee_id
+      WHERE employee.user_id = ? AND attendance.clock_in_time IS NOT NULL AND attendance.clock_out_time IS NULL
+      LIMIT 1
+    `).get(rep.id);
+    const onDuty = Boolean(rep.duty_session_id || activeAttendance);
+    let status = 'offline';
+    if (onDuty) {
+      if (recentPending) {
+        status = 'onsite';
+      } else if (staleMs <= 5 * 60 * 1000) {
+        status = 'active';
+      } else {
+        status = 'stationary';
+      }
+    } else if (recentPending) {
+      status = 'onsite';
+    } else if (rep.is_online && staleMs <= 10 * 60 * 1000) {
+      status = 'active';
+    } else if (rep.is_online && staleMs <= 30 * 60 * 1000) {
+      status = 'stationary';
+    }
     const trail = points.map((point) => ({
       latitude: Number(point.latitude), longitude: Number(point.longitude), accuracy: Number(point.accuracy), updatedAt: point.captured_at,
     }));
@@ -189,6 +209,42 @@ export function getSupervisorRadar(database = defaultDatabase, now = new Date())
     };
   });
   return { success: true, generatedAt: now.toISOString(), businessDate: todayRange.day, representatives: result };
+}
+
+function detectStopsFromPoints(points) {
+  const stops = [];
+  let segment = [];
+  const finish = () => {
+    if (segment.length < 2) return;
+    const first = segment[0];
+    const last = segment.at(-1);
+    const durationMinutes = Math.round((Date.parse(last.recorded_at) - Date.parse(first.recorded_at)) / 60000);
+    if (durationMinutes >= 3) {
+      const avgLat = segment.reduce((sum, p) => sum + Number(p.latitude), 0) / segment.length;
+      const avgLng = segment.reduce((sum, p) => sum + Number(p.longitude), 0) / segment.length;
+      stops.push({
+        latitude: Number(avgLat.toFixed(7)),
+        longitude: Number(avgLng.toFixed(7)),
+        arrived_at: first.recorded_at,
+        departed_at: last.recorded_at,
+        duration_minutes: durationMinutes,
+        stop_name: `توقف (${durationMinutes} دقيقة)`,
+      });
+    }
+  };
+  for (const point of points) {
+    const anchor = segment[0];
+    const prev = segment.at(-1);
+    const gap = prev ? Date.parse(point.recorded_at) - Date.parse(prev.recorded_at) : 0;
+    const distance = anchor ? calculateDistanceMeters(anchor.latitude, anchor.longitude, point.latitude, point.longitude) : 0;
+    if (segment.length && (gap > 15 * 60 * 1000 || distance > 60)) {
+      finish();
+      segment = [];
+    }
+    segment.push(point);
+  }
+  finish();
+  return stops;
 }
 
 export function getSupervisorRepRoute(repIdInput, dateInput, database = defaultDatabase) {
@@ -253,14 +309,21 @@ export function getSupervisorRepRoute(repIdInput, dateInput, database = defaultD
     })),
     speedSummary,
     visitedMachines,
-    stops: stopRows.map((stop) => ({
-      latitude: Number(stop.latitude),
-      longitude: Number(stop.longitude),
-      arrivedAt: stop.arrived_at,
-      departedAt: stop.departed_at,
-      durationMinutes: Number(stop.duration_minutes),
-      name: stop.stop_name,
-    })),
+    stops: (stopRows.length > 0 ? stopRows : detectStopsFromPoints(points)).map((stop) => {
+      const nearbyVisit = visitedMachines.find((vm) =>
+        vm.latitude !== null && vm.longitude !== null
+        && calculateDistanceMeters(Number(stop.latitude), Number(stop.longitude), vm.latitude, vm.longitude) <= 120
+      );
+      const name = stop.stop_name || (nearbyVisit ? `موقع ماكينة ${nearbyVisit.machineCode}` : `نقطة توقف`);
+      return {
+        latitude: Number(stop.latitude),
+        longitude: Number(stop.longitude),
+        arrivedAt: stop.arrived_at,
+        departedAt: stop.departed_at,
+        durationMinutes: Number(stop.duration_minutes),
+        name,
+      };
+    }),
   };
 }
 

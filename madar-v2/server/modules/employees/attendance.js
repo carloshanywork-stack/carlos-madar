@@ -284,7 +284,11 @@ function employeeForRep(userId, database) {
 
 function normalizeLocation(input) {
   const body = requireObject(input, 'location');
-  allowOnlyKeys(body, ['latitude', 'longitude', 'accuracy', 'updatedAt', 'speed']);
+  allowOnlyKeys(body, ['latitude', 'longitude', 'accuracy', 'updatedAt', 'speed', 'isMock', 'is_mock', 'mocked', 'mock_flag']);
+  const isMock = body.isMock === true || body.is_mock === true || body.mocked === true || body.mock_flag === true;
+  if (isMock) {
+    throw new HttpError(400, 'تحديد الموقع الجغرافي الوهمي (Mock GPS) غير مسموح به في تسجيل الحضور.');
+  }
   const latitude = body.latitude;
   const longitude = body.longitude;
   const accuracy = body.accuracy;
@@ -662,7 +666,19 @@ function clockOut(employeeIdValue, source, location, actorId, database = db,
 }
 
 export function clockInForEmployee(employeeId, actorId, database = db, options = {}) {
-  return clockIn(employeeId, 'admin', null, actorId, database, { ...options, markOnTime: true });
+  return database.transaction(() => {
+    const attendance = clockIn(employeeId, 'admin', null, actorId, database, { ...options, markOnTime: true });
+    const employee = database.prepare('SELECT user_id FROM employees WHERE id = ?').get(employeeId);
+    if (employee?.user_id) {
+      const user = database.prepare('SELECT role FROM users WHERE id = ?').get(employee.user_id);
+      if (user?.role === 'rep') {
+        recordAttendanceDuty(database, employee.user_id, 'in',
+          attendance.overtime_session_status === 'open' ? attendance.overtime_clock_in_time : attendance.clock_in_time,
+          null);
+      }
+    }
+    return attendance;
+  })();
 }
 
 export function clockOutForEmployee(employeeId, actorId, database = db, options = {}) {
@@ -674,9 +690,16 @@ export function clockOutForEmployee(employeeId, actorId, database = db, options 
   const adminNote = customTime || options.adminNote !== undefined
     ? requireText(options.adminNote, 'adminNote', { maxLength: 1000 })
     : 'تسجيل انصراف يدوي من الإدارة.';
-  return clockOut(employeeId, 'admin', null, actorId, database, {
-    now, adminNote, customTime,
-  });
+  return database.transaction(() => {
+    const updated = clockOut(employeeId, 'admin', null, actorId, database, {
+      now, adminNote, customTime,
+    });
+    const employee = database.prepare('SELECT user_id FROM employees WHERE id = ?').get(employeeId);
+    if (employee?.user_id) {
+      recordAttendanceDuty(database, employee.user_id, 'out', (updated.last_clock_out_time ?? updated.clock_out_time) || now.toISOString(), null);
+    }
+    return updated;
+  })();
 }
 
 export function clockInForRep(userId, input, database = db, options = {}) {

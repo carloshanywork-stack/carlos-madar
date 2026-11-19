@@ -29,4 +29,8 @@ router.delete('/:id', (req, res) => {
   res.json({ success: true, ...dismissNotification(req.user.id, req.params.id) });
 });
 
+router.post('/:id/dismiss', (req, res) => {
+  res.json({ success: true, ...dismissNotification(req.user.id, req.params.id) });
+});
+
 export default router;
