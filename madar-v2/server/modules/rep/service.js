@@ -401,11 +401,16 @@ export function claimRepMachineWork(rep, cardIdValue, input, database = db) {
     validateMachineGeofence(machine, location);
     const previous = database.prepare('SELECT * FROM rep_machine_work_leases WHERE card_id = ?').get(cardId);
     const now = Date.now();
-    if (previous && previous.expires_at_ms > now && Number(previous.rep_user_id) !== Number(rep.id)) {
-      throw new HttpError(409, 'Another representative is working on this machine.');
-    }
-    if (previous && previous.expires_at_ms > now && previous.visit_uuid !== visitUuid) {
-      throw new HttpError(409, 'This machine already has an active visit. Continue that visit or wait for the claim to expire.');
+    if (previous && previous.expires_at_ms > now) {
+      if (Number(previous.rep_user_id) !== Number(rep.id)) {
+        throw new HttpError(409, 'Another representative is working on this machine.');
+      }
+      if (previous.visit_uuid !== visitUuid) {
+        const completedOldVisit = database.prepare('SELECT id, status FROM rep_visits WHERE visit_uuid = ?').get(previous.visit_uuid);
+        if (completedOldVisit && completedOldVisit.status === 'completed') {
+          throw new HttpError(409, 'This machine already has a completed visit.');
+        }
+      }
     }
     database.prepare(`
       INSERT INTO rep_machine_work_leases (card_id, rep_user_id, visit_uuid, expires_at_ms)

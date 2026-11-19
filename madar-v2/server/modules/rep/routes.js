@@ -44,7 +44,7 @@ import { createRepBugReport, downloadRepBugAttachment, listMyRepBugReports } fro
 const router = Router();
 const syncVisitUpload = diskUploadMany({
   maxBytes: 3 * 1024 * 1024,
-  files: 40,
+  files: 50,
   extensions: ['.jpg', '.jpeg', '.webp'],
   destination: () => ensureStorageDirectory('.incoming'),
 });
