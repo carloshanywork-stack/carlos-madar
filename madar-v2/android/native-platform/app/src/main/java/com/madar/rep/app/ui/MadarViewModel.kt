@@ -8,6 +8,7 @@ import com.madar.rep.app.BuildConfig
 import com.madar.rep.app.core.SupportDiagnostics
 import com.madar.rep.app.core.GeoPoint
 import com.madar.rep.app.core.GeoPolicy
+import com.madar.rep.app.core.Hashing
 import com.madar.rep.app.core.LocationDecision
 import com.madar.rep.app.core.MadarError
 import com.madar.rep.app.core.MadarTime
@@ -24,6 +25,8 @@ import com.madar.rep.app.data.api.VersionGate
 import com.madar.rep.app.data.api.MaintenanceLine
 import com.madar.rep.app.data.api.RouteMachine
 import com.madar.rep.app.data.db.AttendanceActionEntity
+import com.madar.rep.app.data.db.GpsPointEntity
+import com.madar.rep.app.data.db.GpsPointState
 import com.madar.rep.app.data.db.MachineActionEntity
 import com.madar.rep.app.data.db.MachineActionState
 import com.madar.rep.app.data.db.MapPackEntity
@@ -233,8 +236,13 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
                     _routeError.value = null
                     _claimBlockedCardId.value = null
                     _claimBlockedMessage.value = null
+                    com.madar.rep.app.location.GpsBreadcrumbService.stop(container.appContext)
                 } else {
                     refreshAll(current)
+                    if (container.locationProvider.hasPermission()) {
+                        com.madar.rep.app.location.GpsBreadcrumbService.start(container.appContext, current.repId)
+                    }
+                    pingLocationOnForeground()
                 }
             }
         }
@@ -473,6 +481,38 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
         point?.let { container.governorates.find(it.latitude, it.longitude)?.nameAr }
 
     fun hasLocationPermission(): Boolean = container.locationProvider.hasPermission()
+
+    fun pingLocationOnForeground() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val current = session.value ?: return@launch
+            if (!container.locationProvider.hasPermission()) return@launch
+            val fix = container.locationProvider.lastKnown()
+                ?: (container.locationProvider.currentFix(4000L) as? LocationResult.Success)?.point
+            if (fix != null && !fix.isMock) {
+                val nowMs = System.currentTimeMillis()
+                val id = "native-${current.repId}-${UUID.randomUUID()}"
+                val updatedAt = MadarTime.isoUtc(fix.capturedAtMillis)
+                val payload = JSONObject().put("clientPointId", id)
+                    .put("latitude", fix.latitude).put("longitude", fix.longitude)
+                    .put("accuracy", fix.accuracyMeters.toDouble())
+                    .put("speed", 0.0).put("updatedAt", updatedAt)
+                val entity = GpsPointEntity(
+                    clientPointId = id,
+                    repId = current.repId,
+                    latitude = fix.latitude,
+                    longitude = fix.longitude,
+                    accuracy = fix.accuracyMeters.toDouble(),
+                    speed = 0.0,
+                    updatedAt = updatedAt,
+                    state = GpsPointState.QUEUED,
+                    contentHash = Hashing.sha256Hex(payload.toString().toByteArray()),
+                    createdAt = nowMs,
+                )
+                runCatching { container.database.gpsPoints().insert(entity) }
+                container.scheduler.enqueueNow()
+            }
+        }
+    }
 
     fun approveFirstMachineLocation(visit: VisitEntity) {
         val current = session.value ?: return
