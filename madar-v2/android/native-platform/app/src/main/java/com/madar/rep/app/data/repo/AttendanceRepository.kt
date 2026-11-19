@@ -57,14 +57,14 @@ class AttendanceRepository(private val database: MadarDatabase) {
     suspend fun enqueue(
         repId: Long,
         action: String,
-        occurredAtMillis: Long = System.currentTimeMillis(),
+        occurredAtMillis: Long = MadarTime.nowCalibrated(),
         location: GeoPoint?,
         biometricVerified: Boolean,
     ): AttendanceActionEntity {
         if (action != "in" && action != "out") throw MadarError.Validation("نوع تسجيل الحضور غير صالح")
         if (!biometricVerified) throw MadarError.Validation("يلزم تأكيد المصادقة الحيوية")
         if (action == "in" && location == null) throw MadarError.Validation("تسجيل الحضور يحتاج موقع GPS")
-        val now = System.currentTimeMillis()
+        val now = MadarTime.nowCalibrated()
         val entity = AttendanceActionEntity(
             actionUuid = UUID.randomUUID().toString(),
             ownerRepId = repId,

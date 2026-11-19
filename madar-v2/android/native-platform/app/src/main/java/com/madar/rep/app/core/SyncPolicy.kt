@@ -26,7 +26,14 @@ object SyncPolicy {
         if (httpStatus in 200..299) {
             return if (success == false) SyncSignal.NEEDS_REVIEW else SyncSignal.ACK
         }
-        if (httpStatus in setOf(400, 409, 410, 422)) return SyncSignal.NEEDS_REVIEW
+        if (httpStatus == 409) {
+            val isTransientConflict = message?.contains("wait", ignoreCase = true) == true ||
+                message?.contains("انتظار", ignoreCase = true) == true ||
+                message?.contains("another representative", ignoreCase = true) == true ||
+                message?.contains("active visit", ignoreCase = true) == true
+            return if (isTransientConflict) SyncSignal.RETRY else SyncSignal.NEEDS_REVIEW
+        }
+        if (httpStatus in setOf(400, 410, 422)) return SyncSignal.NEEDS_REVIEW
         if (httpStatus == 429 || httpStatus >= 500) return SyncSignal.RETRY
         return SyncSignal.RETRY
     }
