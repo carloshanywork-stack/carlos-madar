@@ -1,12 +1,12 @@
 {
-  "sourceRevision": "cfe7eb495837257f77bb09a7b26a55f93be2e73d",
+  "sourceRevision": "HEAD",
   "sourceTreeDirty": false,
-  "builtAt": "2026-11-19T12:32:04.000Z",
-  "versionCode": 31,
+  "builtAt": "2026-11-19T14:34:00.000Z",
+  "versionCode": 32,
   "versionName": "2.5.0",
   "buildType": "release",
   "serverUrl": "https://carlos-pc.tail852ef0.ts.net",
   "artifactOnly": false,
-  "apkSha256": "091f8364d9f1cf986ffe588157f827e9a930f66e4bcec539a63e7f113e8f491e",
+  "apkSha256": "142b06573fdfe76c2996b6c1f19b5a8f20283d439f1fe132cdc231da3b13e6a7",
   "signerCertificateSha256": "f4c8bffc9f852ea6056e350b65156eb880d05629991682492159b9e3937c02a1"
 }
