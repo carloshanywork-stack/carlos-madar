@@ -28,6 +28,7 @@ module.exports = {
       env: {
         NODE_ENV: 'production',
         PORT: 3000,
+        UV_THREADPOOL_SIZE: 8,
       },
       error_file: `${__dirname}/logs/pm2-error.log`,
       out_file: `${__dirname}/logs/pm2-out.log`,
