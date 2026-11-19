@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -19,13 +21,18 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.HourglassTop
+import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -37,14 +44,19 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.madar.rep.app.core.GeoPoint
+import com.madar.rep.app.core.GeoPolicy
+import com.madar.rep.app.core.LocationDecision
 import com.madar.rep.app.data.db.AttendanceActionState
 import com.madar.rep.app.data.db.MachineActionState
 import com.madar.rep.app.data.db.MapPackState
+import com.madar.rep.app.data.db.VisitEntity
 import com.madar.rep.app.data.db.VisitState
 import com.madar.rep.app.ui.theme.MadarDanger
 import com.madar.rep.app.ui.theme.MadarGold
@@ -290,3 +302,263 @@ fun InfoRow(label: String, value: String, emphasize: Boolean = false) {
     }
     Spacer(Modifier.height(0.dp))
 }
+
+@Composable
+fun VisitProgressStepper(
+    currentStep: Int,
+    modifier: Modifier = Modifier,
+) {
+    val steps = listOf("الوصول", "صور قبل", "الصيانة", "صور بعد", "الاعتماد")
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surface,
+        tonalElevation = 1.dp,
+        modifier = modifier.fillMaxWidth(),
+    ) {
+        Row(
+            Modifier.padding(horizontal = 10.dp, vertical = 10.dp).fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            steps.forEachIndexed { index, title ->
+                val stepNum = index + 1
+                val isDone = stepNum < currentStep
+                val isActive = stepNum == currentStep
+                val badgeColor = when {
+                    isDone -> MadarTeal
+                    isActive -> MaterialTheme.colorScheme.primary
+                    else -> MaterialTheme.colorScheme.surfaceVariant
+                }
+                val textColor = when {
+                    isDone -> MadarTeal
+                    isActive -> MaterialTheme.colorScheme.primary
+                    else -> MadarMuted
+                }
+
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(3.dp),
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(24.dp)
+                            .clip(CircleShape)
+                            .background(badgeColor),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (isDone) {
+                            Icon(
+                                Icons.Default.CheckCircle,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(15.dp),
+                            )
+                        } else {
+                            Text(
+                                "$stepNum",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isActive) MaterialTheme.colorScheme.onPrimary else MadarMuted,
+                            )
+                        }
+                    }
+                    Text(
+                        title,
+                        fontSize = 10.sp,
+                        fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal,
+                        color = textColor,
+                        maxLines = 1,
+                    )
+                }
+
+                if (index < steps.lastIndex) {
+                    Box(
+                        Modifier
+                            .width(12.dp)
+                            .height(2.dp)
+                            .background(if (index < currentStep - 1) MadarTeal else MaterialTheme.colorScheme.surfaceVariant)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun GeofencedArrivalCard(
+    location: LocationUiState,
+    visit: VisitEntity,
+    isArrived: Boolean,
+    approvingMachineLocation: Boolean,
+    onConfirmArrival: (GeoPoint) -> Unit,
+    onApproveMachine: () -> Unit,
+    onRefreshLocation: () -> Unit,
+    onRequestLocationChange: () -> Unit,
+    onRequestPermission: () -> Unit,
+    onReportUnableToService: (() -> Unit)? = null,
+    modifier: Modifier = Modifier,
+) {
+    SectionCard(
+        modifier = modifier,
+        title = "تأكيد التواجد الميداني (Geofence)",
+        subtitle = "التحقق من التواجد الجغرافي الفعلي داخل نطاق أمان الماكينة.",
+    ) {
+        if (!visit.locationLocked) {
+            InlineMessage(
+                "موقع الماكينة غير مثبت بعد؛ يلزم التواجد أمام الماكينة واعتماد موقعها لبدء الزيارة.",
+                MessageTone.Warning,
+            )
+            Button(
+                onClick = onApproveMachine,
+                enabled = !approvingMachineLocation,
+                modifier = Modifier.fillMaxWidth().height(48.dp),
+                shape = RoundedCornerShape(12.dp),
+            ) {
+                if (approvingMachineLocation) {
+                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = Color.White)
+                    Spacer(Modifier.width(8.dp))
+                    Text("جارٍ اعتماد موقع الماكينة…")
+                } else {
+                    Icon(Icons.Default.LocationOn, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("اعتماد موقع الماكينة في النظام")
+                }
+            }
+        } else {
+            val point = location.point
+            val hasLockedCoords = visit.machineLatitude != null && visit.machineLongitude != null
+            val distance = if (point != null && hasLockedCoords) {
+                GeoPolicy.distanceMeters(
+                    point.latitude, point.longitude,
+                    visit.machineLatitude!!, visit.machineLongitude!!,
+                )
+            } else null
+
+            val decision = if (point != null) {
+                GeoPolicy.evaluate(
+                    point,
+                    visit.machineLatitude,
+                    visit.machineLongitude,
+                    visit.geofenceRadiusMeters,
+                )
+            } else LocationDecision.Missing
+
+            val isInsideGeofence = decision == LocationDecision.Valid
+
+            if (point != null && point.isMock) {
+                InlineMessage(
+                    "⚠️ تم اكتشاف أداة تزييف موقع (Mock GPS)! لا يمكن اعتماد الحضور بموقع غير حقيقي.",
+                    MessageTone.Error,
+                )
+            } else if (isArrived) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MadarTeal.copy(alpha = 0.12f))
+                        .padding(12.dp),
+                ) {
+                    Icon(Icons.Default.CheckCircle, contentDescription = null, tint = MadarTeal)
+                    Column {
+                        Text(
+                            "تم تأكيد الوصول والتواجد عند الماكينة بنجاح",
+                            fontWeight = FontWeight.Bold,
+                            color = MadarTeal,
+                            fontSize = 14.sp,
+                        )
+                        if (distance != null) {
+                            Text(
+                                "المسافة المقاسة: ${distance.toInt()}م (ضمن نطاق الـ ${visit.geofenceRadiusMeters.toInt()}م)",
+                                fontSize = 12.sp,
+                                color = MadarTeal.copy(alpha = 0.85f),
+                            )
+                        }
+                    }
+                }
+            } else {
+                if (distance != null) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.LocationOn, contentDescription = null, tint = if (isInsideGeofence) MadarTeal else MadarWarning)
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            if (isInsideGeofence) "أنت داخل نطاق الماكينة (على بُعد ${distance.toInt()}م)"
+                            else "أنت خارج نطاق الماكينة (على بُعد ${distance.toInt()}م · المسموح ${visit.geofenceRadiusMeters.toInt()}م)",
+                            fontWeight = FontWeight.SemiBold,
+                            color = if (isInsideGeofence) MadarTeal else MadarWarning,
+                            fontSize = 14.sp,
+                        )
+                    }
+                }
+
+                Button(
+                    onClick = { point?.let { onConfirmArrival(it) } },
+                    enabled = isInsideGeofence && !location.busy && point != null && !point.isMock,
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (isInsideGeofence) MadarTeal else MaterialTheme.colorScheme.surfaceVariant,
+                        contentColor = if (isInsideGeofence) Color.White else MadarMuted,
+                    ),
+                    shape = RoundedCornerShape(14.dp),
+                ) {
+                    Icon(Icons.Default.LocationOn, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        if (isInsideGeofence) "📍 أنا في الموقع (تأكيد الوصول)"
+                        else "اقترب من الماكينة لتأكيد الوصول (${distance?.toInt() ?: 0}م)",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp,
+                    )
+                }
+
+                if (!isInsideGeofence && distance != null) {
+                    OutlinedButton(
+                        onClick = onRequestLocationChange,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                    ) {
+                        Text("الماكينة نُقلت لمكان آخر؟ طلب تصحيح موقع", fontSize = 12.sp)
+                    }
+                }
+                if (onReportUnableToService != null) {
+                    TextButton(
+                        onClick = onReportUnableToService,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("تعذر إجراء الزيارة؟ إثبات العذر للمشرف", color = MadarDanger, fontSize = 12.sp)
+                    }
+                }
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (point != null) {
+                    Text(
+                        "دقة الإشارة: ±${point.accuracyMeters.toInt()}م · ${point.provider ?: "GPS"}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MadarMuted,
+                    )
+                }
+                TextButton(onClick = onRefreshLocation, enabled = !location.busy) {
+                    if (location.busy) CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+                    else {
+                        Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("تحديث GPS", fontSize = 12.sp)
+                    }
+                }
+            }
+            if (location.permissionDenied) {
+                Button(onClick = onRequestPermission, modifier = Modifier.fillMaxWidth()) {
+                    Text("منح إذن الموقع الجغرافي")
+                }
+            }
+        }
+    }
+}
+

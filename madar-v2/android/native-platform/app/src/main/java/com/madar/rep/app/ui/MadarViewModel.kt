@@ -514,14 +514,30 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
-    fun confirmArrival(visit: VisitEntity) {
+    fun confirmArrival(visit: VisitEntity, point: GeoPoint) {
+        val current = session.value ?: return
+        if (visit.state != VisitState.DRAFT) return
         viewModelScope.launch(Dispatchers.IO) {
-            val fix = container.locationProvider.lastKnown()
-                ?: (container.locationProvider.currentFix(5000L) as? LocationResult.Success)?.point
-            if (fix != null) {
-                applyLocationPoint(fix, "تم تأكيد الوصول إلى موقع الماكينة بنجاح.")
+            try {
+                if (point.isMock) {
+                    _messages.tryEmit("تم رفض تسجيل الوصول: تم اكتشاف أداة تزييف موقع (Mock GPS).")
+                    return@launch
+                }
+                container.visitRepository.saveForm(
+                    visit.visitUuid,
+                    VisitForm(
+                        condition = visit.machineCondition,
+                        reasons = decodeReasonIds(visit),
+                        lines = decodeLines(visit),
+                        notes = visit.notes,
+                    ),
+                    point
+                )
+                pingLocationOnForeground()
+                _messages.tryEmit("📍 تم تأكيد الوصول والتواجد عند الماكينة بنجاح.")
+            } catch (error: Exception) {
+                _messages.tryEmit(human(error))
             }
-            _messages.tryEmit("تم تأكيد وصولك إلى موقع الماكينة (${visit.machineCode}).")
         }
     }
 

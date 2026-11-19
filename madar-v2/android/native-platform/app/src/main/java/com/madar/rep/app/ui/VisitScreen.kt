@@ -1,10 +1,5 @@
 package com.madar.rep.app.ui
 
-import com.madar.rep.app.domain.fsm.VisitFsm
-import com.madar.rep.app.domain.fsm.VisitStep
-import com.madar.rep.app.ui.components.GeofencedArrivalCard
-import com.madar.rep.app.ui.components.UnableToServiceDialog
-import com.madar.rep.app.ui.components.VisitStepBar
 import android.Manifest
 import android.content.Intent
 import android.graphics.BitmapFactory
@@ -128,23 +123,12 @@ fun VisitScreen(
     var notes by remember(visitUuid) { mutableStateOf("") }
     var previewPhoto by remember(visitUuid) { mutableStateOf<PhotoEntity?>(null) }
     var showLocationChange by rememberSaveable(visitUuid) { mutableStateOf(false) }
-    var showBeforeOnlyDialog by rememberSaveable(visitUuid) { mutableStateOf(false) }
-    var manualArrivalConfirmed by rememberSaveable(visitUuid) { mutableStateOf(false) }
     var showUnableToServiceDialog by rememberSaveable(visitUuid) { mutableStateOf(false) }
-    var currentFsmStep by rememberSaveable(visitUuid) { mutableStateOf<VisitStep?>(null) }
+    var showBeforeOnlyDialog by rememberSaveable(visitUuid) { mutableStateOf(false) }
 
     val visit = detail?.visit
     val editable = visit?.state == VisitState.DRAFT
     val claimBlocked = visit != null && blockedCardId == visit.cardId
-
-    val allPhotos = remember(detail?.before, detail?.after) {
-        (detail?.before.orEmpty() + detail?.after.orEmpty())
-    }
-    val fsmState = remember(visit, allPhotos, location.point, manualArrivalConfirmed) {
-        if (visit == null) null
-        else VisitFsm.evaluate(visit, allPhotos, location.point, manualArrivalConfirmed)
-    }
-    val activeStep = currentFsmStep ?: fsmState?.currentStep ?: VisitStep.EN_ROUTE
 
     LaunchedEffect(detail?.visit?.visitUuid) {
         val loaded = detail?.visit ?: return@LaunchedEffect
@@ -271,13 +255,19 @@ fun VisitScreen(
                 MachineHeader(visit = detail!!.visit, badge = visitPill(detail!!.visit.state))
             }
 
-            if (editable) {
-                item {
-                    VisitStepBar(
-                        currentStep = activeStep,
-                        onStepClick = { currentFsmStep = it },
-                    )
+            item {
+                val currentVisit = detail!!.visit
+                val isArrived = (currentVisit.locationLocked && currentVisit.latitude != null && currentVisit.longitude != null) || !currentVisit.locationLocked
+                val beforeCount = detail!!.before.size
+                val afterCount = detail!!.after.size
+                val currentStep = when {
+                    !isArrived -> 1
+                    beforeCount == 0 -> 2
+                    condition != "working" && selectedReasons.isEmpty() -> 3
+                    afterCount == 0 -> 4
+                    else -> 5
                 }
+                VisitProgressStepper(currentStep = currentStep)
             }
 
             if (!editable) {
@@ -300,23 +290,24 @@ fun VisitScreen(
             }
 
             item {
+                val currentVisit = detail!!.visit
+                val isArrived = (currentVisit.locationLocked && currentVisit.latitude != null && currentVisit.longitude != null) || !currentVisit.locationLocked
                 GeofencedArrivalCard(
                     location = location,
-                    visit = detail!!.visit,
-                    isArrivalConfirmed = fsmState?.isArrivalConfirmed == true,
-                    approvingMachineLocation = machineLocationApprovalBusyId == detail!!.visit.cardId,
-                    onConfirmArrival = {
-                        manualArrivalConfirmed = true
-                        vm.confirmArrival(detail!!.visit)
+                    visit = currentVisit,
+                    isArrived = isArrived,
+                    approvingMachineLocation = machineLocationApprovalBusyId == currentVisit.cardId,
+                    onConfirmArrival = { point -> vm.confirmArrival(currentVisit, point) },
+                    onApproveMachine = {
+                        if (vm.hasLocationPermission()) vm.approveFirstMachineLocation(currentVisit)
+                        else permissionLauncher.launch(
+                            arrayOf(
+                                Manifest.permission.ACCESS_FINE_LOCATION,
+                                Manifest.permission.ACCESS_COARSE_LOCATION,
+                            )
+                        )
                     },
                     onRefreshLocation = { vm.refreshLocation() },
-                    onApproveMachineLocation = {
-                        if (vm.hasLocationPermission()) vm.approveFirstMachineLocation(detail!!.visit)
-                        else permissionLauncher.launch(arrayOf(
-                            Manifest.permission.ACCESS_FINE_LOCATION,
-                            Manifest.permission.ACCESS_COARSE_LOCATION,
-                        ))
-                    },
                     onRequestLocationChange = { showLocationChange = true },
                     onReportUnableToService = { showUnableToServiceDialog = true },
                     onRequestPermission = {
@@ -587,7 +578,7 @@ fun VisitScreen(
         LocationChangeDialog(vm = vm, visit = visit, onDismiss = { showLocationChange = false })
     }
     if (showUnableToServiceDialog && visit != null) {
-        UnableToServiceDialog(
+        com.madar.rep.app.ui.components.UnableToServiceDialog(
             visit = visit,
             onDismiss = { showUnableToServiceDialog = false },
             onSubmitException = { reasonCode, reasonLabel, exceptionNotes ->
