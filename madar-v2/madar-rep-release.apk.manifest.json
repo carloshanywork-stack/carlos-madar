@@ -1,12 +1,12 @@
 {
-  "sourceRevision": "74da99ae19f4d5c13e6c6d863eebfd24772c2ff9",
+  "sourceRevision": "761a2af832b966e6202b0dd90fe525bc94bf486e",
   "sourceTreeDirty": false,
-  "builtAt": "2026-11-19T08:27:14.480Z",
-  "versionCode": 29,
-  "versionName": "2.4.9",
+  "builtAt": "2026-11-19T11:00:45.000Z",
+  "versionCode": 30,
+  "versionName": "2.4.10",
   "buildType": "release",
   "serverUrl": "https://carlos-pc.tail852ef0.ts.net",
   "artifactOnly": false,
-  "apkSha256": "d4ba0351222e08227bba647a38bbf5e135f3428213a27dcec0d34cb93d0c4806",
+  "apkSha256": "ae684d55bd48cdb76d95df8939e9658420a42e22df3ef70e4af976b5bc1eb0cf",
   "signerCertificateSha256": "f4c8bffc9f852ea6056e350b65156eb880d05629991682492159b9e3937c02a1"
 }

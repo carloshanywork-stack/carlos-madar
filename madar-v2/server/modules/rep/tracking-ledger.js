@@ -100,6 +100,29 @@ export function recordAttendanceDuty(database, userId, action, occurredAt, locat
     database.prepare(`UPDATE rep_duty_sessions SET ended_at=?,end_location_json=?,updated_at=CURRENT_TIMESTAMP
       WHERE rep_user_id=? AND ended_at IS NULL AND julianday(started_at)<=julianday(?)`)
       .run(occurredAt, location ? JSON.stringify(location) : null, userId, occurredAt);
-    database.prepare('UPDATE users SET is_online = 0 WHERE id = ? AND role = \'rep\'').run(userId);
+    if (location && Number.isFinite(Number(location.latitude)) && Number.isFinite(Number(location.longitude))) {
+      const normalized = {
+        latitude: Number(location.latitude),
+        longitude: Number(location.longitude),
+        accuracy: Number(location.accuracy) || 10,
+        speed: Number(location.speed) || 0,
+        updatedAt: location.updatedAt || occurredAt,
+      };
+      database.prepare(`
+        UPDATE users SET is_online = 0,
+          last_location_json = CASE
+            WHEN last_location_json IS NULL OR datetime(json_extract(last_location_json, '$.updatedAt')) <= datetime(?)
+              THEN ? ELSE last_location_json END
+        WHERE id = ? AND role = 'rep' AND active = 1 AND deleted_at IS NULL
+      `).run(normalized.updatedAt, JSON.stringify(normalized), userId);
+      const workDate = (normalized.updatedAt || occurredAt).slice(0, 10);
+      database.prepare(`
+        INSERT OR IGNORE INTO rep_location_breadcrumbs
+          (user_id, duty_session_id, work_date, latitude, longitude, accuracy, speed, recorded_at)
+        VALUES (?, NULL, ?, ?, ?, ?, ?, ?)
+      `).run(userId, workDate, normalized.latitude, normalized.longitude, normalized.accuracy, normalized.speed, normalized.updatedAt);
+    } else {
+      database.prepare('UPDATE users SET is_online = 0 WHERE id = ? AND role = \'rep\'').run(userId);
+    }
   }
 }

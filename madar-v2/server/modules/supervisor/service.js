@@ -177,6 +177,12 @@ export function getSupervisorRadar(database = defaultDatabase, now = new Date())
       } else {
         status = 'stationary';
       }
+    } else if (recentPending) {
+      status = 'onsite';
+    } else if (rep.is_online && staleMs <= 10 * 60 * 1000) {
+      status = 'active';
+    } else if (rep.is_online && staleMs <= 30 * 60 * 1000) {
+      status = 'stationary';
     }
     const trail = points.map((point) => ({
       latitude: Number(point.latitude), longitude: Number(point.longitude), accuracy: Number(point.accuracy), updatedAt: point.captured_at,

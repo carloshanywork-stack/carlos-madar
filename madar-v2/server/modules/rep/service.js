@@ -399,6 +399,7 @@ export function claimRepMachineWork(rep, cardIdValue, input, database = db) {
       FROM machines WHERE id = ?
     `).get(card.machineId);
     validateMachineGeofence(machine, location);
+    recordRepLocationSignal(database, rep.id, location);
     const previous = database.prepare('SELECT * FROM rep_machine_work_leases WHERE card_id = ?').get(cardId);
     const now = Date.now();
     if (previous && previous.expires_at_ms > now) {
@@ -915,6 +916,7 @@ export function confirmRepMachineLocation(rep, machineId, input, database = db) 
       JSON.stringify(location), location.updatedAt,
     );
     const correctionId = Number(result.lastInsertRowid);
+    recordRepLocationSignal(database, rep.id, location);
     const locked = database.prepare(`UPDATE machines SET latitude = ?, longitude = ?, is_location_locked = 1,
       geofence_radius_meters = 50, area_name = COALESCE(NULLIF(trim(area_name), ''), area)
       WHERE id = ? AND is_location_locked = 0 AND latitude IS NULL AND longitude IS NULL
@@ -1519,6 +1521,9 @@ function recordReceivedVisit(rep, visit, visitId, photoRows, database) {
         reason_codes: approvalReasons,
       },
     });
+    if (visit.location) {
+      recordRepLocationSignal(database, rep.id, visit.location, { insertBreadcrumb: false });
+    }
     const receivedVisit = findVisit(visit.visitUuid, database);
     const card = database.prepare(`
       SELECT before_photos_json, after_photos_json, notes FROM maintenance_cards
@@ -1751,6 +1756,60 @@ function refreshRepStops(userId, workDate, database) {
     }
   }
   return segments.length;
+}
+
+export function recordRepLocationSignal(database, userId, rawLocation, { dutySessionId = null, insertBreadcrumb = false } = {}) {
+  if (!rawLocation || typeof rawLocation !== 'object') return null;
+  const latitude = Number(rawLocation.latitude);
+  const longitude = Number(rawLocation.longitude);
+  if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90
+      || !Number.isFinite(longitude) || longitude < -180 || longitude > 180) {
+    return null;
+  }
+  const accuracy = Number.isFinite(Number(rawLocation.accuracy)) && Number(rawLocation.accuracy) >= 0 ? Number(rawLocation.accuracy) : 10;
+  const speed = Number.isFinite(Number(rawLocation.speed)) && Number(rawLocation.speed) >= 0 ? Number(rawLocation.speed) : 0;
+  const rawTimestamp = rawLocation.updatedAt || rawLocation.captured_at || rawLocation.timestamp;
+  const updatedAt = rawTimestamp && !Number.isNaN(new Date(rawTimestamp).valueOf())
+    ? new Date(rawTimestamp).toISOString() : new Date().toISOString();
+  const normalized = {
+    clientPointId: rawLocation.clientPointId || null,
+    latitude,
+    longitude,
+    accuracy,
+    speed,
+    updatedAt,
+  };
+
+  database.prepare(`
+    UPDATE users SET is_online = 1,
+      last_location_json = CASE
+        WHEN last_location_json IS NULL OR datetime(json_extract(last_location_json, '$.updatedAt')) <= datetime(?)
+          THEN ? ELSE last_location_json END
+    WHERE id = ? AND role = 'rep' AND active = 1 AND deleted_at IS NULL
+  `).run(updatedAt, JSON.stringify(normalized), userId);
+
+  const openSession = database.prepare('SELECT id FROM rep_duty_sessions WHERE rep_user_id = ? AND ended_at IS NULL ORDER BY started_at DESC LIMIT 1').get(userId);
+  const sessionId = dutySessionId || openSession?.id || null;
+
+  if (insertBreadcrumb) {
+    const workDate = businessDate(updatedAt, database);
+    database.prepare(`
+      INSERT OR IGNORE INTO rep_location_breadcrumbs
+        (user_id, duty_session_id, work_date, latitude, longitude, accuracy, speed, recorded_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(userId, sessionId, workDate, latitude, longitude, accuracy, speed, updatedAt);
+
+    if (sessionId) {
+      persistTrackingPoint(database, userId, sessionId, workDate, normalized);
+    }
+  }
+
+  publishOperationsEvent('rep.tracking.updated', {
+    userId,
+    onDuty: Boolean(sessionId),
+  });
+
+  return { sessionId, location: normalized };
 }
 
 /** Persist duty state and idempotent GPS breadcrumbs reported by a representative device. */
