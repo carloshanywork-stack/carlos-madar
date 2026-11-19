@@ -76,7 +76,7 @@ class LocationProvider(private val context: Context) {
         if (providers.isEmpty()) return@withLock LocationResult.ProvidersDisabled
 
         val lastKnown = lastKnown()
-        if (lastKnown != null && !lastKnown.isApproximate) {
+        if (lastKnown != null && lastKnown.accuracyMeters <= 15f && lastKnown.isFresh(System.currentTimeMillis())) {
             return@withLock LocationResult.Success(lastKnown, gpsEnabled)
         }
 
@@ -98,9 +98,9 @@ class LocationProvider(private val context: Context) {
                 override fun onLocationChanged(location: Location) {
                     val candidate = location.toGeoPoint(location.provider ?: "unknown")
                     if (best == null || candidate.accuracyMeters < best!!.accuracyMeters) best = candidate
-                    if (candidate.accuracyMeters <= GeoPolicy.MAX_ACCURACY_METERS &&
-                        candidate.isFresh(System.currentTimeMillis())
-                    ) {
+                    val isHighAccuracy = candidate.accuracyMeters <= 15f
+                    val meetsPolicy = candidate.accuracyMeters <= GeoPolicy.MAX_ACCURACY_METERS
+                    if (candidate.isFresh(System.currentTimeMillis()) && (isHighAccuracy || (!gpsEnabled && meetsPolicy))) {
                         finish(LocationResult.Success(candidate, gpsEnabled))
                     }
                 }
