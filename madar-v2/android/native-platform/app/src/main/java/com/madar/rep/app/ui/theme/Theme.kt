@@ -22,6 +22,14 @@ val MadarDanger = Color(0xFFB3261E)
 val MadarWarning = Color(0xFF8A5A00)
 val MadarMuted = Color(0xFF5A6B7C)
 
+// Amazon Flex Operational Palette
+val FlexDarkHeader = Color(0xFF0F172A)
+val FlexAmazonOrange = Color(0xFFFF9900)
+val FlexGreenArrival = Color(0xFF007A3D)
+val FlexStopBadge = Color(0xFF1E293B)
+val FlexCardBorder = Color(0xFFE2E8F0)
+val FlexSurfaceCard = Color(0xFFFFFFFF)
+
 private val LightColors = lightColorScheme(
     primary = MadarTeal,
     onPrimary = Color.White,

@@ -12,8 +12,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AssignmentTurnedIn
@@ -21,8 +24,12 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.LocationOff
+import androidx.compose.material.icons.filled.Map
+import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -41,6 +48,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -51,6 +59,10 @@ import com.madar.rep.app.data.api.RouteResponse
 import com.madar.rep.app.data.db.VisitEntity
 import com.madar.rep.app.data.db.VisitState
 import com.madar.rep.app.data.repo.RouteView
+import com.madar.rep.app.ui.theme.FlexAmazonOrange
+import com.madar.rep.app.ui.theme.FlexDarkHeader
+import com.madar.rep.app.ui.theme.FlexGreenArrival
+import com.madar.rep.app.ui.theme.FlexStopBadge
 import com.madar.rep.app.ui.theme.MadarDanger
 import com.madar.rep.app.ui.theme.MadarGold
 import com.madar.rep.app.ui.theme.MadarInk
@@ -67,6 +79,7 @@ fun RouteScreen(
     onRefresh: () -> Unit,
     onOpenMachine: (RouteMachine) -> Unit,
     onOpenVisit: (VisitEntity) -> Unit,
+    onOpenMap: (() -> Unit)? = null,
 ) {
     var query by rememberSaveable { mutableStateOf("") }
     var expanded by rememberSaveable { mutableStateOf<Set<String>>(emptySet()) }
@@ -83,7 +96,7 @@ fun RouteScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item {
-            RouteSummaryCard(route, routeView?.fetchedAt, openVisits.size, loading, onRefresh)
+            RouteSummaryCard(route, routeView?.fetchedAt, openVisits.size, loading, onRefresh, onOpenMap)
         }
 
         if (routeView == null && loading) {
@@ -146,6 +159,7 @@ fun RouteScreen(
             }
         }
 
+        var globalStopIndex = 0
         regions.forEach { region ->
             val filtered = region.machines.filter { machine ->
                 query.isBlank() || listOf(
@@ -172,7 +186,9 @@ fun RouteScreen(
             if (isExpanded) {
                 items(filtered, key = { "machine-${it.cardId}" }) { machine ->
                     val localVisit = openVisits.firstOrNull { it.cardId == machine.cardId }
+                    val currentStop = globalStopIndex++
                     MachineCard(
+                        stopIndex = currentStop,
                         machine = machine,
                         localVisit = localVisit,
                         onClick = {
@@ -195,20 +211,22 @@ private fun RouteSummaryCard(
     localOpen: Int,
     loading: Boolean,
     onRefresh: () -> Unit,
+    onOpenMap: (() -> Unit)? = null,
 ) {
     val summary = route?.summary
     Surface(
         shape = RoundedCornerShape(20.dp),
-        color = MaterialTheme.colorScheme.primary,
+        color = FlexDarkHeader,
+        tonalElevation = 4.dp,
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("مسار اليوم", color = MaterialTheme.colorScheme.onPrimary, style = MaterialTheme.typography.titleLarge)
+                    Text("خط السير الميداني · اليوم", color = Color.White, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                     Text(
-                        if (fetchedAt != null) "آخر تحديث ${MadarTime.displayTime(fetchedAt)}" else "لم يُحمّل المسار بعد",
-                        color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.75f),
+                        if (fetchedAt != null) "آخر مزامنة ${MadarTime.displayTime(fetchedAt)}" else "جاري تحميل بيانات خط السير...",
+                        color = Color.White.copy(alpha = 0.7f),
                         fontSize = 12.sp,
                     )
                 }
@@ -216,50 +234,96 @@ private fun RouteSummaryCard(
                     CircularProgressIndicator(
                         modifier = Modifier.size(22.dp),
                         strokeWidth = 2.dp,
-                        color = MaterialTheme.colorScheme.onPrimary,
+                        color = FlexAmazonOrange,
                     )
                 } else {
                     IconButton(onClick = onRefresh) {
-                        Icon(Icons.Default.Refresh, contentDescription = "تحديث", tint = MaterialTheme.colorScheme.onPrimary)
+                        Icon(Icons.Default.Refresh, contentDescription = "تحديث", tint = Color.White)
                     }
                 }
             }
+
             if (summary != null) {
                 Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(
                         "${summary.completed}",
-                        color = MadarGold,
-                        fontSize = 34.sp,
-                        fontWeight = FontWeight.Bold,
+                        color = FlexAmazonOrange,
+                        fontSize = 36.sp,
+                        fontWeight = FontWeight.ExtraBold,
                     )
                     Text(
-                        "من ${summary.totalMachines} ماكينة",
-                        color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.85f),
+                        "من ${summary.totalMachines} محطة مكتملة",
+                        color = Color.White.copy(alpha = 0.85f),
                         modifier = Modifier.padding(bottom = 6.dp),
+                        fontWeight = FontWeight.SemiBold,
                     )
                     Spacer(Modifier.weight(1f))
                     Text(
                         "${summary.progress}%",
-                        color = MaterialTheme.colorScheme.onPrimary,
+                        color = FlexGreenArrival,
                         fontWeight = FontWeight.Bold,
+                        fontSize = 18.sp,
                         modifier = Modifier.padding(bottom = 6.dp),
                     )
                 }
                 LinearProgressIndicator(
                     progress = { (summary.progress.coerceIn(0, 100) / 100f) },
                     modifier = Modifier.fillMaxWidth().height(8.dp),
-                    color = MadarGold,
-                    trackColor = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.2f),
+                    color = FlexAmazonOrange,
+                    trackColor = Color.White.copy(alpha = 0.15f),
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                     SummaryChip("بانتظار التنفيذ", summary.pending.toString())
-                    SummaryChip("مراجعة", summary.pendingReview.toString())
-                    if (localOpen > 0) SummaryChip("محلي", localOpen.toString())
+                    SummaryChip("مراجعة المشرف", summary.pendingReview.toString())
+                    if (localOpen > 0) SummaryChip("مسودة محلية", localOpen.toString())
+                }
+
+                // Amazon Flex View Switcher Toggle (List / Map)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color.White.copy(alpha = 0.10f), RoundedCornerShape(12.dp))
+                        .padding(4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = FlexAmazonOrange,
+                        modifier = Modifier.weight(1f).height(38.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            Icon(Icons.Default.AssignmentTurnedIn, contentDescription = null, tint = Color.Black, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("قائمة المحطات", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        }
+                    }
+                    if (onOpenMap != null) {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = Color.Transparent,
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(38.dp)
+                                .clickable { onOpenMap() }
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Icon(Icons.Default.Map, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("عرض الخريطة", color = Color.White, fontWeight = FontWeight.Medium, fontSize = 13.sp)
+                            }
+                        }
+                    }
                 }
             } else {
                 Text(
                     "حدّث المسار بعد تسجيل الدخول لعرض مهام اليوم.",
-                    color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f),
+                    color = Color.White.copy(alpha = 0.8f),
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
@@ -304,53 +368,84 @@ private fun RegionHeader(name: String, count: Int, expanded: Boolean, onToggle: 
 }
 
 @Composable
-private fun MachineCard(machine: RouteMachine, localVisit: VisitEntity?, onClick: () -> Unit) {
+private fun MachineCard(stopIndex: Int, machine: RouteMachine, localVisit: VisitEntity?, onClick: () -> Unit) {
     val isDraft = localVisit != null && localVisit.state == VisitState.DRAFT
     val (status, tone) = when {
         isDraft -> "draft" to PillStyle(
-            MadarTeal.copy(alpha = 0.2f),
-            MadarTeal,
-            "مسودة مفتوحة - صور قبل الصيانة جاهزة"
+            Color(0xFFFEF3C7),
+            Color(0xFFD97706),
+            "مسودة مفتوحة · صور قبل جاهزة"
         )
         localVisit != null -> localVisit.state to visitPill(localVisit.state)
         machine.reviewStatus == "reshoot" -> "reshoot" to PillStyle(MadarDanger.copy(alpha = 0.12f), MadarDanger, "إعادة تصوير")
-        machine.isCompleted -> "done" to PillStyle(MadarTeal.copy(alpha = 0.14f), MadarTeal, "مكتملة")
+        machine.isCompleted -> "done" to PillStyle(Color(0xFFD1FAE5), FlexGreenArrival, "مكتملة")
         machine.isSubmitted -> "review" to PillStyle(MadarGold.copy(alpha = 0.2f), MadarWarning, "بانتظار المشرف")
         machine.correctionPending -> "correction" to PillStyle(MadarGold.copy(alpha = 0.2f), MadarWarning, "تصحيح معلّق")
-        machine.canVisit -> "open" to PillStyle(MadarTeal.copy(alpha = 0.1f), MadarTeal, "متاحة")
+        machine.canVisit -> "open" to PillStyle(MadarTeal.copy(alpha = 0.1f), MadarTeal, "متاحة للزيارة")
         else -> "blocked" to PillStyle(MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.colorScheme.onSurfaceVariant, "غير متاحة")
     }
     val enabled = localVisit != null || machine.canVisit
     Surface(
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(18.dp),
         color = MaterialTheme.colorScheme.surface,
-        tonalElevation = 1.dp,
+        tonalElevation = 2.dp,
+        border = androidx.compose.foundation.BorderStroke(1.dp, if (isDraft) Color(0xFFF59E0B) else if (machine.isCompleted) FlexGreenArrival.copy(alpha = 0.3f) else Color(0xFFE2E8F0)),
         modifier = Modifier.fillMaxWidth().clickable(enabled = enabled, onClick = onClick),
     ) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    machine.machineCode,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.weight(1f),
-                )
+                // Amazon Flex Stop Badge
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .background(
+                            if (machine.isCompleted) FlexGreenArrival else if (isDraft) Color(0xFFD97706) else FlexStopBadge,
+                            CircleShape
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (machine.isCompleted) {
+                        Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
+                    } else {
+                        Text(
+                            "${stopIndex + 1}",
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp,
+                        )
+                    }
+                }
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        machine.machineCode,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.ExtraBold,
+                    )
+                    Text(
+                        machine.arabicName ?: machine.machineCode,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
                 StatusPill(tone)
             }
-            Text(
-                machine.arabicName ?: machine.machineCode,
-                style = MaterialTheme.typography.bodyMedium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                listOf(machine.clientName, machine.areaName).filterNotNull().filter { it.isNotBlank() }
-                    .joinToString(" · ").ifBlank { machine.address.ifBlank { "بدون عنوان" } },
-                style = MaterialTheme.typography.bodySmall,
-                color = MadarMuted,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Place, contentDescription = null, tint = MadarMuted, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(4.dp))
+                Text(
+                    listOf(machine.clientName, machine.areaName).filterNotNull().filter { it.isNotBlank() }
+                        .joinToString(" · ").ifBlank { machine.address.ifBlank { "بدون عنوان محدد" } },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MadarMuted,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+
             if (machine.reviewNote != null && machine.reviewStatus == "reshoot") {
                 InlineMessage("ملاحظة المشرف: ${machine.reviewNote}", MessageTone.Warning)
             }
@@ -364,20 +459,28 @@ private fun MachineCard(machine: RouteMachine, localVisit: VisitEntity?, onClick
                     )
                 }
             }
-            if (!machine.canVisit && localVisit == null) {
-                Text(
-                    when {
-                        machine.isCompleted -> "تم اعتماد الزيارة بالفعل."
-                        machine.isSubmitted -> "الزيارة بانتظار مراجعة المشرف."
-                        machine.correctionPending -> "يوجد بلاغ تصحيح موقع معلّق."
-                        else -> "الماكينة قيد تنفيذ مندوب آخر أو خارج مسارك."
-                    },
-                    color = MadarMuted,
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
-            if (machine.workStatus == "in_progress" && machine.workOwnerId != null && localVisit == null) {
-                Text("قيد التنفيذ من مندوب آخر", color = MadarWarning, style = MaterialTheme.typography.bodySmall)
+
+            // High-Contrast Action CTA Button (Amazon Flex Style)
+            if (isDraft) {
+                Button(
+                    onClick = onClick,
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD97706)),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth().height(42.dp)
+                ) {
+                    Text("استكمال المسودة (محفوظة محلياً)", fontWeight = FontWeight.Bold, color = Color.White)
+                }
+            } else if (machine.canVisit) {
+                Button(
+                    onClick = onClick,
+                    colors = ButtonDefaults.buttonColors(containerColor = FlexGreenArrival),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth().height(42.dp)
+                ) {
+                    Text("بدء الزيارة الميدانية", fontWeight = FontWeight.Bold, color = Color.White)
+                }
+            } else if (machine.isCompleted) {
+                Text("تمت زيارة الماكينة واعتمادها بنجاح ✅", color = FlexGreenArrival, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodySmall)
             }
         }
     }
