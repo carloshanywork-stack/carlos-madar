@@ -747,10 +747,10 @@ export function syncRepAttendanceAction(userIdValue, input, database = db) {
   const occurredAtText = requireText(body.occurredAt, 'occurredAt', { maxLength: 64 });
   const occurredAtMilliseconds = Date.parse(occurredAtText);
   if (!Number.isFinite(occurredAtMilliseconds)) throw new HttpError(400, 'occurredAt must be a valid date and time.');
-  if (occurredAtMilliseconds > Date.now() + 15 * 60 * 1000) {
-    throw new HttpError(400, 'Attendance time cannot be more than fifteen minutes in the future.');
+  if (occurredAtMilliseconds > Date.now() + 5 * 60 * 1000) {
+    throw new HttpError(400, 'Attendance time cannot be more than five minutes in the future.');
   }
-  const occurredAt = new Date(Math.min(occurredAtMilliseconds, Date.now()));
+  const occurredAt = new Date(occurredAtMilliseconds);
   const location = body.location === undefined || body.location === null ? null : normalizeLocation(body.location);
   if (body.action === 'in' && !location) throw new HttpError(400, 'Clock-in requires a GPS fix.');
   const employee = employeeForRep(userId, database);

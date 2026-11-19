@@ -381,7 +381,7 @@ export function getRepTodayRoute(rep, database = db) {
 export function claimRepMachineWork(rep, cardIdValue, input, database = db) {
   const cardId = positiveId(cardIdValue, 'cardId');
   const body = requireObject(input, 'work claim');
-  allowOnlyKeys(body, ['visitUuid', 'location']);
+  allowOnlyKeys(body, ['visitUuid', 'location', 'reclaim']);
   const visitUuid = actionUuid(body.visitUuid, 'visitUuid');
   const location = normalizeRepLocation(body.location);
   const locationAgeMs = Date.now() - Date.parse(location.updatedAt);
@@ -409,6 +409,9 @@ export function claimRepMachineWork(rep, cardIdValue, input, database = db) {
         const completedOldVisit = database.prepare('SELECT id, status FROM rep_visits WHERE visit_uuid = ?').get(previous.visit_uuid);
         if (completedOldVisit && completedOldVisit.status === 'completed') {
           throw new HttpError(409, 'This machine already has a completed visit.');
+        }
+        if (body.reclaim !== true) {
+          throw new HttpError(409, 'You already have an active work lease on this machine with a different visit UUID.');
         }
       }
     }
