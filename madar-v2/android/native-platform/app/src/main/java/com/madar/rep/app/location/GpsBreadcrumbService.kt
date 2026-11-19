@@ -76,6 +76,11 @@ class GpsBreadcrumbService : Service() {
             if (manager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
                 manager.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 120_000L, 0f, callback, mainLooper)
             }
+            val initial = manager.getLastKnownLocation(LocationManager.GPS_PROVIDER)
+                ?: manager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
+            if (initial != null && !isMock(initial)) {
+                persist(initial)
+            }
         } catch (_: SecurityException) {
             stopSelf()
         }
