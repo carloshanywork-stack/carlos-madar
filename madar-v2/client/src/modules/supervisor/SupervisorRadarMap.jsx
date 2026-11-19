@@ -10,10 +10,28 @@ const STATUS = {
 };
 
 const TILE_PRESETS = {
+  googleHybrid: {
+    id: 'googleHybrid',
+    name: 'قمر صناعي تفصيلي (Google)',
+    icon: '🛰️',
+    url: 'https://mt{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
+    attribution: '&copy; Google Maps &mdash; Satellite & Streets',
+    maxZoom: 20,
+    subdomains: ['0', '1', '2', '3'],
+  },
+  googleStreets: {
+    id: 'googleStreets',
+    name: 'شوارع تفصيلية (Google)',
+    icon: '🗺️',
+    url: 'https://mt{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}',
+    attribution: '&copy; Google Maps',
+    maxZoom: 20,
+    subdomains: ['0', '1', '2', '3'],
+  },
   satellite: {
     id: 'satellite',
-    name: 'القمر الصناعي',
-    icon: '🛰️',
+    name: 'قمر صناعي (Esri)',
+    icon: '🌍',
     url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
     attribution: 'Tiles &copy; Esri &mdash; High-Resolution Satellite',
     maxZoom: 19,
@@ -21,15 +39,15 @@ const TILE_PRESETS = {
   },
   streets: {
     id: 'streets',
-    name: 'خريطة الشوارع',
-    icon: '🗺️',
+    name: 'خريطة الشوارع (OSM)',
+    icon: '🌐',
     url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors',
     maxZoom: 19,
   },
   carto: {
     id: 'carto',
-    name: 'خريطة مضيئة',
+    name: 'خريطة مضيئة (Carto)',
     icon: '🏢',
     url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
     attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
@@ -64,28 +82,60 @@ function formatSpeed(value) {
  * Filter out stationary GPS jitter from the polyline so it doesn't draw
  * an unreadable starburst of zigzag lines while the representative is at a stop.
  */
-function smoothPolyline(rawPoints) {
+function smoothPolyline(rawPoints, stops = []) {
   if (!rawPoints || rawPoints.length <= 2) return rawPoints || [];
-  const smoothed = [rawPoints[0]];
-  for (let i = 1; i < rawPoints.length; i += 1) {
-    const prev = smoothed[smoothed.length - 1];
-    const curr = rawPoints[i];
-    const lat1 = Number(prev.latitude);
-    const lon1 = Number(prev.longitude);
-    const lat2 = Number(curr.latitude);
-    const lon2 = Number(curr.longitude);
-    if (!Number.isFinite(lat1) || !Number.isFinite(lat2)) continue;
 
-    // Approximate distance in meters
-    const dLat = (lat2 - lat1) * 111139;
-    const dLon = (lon2 - lon1) * 111139 * Math.cos((lat1 * Math.PI) / 180);
+  const stopCentroids = (stops || [])
+    .map((s) => ({
+      lat: Number(s.latitude),
+      lng: Number(s.longitude),
+      start: s.arrivedAt ? new Date(s.arrivedAt).getTime() : 0,
+      end: s.departedAt ? new Date(s.departedAt).getTime() : Infinity,
+      anchored: false,
+    }))
+    .filter((s) => Number.isFinite(s.lat) && Number.isFinite(s.lng));
+
+  const smoothed = [];
+  let last = null;
+
+  for (let i = 0; i < rawPoints.length; i += 1) {
+    const curr = rawPoints[i];
+    const lat = Number(curr.latitude);
+    const lon = Number(curr.longitude);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+
+    const time = curr.capturedAt || curr.recordedAt || curr.timestamp ? new Date(curr.capturedAt || curr.recordedAt || curr.timestamp).getTime() : 0;
+    if (time > 0 && stopCentroids.length > 0) {
+      const match = stopCentroids.find((s) => time >= s.start && time <= s.end);
+      if (match) {
+        if (!match.anchored) {
+          match.anchored = true;
+          smoothed.push({ ...curr, latitude: match.lat, longitude: match.lng });
+          last = { latitude: match.lat, longitude: match.lng };
+        }
+        continue;
+      }
+    }
+
+    if (!last) {
+      smoothed.push(curr);
+      last = curr;
+      continue;
+    }
+
+    const lat1 = Number(last.latitude);
+    const lon1 = Number(last.longitude);
+    const dLat = (lat - lat1) * 111139;
+    const dLon = (lon - lon1) * 111139 * Math.cos((lat1 * Math.PI) / 180);
     const distMeters = Math.sqrt(dLat * dLat + dLon * dLon);
 
-    // If points are within 12 meters of each other, collapse them during a stop
-    if (distMeters >= 12 || i === rawPoints.length - 1) {
+    // Filter points < 15 meters to eliminate starburst micro-jitter loops during stationary stops
+    if (distMeters >= 15 || i === rawPoints.length - 1) {
       smoothed.push(curr);
+      last = curr;
     }
   }
+
   return smoothed;
 }
 
@@ -97,8 +147,13 @@ function createPrecisionRepMarkerHtml(rep, isSelected, offsetIndex = 0) {
   const pulseClass = rep.status === 'active' ? 'radar-pulse-anim' : '';
   const selectedClass = isSelected ? 'is-selected' : '';
 
-  // Lateral shift when multiple reps are at the same spot to prevent overlapping badges
-  const lateralShift = offsetIndex === 0 ? 0 : offsetIndex % 2 === 1 ? (Math.ceil(offsetIndex / 2) * 36) : (-Math.ceil(offsetIndex / 2) * 36);
+  // Stagger horizontally and vertically so multiple reps at the exact same location never overlap
+  const lateralShift = offsetIndex === 0
+    ? 0
+    : offsetIndex % 2 === 1
+      ? (Math.ceil(offsetIndex / 2) * 75)
+      : (-Math.ceil(offsetIndex / 2) * 75);
+  const verticalShift = offsetIndex * 24;
 
   return `
     <div class="radar-precision-rep-marker ${pulseClass} ${selectedClass}" style="--rep-color: ${status.color};">
@@ -108,9 +163,9 @@ function createPrecisionRepMarkerHtml(rep, isSelected, offsetIndex = 0) {
         <div class="reticle-dot"></div>
       </div>
 
-      <!-- Needle Pointer Stem (Connects target to badge) -->
-      <div class="radar-needle-stem" style="transform: translateX(${lateralShift}px);">
-        <div class="needle-line"></div>
+      <!-- Needle Pointer Stem (Connects target to badge with staggered offset) -->
+      <div class="radar-needle-stem" style="transform: translate(calc(-50% + ${lateralShift}px), -${verticalShift}px);">
+        <div class="needle-line" style="height: ${16 + verticalShift}px;"></div>
         <div class="radar-rep-pin-body">
           <div class="radar-rep-avatar">${(rep.fullName || 'م').slice(0, 1)}</div>
           <div class="radar-rep-pill">
@@ -132,13 +187,21 @@ function createStopMarkerHtml(stop) {
   `;
 }
 
+function formatMachineLabel(code) {
+  if (!code) return 'ماكينة';
+  if (code.length > 8) {
+    return `#${code.slice(0, 6)}…`;
+  }
+  return code;
+}
+
 function createMachineMarkerHtml(machine) {
   const isApproved = machine.reviewStatus === 'approved';
   const badgeColor = isApproved ? '#10b981' : '#f59e0b';
   return `
-    <div class="radar-leaflet-machine-marker" style="--machine-color: ${badgeColor};">
-      <div class="radar-machine-icon">م</div>
-      <div class="radar-machine-code">${machine.machineCode}</div>
+    <div class="radar-leaflet-machine-marker" style="--machine-color: ${badgeColor};" title="ماكينة: ${machine.machineCode}">
+      <div class="radar-machine-icon">⚙️</div>
+      <div class="radar-machine-code">${formatMachineLabel(machine.machineCode)}</div>
     </div>
   `;
 }
@@ -161,7 +224,7 @@ export default function SupervisorRadarMap({
   const isFirstFitRef = useRef(true);
   const addressCacheRef = useRef({});
 
-  const [activeTileType, setActiveTileType] = useState('satellite'); // Default: Satellite
+  const [activeTileType, setActiveTileType] = useState('googleHybrid'); // Default: Google Hybrid Satellite
   const [showLabelsOnSatellite, setShowLabelsOnSatellite] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [copyFeedback, setCopyFeedback] = useState('');
@@ -250,8 +313,8 @@ export default function SupervisorRadarMap({
     const defaultCenter = [30.0444, 31.2357];
     const map = L.map(mapContainerRef.current, {
       center: defaultCenter,
-      zoom: 13,
-      maxZoom: 19,
+      zoom: 14,
+      maxZoom: 20,
       zoomControl: false,
       attributionControl: false,
     });
@@ -266,7 +329,23 @@ export default function SupervisorRadarMap({
 
     mapInstanceRef.current = map;
 
+    // Invalidate size immediately and after mount/layout paint to prevent blank/white maps
+    map.invalidateSize();
+    const timer = setTimeout(() => {
+      map.invalidateSize();
+    }, 150);
+
+    let resizeObserver = null;
+    if (typeof ResizeObserver !== 'undefined' && mapContainerRef.current) {
+      resizeObserver = new ResizeObserver(() => {
+        map.invalidateSize();
+      });
+      resizeObserver.observe(mapContainerRef.current);
+    }
+
     return () => {
+      clearTimeout(timer);
+      if (resizeObserver) resizeObserver.disconnect();
       map.remove();
       mapInstanceRef.current = null;
     };
@@ -286,9 +365,9 @@ export default function SupervisorRadarMap({
       labelsLayerRef.current = null;
     }
 
-    const preset = TILE_PRESETS[activeTileType] || TILE_PRESETS.satellite;
+    const preset = TILE_PRESETS[activeTileType] || TILE_PRESETS.googleHybrid;
     const baseLayer = L.tileLayer(preset.url, {
-      maxZoom: preset.maxZoom || 19,
+      maxZoom: preset.maxZoom || 20,
       attribution: preset.attribution,
       subdomains: preset.subdomains || 'abc',
     });
@@ -337,14 +416,14 @@ export default function SupervisorRadarMap({
       const isSelected = selectedId !== null && Number(rep.id) === Number(selectedId);
       const status = STATUS[rep.status] ?? STATUS.offline;
 
-      // Subtle, non-intrusive Accuracy Ring
-      const displayRadius = Math.min(80, Math.max(12, rep.accuracy));
+      // Subtle, non-intrusive Accuracy Ring (max 25m, hairline border)
+      const displayRadius = Math.min(25, Math.max(8, rep.accuracy));
       const accuracyCircle = L.circle([rep.lat, rep.lng], {
         radius: displayRadius,
         color: status.color,
         fillColor: status.color,
-        fillOpacity: isSelected ? 0.12 : 0.05,
-        weight: 1.5,
+        fillOpacity: isSelected ? 0.08 : 0.03,
+        weight: 1,
         dashArray: '3, 4',
       });
       accuracyCircle.addTo(markersLayer);
@@ -458,7 +537,7 @@ export default function SupervisorRadarMap({
 
     // 1. Cleaned Polyline with Jitter Filtering
     const rawCoords = selectedRoute.polyline || [];
-    const cleanedCoords = smoothPolyline(rawCoords)
+    const cleanedCoords = smoothPolyline(rawCoords, selectedRoute.stops || [])
       .filter((p) => Number.isFinite(p.latitude) && Number.isFinite(p.longitude))
       .map((p) => [Number(p.latitude), Number(p.longitude)]);
 
@@ -467,9 +546,10 @@ export default function SupervisorRadarMap({
       L.polyline(cleanedCoords, {
         color: '#1e40af',
         weight: 6,
-        opacity: 0.4,
+        opacity: 0.35,
         lineCap: 'round',
         lineJoin: 'round',
+        smoothFactor: 2.0,
       }).addTo(routeLayer);
 
       // Main route polyline
@@ -479,6 +559,7 @@ export default function SupervisorRadarMap({
         opacity: 0.95,
         lineCap: 'round',
         lineJoin: 'round',
+        smoothFactor: 2.0,
       }).addTo(routeLayer);
     }
 
@@ -503,15 +584,15 @@ export default function SupervisorRadarMap({
       });
       stopMarker.addTo(stopsLayer);
 
-      // Heatmap circles: Focused & subtle (max 45m, not 250m!)
+      // Heatmap circles: Focused & subtle (max 35m, fillOpacity: 0.12 so streets remain clear!)
       if (showHeatmap) {
-        const radius = Math.min(45, Math.max(16, 12 + duration * 0.9));
+        const radius = Math.min(35, Math.max(14, 10 + duration * 0.6));
         const heatColor = duration >= 30 ? '#ef4444' : duration >= 10 ? '#f59e0b' : '#10b981';
         L.circle([lat, lng], {
           radius,
           color: heatColor,
           fillColor: heatColor,
-          fillOpacity: 0.22,
+          fillOpacity: 0.12,
           weight: 1,
         }).addTo(heatmapLayer);
       }
@@ -574,7 +655,7 @@ export default function SupervisorRadarMap({
               <b>{preset.name}</b>
             </button>
           ))}
-          {activeTileType === 'satellite' && (
+          {Boolean(TILE_PRESETS[activeTileType]?.labelsUrl) && (
             <label className="satellite-labels-toggle" title="إظهار أسماء الشوارع والمعالم على القمر الصناعي">
               <input
                 type="checkbox"

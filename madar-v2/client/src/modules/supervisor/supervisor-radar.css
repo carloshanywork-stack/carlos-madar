@@ -441,7 +441,6 @@
   align-items: center;
   pointer-events: auto;
   transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
-  margin-left: -50%;
 }
 
 .needle-line {
@@ -630,6 +629,10 @@
   font-family: Consolas, monospace;
   font-size: 9px;
   font-weight: 700;
+  max-width: 80px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Leaflet Popup Styling */
