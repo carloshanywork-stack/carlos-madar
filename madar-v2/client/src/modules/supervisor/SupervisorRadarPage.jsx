@@ -4,6 +4,11 @@ import { regionAccessLabel } from '../../lib/regions.js';
 import './supervisor-radar.css';
 import LocationReviews from './LocationReviews.jsx';
 import SupervisorRadarMap from './SupervisorRadarMap.jsx';
+import PageHeader from '../../components/ui/PageHeader.jsx';
+import Badge from '../../components/ui/Badge.jsx';
+import Button from '../../components/ui/Button.jsx';
+import Modal from '../../components/ui/Modal.jsx';
+import Alert from '../../components/ui/Alert.jsx';
 
 const STATUS = {
   active: { label: 'على المسار', color: '#168569' },
@@ -187,24 +192,26 @@ export default function SupervisorRadarPage() {
 
   return (
     <div className="supervisor-page" dir="rtl">
-      <header className="supervisor-page-head">
-        <div>
-          <span className="supervisor-eyebrow">FIELD OPERATIONS · SUPERVISOR</span>
-          <h1>رادار الإشراف الميداني</h1>
-          <p>متابعة إشارات الوردية ومراجعة صور الزيارات قبل اعتمادها للتقارير.</p>
-        </div>
-        <div className="supervisor-head-actions">
-          <a className="supervisor-export" href="/api/supervisor/reports/approved-visits.xlsx">تنزيل Excel المعتمد ↓</a>
-          <button className="supervisor-refresh" type="button" onClick={() => { setLoading(true); void refresh(); }}>تحديث الرادار ↻</button>
-        </div>
-      </header>
+      <PageHeader
+        kicker="FIELD OPERATIONS · SUPERVISOR"
+        title="رادار الإشراف الميداني"
+        description="متابعة إشارات الوردية ومراجعة صور الزيارات قبل اعتمادها للتقارير."
+        actions={
+          <div className="supervisor-head-actions">
+            <a className="supervisor-export" href="/api/supervisor/reports/approved-visits.xlsx">تنزيل Excel المعتمد ↓</a>
+            <Button variant="secondary" onClick={() => { setLoading(true); void refresh(); }}>تحديث الرادار ↻</Button>
+          </div>
+        }
+      />
 
-      {error && <div className="supervisor-alert" role="alert">{error}</div>}
-      {notice && <div className="supervisor-notice" role="status">✓ {notice}</div>}
-      {overdueAttendance.length > 0 && <div className="supervisor-overdue-warning" role="alert">
-        <strong>تنبيه انصراف متأخر</strong>
-        <span>{overdueAttendance.map((record) => `${record.name} · تجاوز موعد الانصراف بـ ${record.overdue_hours} ساعة`).join('　 |　 ')}</span>
-      </div>}
+      {error && <Alert tone="error">{error}</Alert>}
+      {notice && <Alert tone="success">{notice}</Alert>}
+      {overdueAttendance.length > 0 && (
+        <Alert tone="warning">
+          <strong>تنبيه انصراف متأخر: </strong>
+          <span>{overdueAttendance.map((record) => `${record.name} · تجاوز موعد الانصراف بـ ${record.overdue_hours} ساعة`).join('　 |　 ')}</span>
+        </Alert>
+      )}
 
       <section className="supervisor-kpis" aria-label="ملخص الوردية">
         <article><span>المناديب المسجلون</span><strong>{representatives.length}</strong><small>إجمالي حسابات المناديب</small></article>
@@ -359,7 +366,7 @@ export default function SupervisorRadarPage() {
                 return <article className="qa-visit-card" key={visit.id}>
                 <div className="qa-visit-heading">
                   <div><span className="qa-machine-code" dir="ltr">{visit.machineCode}</span><h3>{visit.machineName}</h3><p>{visit.regionName} · {visit.orderCode}</p></div>
-                  <div className="qa-visit-selection"><label><input type="checkbox" checked={selectedBulkIds.has(Number(visit.id))} onChange={(event) => setSelectedBulkIds((current) => { const next = new Set(current); if (event.target.checked) next.add(Number(visit.id)); else next.delete(Number(visit.id)); return next; })} /> ضمن الاعتماد الجماعي</label><span className="qa-pending-badge">بانتظار الاعتماد</span></div>
+                  <div className="qa-visit-selection"><label><input type="checkbox" checked={selectedBulkIds.has(Number(visit.id))} onChange={(event) => setSelectedBulkIds((current) => { const next = new Set(current); if (event.target.checked) next.add(Number(visit.id)); else next.delete(Number(visit.id)); return next; })} /> ضمن الاعتماد الجماعي</label><Badge tone="warning">بانتظار الاعتماد</Badge></div>
                 </div>
                 <div className="qa-photo-pair">
                   {beforePhotos.map((photo, index) => <button key={`before-${index}`} type="button" onClick={() => setSelectedVisit({ ...visit, zoomPhoto: 'before', zoomPhotoIndex: index })} aria-label={`تكبير صورة قبل الصيانة ${index + 1}`}><img src={photo.thumbnailUrl || photo.url} loading="lazy" decoding="async" alt={`قبل الصيانة ${visit.machineCode} ${index + 1}`} /><span>قبل الصيانة · {index + 1} ↗</span></button>)}
@@ -399,8 +406,8 @@ export default function SupervisorRadarPage() {
                 {visit.notes && <p className="qa-rep-note"><strong>ملاحظة المندوب:</strong> {visit.notes}</p>}
                 <label className="qa-review-note"><span>ملاحظة المراجعة <small>مطلوبة عند طلب إعادة التصوير</small></span><textarea value={reviewNotes[visit.id] ?? ''} onChange={(event) => setReviewNotes((current) => ({ ...current, [visit.id]: event.target.value }))} placeholder="مثال: أعد تصوير اللوحة من زاوية أوضح مع إضاءة كافية" maxLength={1000} rows={2} /></label>
                 <div className="qa-actions">
-                  <button type="button" className="qa-approve" disabled={busyVisit === visit.id} onClick={() => void review(visit, 'approve')}>اعتماد الزيارة ✓</button>
-                  <button type="button" className="qa-reshoot" disabled={busyVisit === visit.id || !(reviewNotes[visit.id] ?? '').trim()} onClick={() => void review(visit, 'reshoot')}>طلب إعادة تصوير ↻</button>
+                  <Button variant="primary" className="qa-approve" disabled={busyVisit === visit.id} onClick={() => void review(visit, 'approve')}>اعتماد الزيارة ✓</Button>
+                  <Button variant="secondary" className="qa-reshoot" disabled={busyVisit === visit.id || !(reviewNotes[visit.id] ?? '').trim()} onClick={() => void review(visit, 'reshoot')}>طلب إعادة تصوير ↻</Button>
                 </div>
                 </article>;
               })}
@@ -410,20 +417,33 @@ export default function SupervisorRadarPage() {
         </section>
       </div>
 
-      {selectedVisit?.zoomPhoto && <div className="qa-zoom-backdrop" role="presentation" onClick={() => setSelectedVisit(null)}>
-        <section role="dialog" aria-modal="true" aria-label="تكبير صورة الزيارة" onClick={(event) => event.stopPropagation()}>
-          <header><strong>ماكينة {selectedVisit.machineCode} · {selectedVisit.zoomPhoto === 'before' ? 'قبل الصيانة' : 'بعد الصيانة'}</strong><button type="button" onClick={() => setSelectedVisit(null)} aria-label="إغلاق">×</button></header>
-          {(() => {
-            const photos = selectedVisit.zoomPhoto === 'before'
-              ? (selectedVisit.beforePhotos ?? (selectedVisit.beforePhotoUrl ? [{ url: selectedVisit.beforePhotoUrl }] : []))
-              : (selectedVisit.afterPhotos ?? (selectedVisit.afterPhotoUrl ? [{ url: selectedVisit.afterPhotoUrl }] : []));
-            const photo = photos[selectedVisit.zoomPhotoIndex ?? 0] ?? photos[0];
-            return photo
-              ? <><img src={photo.url} alt={`صورة ${selectedVisit.zoomPhoto} للماكينة ${selectedVisit.machineCode}`} /><small>{formatTime(photo.capturedAt)} · {selectedVisit.repName}</small></>
-              : <p className="qa-photo-missing">لا توجد صور بعد الصيانة؛ هذه المرحلة اختيارية.</p>;
-          })()}
-        </section>
-      </div>}
+      <Modal
+        open={Boolean(selectedVisit?.zoomPhoto)}
+        onClose={() => setSelectedVisit(null)}
+        wide
+        title={`ماكينة ${selectedVisit?.machineCode} · ${selectedVisit?.zoomPhoto === 'before' ? 'قبل الصيانة' : 'بعد الصيانة'}`}
+      >
+        {selectedVisit && (() => {
+          const photos = selectedVisit.zoomPhoto === 'before'
+            ? (selectedVisit.beforePhotos ?? (selectedVisit.beforePhotoUrl ? [{ url: selectedVisit.beforePhotoUrl }] : []))
+            : (selectedVisit.afterPhotos ?? (selectedVisit.afterPhotoUrl ? [{ url: selectedVisit.afterPhotoUrl }] : []));
+          const photo = photos[selectedVisit.zoomPhotoIndex ?? 0] ?? photos[0];
+          return photo
+            ? (
+              <div style={{ textAlign: 'center' }}>
+                <img
+                  src={photo.url}
+                  alt={`صورة ${selectedVisit.zoomPhoto} للماكينة ${selectedVisit.machineCode}`}
+                  style={{ width: '100%', maxHeight: 'calc(85vh - 120px)', objectFit: 'contain', borderRadius: '8px', background: '#0b0f17' }}
+                />
+                <p style={{ marginTop: '8px', color: 'var(--madar-muted)', fontSize: '11px' }}>
+                  {formatTime(photo.capturedAt)} · {selectedVisit.repName}
+                </p>
+              </div>
+            )
+            : <p className="qa-photo-missing">لا توجد صور بعد الصيانة؛ هذه المرحلة اختيارية.</p>;
+        })()}
+      </Modal>
     </div>
   );
 }

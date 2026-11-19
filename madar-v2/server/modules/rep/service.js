@@ -1996,43 +1996,45 @@ export function syncRepLocationPing(rep, input, database = db) {
       ORDER BY attendance.work_date DESC, attendance.id DESC LIMIT 1
     `).get(rep.id);
 
-    const now = new Date().toISOString();
-    const startedAt = activeAttendance?.clock_in_time || now;
-    const pointLocation = body.location || (Array.isArray(body.trail) && body.trail[0]) || null;
-    const result = database.prepare(`
-      INSERT INTO rep_duty_sessions (rep_user_id, started_at, start_location_json)
-      VALUES (?, ?, ?)
-    `).run(rep.id, startedAt, pointLocation ? JSON.stringify(pointLocation) : null);
-    session = { id: Number(result.lastInsertRowid), started_at: startedAt };
+    if (activeAttendance) {
+      const now = new Date().toISOString();
+      const startedAt = activeAttendance.clock_in_time || now;
+      const pointLocation = body.location || (Array.isArray(body.trail) && body.trail[0]) || null;
+      const result = database.prepare(`
+        INSERT INTO rep_duty_sessions (rep_user_id, started_at, start_location_json)
+        VALUES (?, ?, ?)
+      `).run(rep.id, startedAt, pointLocation ? JSON.stringify(pointLocation) : null);
+      session = { id: Number(result.lastInsertRowid), started_at: startedAt };
 
-    const emp = database.prepare('SELECT id FROM employees WHERE user_id=?').get(rep.id);
-    if (emp) {
-      const today = startedAt.slice(0, 10);
-      const existingAtt = database.prepare('SELECT id FROM employee_daily_attendance WHERE employee_id=? AND work_date=?').get(emp.id, today);
-      if (!existingAtt) {
-        database.prepare(`INSERT INTO employee_daily_attendance
-          (employee_id, work_date, status, overtime_hours, notes, clock_in_time, clock_in_source,
-           clock_in_lat, clock_in_lng, clock_in_accuracy, clock_in_location_at,
-           clock_out_time, clock_out_source, total_hours, regular_hours,
-           overtime_status, overtime_approved_by, clock_in_biometric_verified, clock_out_biometric_verified)
-          VALUES (?, ?, 'present', 0, 'Auto GPS (App)', ?, 'app', ?, ?, ?, ?, NULL, NULL, 0, 0, 'none', NULL, 1, 0)
-          ON CONFLICT(employee_id, work_date) DO UPDATE SET
-            status = 'present',
-            clock_in_time = COALESCE(employee_daily_attendance.clock_in_time, excluded.clock_in_time)`).run(
-          emp.id, today, startedAt,
-          pointLocation?.latitude ?? null, pointLocation?.longitude ?? null, pointLocation?.accuracy ?? null, startedAt
-        );
+      const emp = database.prepare('SELECT id FROM employees WHERE user_id=?').get(rep.id);
+      if (emp) {
+        const today = startedAt.slice(0, 10);
+        const existingAtt = database.prepare('SELECT id FROM employee_daily_attendance WHERE employee_id=? AND work_date=?').get(emp.id, today);
+        if (!existingAtt) {
+          database.prepare(`INSERT INTO employee_daily_attendance
+            (employee_id, work_date, status, overtime_hours, notes, clock_in_time, clock_in_source,
+             clock_in_lat, clock_in_lng, clock_in_accuracy, clock_in_location_at,
+             clock_out_time, clock_out_source, total_hours, regular_hours,
+             overtime_status, overtime_approved_by, clock_in_biometric_verified, clock_out_biometric_verified)
+            VALUES (?, ?, 'present', 0, 'Auto GPS (App)', ?, 'app', ?, ?, ?, ?, NULL, NULL, 0, 0, 'none', NULL, 1, 0)
+            ON CONFLICT(employee_id, work_date) DO UPDATE SET
+              status = 'present',
+              clock_in_time = COALESCE(employee_daily_attendance.clock_in_time, excluded.clock_in_time)`).run(
+            emp.id, today, startedAt,
+            pointLocation?.latitude ?? null, pointLocation?.longitude ?? null, pointLocation?.accuracy ?? null, startedAt
+          );
+        }
       }
-    }
 
-    recordAudit({
-      database,
-      actorId: rep.id,
-      action: 'start_duty',
-      entityType: 'rep_duty_session',
-      entityId: session.id,
-      newValues: { started_at: startedAt, auto_healed: true, from_gps: true },
-    });
+      recordAudit({
+        database,
+        actorId: rep.id,
+        action: 'start_duty',
+        entityType: 'rep_duty_session',
+        entityId: session.id,
+        newValues: { started_at: startedAt, auto_healed: true, from_gps: true },
+      });
+    }
   }
 
   return syncRepTracking(rep, { ...body, onDuty: Boolean(session) }, database, { transitionDuty: false });

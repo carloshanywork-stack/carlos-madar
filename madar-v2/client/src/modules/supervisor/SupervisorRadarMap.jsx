@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import { smoothPolyline } from './trajectory-smoothing.js';
 
 const STATUS = {
   active: { label: 'على المسار', color: '#10b981', bg: '#ecfdf5', text: '#065f46' },
@@ -78,66 +79,6 @@ function formatSpeed(value) {
   return typeof value === 'number' && Number.isFinite(value) ? `${value.toFixed(1)} كم/س` : '0 كم/س';
 }
 
-/**
- * Filter out stationary GPS jitter from the polyline so it doesn't draw
- * an unreadable starburst of zigzag lines while the representative is at a stop.
- */
-function smoothPolyline(rawPoints, stops = []) {
-  if (!rawPoints || rawPoints.length <= 2) return rawPoints || [];
-
-  const stopCentroids = (stops || [])
-    .map((s) => ({
-      lat: Number(s.latitude),
-      lng: Number(s.longitude),
-      start: s.arrivedAt ? new Date(s.arrivedAt).getTime() : 0,
-      end: s.departedAt ? new Date(s.departedAt).getTime() : Infinity,
-      anchored: false,
-    }))
-    .filter((s) => Number.isFinite(s.lat) && Number.isFinite(s.lng));
-
-  const smoothed = [];
-  let last = null;
-
-  for (let i = 0; i < rawPoints.length; i += 1) {
-    const curr = rawPoints[i];
-    const lat = Number(curr.latitude);
-    const lon = Number(curr.longitude);
-    if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
-
-    const time = curr.capturedAt || curr.recordedAt || curr.timestamp ? new Date(curr.capturedAt || curr.recordedAt || curr.timestamp).getTime() : 0;
-    if (time > 0 && stopCentroids.length > 0) {
-      const match = stopCentroids.find((s) => time >= s.start && time <= s.end);
-      if (match) {
-        if (!match.anchored) {
-          match.anchored = true;
-          smoothed.push({ ...curr, latitude: match.lat, longitude: match.lng });
-          last = { latitude: match.lat, longitude: match.lng };
-        }
-        continue;
-      }
-    }
-
-    if (!last) {
-      smoothed.push(curr);
-      last = curr;
-      continue;
-    }
-
-    const lat1 = Number(last.latitude);
-    const lon1 = Number(last.longitude);
-    const dLat = (lat - lat1) * 111139;
-    const dLon = (lon - lon1) * 111139 * Math.cos((lat1 * Math.PI) / 180);
-    const distMeters = Math.sqrt(dLat * dLat + dLon * dLon);
-
-    // Filter points < 15 meters to eliminate starburst micro-jitter loops during stationary stops
-    if (distMeters >= 15 || i === rawPoints.length - 1) {
-      smoothed.push(curr);
-      last = curr;
-    }
-  }
-
-  return smoothed;
-}
 
 /**
  * Creates high-precision HTML marker with a razor-sharp target needle and reticle
@@ -584,7 +525,7 @@ export default function SupervisorRadarMap({
       });
       stopMarker.addTo(stopsLayer);
 
-      // Heatmap circles: Focused & subtle (max 35m, fillOpacity: 0.12 so streets remain clear!)
+      // Heatmap circles: Focused & subtle (max 35m, fillOpacity: 0.04 per GIS standards so streets remain clear!)
       if (showHeatmap) {
         const radius = Math.min(35, Math.max(14, 10 + duration * 0.6));
         const heatColor = duration >= 30 ? '#ef4444' : duration >= 10 ? '#f59e0b' : '#10b981';
@@ -592,7 +533,7 @@ export default function SupervisorRadarMap({
           radius,
           color: heatColor,
           fillColor: heatColor,
-          fillOpacity: 0.12,
+          fillOpacity: 0.04,
           weight: 1,
         }).addTo(heatmapLayer);
       }

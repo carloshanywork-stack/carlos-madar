@@ -9,7 +9,7 @@ export function isFreshGpsFix(location, now = Date.now(), maxAgeMs = 2 * 60_000)
   return Number.isFinite(location?.latitude) && Number.isFinite(location?.longitude)
     && location.latitude >= -90 && location.latitude <= 90
     && location.longitude >= -180 && location.longitude <= 180
-    && Number.isFinite(location?.accuracy) && location.accuracy >= 0 && location.accuracy <= 100
+    && Number.isFinite(location?.accuracy) && location.accuracy >= 0 && location.accuracy <= 15
     && Number.isFinite(capturedAt) && capturedAt <= now + 30_000 && now - capturedAt <= maxAgeMs;
 }
 

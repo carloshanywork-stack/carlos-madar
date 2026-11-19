@@ -46,7 +46,9 @@ export function trackingSessionForPoint(database, userId, point) {
     ORDER BY attendance.work_date DESC, attendance.id DESC LIMIT 1
   `).get(userId);
 
-  const sessionStart = activeAttendance?.clock_in_time || point.updatedAt || new Date().toISOString();
+  if (!activeAttendance) return null;
+
+  const sessionStart = activeAttendance.clock_in_time || point.updatedAt || new Date().toISOString();
   const result = database.prepare('INSERT INTO rep_duty_sessions(rep_user_id, started_at) VALUES (?, ?)')
     .run(userId, sessionStart);
   const sessionId = Number(result.lastInsertRowid);

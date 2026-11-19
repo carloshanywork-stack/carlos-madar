@@ -4,9 +4,9 @@
   --rep-border: #cbd4dc;
   --rep-surface: #fff;
   --rep-canvas: #f1f4f5;
-  --rep-green: #126b57;
-  --rep-green-dark: #0b5142;
-  --rep-green-pale: #e3f1ec;
+  --rep-green: var(--madar-accent, #187b68);
+  --rep-green-dark: var(--madar-accent-strong, #116754);
+  --rep-green-pale: var(--madar-accent-pale, #e7f4ef);
   --rep-gold: #9a6813;
   min-height: 100vh;
   min-height: 100svh;
@@ -22,7 +22,7 @@
 
 #madar-app .rep-assignment-notice { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 12px 0 0; padding: 11px 15px; border: 1px solid #f0d58e; border-radius: 12px; color: #61490d; background: #fff5d9; font-size: 12px; font-weight: 700; }
 #madar-app .rep-assignment-notice b { color: #8a650a; }
-#madar-app .rep-assignment-notice button { width: 28px; height: 28px; border-radius: 8px; color: inherit; background: rgba(97,73,13,.08); cursor: pointer; font-size: 18px; }
+#madar-app .rep-assignment-notice button { width: 28px; height: 28px; border-radius: var(--madar-radius-sm, 8px); color: inherit; background: rgba(97,73,13,.08); cursor: pointer; font-size: 18px; }
 
 #madar-app .rep-app button { color: inherit; font-family: inherit; }
 #madar-app .rep-app button:focus-visible,
@@ -65,10 +65,10 @@
 #madar-app .rep-queue-count { display: flex; min-height: 38px; align-items: center; gap: 5px; padding: 0 10px; border: 1px solid #e5c878; border-radius: 11px; color: #624711; background: #fff8dc; cursor: pointer; font-size: 11px; }
 #madar-app .rep-queue-count b { display: grid; min-width: 20px; height: 20px; place-items: center; border-radius: 50%; color: #fff; background: #986a18; font-size: 10px; }
 #madar-app .rep-queue-count small { font-weight: 800; }
-#madar-app .rep-icon-button { display: grid; width: 38px; height: 38px; flex: 0 0 auto; place-items: center; border: 1px solid #cbd4dc; border-radius: 11px; color: #213a53; background: #fff; cursor: pointer; font-size: 23px; line-height: 1; }
+#madar-app .rep-icon-button { display: grid; width: 38px; height: 38px; flex: 0 0 auto; place-items: center; border: 1px solid #cbd4dc; border-radius: var(--madar-radius-md, 10px); color: #213a53; background: #fff; cursor: pointer; font-size: 23px; line-height: 1; }
 #madar-app .rep-icon-button:disabled { opacity: .56; }
 #madar-app .rep-refresh-button span { display: block; font-size: 26px; line-height: 1; }
-#madar-app .rep-logout-button { min-height: 38px; padding: 0 12px; border: 1px solid #d9c4c3; border-radius: 10px; color: #7b3435 !important; background: #fff; cursor: pointer; font-size: 11px; font-weight: 800; }
+#madar-app .rep-logout-button { min-height: 38px; padding: 0 12px; border: 1px solid #d9c4c3; border-radius: var(--madar-radius-md, 10px); color: #7b3435 !important; background: #fff; cursor: pointer; font-size: 11px; font-weight: 800; }
 #madar-app .rep-offline-banner { max-width: 1460px; margin: 14px auto -2px; padding: 11px 14px; border: 1px solid #e5c879; border-radius: 12px; color: #654809; background: #fff8df; font-size: 12px; font-weight: 750; }
 #madar-app .rep-attendance-card { display: flex; max-width: 1460px; min-height: 105px; align-items: center; justify-content: space-between; gap: 18px; margin: 18px auto 0; padding: 18px 21px; border: 1px solid #b8d4c7; border-radius: 16px; background: linear-gradient(120deg, #fff 0%, #edf7f1 100%); box-shadow: 0 8px 22px rgba(27, 72, 54, .07); }
 #madar-app .rep-attendance-summary { display: grid; gap: 5px; min-width: 0; }
@@ -98,15 +98,15 @@
 #madar-app .rep-overtime-state.done { border-color: #b8d7c8; background: #f3fbf7; }
 #madar-app .rep-overtime-state.rejected { border-color: #e3bcbc; background: #fff5f5; }
 #madar-app .rep-overtime-state.rejected b { color: #8a3d3d; }
-#madar-app .rep-overtime-state > button { min-height: 34px; padding: 0 12px; border: 1px solid #cdd9d4; border-radius: 8px; color: #3c5550; background: #fff; cursor: pointer; font: inherit; font-size: 10px; font-weight: 850; }
+#madar-app .rep-overtime-state > button { min-height: 34px; padding: 0 12px; border: 1px solid #cdd9d4; border-radius: var(--madar-radius-md, 10px); color: #3c5550; background: #fff; cursor: pointer; font: inherit; font-size: 10px; font-weight: 850; }
 #madar-app .rep-overtime-form { display: grid; gap: 9px; padding: 11px 12px; border: 1px solid #cddbd5; border-radius: 11px; background: #fff; }
 #madar-app .rep-overtime-form label { display: grid; gap: 5px; color: #31495b; font-size: 10px; font-weight: 850; }
-#madar-app .rep-overtime-form textarea { padding: 9px 10px; border: 1px solid #bfccd1; border-radius: 8px; color: #1c3548; background: #fff; font: inherit; font-size: 11px; resize: vertical; }
+#madar-app .rep-overtime-form textarea { padding: 9px 10px; border: 1px solid #bfccd1; border-radius: var(--madar-radius-sm, 8px); color: #1c3548; background: #fff; font: inherit; font-size: 11px; resize: vertical; }
 #madar-app .rep-overtime-form-actions { display: flex; flex-wrap: wrap; gap: 7px; }
-#madar-app .rep-overtime-form-actions button { min-height: 36px; padding: 0 13px; border: 1px solid #cdd9d4; border-radius: 8px; color: #3c5550; background: #f5f9f7; cursor: pointer; font: inherit; font-size: 10px; font-weight: 900; }
+#madar-app .rep-overtime-form-actions button { min-height: 36px; padding: 0 13px; border: 1px solid #cdd9d4; border-radius: var(--madar-radius-md, 10px); color: #3c5550; background: #f5f9f7; cursor: pointer; font: inherit; font-size: 10px; font-weight: 900; }
 #madar-app .rep-overtime-form-actions button[type="submit"] { border-color: #14805d; color: #fff; background: #14805d; }
 #madar-app .rep-overtime-form-actions button:disabled, #madar-app .rep-overtime-state > button:disabled { cursor: not-allowed; opacity: .55; }
-#madar-app .rep-overtime-open { min-height: 42px; border: 1px dashed #9dc5b4; border-radius: 10px; color: #126b51; background: #f2faf6; cursor: pointer; font: inherit; font-size: 11px; font-weight: 900; }
+#madar-app .rep-overtime-open { min-height: 42px; border: 1px dashed #9dc5b4; border-radius: var(--madar-radius-md, 10px); color: #126b51; background: #f2faf6; cursor: pointer; font: inherit; font-size: 11px; font-weight: 900; }
 #madar-app .rep-attendance-punch.overtime { background: #1b6fa8; box-shadow: 0 5px 12px rgba(27, 111, 168, .16); }
 
 #madar-app .rep-welcome-row { display: flex; max-width: 1460px; min-height: 190px; align-items: center; justify-content: space-between; gap: 30px; margin: 0 auto; padding: 32px 4px 24px; }
@@ -138,7 +138,7 @@
 #madar-app .rep-route-heading h2 { margin: 5px 0 0; color: #162b40; font-size: 21px; font-weight: 900; }
 #madar-app .rep-route-heading h2 small { margin-inline-start: 7px; color: #536270; font-size: 11px; font-weight: 700; }
 #madar-app .rep-route-heading-actions { display: flex; align-items: center; gap: 8px; }
-#madar-app .rep-map-toggle { min-height: 43px; flex: 0 0 auto; padding: 0 13px; border: 1px solid #b9d2c6; border-radius: 11px; color: #0e6049; background: #eaf5ef; cursor: pointer; font-size: 11px; font-weight: 900; white-space: nowrap; }
+#madar-app .rep-map-toggle { min-height: 43px; flex: 0 0 auto; padding: 0 13px; border: 1px solid #b9d2c6; border-radius: var(--madar-radius-md, 10px); color: #0e6049; background: #eaf5ef; cursor: pointer; font-size: 11px; font-weight: 900; white-space: nowrap; }
 #madar-app .rep-map-toggle.active { color: #fff; background: #116b54; }
 #madar-app .rep-search { display: flex; width: min(100%, 380px); min-height: 46px; align-items: center; gap: 9px; padding: 0 12px; border: 1px solid #c2cdd5; border-radius: 12px; color: #435768; background: #fff; box-shadow: 0 3px 10px rgba(30,53,73,.035); }
 #madar-app .rep-search > span { color: #2a6358; font-size: 26px; line-height: 1; }
@@ -147,9 +147,9 @@
 #madar-app[data-theme="dark"] .rep-search input[type="search"]:not([type="checkbox"]):not([type="radio"]):not([type="range"]) { color: #182e43; background-color: transparent; }
 #madar-app[data-theme="dark"] .rep-search input::placeholder { color: #586876; opacity: 1; }
 #madar-app .rep-search input::placeholder { color: #586876; opacity: 1; }
-#madar-app .rep-search button { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 7px; color: #3e5262; background: #edf1f2; cursor: pointer; font-size: 19px; }
+#madar-app .rep-search button { display: grid; width: 28px; height: 28px; place-items: center; border-radius: var(--madar-radius-sm, 8px); color: #3e5262; background: #edf1f2; cursor: pointer; font-size: 19px; }
 #madar-app .rep-route-filters { display: flex; gap: 7px; margin: 0 0 13px; overflow-x: auto; }
-#madar-app .rep-route-filters button { display: inline-flex; min-height: 37px; flex: 0 0 auto; align-items: center; gap: 8px; padding: 0 12px; border: 1px solid #c6d2d8; border-radius: 999px; color: #405565; background: #fff; cursor: pointer; font-size: 10px; font-weight: 800; }
+#madar-app .rep-route-filters button { display: inline-flex; min-height: 37px; flex: 0 0 auto; align-items: center; gap: 8px; padding: 0 12px; border: 1px solid #c6d2d8; border-radius: var(--madar-radius-full, 999px); color: #405565; background: #fff; cursor: pointer; font-size: 10px; font-weight: 800; }
 #madar-app .rep-route-filters button.active { border-color: #438e76; color: #0d5d47; background: #e8f4ee; }
 #madar-app .rep-route-filters b { display: grid; min-width: 20px; height: 20px; place-items: center; border-radius: 50%; color: #3d5360; background: #edf1f2; font-size: 9px; }
 #madar-app .rep-route-filters button.active b { color: #fff; background: #197258; }
@@ -204,7 +204,7 @@
 #madar-app .rep-map-network.online { border-color: #add2c2; color: #125d47; background: #ebf6f0; }
 #madar-app .rep-map-pack-row { display: flex; align-items: end; gap: 10px; }
 #madar-app .rep-map-pack-row > label { display: grid; min-width: min(100%, 250px); gap: 5px; color: #31495b; font-size: 10px; font-weight: 850; }
-#madar-app .rep-map-pack-row select { min-height: 41px; padding: 0 10px; border: 1px solid #bfccd1; border-radius: 9px; color: #1c3548; background: #fff; font: inherit; }
+#madar-app .rep-map-pack-row select { min-height: 41px; padding: 0 10px; border: 1px solid #bfccd1; border-radius: var(--madar-radius-sm, 8px); color: #1c3548; background: #fff; font: inherit; }
 #madar-app .rep-map-pack-actions { display: flex; flex-wrap: wrap; gap: 7px; }
 #madar-app .rep-map-pack-actions .rep-button { min-height: 40px; padding-inline: 11px; font-size: 10px; }
 #madar-app .rep-map-progress { height: 9px; overflow: hidden; border: 1px solid #c8d4d7; border-radius: 99px; background: #e5ebeb; }
@@ -215,10 +215,10 @@
 #madar-app .rep-map-provisioning strong { color: #60490f; font-size: 11px; }
 #madar-app .rep-map-error { border-color: #e3b7b7; color: #803c3b; background: #fff1f1; }
 #madar-app .rep-map-disclaimer { border: 0; padding: 0 2px; color: #586a71; background: transparent; }
-#madar-app .rep-map-provider-tabs { display: inline-flex; justify-self: start; gap: 5px; padding: 4px; border: 1px solid #cddad4; border-radius: 11px; background: #fff; }
-#madar-app .rep-map-provider-tabs button { display: grid; gap: 2px; padding: 7px 13px; border: 0; border-radius: 8px; color: #43605a; background: transparent; cursor: pointer; font: inherit; text-align: right; }
+#madar-app .rep-map-provider-tabs { display: inline-flex; justify-self: start; gap: 5px; padding: 4px; border: 1px solid #cddad4; border-radius: var(--madar-radius-md, 10px); background: #fff; }
+#madar-app .rep-map-provider-tabs button { display: grid; gap: 2px; padding: 7px 13px; border: 0; border-radius: var(--madar-radius-sm, 8px); color: #43605a; background: transparent; cursor: pointer; font: inherit; text-align: right; }
 #madar-app .rep-map-provider-tabs button b { font-size: 11px; font-weight: 950; }
-#madar-app .rep-map-provider-tabs button small { font-size: 8px; font-weight: 750; opacity: .8; }
+#madar-app .rep-map-provider-tabs button small { font-size: var(--madar-text-2xs, 10px); font-weight: 750; opacity: .8; }
 #madar-app .rep-map-provider-tabs button.active { color: #fff; background: #126b51; }
 #madar-app .rep-map-provider-tabs button:disabled { cursor: not-allowed; opacity: .45; }
 #madar-app .rep-google-map-panel { display: grid; gap: 8px; }
@@ -227,7 +227,7 @@
 #madar-app .rep-google-map-canvas { position: relative; }
 #madar-app .rep-google-map-loading { position: absolute; inset: 0; display: grid; place-items: center; color: #3c5a51; background: #eef4f1; font-size: 12px; font-weight: 800; }
 #madar-app .rep-google-map-chips { display: flex; gap: 7px; overflow-x: auto; padding-bottom: 3px; }
-#madar-app .rep-google-map-chips button { display: grid; flex: 0 0 auto; gap: 1px; min-width: 110px; padding: 8px 11px; border: 1px solid #cbd8d2; border-radius: 9px; color: #2c4a41; background: #fff; cursor: pointer; font: inherit; text-align: right; }
+#madar-app .rep-google-map-chips button { display: grid; flex: 0 0 auto; gap: 1px; min-width: 110px; padding: 8px 11px; border: 1px solid #cbd8d2; border-radius: var(--madar-radius-md, 10px); color: #2c4a41; background: #fff; cursor: pointer; font: inherit; text-align: right; }
 #madar-app .rep-google-map-chips button b { direction: ltr; font-size: 11px; }
 #madar-app .rep-google-map-chips button small { color: #62766f; font-size: 9px; }
 #madar-app .rep-google-map-chips button.active { border-color: #147a5b; background: #ecf8f2; }
@@ -238,7 +238,7 @@
 #madar-app .rep-offline-map-toolbar strong { color: #173548; font-size: 12px; }
 #madar-app .rep-offline-map-toolbar small { color: #52656d; font-size: 9px; }
 #madar-app .rep-offline-map-toolbar > div { display: flex; align-items: center; gap: 5px; }
-#madar-app .rep-offline-map-toolbar button { min-width: 34px; min-height: 34px; padding: 0 8px; border: 1px solid #c5d1d4; border-radius: 8px; color: #1e4250; background: #fff; cursor: pointer; font-size: 12px; font-weight: 850; }
+#madar-app .rep-offline-map-toolbar button { min-width: 34px; min-height: 34px; padding: 0 8px; border: 1px solid #c5d1d4; border-radius: var(--madar-radius-sm, 8px); color: #1e4250; background: #fff; cursor: pointer; font-size: 12px; font-weight: 850; }
 #madar-app .rep-offline-map-toolbar button:disabled { opacity: .48; }
 #madar-app .rep-offline-map-toolbar button:last-child { padding-inline: 10px; font-size: 9px; }
 #madar-app .rep-offline-map-toolbar b { min-width: 24px; color: #264553; font-size: 10px; text-align: center; }
@@ -247,16 +247,16 @@
 #madar-app .rep-offline-map-canvas svg:active { cursor: grabbing; }
 #madar-app .rep-offline-map-canvas svg g[role="button"] { cursor: pointer; }
 #madar-app .rep-map-loading, #madar-app .rep-map-missing { position: absolute; inset: 12px 12px auto; width: fit-content; max-width: calc(100% - 24px); padding: 7px 9px; border: 1px solid #c7d3d3; border-radius: 8px; color: #314a55; background: rgba(255,255,255,.94); font-size: 9px; font-weight: 800; }
-#madar-app .rep-map-attribution { position: absolute; bottom: 7px; left: 7px; max-width: 85%; padding: 4px 6px; border-radius: 5px; color: #3c4e52; background: rgba(255,255,255,.88); font-size: 8px; }
+#madar-app .rep-map-attribution { position: absolute; bottom: 7px; left: 7px; max-width: 85%; padding: 4px 6px; border-radius: var(--madar-radius-sm, 8px); color: #3c4e52; background: rgba(255,255,255,.88); font-size: var(--madar-text-2xs, 10px); }
 #madar-app .rep-map-machine-popup { position: absolute; z-index: 2; right: 10px; bottom: 10px; display: grid; width: min(330px, calc(100% - 20px)); gap: 7px; padding: 14px; border: 1px solid #c9d8d4; border-radius: 13px; color: #18352e; background: rgba(255,255,255,.97); box-shadow: 0 10px 32px #102b2430; }
 #madar-app .rep-map-nearest-list, #madar-app .rep-map-needs-location { display: grid; gap: 7px; margin-top: 10px; padding: 12px; border: 1px solid #c9ddd5; border-radius: 12px; background: #f6faf8; }
 #madar-app .rep-map-nearest-list > strong, #madar-app .rep-map-needs-location > strong { color: #235744; font-size: 11px; font-weight: 950; }
 #madar-app .rep-map-needs-location { border-color: #ead7a8; background: #fffaf0; }
 #madar-app .rep-map-needs-location > strong { color: #80611c; }
 #madar-app .rep-map-nearest-list > small, #madar-app .rep-map-needs-location > small { color: #66766f; font-size: 9px; }
-#madar-app .rep-map-nearest-list > button, #madar-app .rep-map-needs-location > button { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; min-height: 38px; padding: 7px 9px; border: 1px solid #d7e2dd; border-radius: 8px; color: #29483d; background: #fff; cursor: pointer; text-align: start; font-size: 9px; }
+#madar-app .rep-map-nearest-list > button, #madar-app .rep-map-needs-location > button { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; min-height: 38px; padding: 7px 9px; border: 1px solid #d7e2dd; border-radius: var(--madar-radius-md, 10px); color: #29483d; background: #fff; cursor: pointer; text-align: start; font-size: 9px; }
 #madar-app .rep-map-nearest-list > button:disabled, #madar-app .rep-map-needs-location > button:disabled { cursor: not-allowed; opacity: .62; }
-#madar-app .rep-map-nearest-list > button small, #madar-app .rep-map-needs-location > button small { flex: 0 0 auto; color: #71847b; font-size: 8px; }
+#madar-app .rep-map-nearest-list > button small, #madar-app .rep-map-needs-location > button small { flex: 0 0 auto; color: #71847b; font-size: var(--madar-text-2xs, 10px); }
 #madar-app .rep-map-machine-popup > strong { padding-inline-end: 26px; font-size: 13px; }
 #madar-app .rep-map-machine-popup > small { color: #52645e; font-size: 10px; line-height: 1.6; }
 #madar-app .rep-map-machine-popup-close { position: absolute; top: 7px; left: 8px; width: 28px; height: 28px; border: 0; border-radius: 50%; color: #42534e; background: #edf3f0; font-size: 19px; cursor: pointer; }
@@ -272,10 +272,10 @@
 #madar-app .rep-map-legend i.gps-pin { border-color: #0875d1; background: #0875d1; }
 #madar-app .rep-map-legend small { margin-inline-start: auto; color: #5a6970; }
 
-#madar-app .rep-button { display: inline-flex; min-height: 42px; align-items: center; justify-content: center; gap: 8px; padding: 0 15px; border: 1px solid #cbd5da; border-radius: 11px; cursor: pointer; font-size: 12px; font-weight: 850; }
+#madar-app .rep-button { display: inline-flex; min-height: 42px; align-items: center; justify-content: center; gap: 8px; padding: 0 15px; border: 1px solid #cbd5da; border-radius: var(--madar-radius-md, 10px); cursor: pointer; font-size: 12px; font-weight: 850; }
 #madar-app .rep-button:disabled { opacity: .56; }
-#madar-app .rep-button-primary { border-color: #0d624d; color: #fff !important; background: #116b54; box-shadow: 0 4px 11px rgba(13,98,77,.13); }
-#madar-app .rep-button-primary:not(:disabled):hover { background: #0a5744; }
+#madar-app .rep-button-primary { border-color: var(--madar-accent-strong); color: #fff !important; background: var(--madar-accent); box-shadow: 0 4px 11px rgba(13,98,77,.13); }
+#madar-app .rep-button-primary:not(:disabled):hover { background: var(--madar-accent-strong); }
 #madar-app .rep-button-light { color: #253c50 !important; background: #fff; }
 #madar-app .rep-button-danger-light { border-color: #e2b9b8; color: #863a3c !important; background: #fff5f5; }
 #madar-app .rep-app-footer { display: flex; max-width: 1460px; justify-content: space-between; gap: 12px; margin: 35px auto 0; padding-top: 13px; border-top: 1px solid #cbd4da; color: #52616d; font-size: 10px; }
@@ -295,7 +295,7 @@
 #madar-app .rep-queue-list small { color: #586571; font-size: 9px; }
 #madar-app .rep-queue-list .rep-queue-error { color: #833e37; }
 #madar-app .rep-queue-local { color: #725517; font-size: 9px; font-weight: 850; white-space: nowrap; }
-#madar-app .rep-queue-retry { min-height: 32px; padding: 0 9px; border: 1px solid #bbcfbf; border-radius: 8px; color: #155b47 !important; background: #eff7f1; cursor: pointer; font-size: 9px; font-weight: 850; white-space: nowrap; }
+#madar-app .rep-queue-retry { min-height: 32px; padding: 0 9px; border: 1px solid #bbcfbf; border-radius: var(--madar-radius-sm, 8px); color: #155b47 !important; background: #eff7f1; cursor: pointer; font-size: 9px; font-weight: 850; white-space: nowrap; }
 #madar-app .rep-queue-retry:disabled { opacity: .55; }
 #madar-app .rep-sync-now { margin: 0 17px 15px; }
 
@@ -331,7 +331,7 @@
 #madar-app .rep-correction-form { display: grid; gap: 9px; margin-top: 10px; padding-top: 10px; border-top: 1px solid #e2e8e9; }
 #madar-app .rep-correction-form p { margin: 0; color: #4d5f67; font-size: 10px; line-height: 1.6; }
 #madar-app .rep-correction-form label { display: grid; gap: 4px; color: #304958; font-size: 10px; font-weight: 800; }
-#madar-app .rep-correction-form input:not([type="file"]), #madar-app .rep-correction-form textarea { width: 100%; min-height: 38px; padding: 8px 10px; border: 1px solid #c5d0d5; border-radius: 8px; color: #173246; background: #fff; font: inherit; }
+#madar-app .rep-correction-form input:not([type="file"]), #madar-app .rep-correction-form textarea { width: 100%; min-height: 38px; padding: 8px 10px; border: 1px solid #c5d0d5; border-radius: var(--madar-radius-sm, 8px); color: #173246; background: #fff; font: inherit; }
 #madar-app .rep-correction-form input[type="file"] { max-width: 100%; color: #415766; font-size: 10px; }
 #madar-app .rep-correction-form textarea { resize: vertical; }
 #madar-app .rep-correction-form .rep-button { justify-self: start; min-height: 39px; font-size: 10px; }
@@ -362,7 +362,7 @@
 #madar-app .rep-captured-pending-list li { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 8px; padding: 8px; border: 1px solid #e5d39c; border-radius: 9px; color: #604d1b; background: #fff9e9; font-size: 10px; }
 #madar-app .rep-captured-pending-list li > span { min-width: 0; overflow-wrap: anywhere; }
 #madar-app .rep-captured-pending-list .rep-button { min-height: 34px; flex: 0 0 auto; padding-inline: 9px; font-size: 9px; }
-#madar-app .rep-camera-button { display: flex; width: 100%; min-height: 140px; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px; border: 2px dashed #aabdc4; border-radius: 11px; color: #29475b !important; background: #f5f8f8; cursor: pointer; font-size: 11px; font-weight: 850; text-align: center; }
+#madar-app .rep-camera-button { display: flex; width: 100%; min-height: 140px; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px; border: 2px dashed #aabdc4; border-radius: var(--madar-radius-md, 10px); color: #29475b !important; background: #f5f8f8; cursor: pointer; font-size: 11px; font-weight: 850; text-align: center; }
 #madar-app .rep-camera-button:not(:disabled):hover { border-color: #428b73; background: #f0f8f4; }
 #madar-app .rep-camera-icon { display: grid; width: 44px; height: 44px; place-items: center; border: 1px solid #c6d9d0; border-radius: 50%; color: #12624d; background: #e7f3ed; font-size: 24px; }
 #madar-app .rep-photo-preview { display: grid; gap: 7px; }
@@ -373,7 +373,7 @@
 #madar-app .rep-watermark-note { margin: 9px 0 0; color: #4c5c68; font-size: 9px; line-height: 1.7; }
 #madar-app .rep-notes-field { display: grid; gap: 7px; margin-top: 19px; color: #203549; font-size: 11px; font-weight: 850; }
 #madar-app .rep-notes-field > span small { margin-inline-start: 4px; color: #52616d; font-weight: 600; }
-#madar-app .rep-notes-field textarea { width: 100%; min-height: 82px; resize: vertical; padding: 10px 12px; border: 1px solid #c4d0d6; border-radius: 10px; color: #1d3246; background: #fff; font-size: 12px; }
+#madar-app .rep-notes-field textarea { width: 100%; min-height: 82px; resize: vertical; padding: 10px 12px; border: 1px solid #c4d0d6; border-radius: var(--madar-radius-md, 10px); color: #1d3246; background: #fff; font-size: 12px; }
 #madar-app .rep-notes-field textarea::placeholder { color: #65737f; }
 #madar-app .rep-inline-error { margin: 12px 0 0; padding: 10px 12px; border: 1px solid #e3b7b7; border-radius: 9px; color: #803c3b; background: #fff1f1; font-size: 11px; }
 #madar-app .rep-sheet-footer { display: flex; flex: 0 0 auto; justify-content: space-between; gap: 10px; padding: 12px 17px max(12px, env(safe-area-inset-bottom)); border-top: 1px solid #d2dce0; background: #fff; }
@@ -524,14 +524,14 @@
 #madar-app .rep-support-dialog { width: min(100%, 600px); max-height: min(92dvh, 900px); overflow-y: auto; padding: 22px; border: 1px solid #d9e2e6; border-radius: 20px; background: #fff; color: #182d38; box-shadow: 0 24px 80px rgb(0 0 0 / 28%); }
 #madar-app .rep-support-dialog > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 #madar-app .rep-support-dialog h2 { margin: 3px 0; font-size: 22px; }
-#madar-app .rep-support-dialog > header button { width: 40px; height: 40px; border: 0; border-radius: 12px; background: #eef3f4; font-size: 24px; cursor: pointer; }
+#madar-app .rep-support-dialog > header button { width: 40px; height: 40px; border: 0; border-radius: var(--madar-radius-md, 10px); background: #eef3f4; font-size: 24px; cursor: pointer; }
 #madar-app .rep-support-dialog > p { color: #5b6c74; font-size: 13px; line-height: 1.8; }
 #madar-app .rep-support-dialog form { display: grid; gap: 13px; }
 #madar-app .rep-support-dialog label { display: grid; gap: 6px; font-size: 12px; font-weight: 700; }
-#madar-app .rep-support-dialog input, #madar-app .rep-support-dialog select, #madar-app .rep-support-dialog textarea { width: 100%; min-height: 42px; padding: 10px; border: 1px solid #cdd8dc; border-radius: 10px; background: #fff; color: #182d38; font: inherit; }
+#madar-app .rep-support-dialog input, #madar-app .rep-support-dialog select, #madar-app .rep-support-dialog textarea { width: 100%; min-height: 42px; padding: 10px; border: 1px solid #cdd8dc; border-radius: var(--madar-radius-md, 10px); background: #fff; color: #182d38; font: inherit; }
 #madar-app .rep-support-dialog textarea { resize: vertical; }
 #madar-app .rep-support-actions { display: flex; gap: 8px; justify-content: flex-start; }
-#madar-app .rep-support-actions button { min-height: 42px; padding: 0 15px; border: 1px solid #cdd8dc; border-radius: 10px; background: #eef3f4; font: inherit; font-weight: 700; cursor: pointer; }
+#madar-app .rep-support-actions button { min-height: 42px; padding: 0 15px; border: 1px solid #cdd8dc; border-radius: var(--madar-radius-md, 10px); background: #eef3f4; font: inherit; font-weight: 700; cursor: pointer; }
 #madar-app .rep-support-actions button[type="submit"] { border-color: #087968; background: #087968; color: #fff; }
 #madar-app .rep-support-actions button:disabled { opacity: .55; }
 #madar-app .rep-support-error { color: #a52f2f; }
