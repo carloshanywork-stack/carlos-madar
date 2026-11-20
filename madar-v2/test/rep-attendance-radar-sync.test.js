@@ -154,6 +154,14 @@ test('location-ping auto-heals duty session and accepts trail when rep has open 
     speed: 1.2,
     updatedAt: dateIso,
   };
+  const previousDayPoint = {
+    ...trackPoint, clientPointId: 'rep-102-old-point',
+    updatedAt: new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString(),
+  };
+  const oldPing = syncRepLocationPing({ id: 102, role: 'rep' }, { trail: [previousDayPoint] }, db);
+  assert.equal(oldPing.onDuty, false);
+  assert.equal(oldPing.points[0].reason, 'no_duty_session');
+
   const pingResult = syncRepLocationPing({ id: 102, role: 'rep' }, {
     onDuty: true,
     trail: [trackPoint],
@@ -167,6 +175,9 @@ test('location-ping auto-heals duty session and accepts trail when rep has open 
   // rep_duty_sessions must now have an active session
   const sessionAfter = db.prepare('SELECT id, ended_at FROM rep_duty_sessions WHERE rep_user_id = 102 AND ended_at IS NULL').get();
   assert.ok(sessionAfter, 'rep_duty_sessions must have auto-healed');
+  const attendanceRows = db.prepare(`SELECT clock_in_biometric_verified
+    FROM employee_daily_attendance WHERE employee_id = 202`).all();
+  assert.deepEqual(attendanceRows, [{ clock_in_biometric_verified: 0 }]);
 
   // users.last_location_json and is_online must be populated from trail
   const userRow = db.prepare('SELECT is_online, last_location_json FROM users WHERE id = 102').get();
@@ -215,7 +226,7 @@ test('admin clock-in for employee creates duty session for representative users'
   assert.equal(repOnRadar.onDuty, true);
 });
 
-test('location-ping auto-heals duty session and today attendance even when rep had NO prior attendance record at all', () => {
+test('location-ping without attendance cannot create payroll, biometric proof or duty', () => {
   const db = createTestDatabase();
   const now = new Date();
   const dateIso = now.toISOString();
@@ -241,29 +252,14 @@ test('location-ping auto-heals duty session and today attendance even when rep h
   };
   const pingResult = syncRepLocationPing({ id: 104, role: 'rep' }, {
     onDuty: true,
-    location: trackPoint,
     trail: [trackPoint],
   }, db);
 
-  assert.equal(pingResult.onDuty, true);
-  assert.equal(pingResult.acceptedPoints, 1);
-  assert.equal(pingResult.rejectedPoints, 0);
-
-  // Duty session must exist and be open
-  const dutySession = db.prepare('SELECT id, ended_at FROM rep_duty_sessions WHERE rep_user_id = 104 AND ended_at IS NULL').get();
-  assert.ok(dutySession, 'rep_duty_sessions must be auto-created');
-
-  // Attendance for employee must also be auto-recorded for today
-  const today = dateIso.slice(0, 10);
-  const attendance = db.prepare('SELECT id, clock_in_time, clock_in_source FROM employee_daily_attendance WHERE employee_id = 204 AND work_date = ?').get(today);
-  assert.ok(attendance, 'employee_daily_attendance must be auto-created for today');
-  assert.equal(attendance.clock_in_source, 'app');
-
-  // Supervisor radar must show rep onDuty and active
+  assert.equal(pingResult.onDuty, false);
+  assert.equal(pingResult.acceptedPoints, 0);
+  assert.equal(pingResult.points[0].reason, 'no_duty_session');
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM rep_duty_sessions WHERE rep_user_id = 104').get().n, 0);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM employee_daily_attendance WHERE employee_id = 204').get().n, 0);
   const radar = getSupervisorRadar(db, now);
-  const repOnRadar = radar.representatives.find((r) => r.id === 104);
-  assert.equal(repOnRadar.onDuty, true);
-  assert.equal(repOnRadar.status, 'active');
-  assert.equal(repOnRadar.lastLocation.latitude, 30.1234);
-  assert.equal(repOnRadar.lastLocation.longitude, 31.5678);
+  assert.equal(radar.representatives.find((rep) => rep.id === 104).onDuty, false);
 });

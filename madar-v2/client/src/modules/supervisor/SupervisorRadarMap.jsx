@@ -11,6 +11,17 @@ const STATUS = {
 };
 
 const TILE_PRESETS = {
+  localEgypt: {
+    id: 'localEgypt',
+    name: 'خريطة مصر من سيرفر MADAR',
+    icon: '🗺️',
+    url: '/api/supervisor/map/overview/{z}/{x}/{y}',
+    attribution: '&copy; OpenStreetMap contributors · MADAR',
+    maxZoom: 20,
+    maxNativeZoom: 11,
+    minNativeZoom: 5,
+    bounds: [[21.5, 24.5], [32.6, 37.3]],
+  },
   googleHybrid: {
     id: 'googleHybrid',
     name: 'قمر صناعي تفصيلي (Google)',
@@ -310,6 +321,9 @@ export default function SupervisorRadarMap({
     const baseLayer = L.tileLayer(preset.url, {
       maxZoom: preset.maxZoom || 20,
       attribution: preset.attribution,
+      maxNativeZoom: preset.maxNativeZoom,
+      minNativeZoom: preset.minNativeZoom,
+      bounds: preset.bounds,
       subdomains: preset.subdomains || 'abc',
     });
     baseLayer.addTo(map);

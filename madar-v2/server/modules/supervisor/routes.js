@@ -1,3 +1,4 @@
+import { readOfflineMapPackTile } from './offline-map-packs.js';
 import { Router } from 'express';
 import { readFile } from 'node:fs/promises';
 import { asyncHandler, HttpError } from '../http.js';
@@ -24,6 +25,18 @@ router.use((req, res, next) => {
     return;
   }
   next();
+});
+
+// Use the same verified national pack as the representative client.
+router.get('/map/overview/:z/:x/:y', (req, res, next) => {
+  try {
+    const tile = readOfflineMapPackTile('all-egypt', req.params.z, req.params.x, req.params.y);
+    if (!tile) return res.status(204).end();
+    return res.set({ 'Cache-Control': 'private, max-age=300', 'X-Content-Type-Options': 'nosniff',
+      'Content-Type': tile.contentType }).send(tile.data);
+  } catch (error) {
+    return next(error);
+  }
 });
 
 router.get('/map/status', (_req, res) => {

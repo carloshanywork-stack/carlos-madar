@@ -1,3 +1,4 @@
+import { enqueueOperationsEvent } from '../operations-events.js';
 import { recordAttendanceDuty } from '../rep/tracking-ledger.js';
 import { createHash } from 'node:crypto';
 import { db } from '../../database/connection.js';
@@ -804,6 +805,13 @@ export function syncRepAttendanceAction(userIdValue, input, database = db) {
         (action_uuid, rep_user_id, attendance_id, action, payload_sha256, occurred_at)
       VALUES (?, ?, ?, ?, ?, ?)
     `).run(actionUuid, userId, attendance.id, body.action, payloadHash, occurredAt.toISOString());
+    const details = { userId, employeeId: attendance.employee_id, workDate: attendance.work_date };
+    enqueueOperationsEvent('attendance.changed', { ...details, action: body.action }, database);
+    if (attendance.overtime_status === 'pending' && Number(attendance.overtime_hours) > 0) {
+      enqueueOperationsEvent('overtime.pending', {
+        ...details, employeeName: attendance.name, overtimeHours: Number(attendance.overtime_hours),
+      }, database);
+    }
     return { success: true, idempotent: false, actionUuid, attendance };
   }).immediate();
 }

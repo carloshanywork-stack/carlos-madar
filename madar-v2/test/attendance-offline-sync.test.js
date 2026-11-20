@@ -47,7 +47,7 @@ function punch(action, timestamp) {
 
 function effects() {
   return Object.fromEntries(['employee_daily_attendance', 'rep_attendance_sync_actions',
-    'audit_log', 'treasury_entries', 'payroll_runs'].map((table) => [table,
+    'audit_log', 'treasury_entries', 'payroll_runs', 'operations_event_outbox'].map((table) => [table,
     db.prepare(`SELECT * FROM ${table}`).all()]));
 }
 
@@ -65,6 +65,10 @@ test('configured half-hour policy accepts recent offline clock-in and clock-out'
   assert.equal(start.attendance.id, end.attendance.id);
   assert.equal(end.attendance.total_hours, 0.08);
   assert.equal(end.idempotent, false);
+  const intents = db.prepare(`SELECT payload_json FROM operations_event_outbox
+    WHERE event_type = 'attendance.changed'`).all().map((row) => JSON.parse(row.payload_json));
+  assert.deepEqual(intents.filter((intent) => intent.userId === rep.id).map((intent) => intent.action).sort(),
+    ['in', 'out']);
 });
 
 test('exact configured age is accepted but one millisecond older cannot write clock-in', () => {

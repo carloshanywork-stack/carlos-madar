@@ -216,21 +216,6 @@ router.post('/attendance/clock-out', (req, res) => {
 router.post('/attendance/sync', (req, res, next) => {
   try {
     const result = syncRepAttendanceAction(req.user.id, req.body);
-    if (!result.idempotent) publishOperationsEvent('attendance.changed', {
-      userId: req.user.id,
-      action: req.body.action,
-      employeeId: result.attendance.employee_id,
-      workDate: result.attendance.work_date,
-    });
-    if (!result.idempotent && result.attendance.overtime_status === 'pending' && Number(result.attendance.overtime_hours) > 0) {
-      publishOperationsEvent('overtime.pending', {
-        userId: req.user.id,
-        employeeId: result.attendance.employee_id,
-        employeeName: result.attendance.name,
-        workDate: result.attendance.work_date,
-        overtimeHours: Number(result.attendance.overtime_hours),
-      });
-    }
     res.set({ 'Cache-Control': 'private, no-store', Pragma: 'no-cache' });
     res.json(result);
   } catch (error) {
