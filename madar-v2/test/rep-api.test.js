@@ -1614,7 +1614,11 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   const approvedWorkbook = await fetch(`${baseUrl}/api/supervisor/reports/approved-visits.xlsx`, { headers: { cookie: adminCookie } });
   assert.equal(approvedWorkbook.status, 200);
   assert.match(approvedWorkbook.headers.get('content-type'), /spreadsheetml\.sheet/);
-  assert.equal(Buffer.from(await approvedWorkbook.arrayBuffer()).subarray(0, 2).toString(), 'PK');
+  const approvedReport = XLSX.read(Buffer.from(await approvedWorkbook.arrayBuffer()));
+  const approvedRows = XLSX.utils.sheet_to_json(approvedReport.Sheets[approvedReport.SheetNames[0]], { header: 1 });
+  const replacementRow = approvedRows.find((row) => row[1] === '1434' && row[9] === replacementPayload.notes);
+  assert.ok(replacementRow, 'the approved reshoot is included in the supervisor export');
+  assert.match(replacementRow[8], /العدد: 3/u, 'the approved visit retains the submitted quantity in Excel');
   const maintenancePptx = await fetch(`${baseUrl}/api/maintenance/orders/${orderId}/export.pptx?useFixedLogoOnCover=true`, { headers: { cookie: adminCookie } });
   assert.equal(maintenancePptx.status, 200);
   assert.match(maintenancePptx.headers.get('content-type'), /presentationml\.presentation/);

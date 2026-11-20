@@ -665,7 +665,7 @@ export function approveRepVisitsTogether(input, actorId, database = defaultDatab
 export function buildApprovedVisitsWorkbook(dayInput, database = defaultDatabase) {
   const range = dayRange(dayInput, database);
   const visits = database.prepare(`
-    SELECT visit.machine_code, machine.name_ar AS machine_name, visit.region_name,
+    SELECT visit.id, visit.machine_code, machine.name_ar AS machine_name, visit.region_name,
       visit.order_code, user.full_name AS rep_name, visit.captured_at,
       visit.before_captured_at, visit.after_captured_at, visit.reason_ids_json, visit.notes
     FROM rep_visits visit
