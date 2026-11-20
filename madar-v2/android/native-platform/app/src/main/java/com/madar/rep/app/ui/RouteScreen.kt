@@ -162,13 +162,15 @@ fun RouteScreen(
         var globalStopIndex = 0
         regions.forEach { region ->
             val filtered = region.machines.filter { machine ->
-                query.isBlank() || listOf(
-                    machine.machineCode,
-                    machine.arabicName.orEmpty(),
-                    machine.clientName.orEmpty(),
-                    machine.areaName,
-                    machine.address,
-                ).any { it.contains(query, ignoreCase = true) }
+                (machine.workOrderStatus == null || machine.workOrderStatus == "in_progress") && (
+                    query.isBlank() || listOf(
+                        machine.machineCode,
+                        machine.arabicName.orEmpty(),
+                        machine.clientName.orEmpty(),
+                        machine.areaName,
+                        machine.address,
+                    ).any { it.contains(query, ignoreCase = true) }
+                )
             }
             if (filtered.isEmpty()) return@forEach
             val isExpanded = query.isNotBlank() || region.regionName in expanded

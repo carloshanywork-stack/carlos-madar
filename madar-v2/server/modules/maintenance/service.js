@@ -5541,6 +5541,11 @@ export function transitionMaintenanceToReview(orderId, actorId = null, database 
     database.prepare(`
       UPDATE maintenance_orders SET status = 'review', updated_at = CURRENT_TIMESTAMP WHERE id = ?
     `).run(id);
+    database.prepare(`
+      DELETE FROM rep_machine_work_leases WHERE card_id IN (
+        SELECT id FROM maintenance_cards WHERE order_id = ?
+      )
+    `).run(id);
     recordAudit({
       database,
       actorId,
@@ -5596,6 +5601,11 @@ export function archiveMaintenanceOrder(orderId, input, actorId = null, database
         updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `).run(body.warrantyPeriodMonths, actualExpensesCents, refundCents, actorId, selectedMonth, id);
+    database.prepare(`
+      DELETE FROM rep_machine_work_leases WHERE card_id IN (
+        SELECT id FROM maintenance_cards WHERE order_id = ?
+      )
+    `).run(id);
     let treasuryEntryId = null;
     if (refundAdjustmentCents !== 0) {
       const isAdditionalRefund = refundAdjustmentCents > 0;

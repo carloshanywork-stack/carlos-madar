@@ -218,15 +218,10 @@ export function getRepTodayRoute(rep, database = db) {
       AND card.deleted_at IS NULL
       AND card.status != 'excluded'
       AND machine.active = 1 AND machine.deleted_at IS NULL
-      AND (
-        order_record.status IN ('in_progress', 'review')
-        OR (order_record.status = 'archived'
-          AND datetime(order_record.archived_at) >= datetime(?)
-          AND datetime(order_record.archived_at) < datetime(?))
-      )
+      AND order_record.status = 'in_progress'
     ORDER BY machine.area COLLATE NOCASE, machine.code COLLATE NOCASE,
       order_record.created_at DESC, order_record.id DESC, card.id DESC
-  `).all(rep.id, dayStart, dayEnd);
+  `).all(rep.id);
   const routeCardIds = [...new Set(cards.map((row) => Number(row.card_id)))];
   const routeCardPlaceholders = routeCardIds.map(() => '?').join(',');
 
@@ -667,7 +662,7 @@ function findRepVisitCard(rep, visit, database) {
     WHERE card.id = ? AND card.deleted_at IS NULL AND order_record.deleted_at IS NULL
   `).get(visit.cardId);
   if (!card || card.client_deleted_at || card.machine_deleted_at || !card.machine_active
-      || card.card_status === 'excluded' || card.order_status === 'archived') {
+      || card.card_status === 'excluded' || card.order_status === 'archived' || card.order_status === 'review') {
     throw new HttpError(409, 'This machine visit is no longer available on the active route.');
   }
   if (card.correction_pending) {
@@ -795,7 +790,7 @@ function findAssignedRepMachine(rep, machineId, cardId, database) {
   `).get(id, selectedCardId);
   if (!machine || machine.machine_active !== 1 || machine.machine_deleted_at !== null
       || machine.card_deleted_at !== null || machine.card_status === 'excluded'
-      || machine.order_deleted_at !== null || machine.order_status === 'archived' || machine.client_deleted_at !== null) {
+      || machine.order_deleted_at !== null || machine.order_status === 'archived' || machine.order_status === 'review' || machine.client_deleted_at !== null) {
     throw new HttpError(409, 'This machine is no longer available on the active route. Refresh the route and try again.');
   }
   if (machine.correction_pending) {
@@ -897,7 +892,7 @@ export function confirmRepMachineLocation(rep, machineId, input, database = db) 
       JOIN maintenance_orders order_record ON order_record.id = card.order_id
       WHERE assignment.order_id = ? AND assignment.user_id = ? AND card.id = ?
         AND card.machine_id = ? AND card.deleted_at IS NULL AND card.status != 'excluded'
-        AND order_record.deleted_at IS NULL AND order_record.status != 'archived'`).get(
+        AND order_record.deleted_at IS NULL AND order_record.status = 'in_progress'`).get(
       assignedMachine.order_id,
       rep.id, cardId, id,
     );
@@ -1312,7 +1307,7 @@ export async function submitRepMachineCorrection(rep, machineId, input, evidence
       JOIN maintenance_orders order_record ON order_record.id = card.order_id
       WHERE assignment.order_id = ? AND assignment.user_id = ? AND card.id = ?
         AND card.machine_id = ? AND card.deleted_at IS NULL AND card.status != 'excluded'
-        AND order_record.deleted_at IS NULL AND order_record.status != 'archived'`).get(
+        AND order_record.deleted_at IS NULL AND order_record.status = 'in_progress'`).get(
       machine.order_id, rep.id, cardId, id,
     );
     if (!assignmentStillActive) throw new HttpError(409, 'The machine assignment changed. Refresh the route and try again.');
