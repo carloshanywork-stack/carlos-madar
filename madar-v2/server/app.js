@@ -102,7 +102,7 @@ app.use(compressionMiddleware);
 
 const apkDownloadLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: process.env.NODE_ENV === 'test' ? 2000 : 100,
+  max: 2000,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'تم تجاوز الحد الأقصى لمحاولات تنزيل التحديث. يرجى الانتظار والمحاولة لاحقاً.' },
@@ -314,19 +314,51 @@ function downloadApkArtifact(req, res, next, path, downloadName, { release = fal
     return;
   }
   const metadata = fstatSync(descriptor);
+  const fileSize = metadata.size;
+  const rangeHeader = req.headers.range;
+
+  res.socket?.setNoDelay(true);
+  res.attachment(downloadName);
   res.set({
     'Cache-Control': 'private, no-store',
     'X-Content-Type-Options': 'nosniff',
     'Content-Type': 'application/vnd.android.package-archive',
-    'Content-Length': String(metadata.size),
+    'Accept-Ranges': 'bytes',
   });
-  res.attachment(downloadName);
-  const stream = createReadStream(path, { fd: descriptor, autoClose: true, start: 0 });
-  stream.on('error', (error) => {
-    if (res.headersSent) res.destroy(error);
-    else next(error);
-  });
-  stream.pipe(res);
+
+  if (rangeHeader && rangeHeader.startsWith('bytes=')) {
+    const parts = rangeHeader.replace(/bytes=/, '').split('-');
+    const start = parseInt(parts[0], 10);
+    const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+
+    if (isNaN(start) || isNaN(end) || start > end || start >= fileSize || end >= fileSize) {
+      closeSync(descriptor);
+      res.status(416).set('Content-Range', `bytes */${fileSize}`).end();
+      return;
+    }
+
+    const chunkLength = end - start + 1;
+    res.status(206);
+    res.set({
+      'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+      'Content-Length': String(chunkLength),
+    });
+
+    const stream = createReadStream(path, { fd: descriptor, start, end, autoClose: true, highWaterMark: 1024 * 1024 });
+    stream.on('error', (error) => {
+      if (res.headersSent) res.destroy(error);
+      else next(error);
+    });
+    stream.pipe(res);
+  } else {
+    res.set('Content-Length', String(fileSize));
+    const stream = createReadStream(path, { fd: descriptor, autoClose: true, start: 0, highWaterMark: 1024 * 1024 });
+    stream.on('error', (error) => {
+      if (res.headersSent) res.destroy(error);
+      else next(error);
+    });
+    stream.pipe(res);
+  }
 }
 
 function apkTarget(req, res) {
@@ -498,6 +530,7 @@ function sendDesktopFile(req, res, next, artifact) {
   const fileSize = metadata.size;
   const rangeHeader = req.headers.range;
 
+  res.socket?.setNoDelay(true);
   res.attachment(artifact.filename);
   res.set({
     'Cache-Control': 'private, no-cache',
@@ -524,7 +557,7 @@ function sendDesktopFile(req, res, next, artifact) {
       'Content-Length': String(chunkLength),
     });
 
-    const stream = createReadStream(artifact.path, { fd: descriptor, start, end, autoClose: true });
+    const stream = createReadStream(artifact.path, { fd: descriptor, start, end, autoClose: true, highWaterMark: 1024 * 1024 });
     stream.on('error', (error) => {
       if (res.headersSent) res.destroy(error);
       else next(error);
@@ -532,7 +565,7 @@ function sendDesktopFile(req, res, next, artifact) {
     stream.pipe(res);
   } else {
     res.set('Content-Length', String(fileSize));
-    const stream = createReadStream(artifact.path, { fd: descriptor, autoClose: true });
+    const stream = createReadStream(artifact.path, { fd: descriptor, autoClose: true, highWaterMark: 1024 * 1024 });
     stream.on('error', (error) => {
       if (res.headersSent) res.destroy(error);
       else next(error);
@@ -591,9 +624,13 @@ app.get('/download/desktop/install.ps1', (req, res) => {
       '$tempZip = "$env:TEMP\\MADAR-Package.zip"',
       '$installDir = "$env:LOCALAPPDATA\\Programs\\MADAR"',
       '',
-      'Write-Host "2/4 جارٍ تنزيل حزمة برنامج MADAR الكاملة من الخادم..." -ForegroundColor Yellow',
+      'Write-Host "2/4 جارٍ تنزيل حزمة برنامج MADAR الكاملة من الخادم بأقصى سرعة..." -ForegroundColor Yellow',
       'try {',
-      '    Invoke-WebRequest -Uri $downloadUrl -OutFile $tempZip -UseBasicParsing',
+      '    if (Get-Command curl.exe -ErrorAction SilentlyContinue) {',
+      '        curl.exe -L --progress-bar -o $tempZip $downloadUrl',
+      '    } else {',
+      '        (New-Object System.Net.WebClient).DownloadFile($downloadUrl, $tempZip)',
+      '    }',
       '} catch {',
       '    Invoke-WebRequest -Uri "$serverUrl/download/desktop" -OutFile $tempZip -UseBasicParsing',
       '}',
@@ -634,9 +671,13 @@ app.get('/download/desktop/install.ps1', (req, res) => {
   } else {
     script.push(
       '$tempPath = "$env:TEMP\\MADAR-Windows-Setup.exe"',
-      'Write-Host "2/4 جارٍ تنزيل أحدث إصدار من الخادم..." -ForegroundColor Yellow',
+      'Write-Host "2/4 جارٍ تنزيل أحدث إصدار من الخادم بأقصى سرعة..." -ForegroundColor Yellow',
       'try {',
-      '    Invoke-WebRequest -Uri $downloadUrl -OutFile $tempPath -UseBasicParsing',
+      '    if (Get-Command curl.exe -ErrorAction SilentlyContinue) {',
+      '        curl.exe -L --progress-bar -o $tempPath $downloadUrl',
+      '    } else {',
+      '        (New-Object System.Net.WebClient).DownloadFile($downloadUrl, $tempPath)',
+      '    }',
       '} catch {',
       '    Invoke-WebRequest -Uri "$serverUrl/download/desktop" -OutFile $tempPath -UseBasicParsing',
       '}',
