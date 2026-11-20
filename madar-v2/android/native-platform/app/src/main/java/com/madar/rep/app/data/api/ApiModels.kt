@@ -40,6 +40,7 @@ data class RouteMachine(
     val arabicName: String? = null,
     val workOrderId: Long,
     val workOrderCode: String,
+    val workOrderStatus: String? = null,
     val clientName: String? = null,
     val address: String = "",
     val areaName: String = "",
