@@ -71,7 +71,7 @@ fun getMissingAppPermissions(context: Context): List<String> {
 }
 
 @Composable
-fun FirstLaunchPermissions() {
+fun FirstLaunchPermissions(onPermissionResult: () -> Unit) {
     val context = LocalContext.current
     val preferences = remember(context) {
         context.getSharedPreferences("madar.onboarding", Context.MODE_PRIVATE)
@@ -84,6 +84,7 @@ fun FirstLaunchPermissions() {
     ) {
         preferences.edit().putBoolean(KEY_PERMISSIONS_PROMPTED, true).apply()
         showDialog = false
+        onPermissionResult()
     }
 
     LaunchedEffect(Unit) {

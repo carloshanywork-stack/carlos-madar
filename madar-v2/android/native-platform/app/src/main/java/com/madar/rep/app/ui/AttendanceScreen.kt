@@ -74,6 +74,7 @@ fun AttendanceScreen(
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { grants ->
+        vm.updateBreadcrumbStartAllowed(foreground = true)
         if (grants[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
             grants[Manifest.permission.ACCESS_COARSE_LOCATION] == true
         ) {
