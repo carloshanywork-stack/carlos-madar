@@ -46,7 +46,7 @@ const insertStmt = db.prepare('INSERT OR REPLACE INTO tiles (zoom_level, tile_co
 let tileCount = 0;
 
 db.transaction(() => {
-  for (let z = 5; z <= 8; z++) {
+  for (let z = 5; z <= 10; z++) {
     const count = 2 ** z;
     const nw = tileCoordinate(24.5, 32.6, z);
     const se = tileCoordinate(37.2, 21.5, z);

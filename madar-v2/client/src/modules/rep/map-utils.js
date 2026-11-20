@@ -1,8 +1,8 @@
 export const OFFLINE_MAP_PACKS = Object.freeze([
+  { id: 'egypt-overview', name: 'مصر — خريطة عامة', minZoom: 5, maxZoom: 11, bounds: { west: 24.5, south: 21.5, east: 37.3, north: 32.6 } },
   { id: 'greater-cairo', name: 'القاهرة الكبرى', minZoom: 8, maxZoom: 14, bounds: { west: 30.6, south: 29.4, east: 32.1, north: 31.0 } },
   { id: 'delta-canal', name: 'الدلتا والقناة', minZoom: 8, maxZoom: 13, bounds: { west: 29.3, south: 29.0, east: 33.4, north: 32.0 } },
   { id: 'alexandria-coast', name: 'الإسكندرية والساحل', minZoom: 8, maxZoom: 13, bounds: { west: 26.0, south: 29.0, east: 31.9, north: 32.0 } },
-  { id: 'egypt-overview', name: 'مصر — خريطة عامة', minZoom: 5, maxZoom: 11, bounds: { west: 24.5, south: 21.5, east: 37.3, north: 32.6 } },
   { id: 'upper-egypt', name: 'صعيد مصر', minZoom: 8, maxZoom: 12, bounds: { west: 30.5, south: 21.5, east: 33.8, north: 29.5 } },
   { id: 'sinai-red-sea', name: 'سيناء والبحر الأحمر', minZoom: 8, maxZoom: 12, bounds: { west: 31.7, south: 21.5, east: 37.2, north: 31.8 } },
   { id: 'western-desert', name: 'الصحراء الغربية', minZoom: 8, maxZoom: 12, bounds: { west: 24.5, south: 21.5, east: 30.8, north: 31.8 } },

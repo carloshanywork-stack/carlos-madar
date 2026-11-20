@@ -6,8 +6,11 @@ import './machine-directory-map.css';
 
 const FALLBACK_BOUNDS = { west: 24.5, south: 21.5, east: 37.2, north: 31.8 };
 
-async function fetchLocalServerTile(_pack, tile) {
-  const response = await fetch(`/api/supervisor/map/tiles/${tile.z}/${tile.x}/${tile.y}`, {
+async function fetchLocalServerTile(pack, tile) {
+  const endpoint = pack?.serverPackId
+    ? `/api/rep/map/tiles/${pack.serverPackId}/${tile.z}/${tile.x}/${tile.y}`
+    : `/api/supervisor/map/tiles/${tile.z}/${tile.x}/${tile.y}`;
+  const response = await fetch(endpoint, {
     credentials: 'include',
     cache: 'no-store',
   });
@@ -29,20 +32,40 @@ export default function MachineDirectoryMap({ machines = [], counts = {}, locati
       fetch('/api/supervisor/map/status', { credentials: 'include', cache: 'no-store' })
         .then((response) => response.ok ? response.json() : null)
         .catch(() => null),
-    ]).then(([saved, serverMap]) => {
+      fetch('/api/rep/map/packs', { credentials: 'include', cache: 'no-store' })
+        .then((response) => response.ok ? response.json() : null)
+        .catch(() => null),
+    ]).then(([saved, serverMap, repCatalog]) => {
       if (!active) return;
       const localPacks = saved.filter((pack) => pack.status === 'ready');
-      const choices = serverMap?.renderable ? [{
+      const serverRegionalPacks = (repCatalog?.packs || [])
+        .filter((p) => p.available)
+        .map((p) => ({
+          ...p,
+          id: p.id,
+          packId: `server-${p.id}`,
+          serverPackId: p.id,
+          name: p.name,
+          tileCount: Number(p.tileCount) || 0,
+          minZoom: Number(p.minZoom) || 5,
+          maxZoom: Number(p.maxZoom) || 14,
+          bounds: p.coverageBounds || p.bounds || FALLBACK_BOUNDS,
+          serverSource: true,
+        }));
+      const fallbackOverview = serverMap?.renderable ? [{
         ...serverMap,
         id: 'server-local',
         packId: 'server-local',
-        name: serverMap.name || 'خريطة الخادم المحلية',
+        name: serverMap.name || 'خريطة مصر العامة',
         tileCount: Number(serverMap.tileCount) || 0,
-        minZoom: Number(serverMap.minZoom) || 1,
-        maxZoom: Number(serverMap.maxZoom) || 8,
+        minZoom: Number(serverMap.minZoom) || 5,
+        maxZoom: Number(serverMap.maxZoom) || 11,
         bounds: serverMap.bounds || FALLBACK_BOUNDS,
         serverSource: true,
-      }, ...localPacks] : localPacks;
+      }] : [];
+      const choices = serverRegionalPacks.length > 0
+        ? [...serverRegionalPacks, ...localPacks]
+        : [...fallbackOverview, ...localPacks];
       setPacks(choices);
       setPackId((current) => choices.some((pack) => pack.packId === current) ? current : choices[0]?.packId ?? '');
     }).catch(() => {
