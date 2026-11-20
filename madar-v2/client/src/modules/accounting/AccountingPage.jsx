@@ -296,8 +296,8 @@ export default function AccountingPage({ isAdmin = false }) {
 
       {errorMessageText && <div className="madar-section"><Alert tone="error">{errorMessageText}</Alert></div>}
       {tab === 'staff' && <>
-        <div className="madar-list-toolbar madar-section"><div><strong>دليل الفريق والكادر</strong><span className="madar-small madar-muted"> {activeEmployees.length} فرد نشط · ملف واحد لكل موظف ومندوب</span></div><Button icon="users" onClick={() => navigate('/staff')}>فتح الدليل الموحد</Button></div>
-        <section className="madar-panel madar-section"><div className="madar-panel-pad"><h2>إدارة الهوية والصلاحيات من الدليل الموحد</h2><p className="madar-small madar-muted">إنشاء الموظفين وربط حسابات المناديب أو إيقافها متاح الآن من صفحة الفريق والكادر، لتجنب إنشاء ملفات مكررة.</p><Button icon="arrow" onClick={() => navigate('/staff')}>إدارة الفريق والكادر</Button></div></section>
+        <div className="madar-list-toolbar madar-section"><div><strong>دليل الموظفين والورديات</strong><span className="madar-small madar-muted"> {activeEmployees.length} فرد نشط · ملف واحد لكل موظف ومندوب</span></div><Button icon="fingerprint" onClick={() => navigate('/attendance')}>سجل الحضور والورديات</Button></div>
+        <section className="madar-panel madar-section"><div className="madar-panel-pad"><h2>متابعة الموظفين والورديات</h2><p className="madar-small madar-muted">إدارة الحضور والانصراف، الورديات، وتفاصيل الموظفين والمناديب متاحة من شاشة الحضور والورديات.</p><Button icon="arrow" onClick={() => navigate('/attendance')}>فتح الحضور والورديات</Button></div></section>
       </>}
 
       {tab === 'attendance' && <>
