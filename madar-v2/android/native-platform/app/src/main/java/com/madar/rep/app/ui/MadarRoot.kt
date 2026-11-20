@@ -233,14 +233,12 @@ private fun SignedInShell(
     }
 
     val title = when (tab) {
-        Tabs.ATTENDANCE -> "الوردية"
         Tabs.SUPPORT -> "البلاغات الميدانية"
         Tabs.SYNC -> "المزامنة والرتل"
         Tabs.MAP -> "الخريطة المباشرة"
         else -> "خط السير الميداني"
     }
     val subtitle = when (tab) {
-        Tabs.ATTENDANCE -> "تسجيل الحضور والانصراف (بصمة / رمز الهاتف)"
         Tabs.SUPPORT -> "إرسال بلاغ فوري للإدارة"
         Tabs.SYNC -> "طابور العمليات غير المرفوعة"
         Tabs.MAP -> "مواقع الماكينات ومسار المندوب"
@@ -256,10 +254,8 @@ private fun SignedInShell(
                     IconButton(onClick = { profilePage = "profile" }) {
                         Icon(Icons.Default.AccountCircle, contentDescription = "حسابي والإعدادات")
                     }
-                    if (tab == Tabs.ROUTE) {
-                        IconButton(onClick = { tab = Tabs.MAP }) {
-                            Icon(Icons.Default.Map, contentDescription = "عرض الخريطة")
-                        }
+                    IconButton(onClick = { profilePage = "attendance" }) {
+                        Icon(Icons.Default.Fingerprint, contentDescription = "تسجيل الحضور والانصراف")
                     }
                     when (tab) {
                         Tabs.MAP -> {
@@ -275,16 +271,16 @@ private fun SignedInShell(
         bottomBar = {
             NavigationBar {
                 NavigationBarItem(
-                    selected = tab == Tabs.ATTENDANCE,
-                    onClick = { tab = Tabs.ATTENDANCE },
-                    icon = { Icon(Icons.Default.Fingerprint, contentDescription = null) },
-                    label = { Text("الوردية") },
-                )
-                NavigationBarItem(
                     selected = tab == Tabs.ROUTE,
                     onClick = { tab = Tabs.ROUTE },
                     icon = { Icon(Icons.Default.AssignmentTurnedIn, contentDescription = null) },
                     label = { Text("خط السير") },
+                )
+                NavigationBarItem(
+                    selected = tab == Tabs.MAP,
+                    onClick = { tab = Tabs.MAP },
+                    icon = { Icon(Icons.Default.Map, contentDescription = null) },
+                    label = { Text("الخريطة") },
                 )
                 NavigationBarItem(
                     selected = tab == Tabs.SYNC,
@@ -303,7 +299,15 @@ private fun SignedInShell(
                 NavigationBarItem(
                     selected = tab == Tabs.SUPPORT,
                     onClick = { tab = Tabs.SUPPORT },
-                    icon = { Icon(Icons.Default.Notifications, contentDescription = null) },
+                    icon = {
+                        if (unread > 0) {
+                            BadgedBox(badge = { Badge { Text("$unread") } }) {
+                                Icon(Icons.Default.Notifications, contentDescription = null)
+                            }
+                        } else {
+                            Icon(Icons.Default.Notifications, contentDescription = null)
+                        }
+                    },
                     label = { Text("البلاغات") },
                 )
             }
@@ -312,13 +316,12 @@ private fun SignedInShell(
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
             when (tab) {
-                Tabs.ATTENDANCE -> AttendanceHost(vm = vm, onClose = { tab = Tabs.ROUTE })
                 Tabs.SUPPORT -> SupportScreen(vm = vm, screenName = "tabs/support")
                 Tabs.SYNC -> SyncScreen(
                     vm = vm,
                     openVisits = openVisits,
                     onOpenVisit = { visit -> visitUuid = visit.visitUuid },
-                    onOpenAttendance = { tab = Tabs.ATTENDANCE },
+                    onOpenAttendance = { profilePage = "attendance" },
                     onOpenMigration = { context.startActivity(Intent(context, LegacyMigrationActivity::class.java)) },
                 )
                 Tabs.MAP -> MapScreen(
@@ -351,8 +354,7 @@ private fun SignedInShell(
                         }
                     },
                     onOpenVisit = { visit -> visitUuid = visit.visitUuid },
-                    hasOpenAttendance = hasOpenAttendance || pendingIn,
-                    onOpenAttendance = { tab = Tabs.ATTENDANCE },
+                    onOpenMap = { tab = Tabs.MAP },
                 )
             }
         }
