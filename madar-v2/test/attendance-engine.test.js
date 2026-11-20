@@ -49,7 +49,7 @@ async function request(path, options = {}, cookie) {
   const response = await fetch(`${baseUrl}${path}`, {
     ...options,
     headers: {
-      'X-App-Version-Code': '34',
+      'X-App-Version-Code': '35',
       ...(options.headers ?? {}),
       ...(cookie ? { cookie } : {}),
     },
