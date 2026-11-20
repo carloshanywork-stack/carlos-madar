@@ -67,7 +67,7 @@ fun AttendanceScreen(
     val pendingOut = actions.firstOrNull {
         it.action == "out" && it.state != "synced" && it.state != AttendanceActionState.FAILED
     }
-    val record = view?.envelope?.attendance
+    val record = view?.envelope?.let { it.openAttendance ?: it.attendance }
     val open = record?.hasOpenAttendance == true
     val loginState by vm.login.collectAsStateWithLifecycle()
 
