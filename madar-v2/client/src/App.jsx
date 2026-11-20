@@ -20,6 +20,7 @@ const WorkshopOrderDetail = lazy(() => import('./modules/workshop/WorkshopOrderD
 const WarehousePage = lazy(() => import('./modules/warehouse/WarehousePage.jsx'));
 const FinancePage = lazy(() => import('./modules/finance/FinancePage.jsx'));
 const AccountingPage = lazy(() => import('./modules/accounting/AccountingPage.jsx'));
+const AttendanceDashboardPage = lazy(() => import('./modules/attendance/AttendanceDashboardPage.jsx'));
 const StaffDirectoryPage = lazy(() => import('./modules/employees/StaffDirectoryPage.jsx'));
 const ArchivePage = lazy(() => import('./modules/archive/ArchivePage.jsx'));
 const SettingsPage = lazy(() => import('./modules/settings/SettingsPage.jsx'));
@@ -56,6 +57,7 @@ function BusinessRoutes({ user }) {
   const role = user?.role;
   const canViewSupervisor = ['admin', 'supervisor'].includes(role);
   const canViewFinance = ['admin', 'finance', 'accountant'].includes(role);
+  const canViewAttendance = ['admin', 'supervisor', 'finance', 'accountant'].includes(role);
   const canMutateWarehouse = ['admin', 'operations', 'purchasing'].includes(role);
   const canMutateWorkshop = ['admin', 'operations'].includes(role);
   return (
@@ -66,6 +68,7 @@ function BusinessRoutes({ user }) {
         <Route path="/maintenance" element={<MaintenancePage isAdmin={user?.role === 'admin'} />} />
         <Route path="/maintenance/:id" element={<MaintenanceOrderDetail />} />
         <Route path="/supervisor" element={canViewSupervisor ? <SupervisorRadarPage /> : <Navigate to="/" replace />} />
+        <Route path="/attendance" element={canViewAttendance ? <AttendanceDashboardPage isAdmin={role === 'admin'} /> : <Navigate to="/" replace />} />
         <Route path="/workshop" element={<WorkshopPage canMutate={canMutateWorkshop} canViewFinance={canViewFinance} />} />
         <Route path="/workshop/:id" element={<WorkshopOrderDetail canMutate={canMutateWorkshop} canViewFinance={canViewFinance} />} />
         <Route path="/warehouse" element={<WarehousePage canMutate={canMutateWarehouse} canViewFinancialDetails={canViewFinance} />} />

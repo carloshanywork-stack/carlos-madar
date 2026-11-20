@@ -20,6 +20,7 @@ const paths = {
   file: <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6M8 13h8M8 17h8" /></>,
   folder: <><path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><path d="M3 9h18" /></>,
   presentation: <><rect x="3" y="3" width="18" height="14" rx="2" /><path d="M12 17v4m-4 0h8M8 8l2.5 2.5L13 8l3 3" /></>,
+  fingerprint: <><path d="M12 10a2 2 0 0 0-2 2c0 1.02-.1 2.51-.26 4M14 13.12c0 2.38 0 6.38-1 8.88M2 12a10 10 0 0 1 18-6M2 16h.01M21.8 16c.2-2 .131-5.354 0-6M9 6.8a6 6 0 0 1 9 5.2c0 .47 0 1.17-.02 2M5.4 17.5a6 6 0 0 1 0-7M16 17.5a8 8 0 0 1-1 3.5" /></>,
   map: <><path d="m3 6 6-3 6 3 6-3v15l-6 3-6-3-6 3z" /><path d="M9 3v15m6-12v15" /><circle cx="15" cy="10" r="1.5" /></>,
   upload: <><path d="M12 16V4M7 9l5-5 5 5" /><path d="M4 20h16" /></>,
   download: <><path d="M12 4v12m-5-5 5 5 5-5" /><path d="M4 20h16" /></>,

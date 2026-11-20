@@ -792,13 +792,52 @@ export function syncRepAttendanceAction(userIdValue, input, database = db) {
         { apiCode: 'ATTENDANCE_REVIEW_REQUIRED' });
     }
 
-    const attendance = body.action === 'in'
-      ? clockIn(employee.id, 'app', location, userId, database, {
-        now: occurredAt, biometricVerified: true, offlineSync: true, actionUuid,
-      })
-      : clockOut(employee.id, 'app', location, userId, database, {
-        now: occurredAt, biometricVerified: true, offlineSync: true, actionUuid,
-      });
+    let attendance;
+    let isIdempotentSuccess = false;
+    if (body.action === 'in') {
+      const activeRecord = openAttendance(employee.id, database);
+      if (activeRecord) {
+        if (location && (!activeRecord.clock_in_lat || !activeRecord.clock_in_lng)) {
+          database.prepare(`
+            UPDATE employee_daily_attendance
+            SET clock_in_lat = coalesce(clock_in_lat, ?),
+                clock_in_lng = coalesce(clock_in_lng, ?),
+                clock_in_accuracy = coalesce(clock_in_accuracy, ?),
+                clock_in_location_at = coalesce(clock_in_location_at, ?),
+                clock_in_biometric_verified = max(clock_in_biometric_verified, ?)
+            WHERE id = ?
+          `).run(
+            location.latitude, location.longitude, location.accuracy, location.updatedAt ?? null,
+            body.biometricVerified ? 1 : 0, activeRecord.id,
+          );
+        }
+        attendance = getAttendanceRecord(employee.id, activeRecord.work_date, database);
+        isIdempotentSuccess = true;
+      } else {
+        attendance = clockIn(employee.id, 'app', location, userId, database, {
+          now: occurredAt, biometricVerified: true, offlineSync: true, actionUuid,
+        });
+      }
+    } else {
+      const activeRecord = openAttendance(employee.id, database) || openOvertimeSession(employee.id, database);
+      if (!activeRecord) {
+        const timeZone = getTimeZone(database);
+        const todayDate = localDate(occurredAt, timeZone);
+        const closed = getAttendanceRecord(employee.id, todayDate, database);
+        if (closed?.clock_out_time) {
+          attendance = closed;
+          isIdempotentSuccess = true;
+        } else {
+          attendance = clockOut(employee.id, 'app', location, userId, database, {
+            now: occurredAt, biometricVerified: true, offlineSync: true, actionUuid,
+          });
+        }
+      } else {
+        attendance = clockOut(employee.id, 'app', location, userId, database, {
+          now: occurredAt, biometricVerified: true, offlineSync: true, actionUuid,
+        });
+      }
+    }
     recordAttendanceDuty(database, userId, body.action, occurredAt.toISOString(), location);
     database.prepare(`
       INSERT INTO rep_attendance_sync_actions
@@ -812,7 +851,7 @@ export function syncRepAttendanceAction(userIdValue, input, database = db) {
         ...details, employeeName: attendance.name, overtimeHours: Number(attendance.overtime_hours),
       }, database);
     }
-    return { success: true, idempotent: false, actionUuid, attendance };
+    return { success: true, idempotent: isIdempotentSuccess, actionUuid, attendance };
   }).immediate();
 }
 
