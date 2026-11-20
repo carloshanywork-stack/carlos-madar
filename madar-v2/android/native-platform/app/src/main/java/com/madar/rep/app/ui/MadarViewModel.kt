@@ -23,6 +23,8 @@ import com.madar.rep.app.data.api.ServerMapPoint
 import com.madar.rep.app.data.api.VersionGate
 import com.madar.rep.app.data.api.MaintenanceLine
 import com.madar.rep.app.data.api.RouteMachine
+import com.madar.rep.app.location.GpsBreadcrumbService
+import com.madar.rep.app.location.shouldRecordBreadcrumbs
 import com.madar.rep.app.data.db.AttendanceActionEntity
 import com.madar.rep.app.data.db.MachineActionEntity
 import com.madar.rep.app.data.db.MachineActionState
@@ -124,6 +126,7 @@ private data class PendingLocationChange(
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class MadarViewModel(private val container: AppContainer) : ViewModel() {
+    private val breadcrumbStartAllowed = MutableStateFlow(false)
     val session: StateFlow<Session?> = container.sessions.session
 
     private val _login = MutableStateFlow(LoginUiState())
@@ -241,24 +244,25 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
             }
         }
         viewModelScope.launch {
-            session.flatMapLatest { current ->
+            val dutyOwner = session.flatMapLatest { current ->
                 if (current == null) return@flatMapLatest flowOf(null)
                 combine(
                     container.attendanceRepository.observe(current.ownerScopeId),
                     container.attendanceRepository.observeActions(current.ownerScopeId),
                 ) { record, actions ->
-                    val latestClockOut = actions.filter { it.action == "out" }.maxOfOrNull { it.occurredAtMillis }
-                    if (com.madar.rep.app.location.shouldRecordBreadcrumbs(record?.envelope, latestClockOut)) {
-                        current.repId
+                    if (shouldRecordBreadcrumbs(record?.envelope, record?.fetchedAt, actions)) {
+                        current.repId to current.ownerScopeId
                     } else null
                 }
-            }.distinctUntilChanged().collect { repId ->
-                if (repId != null && container.locationProvider.hasPermission()) {
-                    com.madar.rep.app.location.GpsBreadcrumbService.start(container.appContext, repId)
-                } else {
-                    com.madar.rep.app.location.GpsBreadcrumbService.stop(container.appContext)
+            }.distinctUntilChanged()
+            combine(dutyOwner, breadcrumbStartAllowed) { owner, canStart -> owner to canStart }
+                .collect { (owner, canStart) ->
+                    if (owner == null) {
+                        GpsBreadcrumbService.stop(container.appContext)
+                    } else if (canStart) {
+                        GpsBreadcrumbService.start(container.appContext, owner.first, owner.second)
+                    }
                 }
-            }
         }
         viewModelScope.launch {
             machineActions.collect { actions ->
@@ -487,6 +491,10 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
         point?.let { container.governorates.find(it.latitude, it.longitude)?.nameAr }
 
     fun hasLocationPermission(): Boolean = container.locationProvider.hasPermission()
+
+    fun updateBreadcrumbStartAllowed(foreground: Boolean) {
+        breadcrumbStartAllowed.value = foreground && GpsBreadcrumbService.hasRecordingPermission(container.appContext)
+    }
 
     fun confirmArrival(visit: VisitEntity, point: GeoPoint) {
         val current = session.value ?: return

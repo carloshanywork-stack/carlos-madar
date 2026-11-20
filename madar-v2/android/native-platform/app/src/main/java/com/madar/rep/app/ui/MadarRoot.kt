@@ -47,6 +47,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Alignment
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.madar.rep.app.AppContainer
 import com.madar.rep.app.data.session.Session
@@ -70,8 +71,12 @@ private object Tabs {
  */
 @Composable
 fun MadarRoot(container: AppContainer) {
-    FirstLaunchPermissions()
     val vm: MadarViewModel = viewModel(factory = MadarViewModel.factory(container))
+    FirstLaunchPermissions { vm.updateBreadcrumbStartAllowed(foreground = true) }
+    LifecycleResumeEffect(vm) {
+        vm.updateBreadcrumbStartAllowed(foreground = true)
+        onPauseOrDispose { vm.updateBreadcrumbStartAllowed(foreground = false) }
+    }
     val session by vm.session.collectAsStateWithLifecycle()
     val mandatoryUpdate by vm.mandatoryUpdate.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }

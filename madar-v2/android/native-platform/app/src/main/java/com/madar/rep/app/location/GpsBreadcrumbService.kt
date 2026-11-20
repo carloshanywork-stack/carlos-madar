@@ -11,6 +11,7 @@ import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Build
+import android.os.SystemClock
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
@@ -33,6 +34,8 @@ class GpsBreadcrumbService : Service() {
     private var locationManager: LocationManager? = null
     private var listener: LocationListener? = null
     private var repId: Long = 0
+    private var ownerScopeId: Long = 0
+    private var recordingStartedAtNanos = 0L
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
@@ -41,16 +44,19 @@ class GpsBreadcrumbService : Service() {
             return START_NOT_STICKY
         }
         val requestedOwner = intent?.getLongExtra(EXTRA_REP_ID, 0L) ?: 0L
-        if (requestedOwner <= 0 || !hasLocationPermission()) {
+        val requestedScope = intent?.getLongExtra(EXTRA_OWNER_SCOPE, 0L) ?: 0L
+        if (requestedOwner <= 0 || !hasRecordingPermission(this)) {
             stopSelf(startId)
             return START_NOT_STICKY
         }
         val session = (application as MadarApplication).container.sessionGateway.current()
-        if (session == null || session.repId != requestedOwner) {
+        if (session == null || session.repId != requestedOwner || session.ownerScopeId != requestedScope) {
             stopSelf(startId)
             return START_NOT_STICKY
         }
+        if (ownerScopeId != requestedScope) stopRecording()
         repId = requestedOwner
+        ownerScopeId = requestedScope
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(NOTIFICATION_ID, notification(), android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
         } else {
@@ -66,17 +72,13 @@ class GpsBreadcrumbService : Service() {
         val callback = LocationListener { persist(it) }
         locationManager = manager
         listener = callback
+        recordingStartedAtNanos = SystemClock.elapsedRealtimeNanos()
         try {
             if (manager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
                 manager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 60_000L, 0f, callback, mainLooper)
             }
             if (manager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
                 manager.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 120_000L, 0f, callback, mainLooper)
-            }
-            val initial = manager.getLastKnownLocation(LocationManager.GPS_PROVIDER)
-                ?: manager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
-            if (initial != null && !isMock(initial)) {
-                persist(initial)
             }
         } catch (_: SecurityException) {
             stopSelf()
@@ -85,13 +87,15 @@ class GpsBreadcrumbService : Service() {
     }
 
     private fun persist(location: Location) {
+        val scopeAtCapture = ownerScopeId
         if (repId <= 0 || location.hasAccuracy().not() || !location.latitude.isFinite() || !location.longitude.isFinite()
             || location.latitude !in -90.0..90.0 || location.longitude !in -180.0..180.0
             || location.accuracy < 0 || isMock(location)) return
         // A stored fix keeps its acquisition time. Ignore stale fixes instead of
         // recycling a cached position under a fresh timestamp.
-        val elapsedNanos = android.os.SystemClock.elapsedRealtimeNanos() - location.elapsedRealtimeNanos
-        if (elapsedNanos !in 0L..60_000_000_000L || !location.accuracy.isFinite()) return
+        val elapsedNanos = SystemClock.elapsedRealtimeNanos() - location.elapsedRealtimeNanos
+        if (location.elapsedRealtimeNanos < recordingStartedAtNanos || elapsedNanos !in 0L..60_000_000_000L
+            || !location.accuracy.isFinite()) return
         val id = "native-$repId-${UUID.randomUUID()}"
         val updatedAt = MadarTime.isoUtc(location.time)
         val accuracy = location.accuracy.toDouble()
@@ -112,7 +116,7 @@ class GpsBreadcrumbService : Service() {
         )
         serviceScope.launch {
             val container = (application as MadarApplication).container
-            if (container.sessionGateway.current()?.repId != entity.repId) return@launch
+            if (container.sessionGateway.current()?.ownerScopeId != scopeAtCapture) return@launch
             runCatching { container.database.gpsPoints().insert(entity) }
             val now = System.currentTimeMillis()
             if (now - lastEnqueueMillis >= 60_000L) {
@@ -124,7 +128,6 @@ class GpsBreadcrumbService : Service() {
 
     private fun isMock(location: Location): Boolean = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) location.isMock else location.isFromMockProvider
 
-    private fun hasLocationPermission() = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
         || ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
 
     private fun notification(): Notification {
@@ -147,6 +150,7 @@ class GpsBreadcrumbService : Service() {
         listener = null
         locationManager = null
         repId = 0
+        ownerScopeId = 0
     }
 
     override fun onDestroy() {
@@ -161,13 +165,18 @@ class GpsBreadcrumbService : Service() {
         const val ACTION_START = "com.madar.rep.app.location.START_DUTY_RECORDING"
         const val ACTION_STOP = "com.madar.rep.app.location.STOP_DUTY_RECORDING"
         const val EXTRA_REP_ID = "repId"
+        private const val EXTRA_OWNER_SCOPE = "ownerScopeId"
         private const val CHANNEL_ID = "madar-duty-location"
         private const val NOTIFICATION_ID = 4107
         @Volatile
         private var lastEnqueueMillis = 0L
 
-        fun start(context: android.content.Context, repId: Long) {
-            val intent = Intent(context, GpsBreadcrumbService::class.java).setAction(ACTION_START).putExtra(EXTRA_REP_ID, repId)
+        internal fun hasRecordingPermission(context: android.content.Context) =
+            ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+
+        fun start(context: android.content.Context, repId: Long, ownerScopeId: Long) {
+            val intent = Intent(context, GpsBreadcrumbService::class.java).setAction(ACTION_START)
+                .putExtra(EXTRA_REP_ID, repId).putExtra(EXTRA_OWNER_SCOPE, ownerScopeId)
             ContextCompat.startForegroundService(context, intent)
         }
 

@@ -14,6 +14,7 @@ import com.madar.rep.app.data.api.VisitUpload
 import com.madar.rep.app.data.db.AttendanceActionEntity
 import com.madar.rep.app.data.db.AttendanceActionState
 import com.madar.rep.app.data.db.GpsPointState
+import com.madar.rep.app.location.isClockInAwaitingSync
 import com.madar.rep.app.data.db.MachineActionEntity
 import com.madar.rep.app.data.db.MachineActionState
 import com.madar.rep.app.data.db.MadarDatabase
@@ -420,8 +421,9 @@ class SyncEngine(
     private suspend fun syncGpsPoints(session: Session, api: MadarApi) {
         val now = System.currentTimeMillis()
         val points = database.gpsPoints().pending(session.repId, now)
+        val attendanceActions = database.attendanceActions().listForOwner(session.ownerScopeId)
         for (point in points) {
-            if (sessionGateway.current()?.repId != session.repId) return
+            if (sessionGateway.current()?.ownerScopeId != session.ownerScopeId) return
             val capturedAt = MadarTime.parseIso(point.updatedAt)
             if (capturedAt == null || now - capturedAt > GPS_RETENTION_MS) {
                 database.gpsPoints().update(point.copy(
@@ -432,6 +434,10 @@ class SyncEngine(
                 ))
                 continue
             }
+            // Do not let a temporary clock-in sync failure cause its GPS points
+            // to be uploaded before the server can associate them with duty.
+            val precedingAction = attendanceActions.firstOrNull { it.occurredAtMillis <= capturedAt }
+            if (precedingAction?.isClockInAwaitingSync() == true) continue
             val sending = point.copy(
                 state = GpsPointState.SYNCING,
                 attempts = point.attempts + 1,
