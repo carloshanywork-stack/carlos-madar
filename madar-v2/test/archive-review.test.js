@@ -31,7 +31,7 @@ after(async () => {
 async function request(path, cookie, body, method = body === undefined ? 'GET' : 'POST') {
   const form = body instanceof FormData;
   const response = await fetch(base + path, { method,
-    headers: { ...(cookie ? { cookie } : {}), ...(body !== undefined && !form ? { 'content-type': 'application/json' } : {}) },
+    headers: { 'X-App-Version-Code': '35', ...(cookie ? { cookie } : {}), ...(body !== undefined && !form ? { 'content-type': 'application/json' } : {}) },
     body: body === undefined ? undefined : form ? body : JSON.stringify(body) });
   return { status: response.status, body: response.headers.get('content-type')?.includes('application/json')
     ? await response.json() : Buffer.from(await response.arrayBuffer()), cookie: response.headers.get('set-cookie')?.split(';')[0] };
@@ -257,4 +257,36 @@ test('legacy manual photo review migration preserves approved status, pending ev
     assert.equal(legacy.prepare('SELECT before_photos_json FROM maintenance_cards WHERE id=81').get().before_photos_json, '["legacy/source.jpg"]');
     assert.equal(legacy.pragma('foreign_key_check').length, 0);
   } finally { legacy.close(); }
+});
+
+test('maintenance orders in review or archive disappear from the representative route', async () => {
+  const f = fixture();
+  // 1. In progress -> visible
+  const initialCard = await routeCard(f);
+  assert.ok(initialCard, 'order must be visible on route while in_progress');
+  assert.equal(initialCard.cardId, f.cardId);
+
+  // 2. Move to review -> immediately disappears from today-route
+  const reviewRes = await request(`/api/maintenance/orders/${f.orderId}/status`, admin, {}, 'PATCH');
+  assert.equal(reviewRes.status, 200);
+  assert.equal(reviewRes.body.status, 'review');
+
+  const routeDuringReview = await request(`/api/rep/today-route?username=${rep.username}`, rep.cookie);
+  assert.equal(routeDuringReview.status, 200);
+  const cardDuringReview = routeDuringReview.body.regions.flatMap((r) => r.machines).find((m) => m.cardId === f.cardId);
+  assert.equal(cardDuringReview, undefined, 'machine must disappear from representative route when order moves to review');
+
+  // Submitting visit for review order must be rejected with 409
+  const deniedVisit = await request('/api/rep/sync-visit', rep.cookie, visitForm(f));
+  assert.equal(deniedVisit.status, 409);
+
+  // 3. Move to archived -> stays disappeared from today-route
+  const archiveRes = await request(`/api/maintenance/orders/${f.orderId}/archive`, admin, { warrantyPeriodMonths: 3, actualExpensesCents: 0, archiveMonth: '2026-02' });
+  assert.equal(archiveRes.status, 200);
+  assert.equal(archiveRes.body.order.status, 'archived');
+
+  const routeDuringArchive = await request(`/api/rep/today-route?username=${rep.username}`, rep.cookie);
+  assert.equal(routeDuringArchive.status, 200);
+  const cardDuringArchive = routeDuringArchive.body.regions.flatMap((r) => r.machines).find((m) => m.cardId === f.cardId);
+  assert.equal(cardDuringArchive, undefined, 'machine must stay absent from representative route when order is archived');
 });

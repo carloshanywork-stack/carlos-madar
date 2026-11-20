@@ -1635,6 +1635,7 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
   const filteredRegions = useMemo(() => {
     const term = normalize(query);
     return groupRouteMachinesByRegion(route?.regions, (machine) => {
+      if (machine.workOrderStatus && machine.workOrderStatus !== 'in_progress') return false;
       const matchesTerm = !term
         || normalize(machine.machineCode).includes(term)
         || normalize(machine.arabicName).includes(term)
