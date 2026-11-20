@@ -458,3 +458,14 @@ export function sellScrap(input, actorId = null, database = db) {
     offcuts: offcutIds.map((id) => listOffcuts('all', database).find((offcut) => offcut.id === id)),
   };
 }
+
+export function getLowStockMaterials(database = db) {
+  return database.prepare(`
+    SELECT id, code, name, specification, unit, stock, min_stock, unit_cost_cents,
+      (min_stock - stock) as deficit
+    FROM materials
+    WHERE active = 1 AND deleted_at IS NULL AND min_stock > 0 AND stock <= min_stock
+    ORDER BY (stock / CASE WHEN min_stock = 0 THEN 1 ELSE min_stock END) ASC
+  `).all();
+}
+

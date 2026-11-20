@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { db } from '../../database/connection.js';
 import { requireAdmin } from '../auth/authorization.js';
 import { HttpError } from '../http.js';
+import { generateDailyDigest } from './daily-digest.js';
 
 const router = Router();
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
@@ -144,6 +145,11 @@ router.get('/audit-log', requireAdmin, (req, res) => {
     limit,
     pages: total ? Math.ceil(total / limit) : 0,
   });
+});
+
+router.get('/daily-digest', requireAdmin, (req, res) => {
+  const date = typeof req.query.date === 'string' && DATE_ONLY.test(req.query.date) ? req.query.date : null;
+  res.json(generateDailyDigest(date));
 });
 
 export default router;

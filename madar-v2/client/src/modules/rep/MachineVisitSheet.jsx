@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { MAX_VISIT_PHOTOS_PER_PHASE } from '../../../../shared/visit-photo-policy.js';
 import { compressAndWatermark, locationPayload } from './image-processing.js';
+import MachineQrScanner from './MachineQrScanner.jsx';
+import CustomerSignatureModal from './CustomerSignatureModal.jsx';
 import {
   captureNativeCameraPhotos,
   deleteNativeVisitPhoto,
@@ -95,6 +97,10 @@ export default function MachineVisitSheet({ machine, repId, repName = '', reason
   const [locationChangeSaving, setLocationChangeSaving] = useState(false);
   const [locationChangeNote, setLocationChangeNote] = useState('');
   const [locationChangeEvidence, setLocationChangeEvidence] = useState(null);
+  const [qrModalOpen, setQrModalOpen] = useState(false);
+  const [signatureModalOpen, setSignatureModalOpen] = useState(false);
+  const [machineQrVerified, setMachineQrVerified] = useState(false);
+  const [customerSignature, setCustomerSignature] = useState(null);
   const beforeInput = useRef(null);
   const afterInput = useRef(null);
   const previewUrls = useRef(new Set());
@@ -700,6 +706,25 @@ export default function MachineVisitSheet({ machine, repId, repName = '', reason
             </div>
           </section>}
 
+          <section className="rep-verification-tools" style={{ display: 'flex', gap: '8px', margin: '8px 0' }}>
+            <button
+              type="button"
+              className={`rep-button ${machineQrVerified ? 'rep-button-success' : 'rep-button-light'}`}
+              onClick={() => setQrModalOpen(true)}
+              style={{ flex: 1, fontSize: '11px', fontWeight: 800 }}
+            >
+              {machineQrVerified ? '✓ تم مسح كود الماكينة' : '📷 مسح QR الماكينة'}
+            </button>
+            <button
+              type="button"
+              className={`rep-button ${customerSignature ? 'rep-button-success' : 'rep-button-light'}`}
+              onClick={() => setSignatureModalOpen(true)}
+              style={{ flex: 1, fontSize: '11px', fontWeight: 800 }}
+            >
+              {customerSignature ? '✓ تم توقيع العميل' : '✍️ توقيع العميل'}
+            </button>
+          </section>
+
           {locationLocked && <section className="rep-wrong-machine-report">
             <button type="button" className="rep-button rep-button-light"
               onClick={() => { setCorrectionOpen((value) => !value); setError(''); }}
@@ -799,6 +824,22 @@ export default function MachineVisitSheet({ machine, repId, repName = '', reason
         </footer>
       </section>
     </div>
+
+    <MachineQrScanner
+      isOpen={qrModalOpen}
+      expectedCode={activeMachine.machineCode}
+      machineName={activeMachine.arabicName}
+      onClose={() => setQrModalOpen(false)}
+      onVerified={(res) => setMachineQrVerified(res.verified)}
+    />
+
+    <CustomerSignatureModal
+      isOpen={signatureModalOpen}
+      machineCode={activeMachine.machineCode}
+      clientName={activeMachine.arabicName}
+      onClose={() => setSignatureModalOpen(false)}
+      onSave={(sig) => setCustomerSignature(sig)}
+    />
     </>
   );
 }

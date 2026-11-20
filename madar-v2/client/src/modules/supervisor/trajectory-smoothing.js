@@ -97,10 +97,10 @@ export function smoothTrajectoryOutliers(points, options = {}) {
       }
     }
 
-    // Check 2: Acute angular reversal spike (> 135 deg deflection with immediate return)
+    // Check 2: Acute angular reversal spike (> 113 deg deflection with immediate return)
     if (!isOutlier && dPrevCurr >= 12 && dCurrNext >= 12) {
       const detourRatio = (dPrevCurr + dCurrNext) / Math.max(dPrevNext, 1);
-      if (detourRatio > 2.0) {
+      if (detourRatio > 1.6) {
         const latPrev = Number(prev.latitude);
         const lonPrev = Number(prev.longitude);
         const latCurr = Number(curr.latitude);
@@ -120,9 +120,9 @@ export function smoothTrajectoryOutliers(points, options = {}) {
         if (mag1 > 0 && mag2 > 0) {
           const dot = dx1 * dx2 + dy1 * dy2;
           const cosAngle = dot / (mag1 * mag2);
-          // Acute heading reversal spike (cosAngle < -0.6 equates to > 127 degrees deflection)
+          // Acute heading reversal spike (cosAngle < -0.4 equates to > 113 degrees deflection)
           const timeGap = (tNext > 0 && tPrev > 0) ? (tNext - tPrev) / 1000 : 0;
-          if (cosAngle < -0.6 && (timeGap <= 300 || timeGap === 0)) {
+          if (cosAngle < -0.4 && (timeGap <= 600 || timeGap === 0)) {
             isOutlier = true;
           }
         }
@@ -148,8 +148,8 @@ export function suppressStationaryJitter(points, minDistance = DEFAULT_STATIONAR
     .map((s) => ({
       lat: Number(s.latitude),
       lng: Number(s.longitude),
-      start: s.arrivedAt ? new Date(s.arrivedAt).getTime() : 0,
-      end: s.departedAt ? new Date(s.departedAt).getTime() : Infinity,
+      start: s.arrivedAt ? new Date(s.arrivedAt).getTime() : (s.arrived_at ? new Date(s.arrived_at).getTime() : 0),
+      end: s.departedAt ? new Date(s.departedAt).getTime() : (s.departed_at ? new Date(s.departed_at).getTime() : Infinity),
       anchored: false,
     }))
     .filter((s) => Number.isFinite(s.lat) && Number.isFinite(s.lng));
@@ -162,6 +162,7 @@ export function suppressStationaryJitter(points, minDistance = DEFAULT_STATIONAR
     const lat = Number(curr.latitude);
     const lon = Number(curr.longitude);
     const time = parsePointTime(curr);
+    const speed = curr.speed !== undefined && curr.speed !== null ? Number(curr.speed) : null;
 
     // Stop centroid matching
     if (time > 0 && stopCentroids.length > 0) {
@@ -184,6 +185,15 @@ export function suppressStationaryJitter(points, minDistance = DEFAULT_STATIONAR
     }
 
     const distMeters = calculateDistanceMeters(anchor.latitude, anchor.longitude, lat, lon);
+
+    // Dynamic Stationary Dwell Clustering:
+    // If phone reports speed <= 0.8 m/s (or zero) and displacement from anchor is within
+    // the typical GPS urban stationary drift window (< 35m), treat as stationary dwell
+    // and do not create new zig-zag vertices.
+    const isStationary = speed !== null && speed <= 0.8 && distMeters < 35;
+    if (isStationary) {
+      continue;
+    }
 
     // Only advance when displacement is >= 12m (or if final point and sufficiently distant)
     if (distMeters >= minDistance) {

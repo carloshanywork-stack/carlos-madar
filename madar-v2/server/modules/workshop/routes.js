@@ -16,6 +16,7 @@ import {
   transitionWorkshopToDelivered,
   transitionWorkshopToReady,
 } from './service.js';
+import { getWorkshopOrderCosting, getWorkshopProfitabilitySummary } from './costing.js';
 
 const router = Router();
 const designUpload = memoryUpload({
@@ -82,6 +83,22 @@ router.get('/designs/:fileId/download', asyncHandler(async (req, res, next) => {
     if (error && !res.headersSent) next(error);
   });
 }));
+
+router.get('/profitability', (req, res, next) => {
+  try {
+    res.json(roleAware(getWorkshopProfitabilitySummary(), req));
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/orders/:id/costing', (req, res, next) => {
+  try {
+    res.json(roleAware(getWorkshopOrderCosting(req.params.id), req));
+  } catch (error) {
+    next(error);
+  }
+});
 
 router.get('/orders/:id', (req, res, next) => {
   try {

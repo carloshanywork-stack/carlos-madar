@@ -871,3 +871,276 @@
   background: #0b5142;
   color: #fff;
 }
+
+/* --- QR Scanner Modal & Customer Signature Modal --- */
+.rep-qr-modal-backdrop,
+.rep-signature-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: rgba(15, 23, 42, 0.75);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.rep-qr-modal-card,
+.rep-signature-modal-card {
+  width: 100%;
+  max-width: 440px;
+  background: #ffffff;
+  border-radius: 18px;
+  box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.35);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid #e2e8f0;
+}
+
+.rep-qr-modal-header,
+.rep-signature-modal-header {
+  padding: 18px 20px 14px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.rep-qr-modal-header h3,
+.rep-signature-modal-header h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 850;
+  color: #0f172a;
+}
+
+.rep-qr-modal-header p,
+.rep-signature-modal-header p {
+  margin: 4px 0 0;
+  font-size: 11px;
+  color: #64748b;
+}
+
+.btn-close-modal {
+  background: #f1f5f9;
+  border: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  color: #475569;
+}
+
+.rep-qr-target-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 14px 20px 0;
+  padding: 10px 14px;
+  background: #f8fafc;
+  border: 1px dashed #cbd5e1;
+  border-radius: 10px;
+  font-size: 12px;
+  color: #334155;
+}
+
+.rep-qr-target-info code {
+  margin-right: auto;
+  background: #0284c7;
+  color: white;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-weight: 800;
+}
+
+.rep-qr-alert {
+  margin: 12px 20px 0;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.rep-qr-alert.error {
+  background: #fef2f2;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
+}
+
+.rep-qr-alert.success {
+  background: #f0fdf4;
+  color: #15803d;
+  border: 1px solid #bbf7d0;
+}
+
+.rep-qr-body {
+  padding: 16px 20px;
+}
+
+.btn-open-cam,
+.btn-stop-cam {
+  width: 100%;
+  padding: 12px;
+  border-radius: 12px;
+  border: none;
+  background: #0284c7;
+  color: white;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.btn-stop-cam {
+  background: #dc2626;
+  margin-top: 10px;
+}
+
+.rep-qr-video-wrap {
+  position: relative;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #000;
+  height: 220px;
+}
+
+.rep-qr-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.rep-qr-reticle {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 140px;
+  height: 140px;
+  border: 2px solid #38bdf8;
+  border-radius: 12px;
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.45);
+}
+
+.rep-qr-divider {
+  text-align: center;
+  font-size: 11px;
+  color: #94a3b8;
+  margin: 14px 0 10px;
+}
+
+.rep-qr-input-row {
+  display: flex;
+  gap: 8px;
+}
+
+.rep-qr-input,
+.rep-sig-input {
+  flex: 1;
+  padding: 10px 14px;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  font-size: 13px;
+  outline: none;
+}
+
+.rep-qr-input:focus,
+.rep-sig-input:focus {
+  border-color: #0284c7;
+}
+
+.btn-submit-code {
+  padding: 0 16px;
+  background: #0b5142;
+  color: white;
+  border: none;
+  border-radius: 10px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.rep-qr-footer,
+.rep-signature-footer {
+  padding: 12px 20px 16px;
+  background: #f8fafc;
+  border-top: 1px solid #f1f5f9;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.btn-bypass-qr {
+  background: transparent;
+  border: none;
+  color: #d97706;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.btn-cancel {
+  padding: 8px 16px;
+  background: #e2e8f0;
+  border: none;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  color: #475569;
+}
+
+.rep-signature-inputs {
+  padding: 14px 20px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.rep-signature-canvas-wrap {
+  padding: 14px 20px;
+}
+
+.canvas-instruction {
+  font-size: 11px;
+  color: #64748b;
+  margin-bottom: 6px;
+}
+
+.rep-signature-canvas {
+  width: 100%;
+  height: 160px;
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  background: #fafafa;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.btn-clear-sig {
+  background: transparent;
+  border: none;
+  color: #64748b;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.btn-confirm-sig {
+  padding: 8px 16px;
+  background: #0b5142;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.btn-confirm-sig:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+

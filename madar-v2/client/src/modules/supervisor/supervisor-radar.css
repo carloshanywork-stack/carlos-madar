@@ -1288,4 +1288,130 @@
   border-color: var(--madar-accent);
 }
 
+/* --- Route Timeline Replay Bar & Loitering Alerts --- */
+.radar-replay-bar {
+  position: absolute;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 18px;
+  background: rgba(15, 23, 42, 0.92);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 9999px;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+  color: #fff;
+  font-family: inherit;
+  font-size: 13px;
+  max-width: calc(100% - 32px);
+}
+
+.btn-replay-play {
+  background: #0284c7;
+  color: white;
+  border: none;
+  border-radius: 9999px;
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: background 0.15s ease;
+}
+
+.btn-replay-play:hover {
+  background: #0369a1;
+}
+
+.replay-slider {
+  width: 170px;
+  accent-color: #38bdf8;
+  cursor: pointer;
+}
+
+.replay-stats {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.replay-time, .replay-speed, .replay-progress {
+  background: rgba(255, 255, 255, 0.1);
+  padding: 3px 7px;
+  border-radius: 6px;
+  font-family: Consolas, monospace;
+}
+
+.btn-replay-speed {
+  background: rgba(255, 255, 255, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #fff;
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.custom-replay-runner-icon {
+  background: transparent;
+  border: none;
+}
+
+.radar-replay-runner {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  pointer-events: none;
+}
+
+.runner-dot {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: #0284c7;
+  border: 2px solid #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  box-shadow: 0 0 12px #38bdf8;
+  animation: runnerPulse 1.5s infinite;
+}
+
+.runner-tag {
+  margin-top: 4px;
+  background: rgba(15, 23, 42, 0.9);
+  color: #38bdf8;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+  border: 1px solid rgba(56, 189, 248, 0.4);
+}
+
+@keyframes runnerPulse {
+  0% { box-shadow: 0 0 0 0 rgba(56, 189, 248, 0.7); }
+  70% { box-shadow: 0 0 0 10px rgba(56, 189, 248, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(56, 189, 248, 0); }
+}
+
+.radar-leaflet-stop-marker.is-loitering .radar-stop-pin-badge {
+  background: #dc2626 !important;
+  color: #fff !important;
+  font-weight: 900;
+  box-shadow: 0 0 10px rgba(220, 38, 38, 0.6);
+}
+
+
 

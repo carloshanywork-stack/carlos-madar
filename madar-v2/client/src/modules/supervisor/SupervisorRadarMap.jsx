@@ -131,10 +131,11 @@ function createPrecisionRepMarkerHtml(rep, isSelected, offsetIndex = 0) {
 }
 
 function createStopMarkerHtml(stop) {
+  const isLoitering = Number(stop.durationMinutes) >= 30;
   return `
-    <div class="radar-leaflet-stop-marker">
+    <div class="radar-leaflet-stop-marker ${isLoitering ? 'is-loitering' : ''}">
       <div class="radar-stop-pin-dot"></div>
-      <div class="radar-stop-pin-badge">${stop.durationMinutes || 0} د</div>
+      <div class="radar-stop-pin-badge">${isLoitering ? '⚠️ ' : ''}${stop.durationMinutes || 0} د</div>
     </div>
   `;
 }
@@ -173,6 +174,7 @@ export default function SupervisorRadarMap({
   const routeLayerRef = useRef(null);
   const stopsLayerRef = useRef(null);
   const heatmapLayerRef = useRef(null);
+  const replayLayerRef = useRef(null);
   const isFirstFitRef = useRef(true);
   const addressCacheRef = useRef({});
 
@@ -182,6 +184,9 @@ export default function SupervisorRadarMap({
   const [copyFeedback, setCopyFeedback] = useState('');
   const [selectedAddress, setSelectedAddress] = useState(null);
   const [addressLoading, setAddressLoading] = useState(false);
+  const [replayIndex, setReplayIndex] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [replaySpeed, setReplaySpeed] = useState(1);
 
   // Extract all valid rep locations with spatial clustering keys
   const activeRepLocations = useMemo(() => {
@@ -278,6 +283,7 @@ export default function SupervisorRadarMap({
     routeLayerRef.current = L.layerGroup().addTo(map);
     stopsLayerRef.current = L.layerGroup().addTo(map);
     heatmapLayerRef.current = L.layerGroup().addTo(map);
+    replayLayerRef.current = L.layerGroup().addTo(map);
 
     mapInstanceRef.current = map;
 
@@ -476,6 +482,11 @@ export default function SupervisorRadarMap({
     }
   }, [selectedId, activeRepLocations, fetchAddress]);
 
+  const cleanedPolylinePoints = useMemo(() => {
+    if (!selectedRoute?.polyline) return [];
+    return smoothPolyline(selectedRoute.polyline, selectedRoute.stops || []);
+  }, [selectedRoute]);
+
   // Render Clean Polyline (No jitter), Stops, Visited Machines, and Focused Heatmap
   useEffect(() => {
     const map = mapInstanceRef.current;
@@ -491,8 +502,7 @@ export default function SupervisorRadarMap({
     if (!selectedRoute) return;
 
     // 1. Cleaned Polyline with Jitter Filtering
-    const rawCoords = selectedRoute.polyline || [];
-    const cleanedCoords = smoothPolyline(rawCoords, selectedRoute.stops || [])
+    const cleanedCoords = cleanedPolylinePoints
       .filter((p) => Number.isFinite(p.latitude) && Number.isFinite(p.longitude))
       .map((p) => [Number(p.latitude), Number(p.longitude)]);
 
@@ -579,6 +589,60 @@ export default function SupervisorRadarMap({
       machineMarker.addTo(stopsLayer);
     });
   }, [selectedRoute, showHeatmap]);
+
+  const replayPoints = useMemo(() => cleanedPolylinePoints, [cleanedPolylinePoints]);
+
+  // Reset replay when selected route changes
+  useEffect(() => {
+    setReplayIndex(0);
+    setIsPlaying(false);
+    if (replayLayerRef.current) replayLayerRef.current.clearLayers();
+  }, [selectedRoute]);
+
+  // Replay animation loop
+  useEffect(() => {
+    if (!isPlaying || replayPoints.length <= 1) return;
+    const interval = Math.max(30, Math.floor(350 / replaySpeed));
+    const timer = setInterval(() => {
+      setReplayIndex((prev) => {
+        if (prev >= replayPoints.length - 1) {
+          setIsPlaying(false);
+          return prev;
+        }
+        return prev + 1;
+      });
+    }, interval);
+    return () => clearInterval(timer);
+  }, [isPlaying, replaySpeed, replayPoints.length]);
+
+  // Render Replay Runner on map
+  useEffect(() => {
+    const replayLayer = replayLayerRef.current;
+    if (!replayLayer) return;
+    replayLayer.clearLayers();
+    if (!selectedRoute || !replayPoints.length) return;
+
+    const currentPoint = replayPoints[Math.min(replayIndex, replayPoints.length - 1)];
+    if (!currentPoint || !Number.isFinite(currentPoint.latitude) || !Number.isFinite(currentPoint.longitude)) return;
+
+    const runnerIcon = L.divIcon({
+      className: 'custom-replay-runner-icon',
+      html: `
+        <div class="radar-replay-runner">
+          <div class="runner-dot">🚗</div>
+          <div class="runner-tag">${formatTime(currentPoint.recordedAt)} · ${Math.round(currentPoint.speed || 0)} كم/س</div>
+        </div>
+      `,
+      iconSize: [40, 40],
+      iconAnchor: [20, 20],
+    });
+
+    const marker = L.marker([currentPoint.latitude, currentPoint.longitude], {
+      icon: runnerIcon,
+      zIndexOffset: 3000,
+    });
+    marker.addTo(replayLayer);
+  }, [selectedRoute, replayPoints, replayIndex]);
 
   const toggleFullscreen = () => {
     if (!mapContainerRef.current) return;
@@ -701,6 +765,48 @@ export default function SupervisorRadarMap({
       {copyFeedback && (
         <div className="radar-map-copy-toast" role="status">
           ✓ {copyFeedback}
+        </div>
+      )}
+
+      {/* Route Timeline Replay Control Bar */}
+      {selectedRoute && replayPoints.length > 1 && (
+        <div className="radar-replay-bar" dir="rtl">
+          <button
+            type="button"
+            className="btn-replay-play"
+            onClick={() => setIsPlaying(!isPlaying)}
+            title={isPlaying ? 'إيقاف مؤقت' : 'تشغيل مسار اليوم'}
+          >
+            {isPlaying ? '⏸ إيقاف' : '▶ تشغيل اليوم'}
+          </button>
+          <input
+            type="range"
+            min={0}
+            max={replayPoints.length - 1}
+            value={replayIndex}
+            onChange={(e) => setReplayIndex(Number(e.target.value))}
+            className="replay-slider"
+            aria-label="شريط تتبع اليوم"
+          />
+          <div className="replay-stats">
+            <span className="replay-time">
+              ⏱️ {formatTime(replayPoints[Math.min(replayIndex, replayPoints.length - 1)]?.recordedAt)}
+            </span>
+            <span className="replay-speed">
+              🚗 {Math.round(replayPoints[Math.min(replayIndex, replayPoints.length - 1)]?.speed || 0)} كم/س
+            </span>
+            <span className="replay-progress">
+              {Math.round(((replayIndex + 1) / replayPoints.length) * 100)}%
+            </span>
+          </div>
+          <button
+            type="button"
+            className="btn-replay-speed"
+            onClick={() => setReplaySpeed((s) => (s === 1 ? 2 : s === 2 ? 5 : 1))}
+            title="مضاعف سرعة العرض"
+          >
+            {replaySpeed}x
+          </button>
         </div>
       )}
 

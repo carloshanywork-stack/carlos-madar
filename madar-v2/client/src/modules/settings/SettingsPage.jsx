@@ -224,7 +224,7 @@ export default function SettingsPage() {
         <section className="madar-panel madar-section">
           <div className="madar-panel-header"><div><h2>صحة النظام والتخزين</h2><p>فحص SQLite ومدة تشغيل العملية والمساحة الحرة على وسيط التخزين.</p></div><Button variant="secondary" size="small" icon="refresh" disabled={systemHealthLoading} onClick={reloadSystemHealth}>إعادة الفحص</Button></div>
           {systemHealthError ? <div className="madar-panel-body"><Alert tone="error">{systemHealthError}</Alert></div> : systemHealthLoading && !systemHealth ? <LoadingState label="جارٍ فحص النظام والتخزين" /> : systemHealth && <div className="madar-panel-body madar-stack">
-            {systemHealth.status !== 'ok' && <Alert tone={systemHealth.status === 'error' ? 'error' : 'warning'}>{systemHealth.status === 'error' ? 'تعذر التحقق من صحة قاعدة البيانات أو وسيط التخزين.' : `المساحة الحرة أقل من ${systemHealth.storage.thresholdPercent}% من وسيط التخزين.`}</Alert>}
+            {systemHealth.status !== 'ok' && <Alert tone={systemHealth.status === 'error' ? 'error' : 'warning'}>{systemHealth.error || (systemHealth.status === 'error' ? 'تعذر التحقق من صحة قاعدة البيانات أو وسيط التخزين.' : `المساحة الحرة أقل من ${systemHealth.storage?.thresholdPercent}% من وسيط التخزين.`)}</Alert>}
             <div className="madar-grid madar-grid-4">
               <div className="madar-stat-tile"><span>حالة SQLite</span><strong>{systemHealth.database?.status === 'ok' ? 'سليم' : 'تحقق مطلوب'}</strong></div>
               <div className="madar-stat-tile"><span>مدة التشغيل</span><strong>{uptimeLabel(systemHealth.uptimeSeconds)}</strong></div>

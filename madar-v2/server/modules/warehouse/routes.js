@@ -5,6 +5,7 @@ import { financeAware as roleAware } from '../visibility.js';
 import {
   createMaterial,
   createOffcut,
+  getLowStockMaterials,
   issueMaterial,
   listMaterials,
   listMovements,
@@ -29,6 +30,10 @@ router.get('/export.xlsx', requireFinanceOrAdmin, (req, res) => {
 router.get('/materials', (req, res) => {
   const materials = listMaterials();
   res.json(roleAware(materials, req));
+});
+
+router.get('/materials/low-stock', (req, res) => {
+  res.json(roleAware(getLowStockMaterials(), req));
 });
 
 router.post('/materials', requireWarehouseMutationAccess, (req, res) => {
