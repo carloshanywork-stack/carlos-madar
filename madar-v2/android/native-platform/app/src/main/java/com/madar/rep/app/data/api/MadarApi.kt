@@ -94,15 +94,24 @@ class MadarApi(
                 val body = response.body ?: throw MadarError.Protocol("Empty APK response")
                 val totalBytes = body.contentLength()
                 val output = FileOutputStream(temporary)
-                val buffer = ByteArray(8192)
+                val buffer = ByteArray(131072) // 128KB buffer for high-throughput cellular/LAN streaming
                 var bytesReadTotal = 0L
+                var lastEmittedBytes = 0L
+                var lastEmittedTime = 0L
+                val minStepBytes = if (totalBytes > 0) (totalBytes * 0.05).toLong().coerceAtLeast(65536L) else 65536L
+
                 body.byteStream().use { input ->
                     output.use { out ->
                         var read: Int
                         while (input.read(buffer).also { read = it } != -1) {
                             out.write(buffer, 0, read)
                             bytesReadTotal += read
-                            onProgress?.invoke(bytesReadTotal, totalBytes)
+                            val now = System.currentTimeMillis()
+                            if (bytesReadTotal == totalBytes || (bytesReadTotal - lastEmittedBytes >= minStepBytes && now - lastEmittedTime >= 200L)) {
+                                lastEmittedBytes = bytesReadTotal
+                                lastEmittedTime = now
+                                onProgress?.invoke(bytesReadTotal, totalBytes)
+                            }
                         }
                         out.flush()
                     }
