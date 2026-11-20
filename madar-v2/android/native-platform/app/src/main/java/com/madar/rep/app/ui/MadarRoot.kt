@@ -127,6 +127,9 @@ private fun SignedInShell(
     val openVisits by vm.openVisits.collectAsStateWithLifecycle()
     val notifications by vm.notifications.collectAsStateWithLifecycle()
     val unread by vm.unreadNotifications.collectAsStateWithLifecycle()
+    val attendanceView by vm.attendance.collectAsStateWithLifecycle()
+    val attendanceActions by vm.attendanceActions.collectAsStateWithLifecycle()
+    val location by vm.location.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
     if (mandatoryUpdate) {
@@ -137,6 +140,37 @@ private fun SignedInShell(
     var tab by rememberSaveable { mutableStateOf(Tabs.ROUTE) }
     var visitUuid by rememberSaveable { mutableStateOf<String?>(null) }
     var profilePage by rememberSaveable { mutableStateOf<String?>(null) }
+    var autoClockInTriggered by rememberSaveable { mutableStateOf(false) }
+
+    val record = attendanceView?.envelope?.let { it.openAttendance ?: it.attendance }
+    val hasOpenAttendance = record?.hasOpenAttendance == true
+    val hasClockIn = record?.clockInTime != null
+    val pendingIn = attendanceActions.any {
+        it.action == "in" && it.state != "synced" && it.state != com.madar.rep.app.data.db.AttendanceActionState.FAILED
+    }
+
+    val autoBiometricGate = rememberBiometricGate { success, error ->
+        if (success) {
+            vm.enqueueAttendance("in", location.point) { ok ->
+                if (ok) vm.showMessage("تم بدء وردية اليوم بنجاح تلقائياً ✅")
+            }
+        } else if (error != null) {
+            vm.showMessage(error)
+        }
+    }
+
+    LaunchedEffect(attendanceView, autoClockInTriggered) {
+        if (!autoClockInTriggered && attendanceView != null) {
+            autoClockInTriggered = true
+            if (!hasOpenAttendance && !hasClockIn && !pendingIn) {
+                vm.refreshLocation()
+                autoBiometricGate(
+                    "تسجيل الحضور التلقائي",
+                    "أكد هويتك بالبصمة أو رمز الهاتف لبدء وردية اليوم وتفعيل التتبع.",
+                )
+            }
+        }
+    }
 
     visitUuid?.let { uuid ->
         VisitScreen(
@@ -199,12 +233,14 @@ private fun SignedInShell(
     }
 
     val title = when (tab) {
+        Tabs.ATTENDANCE -> "الوردية"
         Tabs.SUPPORT -> "البلاغات الميدانية"
         Tabs.SYNC -> "المزامنة والرتل"
         Tabs.MAP -> "الخريطة المباشرة"
         else -> "خط السير الميداني"
     }
     val subtitle = when (tab) {
+        Tabs.ATTENDANCE -> "تسجيل الحضور والانصراف (بصمة / رمز الهاتف)"
         Tabs.SUPPORT -> "إرسال بلاغ فوري للإدارة"
         Tabs.SYNC -> "طابور العمليات غير المرفوعة"
         Tabs.MAP -> "مواقع الماكينات ومسار المندوب"
@@ -220,6 +256,11 @@ private fun SignedInShell(
                     IconButton(onClick = { profilePage = "profile" }) {
                         Icon(Icons.Default.AccountCircle, contentDescription = "حسابي والإعدادات")
                     }
+                    if (tab == Tabs.ROUTE) {
+                        IconButton(onClick = { tab = Tabs.MAP }) {
+                            Icon(Icons.Default.Map, contentDescription = "عرض الخريطة")
+                        }
+                    }
                     when (tab) {
                         Tabs.MAP -> {
                             IconButton(onClick = { vm.refreshMapCatalog(); vm.refreshMapPoints() }) {
@@ -234,16 +275,16 @@ private fun SignedInShell(
         bottomBar = {
             NavigationBar {
                 NavigationBarItem(
+                    selected = tab == Tabs.ATTENDANCE,
+                    onClick = { tab = Tabs.ATTENDANCE },
+                    icon = { Icon(Icons.Default.Fingerprint, contentDescription = null) },
+                    label = { Text("الوردية") },
+                )
+                NavigationBarItem(
                     selected = tab == Tabs.ROUTE,
                     onClick = { tab = Tabs.ROUTE },
                     icon = { Icon(Icons.Default.AssignmentTurnedIn, contentDescription = null) },
                     label = { Text("خط السير") },
-                )
-                NavigationBarItem(
-                    selected = tab == Tabs.MAP,
-                    onClick = { tab = Tabs.MAP },
-                    icon = { Icon(Icons.Default.Map, contentDescription = null) },
-                    label = { Text("الخريطة") },
                 )
                 NavigationBarItem(
                     selected = tab == Tabs.SYNC,
@@ -271,12 +312,13 @@ private fun SignedInShell(
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
             when (tab) {
+                Tabs.ATTENDANCE -> AttendanceHost(vm = vm, onClose = { tab = Tabs.ROUTE })
                 Tabs.SUPPORT -> SupportScreen(vm = vm, screenName = "tabs/support")
                 Tabs.SYNC -> SyncScreen(
                     vm = vm,
                     openVisits = openVisits,
                     onOpenVisit = { visit -> visitUuid = visit.visitUuid },
-                    onOpenAttendance = { profilePage = "attendance" },
+                    onOpenAttendance = { tab = Tabs.ATTENDANCE },
                     onOpenMigration = { context.startActivity(Intent(context, LegacyMigrationActivity::class.java)) },
                 )
                 Tabs.MAP -> MapScreen(
@@ -309,7 +351,8 @@ private fun SignedInShell(
                         }
                     },
                     onOpenVisit = { visit -> visitUuid = visit.visitUuid },
-                    onOpenMap = { tab = Tabs.MAP },
+                    hasOpenAttendance = hasOpenAttendance || pendingIn,
+                    onOpenAttendance = { tab = Tabs.ATTENDANCE },
                 )
             }
         }
