@@ -8,7 +8,6 @@ import com.madar.rep.app.BuildConfig
 import com.madar.rep.app.core.SupportDiagnostics
 import com.madar.rep.app.core.GeoPoint
 import com.madar.rep.app.core.GeoPolicy
-import com.madar.rep.app.core.Hashing
 import com.madar.rep.app.core.LocationDecision
 import com.madar.rep.app.core.MadarError
 import com.madar.rep.app.core.MadarTime
@@ -25,8 +24,6 @@ import com.madar.rep.app.data.api.VersionGate
 import com.madar.rep.app.data.api.MaintenanceLine
 import com.madar.rep.app.data.api.RouteMachine
 import com.madar.rep.app.data.db.AttendanceActionEntity
-import com.madar.rep.app.data.db.GpsPointEntity
-import com.madar.rep.app.data.db.GpsPointState
 import com.madar.rep.app.data.db.MachineActionEntity
 import com.madar.rep.app.data.db.MachineActionState
 import com.madar.rep.app.data.db.MapPackEntity
@@ -53,6 +50,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
@@ -239,18 +237,26 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
                     com.madar.rep.app.location.GpsBreadcrumbService.stop(container.appContext)
                 } else {
                     refreshAll(current)
-                    if (container.locationProvider.hasPermission()) {
-                        com.madar.rep.app.location.GpsBreadcrumbService.start(container.appContext, current.repId)
-                    }
-                    pingLocationOnForeground()
                 }
             }
         }
         viewModelScope.launch {
-            attendance.collect { record ->
-                val current = session.value ?: return@collect
-                if (record?.envelope?.attendance?.hasOpenAttendance == true) {
-                    com.madar.rep.app.location.GpsBreadcrumbService.start(container.appContext, current.repId)
+            session.flatMapLatest { current ->
+                if (current == null) return@flatMapLatest flowOf(null)
+                combine(
+                    container.attendanceRepository.observe(current.ownerScopeId),
+                    container.attendanceRepository.observeActions(current.ownerScopeId),
+                ) { record, actions ->
+                    val latestClockOut = actions.filter { it.action == "out" }.maxOfOrNull { it.occurredAtMillis }
+                    if (com.madar.rep.app.location.shouldRecordBreadcrumbs(record?.envelope, latestClockOut)) {
+                        current.repId
+                    } else null
+                }
+            }.distinctUntilChanged().collect { repId ->
+                if (repId != null && container.locationProvider.hasPermission()) {
+                    com.madar.rep.app.location.GpsBreadcrumbService.start(container.appContext, repId)
+                } else {
+                    com.madar.rep.app.location.GpsBreadcrumbService.stop(container.appContext)
                 }
             }
         }
@@ -482,38 +488,6 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
 
     fun hasLocationPermission(): Boolean = container.locationProvider.hasPermission()
 
-    fun pingLocationOnForeground() {
-        viewModelScope.launch(Dispatchers.IO) {
-            val current = session.value ?: return@launch
-            if (!container.locationProvider.hasPermission()) return@launch
-            val fix = container.locationProvider.lastKnown()
-                ?: (container.locationProvider.currentFix(4000L) as? LocationResult.Success)?.point
-            if (fix != null && !fix.isMock) {
-                val nowMs = System.currentTimeMillis()
-                val id = "native-${current.repId}-${UUID.randomUUID()}"
-                val updatedAt = MadarTime.isoUtc(fix.capturedAtMillis)
-                val payload = JSONObject().put("clientPointId", id)
-                    .put("latitude", fix.latitude).put("longitude", fix.longitude)
-                    .put("accuracy", fix.accuracyMeters.toDouble())
-                    .put("speed", 0.0).put("updatedAt", updatedAt)
-                val entity = GpsPointEntity(
-                    clientPointId = id,
-                    repId = current.repId,
-                    latitude = fix.latitude,
-                    longitude = fix.longitude,
-                    accuracy = fix.accuracyMeters.toDouble(),
-                    speed = 0.0,
-                    updatedAt = updatedAt,
-                    state = GpsPointState.QUEUED,
-                    contentHash = Hashing.sha256Hex(payload.toString().toByteArray()),
-                    createdAt = nowMs,
-                )
-                runCatching { container.database.gpsPoints().insert(entity) }
-                container.scheduler.enqueueNow()
-            }
-        }
-    }
-
     fun confirmArrival(visit: VisitEntity, point: GeoPoint) {
         val current = session.value ?: return
         if (visit.state != VisitState.DRAFT) return
@@ -533,7 +507,6 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
                     ),
                     point
                 )
-                pingLocationOnForeground()
                 _messages.tryEmit("📍 تم تأكيد الوصول والتواجد عند الماكينة بنجاح.")
             } catch (error: Exception) {
                 _messages.tryEmit(human(error))
@@ -1226,8 +1199,6 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
                         biometricVerified = true,
                     )
                 }
-                if (action == "in") com.madar.rep.app.location.GpsBreadcrumbService.start(container.appContext, current.repId)
-                else com.madar.rep.app.location.GpsBreadcrumbService.stop(container.appContext)
                 _messages.tryEmit(
                     if (action == "in") "سُجّل الحضور محليًا بالوقت الأصلي؛ ستُزامن مع الخادم."
                     else "سُجّل الانصراف محليًا بالوقت الأصلي؛ ستُزامن مع الخادم."

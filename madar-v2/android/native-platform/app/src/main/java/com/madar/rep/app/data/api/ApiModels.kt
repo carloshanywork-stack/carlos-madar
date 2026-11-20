@@ -343,6 +343,7 @@ data class AttendanceRecord(
     val status: String = "open",
     val name: String = "",
     val department: String? = null,
+    val activeClockInTime: String? = null,
 ) {
     val hasOpenAttendance: Boolean get() = clockInTime != null && clockOutTime == null
     val overtimeIsOpen: Boolean get() = overtimeSessionStatus == "open"
@@ -353,6 +354,7 @@ data class AttendanceEnvelope(
     val success: Boolean = false,
     val date: String = "",
     val attendance: AttendanceRecord? = null,
+    val openAttendance: AttendanceRecord? = null,
     val overtimeRequest: OvertimeRequest? = null,
     val actionUuid: String? = null,
     val idempotent: Boolean = false,

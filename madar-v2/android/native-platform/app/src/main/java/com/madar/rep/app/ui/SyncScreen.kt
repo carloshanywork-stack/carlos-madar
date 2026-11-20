@@ -465,7 +465,7 @@ private fun AttendanceQueueCard(
     onOpen: () -> Unit,
     onRetry: (String) -> Unit,
 ) {
-    val record = attendance?.envelope?.attendance
+    val record = attendance?.envelope?.let { it.openAttendance ?: it.attendance }
     val open = record?.hasOpenAttendance == true
     SectionCard(
         title = "الحضور والانصراف",
