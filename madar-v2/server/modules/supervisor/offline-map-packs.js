@@ -8,6 +8,7 @@ import { HttpError } from '../http.js';
 import {
   getOfflineMapPackCatalog as getLegacyCatalog,
   getOfflineMapPackManifest as getLegacyManifest,
+  getOfflineMapStatus as getLegacyStatus,
   readOfflineMapPackTile as readLegacyTile,
 } from './offline-tiles.js';
 
@@ -177,6 +178,26 @@ function generatedPackView(pack, map) {
     version: metadata.version,
     description: metadata.description,
   };
+}
+
+export function getOfflineMapStatus() {
+  const catalog = loadCatalog();
+  if (catalog?.packs?.length) {
+    const overview = catalog.packs.find((p) => p.id === 'egypt-overview') || catalog.packs[0];
+    return {
+      available: true,
+      renderable: true,
+      format: String(overview.metadata?.format || overview.format || 'png').toLowerCase(),
+      name: String(overview.name || 'مصر — خريطة عامة'),
+      attribution: String(overview.metadata?.attribution || overview.attribution || '© OpenStreetMap contributors'),
+      license: String(overview.metadata?.license || overview.license || ''),
+      minZoom: Number.isInteger(Number(overview.minZoom)) ? Number(overview.minZoom) : 5,
+      maxZoom: Number.isInteger(Number(overview.maxZoom)) ? Number(overview.maxZoom) : 11,
+      bounds: Array.isArray(overview.bounds) ? overview.bounds.join(',') : String(overview.bounds || '24.5,21.5,37.3,32.6'),
+      tileCount: Number(overview.tileCount) || 7268,
+    };
+  }
+  return getLegacyStatus();
 }
 
 export function getOfflineMapPackCatalog() {

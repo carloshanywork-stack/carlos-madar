@@ -1,10 +1,10 @@
-import { readOfflineMapPackTile } from './offline-map-packs.js';
+import { getOfflineMapStatus, readOfflineMapPackTile } from './offline-map-packs.js';
 import { Router } from 'express';
 import { readFile } from 'node:fs/promises';
 import { asyncHandler, HttpError } from '../http.js';
 import { requestActorId } from '../actor.js';
 import { reviewCardPhotos } from '../maintenance/photo-review.js';
-import { getOfflineMapStatus, readOfflineMapTile } from './offline-tiles.js';
+import { readOfflineMapTile } from './offline-tiles.js';
 import { getOperationsReplayCursor, getOperationsEventsAfter, publishOperationsEvent, subscribeOperationsEvents } from '../operations-events.js';
 import { approveRepMachineLocationCorrection, rejectRepMachineLocationCorrection, listLocationConfirmations } from '../rep/service.js';
 import {
@@ -44,17 +44,27 @@ router.get('/map/status', (_req, res) => {
   res.json(getOfflineMapStatus());
 });
 
-router.get('/map/tiles/:z/:x/:y', (req, res) => {
-  const tile = readOfflineMapTile(req.params.z, req.params.x, req.params.y);
-  if (!tile) {
-    res.status(204).end();
-    return;
+router.get('/map/tiles/:z/:x/:y', (req, res, next) => {
+  try {
+    let tile = null;
+    try {
+      tile = readOfflineMapPackTile('all-egypt', req.params.z, req.params.x, req.params.y);
+    } catch { /* Fallback to baseline */ }
+    if (!tile) {
+      tile = readOfflineMapTile(req.params.z, req.params.x, req.params.y);
+    }
+    if (!tile) {
+      res.status(204).end();
+      return;
+    }
+    res.set({
+      'Cache-Control': 'private, max-age=300',
+      'X-Content-Type-Options': 'nosniff',
+      'Content-Type': tile.contentType,
+    }).status(200).send(tile.data);
+  } catch (error) {
+    next(error);
   }
-  res.set({
-    'Cache-Control': 'private, max-age=300',
-    'X-Content-Type-Options': 'nosniff',
-    'Content-Type': tile.contentType,
-  }).status(200).send(tile.data);
 });
 
 router.get('/events', (req, res) => {

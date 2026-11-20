@@ -12,6 +12,34 @@ import { isFreshGpsFix, orderMachinesByStraightLineDistance } from './location-r
 const VIEW_WIDTH = 900;
 const VIEW_HEIGHT = 500;
 
+function getDefaultZoom(pack) {
+  const isOverview = ['all-egypt', 'server-local', 'egypt-overview'].includes(pack.id || pack.packId)
+    || pack.serverSource
+    || (pack.maxZoom <= 10);
+  const targetZoom = isOverview ? 8 : 12;
+  return Math.min(pack.maxZoom, Math.max(pack.minZoom, targetZoom));
+}
+
+function parseBounds(bounds) {
+  if (!bounds) return null;
+  if (Array.isArray(bounds) && bounds.length === 4) {
+    const [west, south, east, north] = bounds.map(Number);
+    return { west, south, east, north };
+  }
+  if (typeof bounds === 'string') {
+    const parts = bounds.split(',').map(Number);
+    if (parts.length === 4 && parts.every(Number.isFinite)) {
+      const [west, south, east, north] = parts;
+      return { west, south, east, north };
+    }
+  }
+  if (typeof bounds === 'object') {
+    const { west, south, east, north } = bounds;
+    if ([west, south, east, north].every(Number.isFinite)) return { west, south, east, north };
+  }
+  return null;
+}
+
 function routeCenter(machines, pack) {
   const located = machines.filter((machine) => Number.isFinite(machine.latitude) && Number.isFinite(machine.longitude));
   if (located.length) {
@@ -29,7 +57,7 @@ function routeCenter(machines, pack) {
 export default function OfflineRouteMap({ pack, machines, gps, onMachineSelect, tileLoader }) {
   const defaultCenter = useMemo(() => routeCenter(machines, pack), [machines, pack]);
   const [center, setCenter] = useState(() => gps ? { latitude: gps.latitude, longitude: gps.longitude } : defaultCenter);
-  const [zoom, setZoom] = useState(Math.min(pack.maxZoom, pack.id === 'all-egypt' ? 9 : 12));
+  const [zoom, setZoom] = useState(() => getDefaultZoom(pack));
   const [tiles, setTiles] = useState([]);
   const [tilesLoading, setTilesLoading] = useState(true);
   const [selectedMachineId, setSelectedMachineId] = useState(null);
@@ -42,6 +70,14 @@ export default function OfflineRouteMap({ pack, machines, gps, onMachineSelect, 
   const needsLocation = machines.filter((machine) => !locatedMachines.includes(machine));
   const distanceGroups = isFreshGpsFix(gps) ? orderMachinesByStraightLineDistance(machines, gps) : null;
   const selectedMachine = machines.find((machine) => Number(machine.machineId) === Number(selectedMachineId)) ?? null;
+  const packBounds = useMemo(() => parseBounds(pack.bounds), [pack.bounds]);
+  const outOfBoundsCount = useMemo(() => {
+    if (!packBounds || !locatedMachines.length) return 0;
+    return locatedMachines.filter((m) =>
+      m.longitude < packBounds.west || m.longitude > packBounds.east ||
+      m.latitude < packBounds.south || m.latitude > packBounds.north
+    ).length;
+  }, [packBounds, locatedMachines]);
 
   function getMachineStatus(machine) {
     if (machine.isCompleted || machine.reviewStatus === 'approved') return { label: 'تم الفحص', color: '#168267' };
@@ -51,7 +87,7 @@ export default function OfflineRouteMap({ pack, machines, gps, onMachineSelect, 
 
   useEffect(() => {
     setCenter(defaultCenter);
-    setZoom(Math.min(pack.maxZoom, Math.max(pack.minZoom, pack.id === 'all-egypt' ? 9 : 12)));
+    setZoom(getDefaultZoom(pack));
     setSelectedMachineId(null);
   }, [pack.packId, pack.minZoom, pack.maxZoom]);
 
@@ -118,6 +154,11 @@ export default function OfflineRouteMap({ pack, machines, gps, onMachineSelect, 
           <button type="button" onClick={() => setCenter(gps ? { latitude: gps.latitude, longitude: gps.longitude } : defaultCenter)}>موقعي / المسار</button>
         </div>
       </div>
+      {outOfBoundsCount > 0 && outOfBoundsCount === locatedMachines.length && (
+        <p className="rep-map-warning" role="alert">
+          تنبيه: مواقع الماكينات تقع خارج نطاق حزمة &quot;{pack.name}&quot;. اختر خريطة مصر العامة أو الحزمة المطابقة لمنطقتك.
+        </p>
+      )}
       {pack.maxZoom < 10 && <p className="rep-map-warning">حزمة الخادم المتاحة منخفضة التفاصيل؛ يلزم ملف MBTiles بمستويات تكبير أعلى لعرض الشوارع بدقة.</p>}
       <div className="rep-offline-map-canvas">
         <svg
@@ -169,7 +210,19 @@ export default function OfflineRouteMap({ pack, machines, gps, onMachineSelect, 
           </button>
         </aside>}
         {tilesLoading && <span className="rep-map-loading">{pack.serverSource ? 'جارٍ تحميل البلاطات من MBTiles المحلي…' : 'جارٍ فتح بلاطات الخريطة من ذاكرة الهاتف…'}</span>}
-        {!tilesLoading && !tiles.length && <span className="rep-map-missing">لا توجد بلاطات محفوظة لهذا الموضع/التكبير. حرّك الخريطة أو غيّر مستوى التكبير.</span>}
+        {!tilesLoading && !tiles.length && <div className="rep-map-missing" role="alert" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px' }}>
+          <span>لا توجد بلاطات محفوظة لهذا الموضع/التكبير. حرّك الخريطة أو غيّر مستوى التكبير.</span>
+          {zoom > pack.minZoom && (
+            <button
+              type="button"
+              className="rep-button rep-button-secondary"
+              style={{ padding: '3px 10px', fontSize: '11px', cursor: 'pointer' }}
+              onClick={() => setZoom((prev) => Math.max(pack.minZoom, prev - 1))}
+            >
+              الرجوع لمستوى التكبير السابق ({zoom - 1})
+            </button>
+          )}
+        </div>}
         <small className="rep-map-attribution">{pack.attribution || 'خريطة محلية مخزنة على الهاتف'}</small>
       </div>
       <p className="rep-map-legend"><span><i className="machine-pin done-pin" />تم الفحص</span><span><i className="machine-pin in-progress-pin" />قيد التنفيذ</span><span><i className="machine-pin not-started-pin" />لم تبدأ</span><span><i className="gps-pin" />موقع GPS الحالي</span><small>اسحب الخريطة لتحريكها؛ تحديد الموقع عبر GPS لا يحتاج إلى إنترنت.</small></p>
