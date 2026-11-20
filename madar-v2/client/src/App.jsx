@@ -74,7 +74,7 @@ function BusinessRoutes({ user }) {
         <Route path="/warehouse" element={<WarehousePage canMutate={canMutateWarehouse} canViewFinancialDetails={canViewFinance} />} />
         <Route path="/finance" element={canViewFinance ? <FinancePage /> : <Navigate to="/" replace />} />
         <Route path="/accounting" element={canViewFinance ? <AccountingPage isAdmin={role === 'admin'} canViewPayroll /> : <Navigate to="/" replace />} />
-        <Route path="/staff" element={user?.role === 'admin' ? <StaffDirectoryPage /> : <Navigate to="/" replace />} />
+        <Route path="/staff" element={<Navigate to="/attendance" replace />} />
         <Route path="/rep-support" element={canViewSupervisor ? <RepSupportAdminPage /> : <Navigate to="/" replace />} />
         <Route path="/archive" element={<ArchivePage isAdmin={role === 'admin'} />} />
         <Route path="/settings" element={<SettingsPage />} />

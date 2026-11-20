@@ -9,7 +9,6 @@ const sections = [
   { path: '/warehouse', label: 'المخزون والمواد', icon: 'boxes' },
   { path: '/finance', label: 'الخزينة والفواتير', icon: 'wallet' },
   { path: '/accounting', label: 'المحاسبة والموظفون', icon: 'chart' },
-  { path: '/staff', label: 'الفريق والكادر', icon: 'users' },
   { path: '/rep-support', label: 'دعم تطبيق المندوبين', icon: 'notifications' },
   { path: '/archive', label: 'الأرشيف والتقارير', icon: 'archive' },
   { path: '/settings', label: 'إعدادات النظام', icon: 'settings' },
@@ -26,7 +25,6 @@ export default function Sidebar({ open, onNavigate, user }) {
     ...(canViewAttendance ? [{ path: '/attendance', label: 'الحضور والورديات', icon: 'fingerprint' }] : []),
     ...sections.slice(3),
   ]
-    .filter((item) => item.path !== '/staff' || user?.role === 'admin')
     .filter((item) => item.path !== '/rep-support' || canViewSupervisor)
     .filter((item) => !['/finance', '/accounting'].includes(item.path) || canViewFinance)
     .filter((item) => item.path !== '/settings' || user?.role === 'admin');
