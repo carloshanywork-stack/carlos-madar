@@ -1,8 +1,8 @@
-import { createHash } from 'node:crypto';
 import { copyFileSync, cpSync, existsSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { config as loadDotEnv } from 'dotenv';
+import { assertReleaseProgression, inspectApkArtifact, readApkIdentity } from './android-artifact.js';
 
 const projectRoot = resolve(import.meta.dirname, '..');
 loadDotEnv({ path: resolve(projectRoot, '.env') });
@@ -11,6 +11,8 @@ const releaseBuild = process.argv.includes('--release');
 const artifactOnly = process.argv.includes('--artifact-only');
 const liveReloadBuild = process.argv.includes('--live-reload');
 const nativePlatformBuild = process.argv.includes('--native-platform');
+const managerBuild = process.argv.includes('--manager');
+if (managerBuild && nativePlatformBuild) throw new Error('Choose either --manager or --native-platform.');
 const isWindows = process.platform === 'win32';
 const versionProperties = Object.fromEntries(
   readFileSync(resolve(projectRoot, 'android/version.properties'), 'utf8')
@@ -91,6 +93,9 @@ if (!nativePlatformBuild) {
   run(process.execPath, [viteEntrypoint, 'build', '--mode', 'capacitor-manager'], { cwd: clientDirectory });
   const managerPublicSrc = resolve(projectRoot, 'public/manager');
   const managerAssetsDest = resolve(projectRoot, 'android/app/src/manager/assets/public');
+  if (managerBuild && !existsSync(join(managerPublicSrc, 'index.html'))) {
+    throw new Error('Manager build did not generate its bundled application entry point.');
+  }
   if (existsSync(managerPublicSrc)) {
     rmSync(managerAssetsDest, { recursive: true, force: true });
     cpSync(managerPublicSrc, managerAssetsDest, { recursive: true });
@@ -121,73 +126,55 @@ if (!syncOnly) {
     ? join(process.env.JAVA_HOME, 'bin', isWindows ? 'java.exe' : 'java')
     : 'java';
   const buildType = releaseBuild ? 'release' : 'debug';
-  const task = `:app:assemble${releaseBuild ? 'Release' : 'Debug'}`;
+  const flavor = nativePlatformBuild ? '' : managerBuild ? 'Manager' : 'Rep';
+  const task = `:app:assemble${flavor}${releaseBuild ? 'Release' : 'Debug'}`;
   run(java, ['-classpath', gradleWrapperJar, 'org.gradle.wrapper.GradleWrapperMain', task, '--no-daemon', '--max-workers=1', '-Dorg.gradle.jvmargs=-Xmx1024m'], { cwd: androidDirectory });
   const builtApk = resolve(
     projectRoot,
     nativePlatformBuild
       ? `android/native-platform/app/build/outputs/apk/${buildType}/app-${buildType}.apk`
-      : `android/app/build/outputs/apk/${buildType}/app-${buildType}.apk`,
+      : `android/app/build/outputs/apk/${flavor.toLowerCase()}/${buildType}/app-${flavor.toLowerCase()}-${buildType}.apk`,
   );
   if (!existsSync(builtApk)) throw new Error(`Gradle reported success but the APK is missing: ${builtApk}`);
   const androidSdk = process.env.ANDROID_HOME || process.env.ANDROID_SDK_ROOT;
   const buildTools = readdirSync(join(androidSdk, 'build-tools')).filter((version) => /^(?:34|35|36)\./.test(version)).sort().at(-1);
-  const apksigner = join(androidSdk, 'build-tools', buildTools, isWindows ? 'apksigner.bat' : 'apksigner');
-  if (!existsSync(apksigner)) throw new Error('Android Build Tools apksigner was not found; refusing to publish an unverifiable APK.');
-  const signatureReport = execFileSync(apksigner, ['verify', '--verbose', '--print-certs', builtApk], {
-    encoding: 'utf8',
-    shell: isWindows,
+  const buildToolsDirectory = join(androidSdk, 'build-tools', buildTools);
+  const nativeDebug = nativePlatformBuild && !releaseBuild;
+  const identity = inspectApkArtifact(builtApk, buildToolsDirectory, {
+    applicationId: managerBuild ? 'com.madar.system.app' : nativeDebug ? 'com.madar.rep.app.debug' : 'com.madar.rep.app',
+    versionCode, versionName: nativeDebug ? `${versionName}-debug` : versionName, release: releaseBuild,
   });
-  const certificateMatch = signatureReport.match(/Signer #1 certificate SHA-256 digest:\s*([0-9a-f:]{64,95})/i);
-  if (!certificateMatch) throw new Error('The APK has no verifiable signing certificate; refusing to publish it.');
-  const signerCertificateSha256 = certificateMatch[1].replaceAll(':', '').toLowerCase();
-  if (!/^[0-9a-f]{64}$/.test(signerCertificateSha256)) throw new Error('The APK signing-certificate fingerprint is malformed.');
-  const publishedApk = resolve(projectRoot, releaseBuild ? 'madar-rep-release.apk' : 'madar-rep.apk');
-  const temporaryApk = resolve(projectRoot, `${releaseBuild ? '.madar-rep-release' : '.madar-rep'}-${process.pid}.apk.tmp`);
-  if (!artifactOnly) try {
-    copyFileSync(builtApk, temporaryApk);
-    renameSync(temporaryApk, publishedApk);
-  } finally {
-    rmSync(temporaryApk, { force: true });
+  const artifactName = managerBuild
+    ? (releaseBuild ? 'madar-manager-release.apk' : 'madar-manager.apk')
+    : (releaseBuild ? 'madar-rep-release.apk' : 'madar-rep.apk');
+  const publishedApk = resolve(projectRoot, artifactName);
+  const publishedManifest = `${publishedApk}.manifest.json`;
+  if (!artifactOnly && releaseBuild) {
+    const existing = existsSync(publishedApk) ? readApkIdentity(publishedApk, buildToolsDirectory) : null;
+    const existingManifest = existsSync(publishedManifest) ? JSON.parse(readFileSync(publishedManifest, 'utf8')) : null;
+    assertReleaseProgression(identity, existing, existingManifest);
   }
-  console.log(`${releaseBuild ? 'Release' : 'Debug'} APK: ${builtApk}`);
-  if (!artifactOnly) console.log(`Published APK: ${publishedApk}`);
   const manifest = {
-    sourceRevision, sourceTreeDirty, builtAt: new Date().toISOString(), versionCode, versionName,
+    sourceRevision, sourceTreeDirty, builtAt: new Date().toISOString(), ...identity,
     buildType, serverUrl: process.env.MADAR_REP_SERVER_URL || 'https://carlos-pc.tail852ef0.ts.net',
-    artifactOnly, apkSha256: createHash('sha256').update(readFileSync(builtApk)).digest('hex'), signerCertificateSha256,
+    artifactOnly,
   };
   const manifestBytes = `${JSON.stringify(manifest, null, 2)}\n`;
   writeFileSync(`${builtApk}.manifest.json`, manifestBytes, { mode: 0o600 });
   if (!artifactOnly) {
-    const manifestPath = `${publishedApk}.manifest.json`;
-    const temporaryManifest = `${manifestPath}.${process.pid}.tmp`;
+    const temporaryApk = `${publishedApk}.${process.pid}.tmp`;
+    const temporaryManifest = `${publishedManifest}.${process.pid}.tmp`;
     try {
+      copyFileSync(builtApk, temporaryApk);
       writeFileSync(temporaryManifest, manifestBytes, { mode: 0o600, flag: 'wx' });
-      renameSync(temporaryManifest, manifestPath);
+      renameSync(temporaryApk, publishedApk);
+      renameSync(temporaryManifest, publishedManifest);
     } finally {
+      rmSync(temporaryApk, { force: true });
       rmSync(temporaryManifest, { force: true });
     }
-    const managerBuiltApk = resolve(projectRoot, `android/app/build/outputs/apk/manager/${buildType}/app-manager-${buildType}.apk`);
-    if (existsSync(managerBuiltApk)) {
-      const managerPublishedApk = resolve(projectRoot, releaseBuild ? 'madar-manager-release.apk' : 'madar-manager.apk');
-      const managerApkBytes = readFileSync(managerBuiltApk);
-      const managerManifest = {
-        sourceRevision, sourceTreeDirty, builtAt: new Date().toISOString(), versionCode, versionName,
-        buildType, serverUrl: process.env.MADAR_REP_SERVER_URL || 'https://carlos-pc.tail852ef0.ts.net',
-        artifactOnly: true, apkSha256: createHash('sha256').update(managerApkBytes).digest('hex'), signerCertificateSha256,
-      };
-      const managerManifestBytes = `${JSON.stringify(managerManifest, null, 2)}\n`;
-      writeFileSync(`${managerBuiltApk}.manifest.json`, managerManifestBytes, { mode: 0o600 });
-      writeFileSync(`${managerPublishedApk}.manifest.json`, managerManifestBytes, { mode: 0o600 });
-      copyFileSync(managerBuiltApk, managerPublishedApk);
-      try {
-        writeFileSync(resolve(projectRoot, '..', releaseBuild ? 'madar-manager-release.apk.manifest.json' : 'madar-manager.apk.manifest.json'), managerManifestBytes, { mode: 0o600 });
-        copyFileSync(managerBuiltApk, resolve(projectRoot, '..', releaseBuild ? 'madar-manager-release.apk' : 'madar-manager.apk'));
-        copyFileSync(publishedApk, resolve(projectRoot, '..', releaseBuild ? 'madar-rep-release.apk' : 'madar-rep.apk'));
-        writeFileSync(resolve(projectRoot, '..', releaseBuild ? 'madar-rep-release.apk.manifest.json' : 'madar-rep.apk.manifest.json'), manifestBytes, { mode: 0o600 });
-      } catch (ignored) { }
-    }
+    console.log(`Published APK: ${publishedApk}`);
   }
+  console.log(`${releaseBuild ? 'Release' : 'Debug'} APK: ${builtApk}`);
   console.log(`Android version: ${versionName} (versionCode ${versionCode})`);
 }
