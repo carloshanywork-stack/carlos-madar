@@ -38,11 +38,12 @@ if (serverUrlValue.startsWith('http://') && !releaseBuild
   serverUrl = parseHttpsUrl(serverUrlValue, 'MADAR_DESKTOP_SERVER_URL', { originOnly: true });
 }
 
+const publisherName = process.env.MADAR_WINDOWS_PUBLISHER_NAME?.trim() || '';
 const updateUrlValue = process.env.MADAR_DESKTOP_UPDATE_URL?.trim() || '';
 const updateUrl = updateUrlValue ? parseHttpsUrl(updateUrlValue, 'MADAR_DESKTOP_UPDATE_URL') : '';
 if (releaseBuild) {
   if (!updateUrl) throw new Error('Set MADAR_DESKTOP_UPDATE_URL to the HTTPS generic update feed before making a release build.');
-  if (!process.env.MADAR_WINDOWS_PUBLISHER_NAME?.trim()) {
+  if (!publisherName) {
     throw new Error('Set MADAR_WINDOWS_PUBLISHER_NAME to the exact Windows code-signing publisher name.');
   }
   if (!process.env.CSC_LINK?.trim() && !process.env.WIN_CSC_LINK?.trim() && !process.env.CSC_NAME?.trim()) {
@@ -55,12 +56,17 @@ const desktopConfig = {
   serverUrl,
   updateUrl: normalizedUpdateUrl,
   releaseBuild,
+  publisherName: releaseBuild ? publisherName : null,
 };
 writeFileSync(resolve(projectRoot, 'desktop-app/runtime-config.json'), `${JSON.stringify(desktopConfig, null, 2)}\n`, { mode: 0o600 });
-if (normalizedUpdateUrl) {
-  const ymlContent = `provider: generic\nurl: '${normalizedUpdateUrl}'\n`;
-  writeFileSync(resolve(projectRoot, 'desktop-app/dev-app-update.yml'), ymlContent);
-  writeFileSync(resolve(projectRoot, 'desktop-app/app-update.yml'), ymlContent);
+const updateConfig = {
+  provider: 'generic',
+  url: normalizedUpdateUrl,
+  ...(releaseBuild ? { publisherName: [publisherName] } : {}),
+};
+// JSON is a subset of YAML and can be checked by the app without another parser.
+for (const filename of ['app-update.yml', 'dev-app-update.yml']) {
+  writeFileSync(resolve(projectRoot, 'desktop-app', filename), `${JSON.stringify(updateConfig, null, 2)}\n`);
 }
 
 // Build the client web assets and bundle them into desktop-app/web for offline/local execution

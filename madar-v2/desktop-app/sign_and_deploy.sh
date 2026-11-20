@@ -9,17 +9,15 @@ REMOTE_HOST="carlos-pc.tail852ef0.ts.net"
 REMOTE_USER="carlos"
 REMOTE_PATH="updates"
 
-echo "=== Step 0: Clean remote updates folder ==="
-ssh ${REMOTE_USER}@${REMOTE_HOST} "rm -rf ~/${REMOTE_PATH} && mkdir -p ~/${REMOTE_PATH}"
-echo "✅ Remote ~/updates ready."
+# Keep existing downloads in place until a new release has been built.
+: "${CSC_KEY_PASSWORD:?Provide the approved Windows signing password in the environment}"
 
-echo ""
 echo "=== Step 1: Build desktop installer (release mode) ==="
 export MADAR_DESKTOP_SERVER_URL="https://${REMOTE_HOST}"
 export MADAR_DESKTOP_UPDATE_URL="https://${REMOTE_HOST}/download/desktop/"
 export MADAR_WINDOWS_PUBLISHER_NAME="MADAR ERP"
 export CSC_LINK="${PROJECT_ROOT}/desktop/madar-codesign.pfx"
-export CSC_KEY_PASSWORD="madar-codesign-2026"
+export CSC_KEY_PASSWORD
 export MADAR_WINDOWS_TARGET="nsis"
 export USE_SYSTEM_OSSLSIGNCODE="true"
 
@@ -50,7 +48,7 @@ if osslsigncode verify -in "$EXE" 2>/dev/null; then
 else
   osslsigncode sign \
     -pkcs12 "${PROJECT_ROOT}/desktop/madar-codesign.pfx" \
-    -pass "madar-codesign-2026" \
+    -pass "$CSC_KEY_PASSWORD" \
     -h sha256 \
     -n "MADAR Desktop" \
     -i "https://${REMOTE_HOST}" \
@@ -67,6 +65,7 @@ FILES_TO_UPLOAD=("$SIGNED_EXE")
 [[ -n "$BLOCKMAP" ]]  && FILES_TO_UPLOAD+=("$BLOCKMAP")
 FILES_TO_UPLOAD+=("${CERTS}/cert.cer")
 
+ssh "${REMOTE_USER}@${REMOTE_HOST}" "mkdir -p ~/${REMOTE_PATH}"
 scp "${FILES_TO_UPLOAD[@]}" ${REMOTE_USER}@${REMOTE_HOST}:~/${REMOTE_PATH}/
 echo "✅ All files uploaded to ${REMOTE_HOST}:~/${REMOTE_PATH}"
 
