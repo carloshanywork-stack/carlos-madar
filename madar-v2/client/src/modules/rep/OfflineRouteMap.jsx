@@ -48,15 +48,21 @@ function routeCenter(machines, pack) {
       longitude: located.reduce((total, machine) => total + machine.longitude, 0) / located.length,
     };
   }
-  return {
-    latitude: (pack.bounds.north + pack.bounds.south) / 2,
-    longitude: (pack.bounds.east + pack.bounds.west) / 2,
-  };
+  const parsed = parseBounds(pack.bounds);
+  if (parsed) {
+    return {
+      latitude: (parsed.north + parsed.south) / 2,
+      longitude: (parsed.east + parsed.west) / 2,
+    };
+  }
+  return { latitude: 30.0444, longitude: 31.2357 };
 }
 
 export default function OfflineRouteMap({ pack, machines, gps, onMachineSelect, tileLoader }) {
   const defaultCenter = useMemo(() => routeCenter(machines, pack), [machines, pack]);
   const [center, setCenter] = useState(() => gps ? { latitude: gps.latitude, longitude: gps.longitude } : defaultCenter);
+  const isOnline = typeof navigator !== 'undefined' && navigator.onLine;
+  const effectiveMaxZoom = isOnline ? Math.max(pack.maxZoom, 18) : pack.maxZoom;
   const [zoom, setZoom] = useState(() => getDefaultZoom(pack));
   const [tiles, setTiles] = useState([]);
   const [tilesLoading, setTilesLoading] = useState(true);
@@ -95,10 +101,26 @@ export default function OfflineRouteMap({ pack, machines, gps, onMachineSelect, 
     let active = true;
     const objectUrls = [];
     setTilesLoading(true);
-    Promise.all(tileCoordinates.map(async (tile) => {
-      const blob = tileLoader
-        ? await tileLoader(pack, tile)
-        : await getOfflineMapTile(pack.packId, tile.z, tile.x, tile.y);
+    Promise.allSettled(tileCoordinates.map(async (tile) => {
+      let blob = null;
+      try {
+        blob = tileLoader
+          ? await tileLoader(pack, tile)
+          : await getOfflineMapTile(pack.packId, tile.z, tile.x, tile.y);
+      } catch {
+        blob = null;
+      }
+      // If local tile is unavailable and online, fetch from OpenStreetMap
+      if (!blob && typeof navigator !== 'undefined' && navigator.onLine) {
+        try {
+          const response = await fetch(`https://tile.openstreetmap.org/${tile.z}/${tile.x}/${tile.y}.png`, {
+            cache: 'force-cache',
+          });
+          if (response.ok) blob = await response.blob();
+        } catch {
+          blob = null;
+        }
+      }
       if (!blob || !active) return null;
       const href = URL.createObjectURL(blob);
       objectUrls.push(href);
@@ -108,8 +130,13 @@ export default function OfflineRouteMap({ pack, machines, gps, onMachineSelect, 
         left: VIEW_WIDTH / 2 + tile.x * 256 - worldCenter.x,
         top: VIEW_HEIGHT / 2 + tile.y * 256 - worldCenter.y,
       };
-    })).then((loaded) => {
-      if (active) setTiles(loaded.filter(Boolean));
+    })).then((results) => {
+      if (active) {
+        const loaded = results
+          .filter((res) => res.status === 'fulfilled' && res.value)
+          .map((res) => res.value);
+        setTiles(loaded);
+      }
     }).catch(() => {
       if (active) setTiles([]);
     }).finally(() => {
@@ -122,7 +149,7 @@ export default function OfflineRouteMap({ pack, machines, gps, onMachineSelect, 
   }, [pack, tileCoordinates, tileLoader, worldCenter]);
 
   function zoomBy(delta) {
-    setZoom((current) => Math.min(pack.maxZoom, Math.max(pack.minZoom, current + delta)));
+    setZoom((current) => Math.min(effectiveMaxZoom, Math.max(pack.minZoom, current + delta)));
   }
 
   function onPointerDown(event) {
@@ -146,11 +173,11 @@ export default function OfflineRouteMap({ pack, machines, gps, onMachineSelect, 
   return (
     <section className="rep-offline-map" aria-label={`الخريطة المحلية ${pack.name}`}>
       <div className="rep-offline-map-toolbar">
-          <span><strong>{pack.name}</strong><small>{pack.serverSource ? 'بلاطات من خادم الخرائط المحلي' : `${Number(pack.tileCount || 0).toLocaleString('ar-EG')} بلاطة محفوظة`} · التكبير {pack.minZoom}–{pack.maxZoom}</small></span>
+          <span><strong>{pack.name}</strong><small>{pack.serverSource ? 'بلاطات من خادم الخرائط المحلي' : `${Number(pack.tileCount || 0).toLocaleString('ar-EG')} بلاطة محفوظة`}{isOnline ? ' · وضع تفصيلي متصل' : ` · التكبير ${pack.minZoom}–${pack.maxZoom}`}</small></span>
         <div>
           <button type="button" onClick={() => zoomBy(-1)} disabled={zoom <= pack.minZoom} aria-label="تصغير الخريطة">−</button>
           <b>{zoom}</b>
-          <button type="button" onClick={() => zoomBy(1)} disabled={zoom >= pack.maxZoom} aria-label="تكبير الخريطة">+</button>
+          <button type="button" onClick={() => zoomBy(1)} disabled={zoom >= effectiveMaxZoom} aria-label="تكبير الخريطة">+</button>
           <button type="button" onClick={() => setCenter(gps ? { latitude: gps.latitude, longitude: gps.longitude } : defaultCenter)}>موقعي / المسار</button>
         </div>
       </div>
