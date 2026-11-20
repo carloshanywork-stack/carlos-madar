@@ -33,6 +33,7 @@ module.exports = {
     artifactName: 'MADAR-Windows-${version}-Setup.${ext}',
     icon: 'desktop/madar.ico',
     forceCodeSigning: releaseBuild,
+    ...(publisherName ? { signtoolOptions: { publisherName: [publisherName] } } : {}),
   },
   nsis: {
     installerIcon: 'desktop/madar.ico',

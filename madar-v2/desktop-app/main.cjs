@@ -1,10 +1,12 @@
 const { app, BrowserWindow, dialog, ipcMain, Menu, shell, Tray, Notification } = require('electron');
 const { autoUpdater } = require('electron-updater');
+const { readUpdateChannel, verifyWindowsInstaller } = require('./update-security.cjs');
+const { commitWebBuild } = require('./web-cache.cjs');
 const http = require('node:http');
 const https = require('node:https');
 const crypto = require('node:crypto');
-const { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } = require('node:fs');
-const { join, extname, dirname } = require('node:path');
+const { existsSync, readFileSync, writeFileSync } = require('node:fs');
+const { join, extname } = require('node:path');
 
 const APP_ID = 'com.madar.desktop';
 const INTERNAL_TOKEN = crypto.randomBytes(32).toString('hex');
@@ -102,20 +104,17 @@ function readConfig() {
 const config = readConfig();
 
 function configureAutoUpdater() {
-  let targetUpdateUrl = config.updateUrl || (currentServerOrigin ? `${currentServerOrigin}/download/desktop/` : '');
-  if (!targetUpdateUrl) return false;
-  if (!targetUpdateUrl.endsWith('/')) targetUpdateUrl = `${targetUpdateUrl}/`;
+  if (!app.isPackaged || process.platform !== 'win32') return null;
   try {
-    autoUpdater.setFeedURL({
-      provider: 'generic',
-      url: targetUpdateUrl,
-    });
-    autoUpdater.verifyUpdateCodeSignature = () => Promise.resolve(null);
-    autoUpdater.verifySignature = () => Promise.resolve(null);
-    return true;
+    const configPath = join(app.getAppPath(), 'app-update.yml');
+    const channel = readUpdateChannel(config, JSON.parse(readFileSync(configPath, 'utf8')));
+    autoUpdater.updateConfigPath = configPath;
+    autoUpdater.verifyUpdateCodeSignature = (_names, file) => verifyWindowsInstaller(file, channel.publisher);
+    autoUpdater.setFeedURL({ provider: 'generic', url: channel.url });
+    return channel;
   } catch (err) {
-    console.warn('Could not set autoUpdater feed URL:', err.message);
-    return false;
+    console.warn('Windows update channel unavailable:', err.message);
+    return null;
   }
 }
 
@@ -128,19 +127,9 @@ function isTrustedUrl(value) {
   }
 }
 
-function getUserWebCacheDir() {
-  try {
-    if (app && typeof app.getPath === 'function') {
-      try {
-        const appData = app.getPath('appData');
-        if (appData) return join(appData, 'madar-web-cache');
-      } catch { }
-      return join(app.getPath('userData'), 'madar-web-cache');
-    }
-    return join(__dirname, 'web');
-  } catch {
-    return join(__dirname, 'web');
-  }
+function getUserWebCacheDir(origin = currentServerOrigin) {
+  const originKey = crypto.createHash('sha256').update(origin).digest('hex');
+  return join(app.getPath('userData'), 'web-cache-v2', originKey);
 }
 
 function getPackagedWebDirectory() {
@@ -149,33 +138,6 @@ function getPackagedWebDirectory() {
   const devClientDist = join(__dirname, '../client/dist');
   if (existsSync(devClientDist)) return devClientDist;
   return packagedWeb;
-}
-
-function getWebDirectory() {
-  const cacheDir = getUserWebCacheDir();
-  if (existsSync(join(cacheDir, 'index.html'))) {
-    return cacheDir;
-  }
-  return getPackagedWebDirectory();
-}
-
-function initWebCache() {
-  try {
-    const cacheDir = getUserWebCacheDir();
-    if (!existsSync(cacheDir)) {
-      mkdirSync(cacheDir, { recursive: true });
-    }
-    const indexCachePath = join(cacheDir, 'index.html');
-    if (!existsSync(indexCachePath)) {
-      const packagedDir = getPackagedWebDirectory();
-      if (existsSync(join(packagedDir, 'index.html'))) {
-        cpSync(packagedDir, cacheDir, { recursive: true });
-        console.log('[WebCache] Initialized cache from bundled web assets.');
-      }
-    }
-  } catch (err) {
-    console.warn('[WebCache] Could not initialize web cache:', err.message);
-  }
 }
 
 async function fetchLiveIndexHtml(targetOrigin, timeoutMs = 2500) {
@@ -201,58 +163,41 @@ async function fetchLiveIndexHtml(targetOrigin, timeoutMs = 2500) {
   }
 }
 
-async function fetchLiveAsset(pathname, targetOrigin, timeoutMs = 8000) {
+async function fetchLiveAsset(pathname, targetOrigin, timeoutMs = 8000, bounded = false) {
   try {
     const cleanPath = pathname.startsWith('/') ? pathname : `/${pathname}`;
     const url = new URL(cleanPath, targetOrigin).toString();
     const res = await fetch(url, {
       signal: AbortSignal.timeout(timeoutMs),
+      redirect: bounded ? 'error' : 'follow',
       headers: {
         'User-Agent': `MADAR-Desktop/${app.getVersion() || '1.0.1'}`,
       },
     });
     if (!res.ok) return null;
-    const buffer = Buffer.from(await res.arrayBuffer());
     const contentType = res.headers.get('content-type') || '';
-    return { buffer, contentType };
+    if (!bounded) return { buffer: Buffer.from(await res.arrayBuffer()), contentType };
+    const chunks = [];
+    let bytes = 0;
+    for await (const chunk of res.body) {
+      bytes += chunk.length;
+      if (bytes > 32 * 1024 * 1024) return null;
+      chunks.push(chunk);
+    }
+    return { buffer: Buffer.concat(chunks, bytes), contentType };
   } catch {
     return null;
   }
 }
 
-const prefetchInProgress = new Set();
+const cacheUpdates = new Set();
 
-function triggerBackgroundAssetPrefetch(htmlContent, targetOrigin) {
-  if (!htmlContent || !targetOrigin) return;
-  const assetRegex = /(?:src|href)=["'](\/assets\/[^"'\s>]+)["']/g;
-  const matchedAssets = new Set();
-  let match;
-  while ((match = assetRegex.exec(htmlContent)) !== null) {
-    matchedAssets.add(match[1]);
-  }
-
-  const cacheDir = getUserWebCacheDir();
-  for (const assetPath of matchedAssets) {
-    const localFile = join(cacheDir, assetPath.replace(/^\//, ''));
-    if (existsSync(localFile) || prefetchInProgress.has(assetPath)) {
-      continue;
-    }
-    prefetchInProgress.add(assetPath);
-    fetchLiveAsset(assetPath, targetOrigin, 10000)
-      .then((result) => {
-        if (result && result.buffer) {
-          mkdirSync(dirname(localFile), { recursive: true });
-          writeFileSync(localFile, result.buffer);
-          console.log(`[Live Web Sync] Prefetched & cached: ${assetPath}`);
-        }
-      })
-      .catch((err) => {
-        console.warn(`[Live Web Sync] Failed to prefetch ${assetPath}:`, err.message);
-      })
-      .finally(() => {
-        prefetchInProgress.delete(assetPath);
-      });
-  }
+function stageWebBuild(html, origin) {
+  if (cacheUpdates.has(origin)) return;
+  cacheUpdates.add(origin);
+  commitWebBuild(getUserWebCacheDir(origin), html, (path) => fetchLiveAsset(path, origin, 10000, true))
+    .catch((error) => console.warn('Offline web cache refresh failed:', error.message))
+    .finally(() => cacheUpdates.delete(origin));
 }
 
 function proxyRequest(req, res, targetOrigin, redirectCount = 0) {
@@ -328,7 +273,8 @@ function startLoopbackServer() {
         return;
       }
 
-      const cacheDir = getUserWebCacheDir();
+      const origin = currentServerOrigin;
+      const cacheDir = getUserWebCacheDir(origin);
       const packagedDir = getPackagedWebDirectory();
 
       // 2. Asset request (/assets/*)
@@ -372,14 +318,8 @@ function startLoopbackServer() {
         // Priority 3: Live fetch from server if connected
         if (currentServerOrigin) {
           try {
-            const liveAsset = await fetchLiveAsset(pathname, currentServerOrigin, 8000);
+            const liveAsset = await fetchLiveAsset(pathname, origin, 8000);
             if (liveAsset && liveAsset.buffer) {
-              try {
-                mkdirSync(dirname(cachedAssetPath), { recursive: true });
-                writeFileSync(cachedAssetPath, liveAsset.buffer);
-              } catch (writeErr) {
-                console.warn('Could not cache live asset to disk:', writeErr.message);
-              }
               const ext = extname(cachedAssetPath).toLowerCase();
               res.writeHead(200, {
                 'Content-Type': liveAsset.contentType || MIME_TYPES[ext] || 'application/octet-stream',
@@ -423,12 +363,8 @@ function startLoopbackServer() {
         }
         if (currentServerOrigin) {
           try {
-            const liveFile = await fetchLiveAsset(pathname, currentServerOrigin, 5000);
+            const liveFile = await fetchLiveAsset(pathname, origin, 5000);
             if (liveFile && liveFile.buffer) {
-              try {
-                mkdirSync(dirname(cachedFile), { recursive: true });
-                writeFileSync(cachedFile, liveFile.buffer);
-              } catch { }
               res.writeHead(200, {
                 'Content-Type': liveFile.contentType || MIME_TYPES[ext] || 'application/octet-stream',
                 'Cache-Control': 'public, max-age=86400',
@@ -447,16 +383,9 @@ function startLoopbackServer() {
       // Attempt live web sync if server is reachable
       let html = null;
       if (currentServerOrigin) {
-        html = await fetchLiveIndexHtml(currentServerOrigin, 2500);
+        html = await fetchLiveIndexHtml(origin, 2500);
         if (html) {
-          try {
-            const cachedIndexPath = join(cacheDir, 'index.html');
-            mkdirSync(cacheDir, { recursive: true });
-            writeFileSync(cachedIndexPath, html, 'utf8');
-            triggerBackgroundAssetPrefetch(html, currentServerOrigin);
-          } catch (cacheWriteErr) {
-            console.warn('Failed to write index.html to cache:', cacheWriteErr.message);
-          }
+          stageWebBuild(html, origin);
           res.writeHead(200, {
             'Content-Type': 'text/html; charset=utf-8',
             'Cache-Control': 'no-cache, no-store, must-revalidate',
@@ -550,13 +479,12 @@ async function showUpdateAvailable(info) {
         mainWindow.setProgressBar(0.01);
       }
 
-      try {
-        await autoUpdater.downloadUpdate();
-      } catch (diffErr) {
-        console.warn('Differential download failed, retrying with full package download:', diffErr.message);
-        autoUpdater.disableDifferentialDownload = true;
-        await autoUpdater.downloadUpdate();
-      }
+      const channel = configureAutoUpdater();
+      if (!channel) throw new Error('قناة التحديث لا تحتوي على ناشر معتمد.');
+      // Electron can reuse a previously downloaded installer without repeating its download-time checks.
+      const [installer] = await autoUpdater.downloadUpdate();
+      const signatureError = await verifyWindowsInstaller(installer, channel.publisher);
+      if (signatureError) throw new Error(signatureError);
 
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.setProgressBar(-1);
@@ -574,6 +502,8 @@ async function showUpdateAvailable(info) {
       });
 
       if (choice.response === 0) {
+        const installError = await verifyWindowsInstaller(installer, channel.publisher);
+        if (installError) throw new Error(installError);
         autoUpdater.quitAndInstall(false, true);
       }
     }
@@ -581,20 +511,14 @@ async function showUpdateAvailable(info) {
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.setProgressBar(-1);
     }
-    const choice = await dialog.showMessageBox(mainWindow, {
+    await dialog.showMessageBox(mainWindow, {
       type: 'warning',
       title: 'تعذر التحديث التلقائي',
-      message: 'لم يكتمل تنزيل تحديث MADAR تلقائياً.',
-      detail: `يمكنك تنزيل مثبت التحديث المباشر وتثبيته بضغطة واحدة دون فقدان أي بيانات.\nالخطأ: ${error?.message || 'تحقق من الاتصال'}`,
-      buttons: ['تنزيل المثبت الآن', 'إلغاء'],
-      defaultId: 0,
-      cancelId: 1,
+      message: 'تعذر التحقق من مثبت MADAR أو تنزيله.',
+      detail: error?.message || 'تحقق من الاتصال وشهادة الناشر المعتمدة لدى مسؤول النظام.',
+      buttons: ['حسناً'],
       noLink: true,
     });
-    if (choice.response === 0) {
-      const downloadTarget = currentServerOrigin ? `${currentServerOrigin}/download/desktop` : 'https://carlos-pc.tail852ef0.ts.net/download/desktop';
-      shell.openExternal(downloadTarget);
-    }
     console.error('MADAR desktop update failed:', error);
   } finally {
     updatePromptOpen = false;
@@ -785,8 +709,6 @@ ipcMain.handle('madar:desktop:set-server-config', (_event, payload) => {
   const validated = validateServerUrl(payload.serverUrl);
   currentServerOrigin = validated.origin;
   config.serverUrl = currentServerOrigin;
-  config.updateUrl = `${currentServerOrigin}/download/desktop/`;
-  configureAutoUpdater();
   const userConfigPath = getUserConfigPath();
   writeFileSync(userConfigPath, JSON.stringify({ serverUrl: currentServerOrigin }, null, 2), { encoding: 'utf8', mode: 0o600 });
   return { ok: true, serverUrl: currentServerOrigin };
@@ -991,9 +913,8 @@ ipcMain.handle('madar:desktop:notification', (_event, payload = {}) => {
 });
 
 autoUpdater.autoDownload = false;
-autoUpdater.autoInstallOnAppQuit = true;
-autoUpdater.verifyUpdateCodeSignature = () => Promise.resolve(null);
-autoUpdater.verifySignature = () => Promise.resolve(null);
+autoUpdater.autoInstallOnAppQuit = false;
+autoUpdater.disableWebInstaller = true;
 autoUpdater.on('update-available', (info) => { void showUpdateAvailable(info); });
 autoUpdater.on('error', (error) => console.error('MADAR desktop updater:', error));
 
@@ -1005,23 +926,9 @@ autoUpdater.on('download-progress', (progressObj) => {
   }
 });
 
-autoUpdater.on('update-downloaded', (info) => {
-  console.log(`[AutoUpdater] Update ${info.version} downloaded successfully.`);
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.setProgressBar(-1);
-  }
-  if (Notification && Notification.isSupported()) {
-    new Notification({
-      title: 'MADAR ERP',
-      body: `تم تنزيل تحديث ${info.version} بنجاح.`,
-      icon: join(__dirname, 'web/icon-192.png'),
-    }).show();
-  }
-});
 configureAutoUpdater();
 
 app.whenReady().then(async () => {
-  initWebCache();
   setupDownloadManager();
   createMenu();
   createTray();
