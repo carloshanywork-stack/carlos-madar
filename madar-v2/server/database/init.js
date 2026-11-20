@@ -1334,6 +1334,20 @@ export function migrateAttendanceRevocation(database) {
   if (violations.length) throw new Error('Attendance revocation migration produced foreign key violations.');
 }
 
+export function cleanupOrphanedForeignKeyRecords(database) {
+  try {
+    const violations = database.pragma('foreign_key_check');
+    if (!violations || violations.length === 0) return;
+    for (const v of violations) {
+      if (v.table === 'rep_visit_reviews' && v.parent === 'rep_visits') {
+        database.prepare('DELETE FROM rep_visit_reviews WHERE rowid = ?').run(v.rowid);
+      }
+    }
+  } catch (err) {
+    console.warn('Orphaned FK cleanup check skipped:', err?.message || err);
+  }
+}
+
 export function migrateMachineUpdatedAt(database) {
   const migrate = database.transaction(() => {
     if (database.prepare('SELECT 1 FROM schema_migrations WHERE version = ?').get(machineUpdatedAtMigration)) return;
@@ -2252,6 +2266,7 @@ export function initializeDatabase({ database = db, initialAdminPassword = env.i
   // PRAGMA foreign_keys changes while a transaction is active.
   migrateAttendanceCancellation(database);
   migrateAttendanceRevocation(database);
+  cleanupOrphanedForeignKeyRecords(database);
   const setupRequired = database
     .prepare('SELECT COUNT(*) AS count FROM users WHERE deleted_at IS NULL')
     .get().count === 0;

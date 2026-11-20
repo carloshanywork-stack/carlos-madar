@@ -1,52 +1,4 @@
 {
-  "../../../MADAR/madar-v2/client/node_modules/@capacitor/app/dist/esm/web.js": {
-    "file": "assets/web-ha4WG1bb.js",
-    "name": "web",
-    "src": "../../../MADAR/madar-v2/client/node_modules/@capacitor/app/dist/esm/web.js",
-    "isDynamicEntry": true,
-    "imports": [
-      "index.html",
-      "_react-vendor-DGbYTHPG.js",
-      "_react-dom-vendor-DRlbiy03.js",
-      "_scheduler-vendor-vkHo-WjO.js"
-    ]
-  },
-  "../../../MADAR/madar-v2/client/node_modules/@capacitor/filesystem/dist/esm/web.js": {
-    "file": "assets/web-Bz9f6F0L.js",
-    "name": "web",
-    "src": "../../../MADAR/madar-v2/client/node_modules/@capacitor/filesystem/dist/esm/web.js",
-    "isDynamicEntry": true,
-    "imports": [
-      "index.html",
-      "_react-vendor-DGbYTHPG.js",
-      "_react-dom-vendor-DRlbiy03.js",
-      "_scheduler-vendor-vkHo-WjO.js"
-    ]
-  },
-  "../../../MADAR/madar-v2/client/node_modules/@capacitor/geolocation/dist/esm/web.js": {
-    "file": "assets/web-trepZKkt.js",
-    "name": "web",
-    "src": "../../../MADAR/madar-v2/client/node_modules/@capacitor/geolocation/dist/esm/web.js",
-    "isDynamicEntry": true,
-    "imports": [
-      "index.html",
-      "_react-vendor-DGbYTHPG.js",
-      "_react-dom-vendor-DRlbiy03.js",
-      "_scheduler-vendor-vkHo-WjO.js"
-    ]
-  },
-  "../../../MADAR/madar-v2/client/node_modules/@capacitor/network/dist/esm/web.js": {
-    "file": "assets/web-CRhRMJrB.js",
-    "name": "web",
-    "src": "../../../MADAR/madar-v2/client/node_modules/@capacitor/network/dist/esm/web.js",
-    "isDynamicEntry": true,
-    "imports": [
-      "index.html",
-      "_react-vendor-DGbYTHPG.js",
-      "_react-dom-vendor-DRlbiy03.js",
-      "_scheduler-vendor-vkHo-WjO.js"
-    ]
-  },
   "_react-dom-vendor-DRlbiy03.js": {
     "file": "assets/react-dom-vendor-DRlbiy03.js",
     "name": "react-dom-vendor",
@@ -64,7 +16,7 @@
     "name": "scheduler-vendor"
   },
   "index.html": {
-    "file": "assets/index-AdX2sl9y.js",
+    "file": "assets/index-BdTYy35U.js",
     "name": "index",
     "src": "index.html",
     "isEntry": true,
@@ -74,19 +26,67 @@
       "_scheduler-vendor-vkHo-WjO.js"
     ],
     "dynamicImports": [
-      "../../../MADAR/madar-v2/client/node_modules/@capacitor/app/dist/esm/web.js",
-      "../../../MADAR/madar-v2/client/node_modules/@capacitor/filesystem/dist/esm/web.js",
-      "../../../MADAR/madar-v2/client/node_modules/@capacitor/geolocation/dist/esm/web.js",
-      "../../../MADAR/madar-v2/client/node_modules/@capacitor/network/dist/esm/web.js",
+      "node_modules/@capacitor/app/dist/esm/web.js",
+      "node_modules/@capacitor/filesystem/dist/esm/web.js",
+      "node_modules/@capacitor/geolocation/dist/esm/web.js",
+      "node_modules/@capacitor/network/dist/esm/web.js",
       "src/modules/rep/MachineVisitSheet.jsx",
       "src/modules/rep/OfflineMapPanel.jsx"
     ],
     "css": [
-      "assets/index-uDfYFW0k.css"
+      "assets/index-C19oZGOH.css"
+    ]
+  },
+  "node_modules/@capacitor/app/dist/esm/web.js": {
+    "file": "assets/web-Bf3NIepN.js",
+    "name": "web",
+    "src": "node_modules/@capacitor/app/dist/esm/web.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "index.html",
+      "_react-vendor-DGbYTHPG.js",
+      "_react-dom-vendor-DRlbiy03.js",
+      "_scheduler-vendor-vkHo-WjO.js"
+    ]
+  },
+  "node_modules/@capacitor/filesystem/dist/esm/web.js": {
+    "file": "assets/web-CEDSiwNi.js",
+    "name": "web",
+    "src": "node_modules/@capacitor/filesystem/dist/esm/web.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "index.html",
+      "_react-vendor-DGbYTHPG.js",
+      "_react-dom-vendor-DRlbiy03.js",
+      "_scheduler-vendor-vkHo-WjO.js"
+    ]
+  },
+  "node_modules/@capacitor/geolocation/dist/esm/web.js": {
+    "file": "assets/web-IoDAtQBh.js",
+    "name": "web",
+    "src": "node_modules/@capacitor/geolocation/dist/esm/web.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "index.html",
+      "_react-vendor-DGbYTHPG.js",
+      "_react-dom-vendor-DRlbiy03.js",
+      "_scheduler-vendor-vkHo-WjO.js"
+    ]
+  },
+  "node_modules/@capacitor/network/dist/esm/web.js": {
+    "file": "assets/web-C6qfeZ8W.js",
+    "name": "web",
+    "src": "node_modules/@capacitor/network/dist/esm/web.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "index.html",
+      "_react-vendor-DGbYTHPG.js",
+      "_react-dom-vendor-DRlbiy03.js",
+      "_scheduler-vendor-vkHo-WjO.js"
     ]
   },
   "src/modules/rep/MachineVisitSheet.jsx": {
-    "file": "assets/MachineVisitSheet-B93BxPZj.js",
+    "file": "assets/MachineVisitSheet-BnO_nFI0.js",
     "name": "MachineVisitSheet",
     "src": "src/modules/rep/MachineVisitSheet.jsx",
     "isDynamicEntry": true,
@@ -98,7 +98,7 @@
     ]
   },
   "src/modules/rep/OfflineMapPanel.jsx": {
-    "file": "assets/OfflineMapPanel-BrYZuAYp.js",
+    "file": "assets/OfflineMapPanel-CbJ4iGFE.js",
     "name": "OfflineMapPanel",
     "src": "src/modules/rep/OfflineMapPanel.jsx",
     "isDynamicEntry": true,

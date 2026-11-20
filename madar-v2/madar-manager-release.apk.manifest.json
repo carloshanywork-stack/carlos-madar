@@ -1,9 +1,9 @@
 {
-  "sourceRevision": "74da99ae19f4d5c13e6c6d863eebfd24772c2ff9",
+  "sourceRevision": "4aded54601b7ce45a2f9f78314da4e44cb8557fe",
   "sourceTreeDirty": false,
-  "builtAt": "2026-11-19T08:27:14.526Z",
-  "versionCode": 29,
-  "versionName": "2.4.9",
+  "builtAt": "2026-11-18T14:24:17.767Z",
+  "versionCode": 26,
+  "versionName": "2.4.6",
   "buildType": "release",
   "serverUrl": "https://carlos-pc.tail852ef0.ts.net",
   "artifactOnly": true,

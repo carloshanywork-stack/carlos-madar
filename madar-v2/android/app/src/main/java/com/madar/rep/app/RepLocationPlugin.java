@@ -47,6 +47,7 @@ public class RepLocationPlugin extends Plugin {
 
     private static final String MOCK_WARNING = "تم رصد تطبيق لتزييف الموقع، يرجى إغلاقه للمتابعة.";
     private static final long LOCATION_TIMEOUT_MS = 15000;
+    private static final float GPS_PRECISION_ACCURACY_METERS = 15f;
     private static final float MAX_CLOCK_ACCURACY_METERS = 250f;
     private static final float MAX_FALLBACK_ACCURACY_METERS = 500f;
 
@@ -133,7 +134,8 @@ public class RepLocationPlugin extends Plugin {
 
         // Fast-path: check best last known location across GPS, Network, and Passive providers
         Location fastKnown = getBestLastKnownLocation(locationManager);
-        if (fastKnown != null && fastKnown.hasAccuracy() && fastKnown.getAccuracy() <= MAX_CLOCK_ACCURACY_METERS) {
+        float fastTargetAccuracy = gpsEnabled ? GPS_PRECISION_ACCURACY_METERS : MAX_CLOCK_ACCURACY_METERS;
+        if (fastKnown != null && fastKnown.hasAccuracy() && fastKnown.getAccuracy() <= fastTargetAccuracy) {
             if (isMockLocation(fastKnown)) {
                 call.reject(MOCK_WARNING, "MOCK_LOCATION_DETECTED");
                 return;
@@ -188,7 +190,8 @@ public class RepLocationPlugin extends Plugin {
                     && (bestLocationRef[0] == null || location.getAccuracy() < bestLocationRef[0].getAccuracy())) {
                     bestLocationRef[0] = location;
                 }
-                if (!location.hasAccuracy() || location.getAccuracy() > MAX_CLOCK_ACCURACY_METERS
+                float requiredAccuracy = gpsEnabled ? GPS_PRECISION_ACCURACY_METERS : MAX_CLOCK_ACCURACY_METERS;
+                if (!location.hasAccuracy() || location.getAccuracy() > requiredAccuracy
                     || !settled.compareAndSet(false, true)) return;
                 handler.removeCallbacks(timeout);
                 if (locationManager != null) {

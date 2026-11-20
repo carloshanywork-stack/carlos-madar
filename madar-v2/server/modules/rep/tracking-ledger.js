@@ -34,23 +34,6 @@ export function trackingSessionForPoint(database, userId, point) {
     return openSession ? openSession.id : sessions[0].id;
   }
 
-  // Graceful auto-healing: if point has no matched session, check if rep is clocked in today
-  const activeAttendance = database.prepare(`
-    SELECT attendance.id, attendance.clock_in_time
-    FROM employee_daily_attendance attendance
-    JOIN employees employee ON employee.id = attendance.employee_id
-    WHERE employee.user_id = ? AND attendance.clock_in_time IS NOT NULL AND attendance.clock_out_time IS NULL
-    ORDER BY attendance.work_date DESC, attendance.id DESC LIMIT 1
-  `).get(userId);
-
-  if (activeAttendance) {
-    let open = database.prepare('SELECT id FROM rep_duty_sessions WHERE rep_user_id=? AND ended_at IS NULL').get(userId);
-    if (open) return open.id;
-    const result = database.prepare('INSERT INTO rep_duty_sessions(rep_user_id, started_at) VALUES (?, ?)')
-      .run(userId, activeAttendance.clock_in_time || point.updatedAt);
-    return Number(result.lastInsertRowid);
-  }
-
   return null;
 }
 

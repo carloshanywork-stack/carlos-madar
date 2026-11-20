@@ -1,0 +1,14 @@
+{
+  "sourceRevision": "daeb350d9d5c2d8ab6fea712f5d5293ae4e945c3",
+  "sourceTreeDirty": true,
+  "builtAt": "2026-11-20T17:13:57.481Z",
+  "applicationId": "com.madar.rep.app",
+  "versionCode": 32,
+  "versionName": "2.5.0",
+  "debuggable": true,
+  "apkSha256": "92aed01a4f3652efa446055c85b923e4efa37b3e571239c970e2ae9ca0c96068",
+  "signerCertificateSha256": "6b7662b9baf48dc6a00c44911b5bc4e0d2eb7693083b71458c5cf9bd8e5d87d1",
+  "buildType": "debug",
+  "serverUrl": "https://carlos-pc.tail852ef0.ts.net",
+  "artifactOnly": false
+}

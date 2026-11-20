@@ -32,6 +32,7 @@ public class RepLocationService extends Service implements LocationListener {
     private static final String CHANNEL_ID = "madar-rep-duty-location";
     private static final int NOTIFICATION_ID = 43102;
     private static final long MOVING_INTERVAL_MS = 15000L;
+    private static final float GPS_PRECISION_ACCURACY_METERS = 15f;
     private static final long STATIONARY_INTERVAL_MS = 60000L;
     private static final long STATIONARY_AFTER_MS = 3 * 60 * 1000L;
     private static final float MOVING_SPEED_METERS_PER_SECOND = 2f / 3.6f;
@@ -135,6 +136,11 @@ public class RepLocationService extends Service implements LocationListener {
 
     @Override
     public void onLocationChanged(Location location) {
+        boolean gpsActive = locationManager != null && locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER);
+        if (gpsActive && (!location.hasAccuracy() || location.getAccuracy() > GPS_PRECISION_ACCURACY_METERS)) {
+            // When GPS hardware is active, do not record or sync coarse network fixes (> 15m)
+            return;
+        }
         boolean mocked = RepLocationPlugin.isMockLocation(location);
         JSObject json = RepLocationPlugin.locationToJson(location, mocked);
         getPreferences().edit()

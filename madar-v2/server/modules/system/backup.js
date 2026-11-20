@@ -1,6 +1,7 @@
 import { schemaFingerprint } from '../../database/schema-compatibility.js';
 import { legacyDataImportVersion } from '../../database/data-import-version.js';
 import { backupByteLimit, verifyBackupArchive, retainLatestBackup } from './backup-retention.js';
+import { syncBackupToCloud } from './cloud-sync.js';
 import { ZipArchive } from 'archiver';
 import { closeSync, createWriteStream, existsSync, openSync, readSync } from 'node:fs';
 import { cp, lstat, mkdir, mkdtemp, open, readdir, readFile, readlink, realpath, rename, rm, stat } from 'node:fs/promises';
@@ -693,9 +694,12 @@ export async function createSystemBackup(database = db) {
       let removedBackups = 0; let retentionError = null;
       try { removedBackups = await retainLatestBackup(backupRoot, filename); }
       catch (error) { retentionError = error.message; }
+      let cloudSync = null;
+      try { cloudSync = await syncBackupToCloud(outputPath); }
+      catch (error) { cloudSync = { synced: false, error: error.message }; }
       const metadata = await stat(outputPath);
       return { filename, sizeBytes: metadata.size, createdAt: createdAt.toISOString(), databaseHealth: health.status,
-        verification, retention: { keep: 1, removedBackups, error: retentionError } };
+        verification, retention: { keep: 1, removedBackups, error: retentionError }, cloudSync };
     } catch (error) {
       await rm(temporaryOutput, { force: true });
       throw error;
@@ -769,8 +773,14 @@ router.get('/health', asyncHandler(async (req, res) => {
   const status = database.status !== 'ok' || storage.status === 'error'
     ? 'error'
     : storage.status === 'warning' ? 'warning' : 'ok';
+  const errorMessage = database.status !== 'ok'
+    ? (database.error || `تحقق مطلوب من قاعدة البيانات (${database.integrity})`)
+    : storage.status === 'error'
+      ? (storage.error || 'وسيط التخزين غير متاح أو تعذر فحصه.')
+      : null;
   const health = {
     status,
+    ...(errorMessage ? { error: errorMessage } : {}),
     uptimeSeconds: Math.floor(process.uptime()),
     events: db.prepare('SELECT COUNT(*) AS pendingPublications, MIN(occurred_at) AS oldestPendingAt FROM operations_event_outbox').get(),
     database,
@@ -783,7 +793,7 @@ router.get('/health', asyncHandler(async (req, res) => {
       nextScheduledAt: backupSchedulerState.nextRunAt,
     },
   };
-  res.status(status === 'error' ? 503 : 200).json(health);
+  res.status(200).json(health);
 }));
 let isRestoreInProgress = false;
 

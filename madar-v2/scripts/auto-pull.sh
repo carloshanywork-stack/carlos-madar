@@ -131,8 +131,16 @@ if printf '%s\n' "$CHANGED" | grep -qx 'madar-v2/package-lock.json'; then
     || { log "backend deps not updated; not restarting"; exit 0; }
 fi
 
-# All tests create their own temporary databases/storage; never pass production paths.
-if ! run_step "$PROJECT_DIR" "V2 regression gate" env -u MADAR_V2_DATABASE_PATH -u MADAR_V2_STORAGE_ROOT -u MADAR_V2_DATA_DIR -u MADAR_V2_BACKUP_ROOT NODE_ENV=test npm test; then
+# Dotenv can fill unset values from production. Pin every persistent test root.
+TEST_ROOT="$(mktemp -d -t madar-deploy-tests.XXXXXXXX)" || exit 1
+if run_step "$PROJECT_DIR" "V2 regression gate" env \
+  MADAR_V2_DATABASE_PATH="$TEST_ROOT/db.sqlite" MADAR_V2_STORAGE_ROOT="$TEST_ROOT/storage" \
+  MADAR_V2_DATA_DIR="$TEST_ROOT/data" MADAR_V2_BACKUP_ROOT="$TEST_ROOT/backups" \
+  STORAGE_MOUNT_PATH='' MADAR_V2_BACKUP_MOUNT_PATH='' MADAR_V2_OFFLINE_MAPS_DIR='' \
+  NODE_ENV=test npm test; then
+  rm -rf -- "$TEST_ROOT"
+else
+  rm -rf -- "$TEST_ROOT"
   log "tests failed; deployed receipt unchanged; not restarting"
   exit 1
 fi

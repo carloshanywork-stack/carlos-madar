@@ -81,7 +81,7 @@ function estimateDistance(points) {
   let distance = 0;
   let previous = null;
   for (const point of points) {
-    if (Number(point.accuracy) > 100) continue;
+    if (point.accuracy !== null && point.accuracy !== undefined && Number(point.accuracy) > 15) continue;
     if (previous) {
       const gapMs = new Date(point.captured_at).valueOf() - new Date(previous.captured_at).valueOf();
       const segment = haversineKm(previous, point);
@@ -144,16 +144,18 @@ export function getSupervisorRadar(database = defaultDatabase, now = new Date())
       FROM rep_tracking_breadcrumbs point
       LEFT JOIN rep_duty_sessions duty ON duty.id = point.duty_session_id
       WHERE point.user_id = ? AND datetime(point.recorded_at) >= datetime(?) AND datetime(point.recorded_at) < datetime(?)
+        AND (point.accuracy IS NULL OR point.accuracy <= 15)
       ORDER BY datetime(point.recorded_at), point.id
     `).all(rep.id, start, end);
     const savedLocation = parseJson(rep.last_location_json);
+    const validSavedLocation = savedLocation && (savedLocation.accuracy === null || savedLocation.accuracy === undefined || Number(savedLocation.accuracy) <= 15) ? savedLocation : null;
     const latestPoint = points.at(-1);
-    const savedLocationTime = savedLocation?.updatedAt ? new Date(savedLocation.updatedAt).valueOf() : Number.NEGATIVE_INFINITY;
+    const savedLocationTime = validSavedLocation?.updatedAt ? new Date(validSavedLocation.updatedAt).valueOf() : Number.NEGATIVE_INFINITY;
     const latestPointTime = latestPoint ? new Date(latestPoint.captured_at).valueOf() : Number.NEGATIVE_INFINITY;
     const useLatestPoint = latestPoint && latestPointTime > savedLocationTime;
     const location = useLatestPoint
       ? { latitude: Number(latestPoint.latitude), longitude: Number(latestPoint.longitude), accuracy: Number(latestPoint.accuracy), updatedAt: latestPoint.captured_at }
-      : savedLocation;
+      : (validSavedLocation ?? savedLocation);
     const lastSignal = location?.updatedAt ?? null;
     const staleMs = lastSignal ? now.valueOf() - new Date(lastSignal).valueOf() : Number.POSITIVE_INFINITY;
     const recentPending = database.prepare(`
@@ -212,6 +214,9 @@ export function getSupervisorRadar(database = defaultDatabase, now = new Date())
 }
 
 function detectStopsFromPoints(points) {
+  const accuratePoints = (points || []).filter(
+    (p) => p.accuracy === null || p.accuracy === undefined || Number(p.accuracy) <= 15
+  );
   const stops = [];
   let segment = [];
   const finish = () => {
@@ -232,7 +237,7 @@ function detectStopsFromPoints(points) {
       });
     }
   };
-  for (const point of points) {
+  for (const point of accuratePoints) {
     const anchor = segment[0];
     const prev = segment.at(-1);
     const gap = prev ? Date.parse(point.recorded_at) - Date.parse(prev.recorded_at) : 0;
@@ -260,12 +265,14 @@ export function getSupervisorRepRoute(repIdInput, dateInput, database = defaultD
     FROM rep_tracking_breadcrumbs
     WHERE user_id = ? AND work_date = ?
       AND datetime(recorded_at) >= datetime(?) AND datetime(recorded_at) < datetime(?)
+      AND (accuracy IS NULL OR accuracy <= 15)
     ORDER BY datetime(recorded_at), id`).all(repId, day, start, end);
   const stopRows = database.prepare(`SELECT stop_arrived_at AS arrived_at,
       stop_departed_at AS departed_at, MAX(stop_duration_minutes) AS duration_minutes,
       stop_name, AVG(latitude) AS latitude, AVG(longitude) AS longitude
     FROM rep_tracking_breadcrumbs
     WHERE user_id = ? AND work_date = ? AND is_stop = 1 AND stop_arrived_at IS NOT NULL
+      AND (accuracy IS NULL OR accuracy <= 15)
     GROUP BY stop_arrived_at, stop_departed_at, stop_name
     ORDER BY datetime(stop_arrived_at)`).all(repId, day);
   const visitedRows = database.prepare(`SELECT visit.visit_uuid, visit.machine_code, machine.name_ar AS machine_name,
@@ -658,7 +665,7 @@ export function approveRepVisitsTogether(input, actorId, database = defaultDatab
 export function buildApprovedVisitsWorkbook(dayInput, database = defaultDatabase) {
   const range = dayRange(dayInput, database);
   const visits = database.prepare(`
-    SELECT visit.machine_code, machine.name_ar AS machine_name, visit.region_name,
+    SELECT visit.id, visit.machine_code, machine.name_ar AS machine_name, visit.region_name,
       visit.order_code, user.full_name AS rep_name, visit.captured_at,
       visit.before_captured_at, visit.after_captured_at, visit.reason_ids_json, visit.notes
     FROM rep_visits visit

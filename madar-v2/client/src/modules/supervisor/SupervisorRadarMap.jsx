@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import { smoothPolyline } from './trajectory-smoothing.js';
 
 const STATUS = {
   active: { label: 'على المسار', color: '#10b981', bg: '#ecfdf5', text: '#065f46' },
@@ -10,10 +11,39 @@ const STATUS = {
 };
 
 const TILE_PRESETS = {
+  localEgypt: {
+    id: 'localEgypt',
+    name: 'خريطة مصر من سيرفر MADAR',
+    icon: '🗺️',
+    url: '/api/supervisor/map/overview/{z}/{x}/{y}',
+    attribution: '&copy; OpenStreetMap contributors · MADAR',
+    maxZoom: 20,
+    maxNativeZoom: 11,
+    minNativeZoom: 5,
+    bounds: [[21.5, 24.5], [32.6, 37.3]],
+  },
+  googleHybrid: {
+    id: 'googleHybrid',
+    name: 'قمر صناعي تفصيلي (Google)',
+    icon: '🛰️',
+    url: 'https://mt{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
+    attribution: '&copy; Google Maps &mdash; Satellite & Streets',
+    maxZoom: 20,
+    subdomains: ['0', '1', '2', '3'],
+  },
+  googleStreets: {
+    id: 'googleStreets',
+    name: 'شوارع تفصيلية (Google)',
+    icon: '🗺️',
+    url: 'https://mt{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}',
+    attribution: '&copy; Google Maps',
+    maxZoom: 20,
+    subdomains: ['0', '1', '2', '3'],
+  },
   satellite: {
     id: 'satellite',
-    name: 'القمر الصناعي',
-    icon: '🛰️',
+    name: 'قمر صناعي (Esri)',
+    icon: '🌍',
     url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
     attribution: 'Tiles &copy; Esri &mdash; High-Resolution Satellite',
     maxZoom: 19,
@@ -21,15 +51,15 @@ const TILE_PRESETS = {
   },
   streets: {
     id: 'streets',
-    name: 'خريطة الشوارع',
-    icon: '🗺️',
+    name: 'خريطة الشوارع (OSM)',
+    icon: '🌐',
     url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors',
     maxZoom: 19,
   },
   carto: {
     id: 'carto',
-    name: 'خريطة مضيئة',
+    name: 'خريطة مضيئة (Carto)',
     icon: '🏢',
     url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
     attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
@@ -60,34 +90,6 @@ function formatSpeed(value) {
   return typeof value === 'number' && Number.isFinite(value) ? `${value.toFixed(1)} كم/س` : '0 كم/س';
 }
 
-/**
- * Filter out stationary GPS jitter from the polyline so it doesn't draw
- * an unreadable starburst of zigzag lines while the representative is at a stop.
- */
-function smoothPolyline(rawPoints) {
-  if (!rawPoints || rawPoints.length <= 2) return rawPoints || [];
-  const smoothed = [rawPoints[0]];
-  for (let i = 1; i < rawPoints.length; i += 1) {
-    const prev = smoothed[smoothed.length - 1];
-    const curr = rawPoints[i];
-    const lat1 = Number(prev.latitude);
-    const lon1 = Number(prev.longitude);
-    const lat2 = Number(curr.latitude);
-    const lon2 = Number(curr.longitude);
-    if (!Number.isFinite(lat1) || !Number.isFinite(lat2)) continue;
-
-    // Approximate distance in meters
-    const dLat = (lat2 - lat1) * 111139;
-    const dLon = (lon2 - lon1) * 111139 * Math.cos((lat1 * Math.PI) / 180);
-    const distMeters = Math.sqrt(dLat * dLat + dLon * dLon);
-
-    // If points are within 12 meters of each other, collapse them during a stop
-    if (distMeters >= 12 || i === rawPoints.length - 1) {
-      smoothed.push(curr);
-    }
-  }
-  return smoothed;
-}
 
 /**
  * Creates high-precision HTML marker with a razor-sharp target needle and reticle
@@ -97,8 +99,13 @@ function createPrecisionRepMarkerHtml(rep, isSelected, offsetIndex = 0) {
   const pulseClass = rep.status === 'active' ? 'radar-pulse-anim' : '';
   const selectedClass = isSelected ? 'is-selected' : '';
 
-  // Lateral shift when multiple reps are at the same spot to prevent overlapping badges
-  const lateralShift = offsetIndex === 0 ? 0 : offsetIndex % 2 === 1 ? (Math.ceil(offsetIndex / 2) * 36) : (-Math.ceil(offsetIndex / 2) * 36);
+  // Stagger horizontally and vertically so multiple reps at the exact same location never overlap
+  const lateralShift = offsetIndex === 0
+    ? 0
+    : offsetIndex % 2 === 1
+      ? (Math.ceil(offsetIndex / 2) * 75)
+      : (-Math.ceil(offsetIndex / 2) * 75);
+  const verticalShift = offsetIndex * 24;
 
   return `
     <div class="radar-precision-rep-marker ${pulseClass} ${selectedClass}" style="--rep-color: ${status.color};">
@@ -108,9 +115,9 @@ function createPrecisionRepMarkerHtml(rep, isSelected, offsetIndex = 0) {
         <div class="reticle-dot"></div>
       </div>
 
-      <!-- Needle Pointer Stem (Connects target to badge) -->
-      <div class="radar-needle-stem" style="transform: translateX(${lateralShift}px);">
-        <div class="needle-line"></div>
+      <!-- Needle Pointer Stem (Connects target to badge with staggered offset) -->
+      <div class="radar-needle-stem" style="transform: translate(calc(-50% + ${lateralShift}px), -${verticalShift}px);">
+        <div class="needle-line" style="height: ${16 + verticalShift}px;"></div>
         <div class="radar-rep-pin-body">
           <div class="radar-rep-avatar">${(rep.fullName || 'م').slice(0, 1)}</div>
           <div class="radar-rep-pill">
@@ -124,21 +131,30 @@ function createPrecisionRepMarkerHtml(rep, isSelected, offsetIndex = 0) {
 }
 
 function createStopMarkerHtml(stop) {
+  const isLoitering = Number(stop.durationMinutes) >= 30;
   return `
-    <div class="radar-leaflet-stop-marker">
+    <div class="radar-leaflet-stop-marker ${isLoitering ? 'is-loitering' : ''}">
       <div class="radar-stop-pin-dot"></div>
-      <div class="radar-stop-pin-badge">${stop.durationMinutes || 0} د</div>
+      <div class="radar-stop-pin-badge">${isLoitering ? '⚠️ ' : ''}${stop.durationMinutes || 0} د</div>
     </div>
   `;
+}
+
+function formatMachineLabel(code) {
+  if (!code) return 'ماكينة';
+  if (code.length > 8) {
+    return `#${code.slice(0, 6)}…`;
+  }
+  return code;
 }
 
 function createMachineMarkerHtml(machine) {
   const isApproved = machine.reviewStatus === 'approved';
   const badgeColor = isApproved ? '#10b981' : '#f59e0b';
   return `
-    <div class="radar-leaflet-machine-marker" style="--machine-color: ${badgeColor};">
-      <div class="radar-machine-icon">م</div>
-      <div class="radar-machine-code">${machine.machineCode}</div>
+    <div class="radar-leaflet-machine-marker" style="--machine-color: ${badgeColor};" title="ماكينة: ${machine.machineCode}">
+      <div class="radar-machine-icon">⚙️</div>
+      <div class="radar-machine-code">${formatMachineLabel(machine.machineCode)}</div>
     </div>
   `;
 }
@@ -158,15 +174,19 @@ export default function SupervisorRadarMap({
   const routeLayerRef = useRef(null);
   const stopsLayerRef = useRef(null);
   const heatmapLayerRef = useRef(null);
+  const replayLayerRef = useRef(null);
   const isFirstFitRef = useRef(true);
   const addressCacheRef = useRef({});
 
-  const [activeTileType, setActiveTileType] = useState('satellite'); // Default: Satellite
+  const [activeTileType, setActiveTileType] = useState('googleHybrid'); // Default: Google Hybrid Satellite
   const [showLabelsOnSatellite, setShowLabelsOnSatellite] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [copyFeedback, setCopyFeedback] = useState('');
   const [selectedAddress, setSelectedAddress] = useState(null);
   const [addressLoading, setAddressLoading] = useState(false);
+  const [replayIndex, setReplayIndex] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [replaySpeed, setReplaySpeed] = useState(1);
 
   // Extract all valid rep locations with spatial clustering keys
   const activeRepLocations = useMemo(() => {
@@ -250,8 +270,8 @@ export default function SupervisorRadarMap({
     const defaultCenter = [30.0444, 31.2357];
     const map = L.map(mapContainerRef.current, {
       center: defaultCenter,
-      zoom: 13,
-      maxZoom: 19,
+      zoom: 14,
+      maxZoom: 20,
       zoomControl: false,
       attributionControl: false,
     });
@@ -263,10 +283,27 @@ export default function SupervisorRadarMap({
     routeLayerRef.current = L.layerGroup().addTo(map);
     stopsLayerRef.current = L.layerGroup().addTo(map);
     heatmapLayerRef.current = L.layerGroup().addTo(map);
+    replayLayerRef.current = L.layerGroup().addTo(map);
 
     mapInstanceRef.current = map;
 
+    // Invalidate size immediately and after mount/layout paint to prevent blank/white maps
+    map.invalidateSize();
+    const timer = setTimeout(() => {
+      map.invalidateSize();
+    }, 150);
+
+    let resizeObserver = null;
+    if (typeof ResizeObserver !== 'undefined' && mapContainerRef.current) {
+      resizeObserver = new ResizeObserver(() => {
+        map.invalidateSize();
+      });
+      resizeObserver.observe(mapContainerRef.current);
+    }
+
     return () => {
+      clearTimeout(timer);
+      if (resizeObserver) resizeObserver.disconnect();
       map.remove();
       mapInstanceRef.current = null;
     };
@@ -286,10 +323,13 @@ export default function SupervisorRadarMap({
       labelsLayerRef.current = null;
     }
 
-    const preset = TILE_PRESETS[activeTileType] || TILE_PRESETS.satellite;
+    const preset = TILE_PRESETS[activeTileType] || TILE_PRESETS.googleHybrid;
     const baseLayer = L.tileLayer(preset.url, {
-      maxZoom: preset.maxZoom || 19,
+      maxZoom: preset.maxZoom || 20,
       attribution: preset.attribution,
+      maxNativeZoom: preset.maxNativeZoom,
+      minNativeZoom: preset.minNativeZoom,
+      bounds: preset.bounds,
       subdomains: preset.subdomains || 'abc',
     });
     baseLayer.addTo(map);
@@ -337,14 +377,14 @@ export default function SupervisorRadarMap({
       const isSelected = selectedId !== null && Number(rep.id) === Number(selectedId);
       const status = STATUS[rep.status] ?? STATUS.offline;
 
-      // Subtle, non-intrusive Accuracy Ring
-      const displayRadius = Math.min(80, Math.max(12, rep.accuracy));
+      // Subtle, non-intrusive Accuracy Ring (max 25m, hairline border)
+      const displayRadius = Math.min(25, Math.max(8, rep.accuracy));
       const accuracyCircle = L.circle([rep.lat, rep.lng], {
         radius: displayRadius,
         color: status.color,
         fillColor: status.color,
-        fillOpacity: isSelected ? 0.12 : 0.05,
-        weight: 1.5,
+        fillOpacity: isSelected ? 0.08 : 0.03,
+        weight: 1,
         dashArray: '3, 4',
       });
       accuracyCircle.addTo(markersLayer);
@@ -442,6 +482,11 @@ export default function SupervisorRadarMap({
     }
   }, [selectedId, activeRepLocations, fetchAddress]);
 
+  const cleanedPolylinePoints = useMemo(() => {
+    if (!selectedRoute?.polyline) return [];
+    return smoothPolyline(selectedRoute.polyline, selectedRoute.stops || []);
+  }, [selectedRoute]);
+
   // Render Clean Polyline (No jitter), Stops, Visited Machines, and Focused Heatmap
   useEffect(() => {
     const map = mapInstanceRef.current;
@@ -457,8 +502,7 @@ export default function SupervisorRadarMap({
     if (!selectedRoute) return;
 
     // 1. Cleaned Polyline with Jitter Filtering
-    const rawCoords = selectedRoute.polyline || [];
-    const cleanedCoords = smoothPolyline(rawCoords)
+    const cleanedCoords = cleanedPolylinePoints
       .filter((p) => Number.isFinite(p.latitude) && Number.isFinite(p.longitude))
       .map((p) => [Number(p.latitude), Number(p.longitude)]);
 
@@ -467,9 +511,10 @@ export default function SupervisorRadarMap({
       L.polyline(cleanedCoords, {
         color: '#1e40af',
         weight: 6,
-        opacity: 0.4,
+        opacity: 0.35,
         lineCap: 'round',
         lineJoin: 'round',
+        smoothFactor: 2.0,
       }).addTo(routeLayer);
 
       // Main route polyline
@@ -479,6 +524,7 @@ export default function SupervisorRadarMap({
         opacity: 0.95,
         lineCap: 'round',
         lineJoin: 'round',
+        smoothFactor: 2.0,
       }).addTo(routeLayer);
     }
 
@@ -503,15 +549,15 @@ export default function SupervisorRadarMap({
       });
       stopMarker.addTo(stopsLayer);
 
-      // Heatmap circles: Focused & subtle (max 45m, not 250m!)
+      // Heatmap circles: Focused & subtle (max 35m, fillOpacity: 0.04 per GIS standards so streets remain clear!)
       if (showHeatmap) {
-        const radius = Math.min(45, Math.max(16, 12 + duration * 0.9));
+        const radius = Math.min(35, Math.max(14, 10 + duration * 0.6));
         const heatColor = duration >= 30 ? '#ef4444' : duration >= 10 ? '#f59e0b' : '#10b981';
         L.circle([lat, lng], {
           radius,
           color: heatColor,
           fillColor: heatColor,
-          fillOpacity: 0.22,
+          fillOpacity: 0.04,
           weight: 1,
         }).addTo(heatmapLayer);
       }
@@ -544,6 +590,60 @@ export default function SupervisorRadarMap({
     });
   }, [selectedRoute, showHeatmap]);
 
+  const replayPoints = useMemo(() => cleanedPolylinePoints, [cleanedPolylinePoints]);
+
+  // Reset replay when selected route changes
+  useEffect(() => {
+    setReplayIndex(0);
+    setIsPlaying(false);
+    if (replayLayerRef.current) replayLayerRef.current.clearLayers();
+  }, [selectedRoute]);
+
+  // Replay animation loop
+  useEffect(() => {
+    if (!isPlaying || replayPoints.length <= 1) return;
+    const interval = Math.max(30, Math.floor(350 / replaySpeed));
+    const timer = setInterval(() => {
+      setReplayIndex((prev) => {
+        if (prev >= replayPoints.length - 1) {
+          setIsPlaying(false);
+          return prev;
+        }
+        return prev + 1;
+      });
+    }, interval);
+    return () => clearInterval(timer);
+  }, [isPlaying, replaySpeed, replayPoints.length]);
+
+  // Render Replay Runner on map
+  useEffect(() => {
+    const replayLayer = replayLayerRef.current;
+    if (!replayLayer) return;
+    replayLayer.clearLayers();
+    if (!selectedRoute || !replayPoints.length) return;
+
+    const currentPoint = replayPoints[Math.min(replayIndex, replayPoints.length - 1)];
+    if (!currentPoint || !Number.isFinite(currentPoint.latitude) || !Number.isFinite(currentPoint.longitude)) return;
+
+    const runnerIcon = L.divIcon({
+      className: 'custom-replay-runner-icon',
+      html: `
+        <div class="radar-replay-runner">
+          <div class="runner-dot">🚗</div>
+          <div class="runner-tag">${formatTime(currentPoint.recordedAt)} · ${Math.round(currentPoint.speed || 0)} كم/س</div>
+        </div>
+      `,
+      iconSize: [40, 40],
+      iconAnchor: [20, 20],
+    });
+
+    const marker = L.marker([currentPoint.latitude, currentPoint.longitude], {
+      icon: runnerIcon,
+      zIndexOffset: 3000,
+    });
+    marker.addTo(replayLayer);
+  }, [selectedRoute, replayPoints, replayIndex]);
+
   const toggleFullscreen = () => {
     if (!mapContainerRef.current) return;
     const elem = mapContainerRef.current.parentElement;
@@ -574,7 +674,7 @@ export default function SupervisorRadarMap({
               <b>{preset.name}</b>
             </button>
           ))}
-          {activeTileType === 'satellite' && (
+          {Boolean(TILE_PRESETS[activeTileType]?.labelsUrl) && (
             <label className="satellite-labels-toggle" title="إظهار أسماء الشوارع والمعالم على القمر الصناعي">
               <input
                 type="checkbox"
@@ -665,6 +765,48 @@ export default function SupervisorRadarMap({
       {copyFeedback && (
         <div className="radar-map-copy-toast" role="status">
           ✓ {copyFeedback}
+        </div>
+      )}
+
+      {/* Route Timeline Replay Control Bar */}
+      {selectedRoute && replayPoints.length > 1 && (
+        <div className="radar-replay-bar" dir="rtl">
+          <button
+            type="button"
+            className="btn-replay-play"
+            onClick={() => setIsPlaying(!isPlaying)}
+            title={isPlaying ? 'إيقاف مؤقت' : 'تشغيل مسار اليوم'}
+          >
+            {isPlaying ? '⏸ إيقاف' : '▶ تشغيل اليوم'}
+          </button>
+          <input
+            type="range"
+            min={0}
+            max={replayPoints.length - 1}
+            value={replayIndex}
+            onChange={(e) => setReplayIndex(Number(e.target.value))}
+            className="replay-slider"
+            aria-label="شريط تتبع اليوم"
+          />
+          <div className="replay-stats">
+            <span className="replay-time">
+              ⏱️ {formatTime(replayPoints[Math.min(replayIndex, replayPoints.length - 1)]?.recordedAt)}
+            </span>
+            <span className="replay-speed">
+              🚗 {Math.round(replayPoints[Math.min(replayIndex, replayPoints.length - 1)]?.speed || 0)} كم/س
+            </span>
+            <span className="replay-progress">
+              {Math.round(((replayIndex + 1) / replayPoints.length) * 100)}%
+            </span>
+          </div>
+          <button
+            type="button"
+            className="btn-replay-speed"
+            onClick={() => setReplaySpeed((s) => (s === 1 ? 2 : s === 2 ? 5 : 1))}
+            title="مضاعف سرعة العرض"
+          >
+            {replaySpeed}x
+          </button>
         </div>
       )}
 

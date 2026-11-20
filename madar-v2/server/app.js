@@ -32,6 +32,11 @@ import repRouter from './modules/rep/routes.js';
 import supervisorRouter from './modules/supervisor/routes.js';
 import notificationsRouter from './modules/notifications/routes.js';
 import { getStorageHealth } from './modules/system/health.js';
+import sharp from 'sharp';
+
+// Maximize image processing concurrency across all CPU threads
+sharp.concurrency(4);
+sharp.cache({ files: 50, memory: 128 });
 
 export const app = express();
 

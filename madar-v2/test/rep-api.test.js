@@ -21,6 +21,7 @@ process.env.REP_ATTENDANCE_MAX_OFFLINE_AGE_HOURS = '24';
 process.env.MADAR_REP_SELF_APPROVAL_DAILY_LIMIT = '1';
 process.env.STORAGE_MOUNT_PATH = '';
 process.env.NODE_ENV = 'test';
+process.env.MADAR_REP_MIN_SUPPORTED_VERSION_CODE = '0';
 process.env.COOKIE_SECURE = 'false';
 process.env.MADAR_GITHUB_ISSUES_TOKEN = '';
 process.env.MADAR_GITHUB_ISSUES_REPOSITORY = '';
@@ -298,6 +299,12 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   assert.equal(Buffer.from(await localTile.arrayBuffer()).toString(), 'local-raster-tile');
   const invalidLocalTile = await request('/api/supervisor/map/tiles/1/2/0', {}, adminCookie);
   assert.equal(invalidLocalTile.response.status, 400);
+  const overviewTile = await fetch(`${baseUrl}/api/supervisor/map/overview/8/150/105`, {
+    headers: { cookie: adminCookie },
+  });
+  assert.equal(overviewTile.status, 200);
+  assert.equal(overviewTile.headers.get('content-type'), 'image/png');
+  assert.equal(Buffer.from(await overviewTile.arrayBuffer()).toString(), 'cairo-raster-tile');
   const adminApkDownload = await fetch(`${baseUrl}/download/apk`, { headers: { cookie: adminCookie } });
   assert.equal(adminApkDownload.status, 200);
   assert.match(adminApkDownload.headers.get('content-type'), /application\/vnd\.android\.package-archive/);
@@ -1607,7 +1614,11 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   const approvedWorkbook = await fetch(`${baseUrl}/api/supervisor/reports/approved-visits.xlsx`, { headers: { cookie: adminCookie } });
   assert.equal(approvedWorkbook.status, 200);
   assert.match(approvedWorkbook.headers.get('content-type'), /spreadsheetml\.sheet/);
-  assert.equal(Buffer.from(await approvedWorkbook.arrayBuffer()).subarray(0, 2).toString(), 'PK');
+  const approvedReport = XLSX.read(Buffer.from(await approvedWorkbook.arrayBuffer()));
+  const approvedRows = XLSX.utils.sheet_to_json(approvedReport.Sheets[approvedReport.SheetNames[0]], { header: 1 });
+  const replacementRow = approvedRows.find((row) => row[1] === '1434' && row[9] === replacementPayload.notes);
+  assert.ok(replacementRow, 'the approved reshoot is included in the supervisor export');
+  assert.match(replacementRow[8], /العدد: 3/u, 'the approved visit retains the submitted quantity in Excel');
   const maintenancePptx = await fetch(`${baseUrl}/api/maintenance/orders/${orderId}/export.pptx?useFixedLogoOnCover=true`, { headers: { cookie: adminCookie } });
   assert.equal(maintenancePptx.status, 200);
   assert.match(maintenancePptx.headers.get('content-type'), /presentationml\.presentation/);

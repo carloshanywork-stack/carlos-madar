@@ -154,6 +154,14 @@ test('location-ping auto-heals duty session and accepts trail when rep has open 
     speed: 1.2,
     updatedAt: dateIso,
   };
+  const previousDayPoint = {
+    ...trackPoint, clientPointId: 'rep-102-old-point',
+    updatedAt: new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString(),
+  };
+  const oldPing = syncRepLocationPing({ id: 102, role: 'rep' }, { trail: [previousDayPoint] }, db);
+  assert.equal(oldPing.onDuty, false);
+  assert.equal(oldPing.points[0].reason, 'no_duty_session');
+
   const pingResult = syncRepLocationPing({ id: 102, role: 'rep' }, {
     onDuty: true,
     trail: [trackPoint],
@@ -167,6 +175,9 @@ test('location-ping auto-heals duty session and accepts trail when rep has open 
   // rep_duty_sessions must now have an active session
   const sessionAfter = db.prepare('SELECT id, ended_at FROM rep_duty_sessions WHERE rep_user_id = 102 AND ended_at IS NULL').get();
   assert.ok(sessionAfter, 'rep_duty_sessions must have auto-healed');
+  const attendanceRows = db.prepare(`SELECT clock_in_biometric_verified
+    FROM employee_daily_attendance WHERE employee_id = 202`).all();
+  assert.deepEqual(attendanceRows, [{ clock_in_biometric_verified: 0 }]);
 
   // users.last_location_json and is_online must be populated from trail
   const userRow = db.prepare('SELECT is_online, last_location_json FROM users WHERE id = 102').get();
@@ -213,4 +224,42 @@ test('admin clock-in for employee creates duty session for representative users'
   const radar = getSupervisorRadar(db, now);
   const repOnRadar = radar.representatives.find((r) => r.id === 103);
   assert.equal(repOnRadar.onDuty, true);
+});
+
+test('location-ping without attendance cannot create payroll, biometric proof or duty', () => {
+  const db = createTestDatabase();
+  const now = new Date();
+  const dateIso = now.toISOString();
+
+  // Create rep user and employee with NO prior attendance
+  db.prepare(`
+    INSERT INTO users (id, username, full_name, role, active, is_online, password_hash)
+    VALUES (104, 'rep-auto-gps', 'مندوب التتبع التلقائي', 'rep', 1, 0, 'hash')
+  `).run();
+  db.prepare(`
+    INSERT INTO employees (id, user_id, name, department, phone)
+    VALUES (204, 104, 'مندوب التتبع التلقائي', 'Maintenance', '+201211111111')
+  `).run();
+
+  // Rep opens app and sends location ping without touching any attendance button
+  const trackPoint = {
+    clientPointId: 'rep-104-auto-1',
+    latitude: 30.1234,
+    longitude: 31.5678,
+    accuracy: 5,
+    speed: 0,
+    updatedAt: dateIso,
+  };
+  const pingResult = syncRepLocationPing({ id: 104, role: 'rep' }, {
+    onDuty: true,
+    trail: [trackPoint],
+  }, db);
+
+  assert.equal(pingResult.onDuty, false);
+  assert.equal(pingResult.acceptedPoints, 0);
+  assert.equal(pingResult.points[0].reason, 'no_duty_session');
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM rep_duty_sessions WHERE rep_user_id = 104').get().n, 0);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM employee_daily_attendance WHERE employee_id = 204').get().n, 0);
+  const radar = getSupervisorRadar(db, now);
+  assert.equal(radar.representatives.find((rep) => rep.id === 104).onDuty, false);
 });

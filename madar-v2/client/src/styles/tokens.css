@@ -26,6 +26,34 @@
   --madar-safe-right: env(safe-area-inset-right, 0px);
   --madar-safe-bottom: env(safe-area-inset-bottom, 0px);
   --madar-safe-left: env(safe-area-inset-left, 0px);
+
+  /* Typography Scale */
+  --madar-font-sans: "Segoe UI", Tahoma, Arial, sans-serif;
+  --madar-font-mono: Consolas, "SFMono-Regular", Menlo, monospace;
+  --madar-text-2xs: 10px;
+  --madar-text-xs: 11px;
+  --madar-text-sm: 12px;
+  --madar-text-base: 14px;
+  --madar-text-lg: 16px;
+  --madar-text-xl: 18px;
+  --madar-text-2xl: 22px;
+  --madar-text-3xl: 28px;
+  --madar-weight-normal: 500;
+  --madar-weight-medium: 650;
+  --madar-weight-bold: 800;
+  --madar-weight-heavy: 900;
+
+  /* Radius Scale */
+  --madar-radius-sm: 8px;
+  --madar-radius-md: 10px;
+  --madar-radius-lg: 14px;
+  --madar-radius-xl: 16px;
+  --madar-radius-full: 999px;
+
+  /* Component Accent Bridges */
+  --rep-green: var(--madar-accent);
+  --rep-green-dark: var(--madar-accent-strong);
+  --rep-green-pale: var(--madar-accent-pale);
   min-height: 100vh;
   min-height: 100dvh;
   color: var(--madar-text);
