@@ -37,12 +37,12 @@ This packages the existing field-representative UI in a Capacitor Android shell.
    npm run android:debug -- --live-reload
    ```
 
-   The build script runs Vite and Capacitor via the active Node executable, including on Windows. `android:sync` builds `client/dist` for the local Express server and `public/rep` for the Android package, then copies the latest web assets/plugins into `android/`. `android:debug` repeats that sync, invokes Gradle's wrapper, and atomically copies the resulting debug APK to `madar-v2/madar-rep.apk`. The generated APK is ignored by Git.
+   The build script runs Vite and Capacitor via the active Node executable, including on Windows. `android:sync` builds `client/dist` for the local Express server and `public/rep` for the Android package, then copies the latest web assets/plugins into `android/`. `android:debug` builds the native representative debug variant and copies it to `madar-v2/madar-rep.apk`. Its application ID has a `.debug` suffix. The generated APK is ignored by Git.
 
 3. Install the APK:
 
    ```powershell
-   adb install -r android/app/build/outputs/apk/debug/app-debug.apk
+   adb install -r android/native-platform/app/build/outputs/apk/debug/app-debug.apk
    ```
 
 Debug APKs use Gradle's machine-local debug key and are for testing only. Do not distribute them as production updates. Each release APK must use the same approved signing key as every previous release of `com.madar.rep.app`; Android rejects an update signed with a different key. Keep the keystore and `android/key.properties` outside source control, retain secure backups of the keystore, and do not rotate or replace it for an existing package.
@@ -56,7 +56,7 @@ keyAlias=<approved key alias>
 keyPassword=<key password>
 ```
 
-Then increment `versionCode` in `android/version.properties` for every update and run `npm run android:release`. That file is the version source for each build and may be overridden for CI with `MADAR_REP_VERSION_CODE` and `MADAR_REP_VERSION_NAME`. Release builds require a clean committed source tree, a valid `android/key.properties`, and the approved existing keystore; never generate a replacement signing key. The build script verifies the APK signature, then writes `madar-rep-release.apk.manifest.json` atomically beside `madar-rep-release.apk`. The sidecar records source revision/clean state, build time/type, version, APK SHA-256, and signer-certificate SHA-256; it contains no signing secrets. Publish the APK and sidecar together. `/download/apk/status` validates the release sidecar against the APK bytes and exposes only the authenticated download metadata; `/download/apk` refuses a release with missing/stale metadata or a symlinked artifact. The Settings → System screen shows the verified version and short APK hash. Debug and transition artifacts remain distinct from the release artifact.
+Then increment `versionCode` in `android/version.properties` for every update and run `npm run android:release`. That file is the version source validated by the packaging script. Gradle overrides must match it for a publishable build. Release builds require a clean committed source tree, a valid `android/key.properties`, and the approved existing keystore; never generate a replacement signing key. The build script verifies the APK signature, then writes `madar-rep-release.apk.manifest.json` atomically beside `madar-rep-release.apk`. The sidecar records source revision/clean state, build time/type, version, APK SHA-256, and signer-certificate SHA-256; it contains no signing secrets. Publish the APK and sidecar together. `/download/apk/status` validates the release sidecar against the APK bytes and exposes only the authenticated download metadata; `/download/apk` refuses a release with missing/stale metadata or a symlinked artifact. The Settings → System screen shows the verified version and short APK hash. Debug and transition artifacts remain distinct from the release artifact.
 
 Before serving or recording a release, set `MADAR_REP_SIGNER_CERT_SHA256` in the server environment to the approved signing certificate's 64-character SHA-256 fingerprint. Keep the keystore and passwords outside the repository. The Admin → Support → APK release history action rechecks the clean-build manifest, APK digest, signer fingerprint, and configured pin before recording a local release; it never uploads the APK to GitHub or another cloud service. Missing or mismatched signing configuration blocks release recording and release downloads. Recording also governs distribution through the `apk_releases` registry: `/download/apk/status` reports `available: false` with a `reason`, and `/download/apk` refuses an artifact whose version code is not recorded, whose bytes or signer differ from the recorded row, or whose row is `withdrawn`/`retained`. An operator without an admin browser session can record the same verified artifact on the server with `node scripts/record-release.mjs <adminUserId> [notes]`; it applies the identical checks and writes the same audit entry.
 
@@ -127,3 +127,21 @@ MADAR_GITHUB_ISSUES_TOKEN=github_pat_replace_locally
 The administrator settings page offers a separate **Debug transition** download when `MADAR_REP_TRANSITION_APK_PATH` exists (default: `madar-v2/madar-rep-transition.apk`). This is for phones that still run the previously distributed Debug-signed `com.madar.rep.app` 2.0.2 (versionCode 4) or later Debug-signed updates. The transition APK is now 2.0.8 (versionCode 10) and uses that same Debug certificate. It contains the native consecutive-photo camera and current representative route UI. The standard `/download/apk` continues to select the release-signed artifact; it is not replaced by this transition file.
 
 Before updating, preserve pending visits and photos using the app's recovery process. Install the transition APK over the existing app without uninstalling it first. Confirm the version and run a real multi-photo visit on the handset. Matching the known certificate and increasing versionCode establish Android's update prerequisites for that distributed Debug build, but no physical-handset installation or data-preservation test has been performed. If the handset's certificate differs, stop and inspect it; do not uninstall to force installation. The transition remains a debuggable build and is not the security release. Moving from Debug to the release-signed APK needs an export/reinstall/import path with device acceptance testing.
+
+
+### Build the manager APK separately
+
+Increment `versionCode` in `android/version.properties` before preparing a
+release. To build only the manager candidate from the current checkout:
+
+```bash
+node scripts/build-android.js --manager --release --artifact-only
+```
+
+The manager artifact and manifest are written under
+`android/app/build/outputs/apk/manager/release/`. The script assembles the
+Manager flavor and independently checks APK package, manifest version,
+debuggability and approved signing certificate. An ordinary native rep build
+never reads or publishes a leftover manager APK. Direct Gradle assembly has no
+APK distribution side effect. The release candidate must supersede the current
+distributed and advertised version before publication.

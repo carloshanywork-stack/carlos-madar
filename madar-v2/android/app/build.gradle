@@ -73,50 +73,6 @@ android {
     }
 }
 
-tasks.register('publishDualReleaseApks') {
-    doLast {
-        def requested = gradle.startParameter.taskNames
-        def isManagerOnly = requested.any { it.contains('Manager') } && !requested.any { it.contains('Rep') }
-        def repApk = file("${buildDir}/outputs/apk/rep/release/app-rep-release.apk")
-        def managerApk = file("${buildDir}/outputs/apk/manager/release/app-manager-release.apk")
-        def defaultReleaseDir = file("${buildDir}/outputs/apk/release")
-        defaultReleaseDir.mkdirs()
-        if (repApk.exists() && !isManagerOnly) {
-            copy {
-                from repApk
-                into defaultReleaseDir
-                rename { 'app-release.apk' }
-            }
-            copy {
-                from repApk
-                into rootProject.file("..")
-                rename { 'madar-rep-release.apk' }
-            }
-            copy {
-                from repApk
-                into rootProject.file("../..")
-                rename { 'madar-rep-release.apk' }
-            }
-        }
-        if (managerApk.exists()) {
-            copy {
-                from managerApk
-                into rootProject.file("..")
-                rename { 'madar-manager-release.apk' }
-            }
-            copy {
-                from managerApk
-                into rootProject.file("../..")
-                rename { 'madar-manager-release.apk' }
-            }
-        }
-    }
-}
-
-tasks.matching { it.name in ['assembleRelease', 'assembleRepRelease', 'assembleManagerRelease'] }.configureEach {
-    finalizedBy 'publishDualReleaseApks'
-}
-
 gradle.taskGraph.whenReady { taskGraph ->
     def releaseBuildRequested = taskGraph.allTasks.any { task ->
         task.path.startsWith(':app:') && task.name.toLowerCase().contains('release')
