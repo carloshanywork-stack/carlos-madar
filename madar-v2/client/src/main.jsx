@@ -15,7 +15,13 @@ createRoot(document.getElementById('root')).render(
   </React.StrictMode>,
 );
 
-if (import.meta.env.PROD && 'serviceWorker' in navigator && !Capacitor.isNativePlatform()) {
+if (typeof window !== 'undefined' && window.madarDesktop && 'serviceWorker' in navigator) {
+  navigator.serviceWorker.getRegistrations().then((registrations) => {
+    for (const registration of registrations) {
+      registration.unregister().catch(() => {});
+    }
+  }).catch(() => {});
+} else if (import.meta.env.PROD && 'serviceWorker' in navigator && !Capacitor.isNativePlatform()) {
   window.addEventListener('load', () => {
     let refreshing = false;
     const hadController = Boolean(navigator.serviceWorker.controller);

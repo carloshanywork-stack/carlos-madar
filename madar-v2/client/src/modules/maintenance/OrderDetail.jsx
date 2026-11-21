@@ -19,6 +19,7 @@ import Tabs from '../../components/ui/Tabs.jsx';
 import Toast from '../../components/ui/Toast.jsx';
 import MaintenancePptxExportModal from './MaintenancePptxExportModal.jsx';
 import StorageFileExplorer, { TripScanProgress } from './StorageFileExplorer.jsx';
+import OperationalImageViewer, { buildOperationalFilename } from '../../components/ui/OperationalImageViewer.jsx';
 
 const EMPTY_MACHINES = [];
 const CARD_NOTE_SAVE_DELAY_MS = 800;
@@ -120,7 +121,9 @@ export default function MaintenanceOrderDetail() {
   const [machineCodeDraft, setMachineCodeDraft] = useState('');
   const [machineCodeError, setMachineCodeError] = useState('');
   const [lightboxState, setLightboxState] = useState(null);
+  const [unmatchedViewerState, setUnmatchedViewerState] = useState(null);
   const [quantityModal, setQuantityModal] = useState(null);
+  const [downloadingPhoto, setDownloadingPhoto] = useState(false);
   const [saving, setSaving] = useState(false);
   const [tripProcessing, setTripProcessing] = useState(false);
   const [tripProgress, setTripProgress] = useState(EMPTY_TRIP_PROGRESS);
@@ -1359,7 +1362,30 @@ export default function MaintenanceOrderDetail() {
                     <div className="madar-unmatched-details-inner">
                       <div className="madar-unmatched-source"><strong>مسار المصدر</strong><code>{folder.source_name}</code></div>
                       {(folder.before_photo_urls.length > 0 || folder.after_photo_urls.length > 0) && <div className="madar-photo-grid madar-unmatched-photos">
-                        {[...folder.before_photo_urls, ...folder.after_photo_urls].slice(0, 8).map((url, index) => <a key={`${url}-${index}`} href={url} target="_blank" rel="noreferrer"><img className="madar-photo" src={url} alt={`صورة من ${folder.folder_name} ${index + 1}`} loading="lazy" /></a>)}
+                        {[...folder.before_photo_urls, ...folder.after_photo_urls].slice(0, 8).map((url, index) => (
+                          <button
+                            key={`${url}-${index}`}
+                            type="button"
+                            onClick={() => {
+                              const allUrls = [...folder.before_photo_urls, ...folder.after_photo_urls];
+                              setUnmatchedViewerState({
+                                photos: allUrls.map((u, i) => ({
+                                  url: u,
+                                  title: `صورة مجلد غير مطابق (${i + 1} من ${allUrls.length})`,
+                                  subtitle: folder.folder_name,
+                                  phase: 'unmatched',
+                                })),
+                                index,
+                                folderName: folder.folder_name,
+                              });
+                            }}
+                            style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}
+                            title="معاينة الصورة وتنزيلها"
+                            aria-label={`معاينة وتنزيل صورة ${index + 1}`}
+                          >
+                            <img className="madar-photo" src={url} alt={`صورة من ${folder.folder_name} ${index + 1}`} loading="lazy" />
+                          </button>
+                        ))}
                       </div>}
                       <div className="madar-unmatched-binding">
                         <div className="madar-unmatched-machine-picker">
@@ -1804,6 +1830,16 @@ export default function MaintenanceOrderDetail() {
           rotationBusy={saving}
         />
       )}
+      {unmatchedViewerState && (
+        <OperationalImageViewer
+          isOpen={Boolean(unmatchedViewerState)}
+          onClose={() => setUnmatchedViewerState(null)}
+          photos={unmatchedViewerState.photos}
+          currentIndex={unmatchedViewerState.index}
+          onIndexChange={(idx) => setUnmatchedViewerState((prev) => ({ ...prev, index: idx }))}
+          title={`صور مجلد غير مطابق: ${unmatchedViewerState.folderName}`}
+        />
+      )}
       <QuantityModal
         open={Boolean(quantityModal)}
         reason={quantityModal?.reason}
@@ -1998,6 +2034,7 @@ function PhotoLightboxModal({
   const [tagTargetPhase, setTagTargetPhase] = useState('before');
   const [tagTargetsLoading, setTagTargetsLoading] = useState(false);
   const [quantityModal, setQuantityModal] = useState(null);
+  const [downloadingPhoto, setDownloadingPhoto] = useState(false);
   const currentCardIndex = lightboxState
     ? viewerCards.findIndex((card) => card.id === lightboxState.cardId)
     : -1;
@@ -2163,6 +2200,26 @@ function PhotoLightboxModal({
     onClose({ cardId: currentCard.id, phase: nextPhoto.phase, photoIndex: indexAfterRemoval });
   }
 
+  async function handleDownloadCurrentPhoto() {
+    if (downloadingPhoto || !currentPhoto) return;
+    setDownloadingPhoto(true);
+    try {
+      const safeName = buildOperationalFilename({
+        machineCode: currentCard.machine_code,
+        phase: currentPhoto.phase,
+        index: currentPhoto.index,
+        fallback: currentFilename || 'photo.jpg',
+        originalUrl: currentPhoto.url,
+      });
+      await api.download(currentPhoto.url, safeName);
+      onShowToast?.('تم تنزيل الصورة بنجاح.');
+    } catch (err) {
+      onShowToast?.(`تعذر تنزيل الصورة: ${errorMessage(err)}`, 'error');
+    } finally {
+      setDownloadingPhoto(false);
+    }
+  }
+
   async function saveCurrentPhotoRotation() {
     if (!currentPhoto || !rotationAngle || !canRotatePhotos || isRotating) return;
     setIsRotating(true);
@@ -2220,6 +2277,30 @@ function PhotoLightboxModal({
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            onClick={() => onClose(null)}
+            className="madar-button"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              background: '#0f766e',
+              color: '#ffffff',
+              border: '1px solid #14b8a6',
+              borderRadius: '8px',
+              padding: '5px 12px',
+              fontSize: '12px',
+              fontWeight: 850,
+              cursor: 'pointer',
+              marginInlineEnd: '0.4rem',
+            }}
+            title="رجوع لكارت الماكينة وقائمة الصيانة (Esc)"
+            aria-label="رجوع"
+          >
+            <span aria-hidden="true">←</span>
+            <span>رجوع</span>
+          </button>
           <strong style={{ fontSize: '15px', color: '#f8fafc' }}>
             {currentCard.machine_name_ar}{currentCard.machine_name_en ? ` · ${currentCard.machine_name_en}` : ''}
           </strong>
@@ -2401,6 +2482,29 @@ function PhotoLightboxModal({
               </button>
             </>
           )}
+
+          <button
+            type="button"
+            className="madar-button madar-button-small"
+            disabled={downloadingPhoto}
+            onClick={handleDownloadCurrentPhoto}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '4px',
+              background: downloadingPhoto ? 'rgba(56, 189, 248, 0.15)' : 'rgba(255, 255, 255, 0.12)',
+              color: downloadingPhoto ? '#38bdf8' : '#ffffff',
+              border: '1px solid rgba(255, 255, 255, 0.2)',
+              borderRadius: '6px',
+              fontSize: '11px',
+              fontWeight: 800,
+              cursor: downloadingPhoto ? 'wait' : 'pointer',
+            }}
+            title="تنزيل الصورة الأصلية كاملة الدقة"
+            aria-label="تنزيل الصورة"
+          >
+            <span>{downloadingPhoto ? 'جارٍ التنزيل…' : 'تنزيل الصورة ↓'}</span>
+          </button>
 
           {canRotatePhotos && (
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', flexWrap: 'wrap' }}>

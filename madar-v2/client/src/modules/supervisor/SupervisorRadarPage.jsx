@@ -9,6 +9,7 @@ import Badge from '../../components/ui/Badge.jsx';
 import Button from '../../components/ui/Button.jsx';
 import Modal from '../../components/ui/Modal.jsx';
 import Alert from '../../components/ui/Alert.jsx';
+import OperationalImageViewer from '../../components/ui/OperationalImageViewer.jsx';
 
 const STATUS = {
   active: { label: 'على المسار', color: '#168569' },
@@ -417,33 +418,33 @@ export default function SupervisorRadarPage() {
         </section>
       </div>
 
-      <Modal
-        open={Boolean(selectedVisit?.zoomPhoto)}
-        onClose={() => setSelectedVisit(null)}
-        wide
-        title={`ماكينة ${selectedVisit?.machineCode} · ${selectedVisit?.zoomPhoto === 'before' ? 'قبل الصيانة' : 'بعد الصيانة'}`}
-      >
-        {selectedVisit && (() => {
-          const photos = selectedVisit.zoomPhoto === 'before'
-            ? (selectedVisit.beforePhotos ?? (selectedVisit.beforePhotoUrl ? [{ url: selectedVisit.beforePhotoUrl }] : []))
-            : (selectedVisit.afterPhotos ?? (selectedVisit.afterPhotoUrl ? [{ url: selectedVisit.afterPhotoUrl }] : []));
-          const photo = photos[selectedVisit.zoomPhotoIndex ?? 0] ?? photos[0];
-          return photo
-            ? (
-              <div style={{ textAlign: 'center' }}>
-                <img
-                  src={photo.url}
-                  alt={`صورة ${selectedVisit.zoomPhoto} للماكينة ${selectedVisit.machineCode}`}
-                  style={{ width: '100%', maxHeight: 'calc(85vh - 120px)', objectFit: 'contain', borderRadius: '8px', background: '#0b0f17' }}
-                />
-                <p style={{ marginTop: '8px', color: 'var(--madar-muted)', fontSize: '11px' }}>
-                  {formatTime(photo.capturedAt)} · {selectedVisit.repName}
-                </p>
-              </div>
-            )
-            : <p className="qa-photo-missing">لا توجد صور بعد الصيانة؛ هذه المرحلة اختيارية.</p>;
-        })()}
-      </Modal>
+      {selectedVisit?.zoomPhoto && (() => {
+        const beforePhotos = selectedVisit.beforePhotos ?? (selectedVisit.beforePhotoUrl ? [{ url: selectedVisit.beforePhotoUrl, capturedAt: selectedVisit.beforeCapturedAt }] : []);
+        const afterPhotos = selectedVisit.afterPhotos ?? (selectedVisit.afterPhotoUrl ? [{ url: selectedVisit.afterPhotoUrl, capturedAt: selectedVisit.afterCapturedAt }] : []);
+        const allPhotos = [
+          ...beforePhotos.map((p, i) => ({ ...p, phase: 'قبل الصيانة', phaseLabel: 'قبل الصيانة', title: `قبل الصيانة (${i + 1} من ${beforePhotos.length})` })),
+          ...afterPhotos.map((p, i) => ({ ...p, phase: 'بعد الصيانة', phaseLabel: 'بعد الصيانة', title: `بعد الصيانة (${i + 1} من ${afterPhotos.length})` })),
+        ];
+        const startIndex = selectedVisit.zoomPhoto === 'before'
+          ? (selectedVisit.zoomPhotoIndex ?? 0)
+          : beforePhotos.length + (selectedVisit.zoomPhotoIndex ?? 0);
+        const activeIndex = selectedVisit.activePhotoIndex ?? startIndex;
+        const activePhoto = allPhotos[activeIndex] || allPhotos[0];
+
+        return (
+          <OperationalImageViewer
+            isOpen={Boolean(selectedVisit?.zoomPhoto)}
+            onClose={() => setSelectedVisit(null)}
+            photos={allPhotos}
+            currentIndex={activeIndex}
+            onIndexChange={(newIdx) => setSelectedVisit((prev) => ({ ...prev, activePhotoIndex: newIdx }))}
+            machineCode={selectedVisit.machineCode}
+            title={`ماكينة ${selectedVisit.machineCode} · ${selectedVisit.machineName}`}
+            subtitle={`${formatTime(activePhoto?.capturedAt || selectedVisit.capturedAt)} · المندوب: ${selectedVisit.repName}`}
+            phaseLabel={activePhoto?.phaseLabel}
+          />
+        );
+      })()}
     </div>
   );
 }
