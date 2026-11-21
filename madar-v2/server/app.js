@@ -451,10 +451,11 @@ app.get('/download/apk/status', apkDownloadLimiter, (req, res) => {
 function resolveDesktopArtifact(requestedFilename) {
   if (requestedFilename) {
     const base = basename(requestedFilename);
-    if (['madar-codesign.cer', 'madar-ca.cer'].includes(base)) {
+    if (['madar-codesign.cer', 'madar-ca.cer', 'install.ps1', 'update.ps1'].includes(base)) {
       const candidatePaths = [
         join(desktopDistDir, base),
         join(desktopWindowsDir, base),
+        join(projectRoot, 'desktop-app', base),
         join(projectRoot, 'desktop/madar-codesign.cer'),
       ];
       for (const p of candidatePaths) {
@@ -526,6 +527,8 @@ function sendDesktopFile(req, res, next, artifact) {
     contentType = 'text/yaml; charset=utf-8';
   } else if (artifact.filename.endsWith('.cer') || artifact.filename.endsWith('.crt')) {
     contentType = 'application/x-x509-ca-cert';
+  } else if (artifact.filename.endsWith('.ps1')) {
+    contentType = 'text/plain; charset=utf-8';
   }
 
   const fileSize = metadata.size;
