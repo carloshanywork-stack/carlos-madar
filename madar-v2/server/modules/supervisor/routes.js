@@ -47,9 +47,12 @@ router.get('/map/status', (_req, res) => {
 router.get('/map/tiles/:z/:x/:y', (req, res, next) => {
   try {
     let tile = null;
-    try {
-      tile = readOfflineMapPackTile('all-egypt', req.params.z, req.params.x, req.params.y);
-    } catch { /* Fallback to baseline */ }
+    for (const packId of ['all-egypt', 'greater-cairo', 'delta-canal', 'alexandria-coast', 'upper-egypt', 'sinai-red-sea', 'western-desert']) {
+      try {
+        tile = readOfflineMapPackTile(packId, req.params.z, req.params.x, req.params.y);
+        if (tile) break;
+      } catch { /* Try next regional pack */ }
+    }
     if (!tile) {
       tile = readOfflineMapTile(req.params.z, req.params.x, req.params.y);
     }

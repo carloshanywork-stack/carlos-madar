@@ -62,8 +62,8 @@ export default function OfflineRouteMap({ pack, machines, gps, onMachineSelect, 
   const defaultCenter = useMemo(() => routeCenter(machines, pack), [machines, pack]);
   const [center, setCenter] = useState(() => gps ? { latitude: gps.latitude, longitude: gps.longitude } : defaultCenter);
   const isOnline = typeof navigator !== 'undefined' && navigator.onLine;
-  const effectiveMaxZoom = isOnline ? Math.max(pack.maxZoom, 18) : pack.maxZoom;
-  const [zoom, setZoom] = useState(() => getDefaultZoom(pack));
+  const effectiveMaxZoom = pack.maxZoom;
+  const [zoom, setZoom] = useState(() => Math.min(pack.maxZoom, getDefaultZoom(pack)));
   const [tiles, setTiles] = useState([]);
   const [tilesLoading, setTilesLoading] = useState(true);
   const [selectedMachineId, setSelectedMachineId] = useState(null);
