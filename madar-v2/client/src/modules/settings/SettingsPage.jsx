@@ -1,9 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { api } from '../../lib/api.js';
 import { errorMessage } from '../../lib/format.js';
 import { hasUniversalRegionAccess, regionAccessLabel } from '../../lib/regions.js';
 import { useApi } from '../../lib/useApi.js';
 import { useToast } from '../../lib/useToast.js';
+import { QUALITY_TIERS, getStoredQualityPreference, setStoredQualityPreference, getActiveAdaptiveProfile } from '../../lib/adaptive-quality.js';
+import { mediaCache } from '../../lib/cache/media-cache.js';
 import Alert from '../../components/ui/Alert.jsx';
 import Badge from '../../components/ui/Badge.jsx';
 import Button from '../../components/ui/Button.jsx';
@@ -87,6 +89,38 @@ export default function SettingsPage() {
   const [desktopStatus, setDesktopStatus] = useState(null);
   const [desktopStatusLoading, setDesktopStatusLoading] = useState(false);
   const [desktopStatusError, setDesktopStatusError] = useState('');
+  const [qualityPref, setQualityPref] = useState(() => getStoredQualityPreference());
+  const [mediaDiagnostics, setMediaDiagnostics] = useState(null);
+  const [clearingMediaCache, setClearingMediaCache] = useState(false);
+
+  const refreshMediaDiagnostics = useCallback(() => {
+    mediaCache.getDiagnostics().then(setMediaDiagnostics).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    refreshMediaDiagnostics();
+  }, [refreshMediaDiagnostics, qualityPref]);
+
+  const handleQualityPrefChange = async (newPref) => {
+    setStoredQualityPreference(newPref);
+    setQualityPref(newPref);
+    await getActiveAdaptiveProfile(true);
+    refreshMediaDiagnostics();
+    showToast(`تم ضبط نمط جودة العرض على: ${newPref === 'auto' ? 'تلقائي' : QUALITY_TIERS[newPref]?.nameAr || newPref}`);
+  };
+
+  const handleClearMediaCache = async () => {
+    setClearingMediaCache(true);
+    try {
+      await mediaCache.clearActiveCache();
+      refreshMediaDiagnostics();
+      showToast('تم تفريغ الذاكرة المؤقتة للصور بنجاح.');
+    } catch (err) {
+      setActionError('تعذر تفريغ ذاكرة الصور: ' + err.message);
+    } finally {
+      setClearingMediaCache(false);
+    }
+  };
 
   const reloadDesktopStatus = async () => {
     setDesktopStatusLoading(true);
@@ -294,6 +328,155 @@ export default function SettingsPage() {
                 </Alert>
               </div>}
             </article>
+          </div>
+        </section>
+
+        <section className="madar-panel madar-section">
+          <div className="madar-panel-header">
+            <div>
+              <h2>جودة العرض والذاكرة المؤقتة للصور التشغيلية</h2>
+              <p>تكييف أبعاد الصور ودقتها تلقائياً حسب قدرات جهازك وشاشتك مع تخزين مؤقت آمن يمنع تكرار التحميل.</p>
+            </div>
+            <div className="madar-inline-wrap">
+              <Button
+                variant="secondary"
+                size="small"
+                icon="refresh"
+                onClick={() => {
+                  refreshMediaDiagnostics();
+                  showToast('تم تحديث إحصائيات الذاكرة المؤقتة.');
+                }}
+              >
+                تحديث الإحصائيات
+              </Button>
+              <Button
+                variant="ghost"
+                size="small"
+                disabled={clearingMediaCache || !mediaDiagnostics?.entryCount}
+                onClick={handleClearMediaCache}
+                title="تفريغ ذاكرة الصور المحفوظة محلياً لهذا الحساب"
+              >
+                {clearingMediaCache ? 'جارٍ التفريغ…' : 'تفريغ كاش الصور'}
+              </Button>
+            </div>
+          </div>
+          <div className="madar-panel-body madar-stack">
+            <div className="madar-grid madar-grid-4">
+              <div className="madar-stat-tile">
+                <span>المستوى الفعّال</span>
+                <strong>{mediaDiagnostics?.activeProfile?.tierLabel || 'تلقائي (متوازن)'}</strong>
+                <small>{mediaDiagnostics?.activeProfile?.targetMaxDimension ? `أقصى بُعد: ${mediaDiagnostics.activeProfile.targetMaxDimension}px` : 'متكيف تلقائياً'}</small>
+              </div>
+              <div className="madar-stat-tile">
+                <span>حجم الذاكرة المستهلكة</span>
+                <strong>{mediaDiagnostics ? fileSize(mediaDiagnostics.totalBytes) : '0 KB'}</strong>
+                <small>الحد الأقصى: {mediaDiagnostics ? fileSize(mediaDiagnostics.maxBytes) : '—'}</small>
+              </div>
+              <div className="madar-stat-tile">
+                <span>الصور المحفوظة</span>
+                <strong>{mediaDiagnostics ? `${mediaDiagnostics.entryCount} صورة` : '0 صورة'}</strong>
+                <small>نسبة التوفير: {mediaDiagnostics?.hitRatio ?? 100}%</small>
+              </div>
+              <div className="madar-stat-tile">
+                <span>البيانات الموفّرة</span>
+                <strong>{mediaDiagnostics ? fileSize(mediaDiagnostics.bytesSaved) : '0 MB'}</strong>
+                <small>{mediaDiagnostics?.hits ?? 0} طلب موفر عبر الكاش</small>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap', paddingTop: '0.5rem' }}>
+              <div style={{ flex: 1, minWidth: '240px' }}>
+                <Select
+                  label="تفضيل جودة العرض"
+                  value={qualityPref}
+                  onChange={(e) => void handleQualityPrefChange(e.target.value)}
+                >
+                  <option value="auto">تلقائي (مستحسن: يختار الأنسب للشاشة والمعالج والذاكرة)</option>
+                  <option value="conservative">موفر للموارد (800 بكسل · مناسب للأجهزة الضعيفة والاتصال المحدود)</option>
+                  <option value="balanced">متوازن (1200 بكسل · جودة ممتازة مع سرعة تصفح عالية)</option>
+                  <option value="high">جودة عالية (1800 بكسل · وضوح فائق لشاشات Full HD و 2K)</option>
+                  <option value="ultra">أعلى دقة ممكنة (2400 بكسل · لشاشات 4K والأجهزة المتقدمة)</option>
+                </Select>
+              </div>
+              {qualityPref !== 'auto' && (
+                <div style={{ marginTop: '22px' }}>
+                  <Button variant="ghost" size="small" onClick={() => void handleQualityPrefChange('auto')}>
+                    استعادة التلقائي
+                  </Button>
+                </div>
+              )}
+            </div>
+          </div>
+        </section>
+
+        <section className="madar-panel madar-section">
+          <div className="madar-panel-header">
+            <div>
+              <h2>جودة العرض والذاكرة المؤقتة للصور (Adaptive Media Cache)</h2>
+              <p>تكييف أبعاد الصور ودقتها تلقائياً حسب قدرات جهازك وشاشتك مع تخزين مؤقت محمي يمنع تكرار التحميل.</p>
+            </div>
+            <div className="madar-inline-wrap">
+              <Button
+                variant="secondary"
+                size="small"
+                icon="refresh"
+                onClick={() => {
+                  refreshMediaDiagnostics();
+                  showToast('تم تحديث إحصائيات الذاكرة المؤقتة.');
+                }}
+              >
+                تحديث الإحصائيات
+              </Button>
+              <Button
+                variant="ghost"
+                size="small"
+                disabled={clearingMediaCache || !mediaDiagnostics?.entryCount}
+                onClick={handleClearMediaCache}
+                title="تفريغ الصور المخزنة مؤقتاً لهذا الحساب"
+              >
+                {clearingMediaCache ? 'جارٍ التفريغ…' : 'تفريغ كاش الصور'}
+              </Button>
+            </div>
+          </div>
+          <div className="madar-panel-body madar-stack">
+            <div className="madar-grid madar-grid-4">
+              <div className="madar-stat-tile">
+                <span>نمط الجودة الفعّال</span>
+                <strong>{mediaDiagnostics?.activeProfile?.tierLabel || 'متوازن'}</strong>
+                <small>{mediaDiagnostics?.activeProfile?.maxDimension ? `حد أقصى ${mediaDiagnostics.activeProfile.maxDimension}px` : 'تلقائي'}</small>
+              </div>
+              <div className="madar-stat-tile">
+                <span>الصور المخزنة مؤقتاً</span>
+                <strong>{mediaDiagnostics?.entryCount ?? 0} صورة</strong>
+                <small>{mediaDiagnostics?.totalBytes ? fileSize(mediaDiagnostics.totalBytes) : '0 KB'} / {fileSize(mediaDiagnostics?.maxBytes || 300 * 1024 * 1024)}</small>
+              </div>
+              <div className="madar-stat-tile">
+                <span>نسبة التوفير من الكاش</span>
+                <strong>{mediaDiagnostics?.hitRatio ?? 100}%</strong>
+                <small>{mediaDiagnostics?.hits ?? 0} طلب موفر · {mediaDiagnostics?.bytesSaved ? fileSize(mediaDiagnostics.bytesSaved) : '0 MB'} وفر</small>
+              </div>
+              <div className="madar-stat-tile">
+                <span>شاشة ومواصفات الجهاز</span>
+                <strong>{mediaDiagnostics?.activeProfile?.signals?.devicePixelRatio ? `${mediaDiagnostics.activeProfile.signals.devicePixelRatio}x DPI` : 'قياسي'}</strong>
+                <small>{mediaDiagnostics?.activeProfile?.signals?.screenWidth ? `${mediaDiagnostics.activeProfile.signals.screenWidth}×${mediaDiagnostics.activeProfile.signals.screenHeight}` : '—'} · {mediaDiagnostics?.activeProfile?.signals?.systemTotalMemoryGb ? `${mediaDiagnostics.activeProfile.signals.systemTotalMemoryGb} GB RAM` : `${mediaDiagnostics?.activeProfile?.signals?.hardwareConcurrency || 4} Cores`}</small>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap', paddingTop: '0.5rem' }}>
+              <div style={{ minWidth: '280px' }}>
+                <Select
+                  label="تفضيل جودة العرض"
+                  value={qualityPref}
+                  onChange={(e) => void handleQualityPrefChange(e.target.value)}
+                >
+                  <option value="auto">تلقائي (مستحسن: يختار الأنسب للشاشة والمعالج والذاكرة)</option>
+                  <option value="conservative">موفر للموارد (800 بكسل · أجهزة اقتصادية)</option>
+                  <option value="balanced">متوازن (1200 بكسل · سرعة تصفح عالية واستقرار)</option>
+                  <option value="high">جودة عالية (1800 بكسل · وضوح فائق لشاشات 2K)</option>
+                  <option value="ultra">أعلى دقة ممكنة (2400 بكسل · شاشات 4K والأجهزة المتقدمة)</option>
+                </Select>
+              </div>
+            </div>
           </div>
         </section>
 

@@ -737,6 +737,16 @@ ipcMain.handle('madar:desktop:version', () => app.getVersion());
 ipcMain.handle('madar:desktop:get-diagnostics', () => (
   sanitizeDiagnostics(syncDiagnostics, app.getVersion(), currentServerOrigin)
 ));
+ipcMain.handle('madar:desktop:get-system-capabilities', () => {
+  const os = require('node:os');
+  return {
+    totalMemoryGb: Math.max(1, Math.round(os.totalmem() / (1024 * 1024 * 1024))),
+    freeMemoryGb: Math.max(0, Math.round(os.freemem() / (1024 * 1024 * 1024))),
+    cpuCores: Math.min(os.cpus()?.length || 4, 32),
+    platform: process.platform,
+    arch: process.arch,
+  };
+});
 ipcMain.handle('madar:desktop:check-updates', () => checkForUpdates({ manual: true }));
 ipcMain.handle('madar:desktop:get-server-config', () => ({
   serverUrl: currentServerOrigin,
