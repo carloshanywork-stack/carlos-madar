@@ -83,6 +83,7 @@ export default function SettingsPage() {
   const { notice, showToast, clearToast } = useToast();
   const desktopApp = typeof window !== 'undefined' ? window.madarDesktop : null;
   const [desktopVersion, setDesktopVersion] = useState('');
+  const [desktopDiagnostics, setDesktopDiagnostics] = useState(null);
   const [desktopStatus, setDesktopStatus] = useState(null);
   const [desktopStatusLoading, setDesktopStatusLoading] = useState(false);
   const [desktopStatusError, setDesktopStatusError] = useState('');
@@ -102,10 +103,19 @@ export default function SettingsPage() {
     }
   };
 
+  const refreshDesktopDiagnostics = () => {
+    if (desktopApp?.getDiagnostics) {
+      desktopApp.getDiagnostics().then((diag) => setDesktopDiagnostics(diag)).catch(() => {});
+    }
+  };
+
   useEffect(() => {
     let active = true;
     if (desktopApp?.getVersion) {
       desktopApp.getVersion().then((version) => { if (active) setDesktopVersion(version); }).catch(() => { });
+    }
+    if (desktopApp?.getDiagnostics) {
+      desktopApp.getDiagnostics().then((diag) => { if (active) setDesktopDiagnostics(diag); }).catch(() => { });
     }
     if (isAdmin) {
       reloadDesktopStatus();
@@ -251,8 +261,28 @@ export default function SettingsPage() {
               </div>}
             </article>)}
             <article className="madar-panel madar-panel-pad">
-              <div className="madar-panel-header"><div><h3>تطبيق MADAR لويندوز</h3><p>{desktopApp ? 'نسخة سطح المكتب المثبتة على هذا الجهاز.' : desktopStatus?.available ? `مثبت Windows متاح للتحميل (${fileSize(desktopStatus.sizeBytes)}).` : 'سيُتاح رابط التنزيل بعد تجهيز أول مثبت Windows موقّع.'}</p></div><div className="madar-inline-wrap">{desktopApp ? <><Button variant="secondary" icon="refresh" onClick={() => { void desktopApp.checkForUpdates(); }}>التحقق من تحديث التطبيق</Button><Button variant="secondary" onClick={() => { void desktopApp.openServerSettings?.(); }}>إعدادات الخادم</Button></> : desktopStatus?.available ? <a className="madar-button madar-button-primary" href="/download/desktop" download={desktopStatus.filename || 'MADAR-Windows-Setup.exe'}><Icon name="download" size={15} /> تنزيل مثبت Windows</a> : <Button variant="secondary" disabled>تطبيق Windows قريباً</Button>}</div></div>
+              <div className="madar-panel-header"><div><h3>تطبيق MADAR لويندوز</h3><p>{desktopApp ? 'نسخة سطح المكتب المثبتة على هذا الجهاز.' : desktopStatus?.available ? `مثبت Windows متاح للتحميل (${fileSize(desktopStatus.sizeBytes)}).` : 'سيُتاح رابط التنزيل بعد تجهيز أول مثبت Windows موقّع.'}</p></div><div className="madar-inline-wrap">{desktopApp ? <><Button variant="secondary" icon="refresh" onClick={() => { void desktopApp.checkForUpdates(); refreshDesktopDiagnostics(); }}>التحقق من تحديث التطبيق</Button><Button variant="secondary" onClick={() => { void desktopApp.openServerSettings?.(); }}>إعدادات الخادم</Button></> : desktopStatus?.available ? <a className="madar-button madar-button-primary" href="/download/desktop" download={desktopStatus.filename || 'MADAR-Windows-Setup.exe'}><Icon name="download" size={15} /> تنزيل مثبت Windows</a> : <Button variant="secondary" disabled>تطبيق Windows قريباً</Button>}</div></div>
               <div className="madar-health-row"><span className="madar-health-pulse" /><div><strong>{desktopApp ? `إصدار Windows ${desktopVersion || '…'}` : desktopStatus?.available ? 'مثبت Windows جاهز للتحميل' : 'بيانات MADAR محفوظة على السيرفر'}</strong><small>{desktopStatus?.available ? `${desktopStatus.filename} · ${fileSize(desktopStatus.sizeBytes)}` : 'تحديث برنامج Windows لا يستبدل قاعدة البيانات أو ملفات Ubuntu.'}</small></div><Badge tone={desktopApp ? 'info' : desktopStatus?.available ? 'success' : 'warning'}>{desktopApp ? 'Desktop' : desktopStatus?.available ? 'متاح' : 'قيد التجهيز'}</Badge></div>
+              {desktopApp && desktopDiagnostics && (
+                <div className="madar-stack" style={{ marginTop: '12px', padding: '10px 14px', background: 'rgba(0, 0, 0, 0.03)', borderRadius: '8px', border: '1px solid var(--madar-border, rgba(0, 0, 0, 0.1))' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                    <strong>حالة مزامنة واجهة سطح المكتب:</strong>
+                    <Badge tone={desktopDiagnostics.uiSource === 'live-sync' ? 'success' : desktopDiagnostics.uiSource === 'offline-cache' ? 'info' : 'warning'}>
+                      {desktopDiagnostics.uiSource === 'live-sync' ? 'مزامنة حية (Live Sync)' : desktopDiagnostics.uiSource === 'offline-cache' ? 'كاش محلي دون اتصال (Offline Cache)' : 'نسخة مدمجة احتياطية'}
+                    </Badge>
+                  </div>
+                  <div className="madar-grid madar-grid-3" style={{ marginTop: '8px', fontSize: '0.85rem' }}>
+                    <div><span className="madar-muted">إصدار الواجهة المحملة: </span><code dir="ltr">{desktopDiagnostics.loadedBuildVersion || 'unknown'}</code></div>
+                    <div><span className="madar-muted">آخر مزامنة ناجحة: </span><span>{desktopDiagnostics.lastSyncTime ? new Date(desktopDiagnostics.lastSyncTime).toLocaleString('ar') : 'لم تتم بعد'}</span></div>
+                    <div><span className="madar-muted">عنوان السيرفر المتصل: </span><span dir="ltr">{desktopDiagnostics.serverUrl || '—'}</span></div>
+                  </div>
+                  {desktopDiagnostics.lastSyncError && (
+                    <div style={{ marginTop: '8px' }}>
+                      <Alert tone="warning">تعذر تحديث الكاش التلقائي: {desktopDiagnostics.lastSyncError}</Alert>
+                    </div>
+                  )}
+                </div>
+              )}
               {!desktopApp && desktopStatus?.available && <div className="madar-stack" style={{ marginTop: '12px' }}>
                 <Alert tone="info">
                   <strong>التثبيت المباشر بدون حظر ويندوز 11 (Smart App Control):</strong>

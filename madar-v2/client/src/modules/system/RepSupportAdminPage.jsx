@@ -5,6 +5,7 @@ import Button from '../../components/ui/Button.jsx';
 import EmptyState from '../../components/ui/EmptyState.jsx';
 import LoadingState from '../../components/ui/LoadingState.jsx';
 import PageHeader from '../../components/ui/PageHeader.jsx';
+import OperationalImageViewer from '../../components/ui/OperationalImageViewer.jsx';
 import { api } from '../../lib/api.js';
 import { errorMessage } from '../../lib/format.js';
 import { useApi } from '../../lib/useApi.js';
@@ -22,6 +23,7 @@ export default function RepSupportAdminPage() {
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   const [releaseNotes, setReleaseNotes] = useState('');
+  const [viewingSupportPhoto, setViewingSupportPhoto] = useState(null);
   const reportsUrl = `/api/system/rep-support/reports?status=${encodeURIComponent(status)}`;
   const { data: reportData, loading: reportsLoading, error: reportsError, reload: reloadReports } = useApi(reportsUrl, { enabled: view === 'reports' });
   const { data: locationData, loading: locationsLoading, error: locationsError, reload: reloadLocations } = useApi('/api/system/rep-location-changes?status=pending', { enabled: view === 'locations' });
@@ -139,7 +141,31 @@ export default function RepSupportAdminPage() {
               </td>
               <td>{report.representativeName || report.username}</td>
               <td>{report.appVersion}<br />{report.deviceModel} · Android {report.androidVersion}</td>
-              <td>{report.attachments.map((attachment) => attachment.downloadUrl ? <a key={attachment.id} href={attachment.downloadUrl} target="_blank" rel="noreferrer">صورة ({Math.ceil(attachment.byteSize / 1024)} KB)</a> : <span key={attachment.id}>انتهت مدة الاحتفاظ</span>)}</td>
+              <td>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {report.attachments.map((attachment) => attachment.downloadUrl ? (
+                    <Button
+                      key={attachment.id}
+                      size="small"
+                      variant="ghost"
+                      onClick={() => setViewingSupportPhoto({
+                        title: `مرفق بلاغ: ${report.category}`,
+                        subtitle: `${report.representativeName || report.username} · ${report.appVersion || ''}`,
+                        photos: [{
+                          id: attachment.id,
+                          url: attachment.downloadUrl,
+                          filename: attachment.filename || `MADAR_support_${report.id}_${attachment.id}.jpg`,
+                          caption: `صورة مرفقة (${Math.ceil((attachment.byteSize || 0) / 1024)} KB)`
+                        }]
+                      })}
+                    >
+                      صورة ({Math.ceil(attachment.byteSize / 1024)} KB)
+                    </Button>
+                  ) : (
+                    <span key={attachment.id} className="madar-muted">انتهت مدة الاحتفاظ</span>
+                  ))}
+                </div>
+              </td>
               <td><Badge>{STATUS_LABELS[report.status] ?? report.status}</Badge><p>{report.githubStatus === 'created' && report.githubIssueUrl ? <a href={report.githubIssueUrl} target="_blank" rel="noreferrer">تذكرة GitHub</a> : `GitHub: ${report.githubStatus}`}</p>{report.githubLastError && <small>{report.githubLastError}</small>}</td>
               <td><div style={{ display: 'grid', gap: 6 }}>
                 <Button size="small" variant="secondary" disabled={busy === `export-${report.id}`} onClick={() => exportPackage(report)}>{busy === `export-${report.id}` ? 'جارٍ التجهيز…' : 'تنزيل ZIP'}</Button>
@@ -159,7 +185,26 @@ export default function RepSupportAdminPage() {
           {requests.map((request) => <tr key={request.id}><td>{request.machineCode} · {request.machineName}<br /><small>{request.orderCode}</small></td><td>{request.representativeName}</td>
             <td>{request.oldLocation ? `${request.oldLocation.latitude}, ${request.oldLocation.longitude}` : '—'}</td>
             <td>{request.proposedLocation.latitude}, {request.proposedLocation.longitude}<br /><small>دقة GPS: {request.proposedLocation.accuracy} م · بُعد: {Math.round(request.distanceMeters)} م</small></td>
-            <td>{request.hasEvidence ? <a href={`/api/system/rep-location-changes/${request.id}/evidence`} target="_blank" rel="noreferrer">عرض الصورة</a> : 'لا يوجد'}</td>
+            <td>{request.hasEvidence ? (
+              <Button
+                size="small"
+                variant="ghost"
+                onClick={() => setViewingSupportPhoto({
+                  title: `دليل تغيير موقع: ${request.machineCode}`,
+                  subtitle: `${request.machineName} · ${request.representativeName}`,
+                  machineCode: request.machineCode,
+                  phaseLabel: 'تغيير موقع',
+                  photos: [{
+                    id: `loc-${request.id}`,
+                    url: `/api/system/rep-location-changes/${request.id}/evidence`,
+                    filename: `MADAR_${request.machineCode}_location_evidence.jpg`,
+                    caption: `إحداثيات مقترحة: ${request.proposedLocation.latitude}, ${request.proposedLocation.longitude}`
+                  }]
+                })}
+              >
+                عرض الصورة
+              </Button>
+            ) : 'لا يوجد'}</td>
             <td><div style={{ display: 'flex', gap: 6 }}><Button size="small" disabled={busy === `location-${request.id}`} onClick={() => reviewLocation(request, 'approved')}>اعتماد</Button><Button size="small" variant="danger" disabled={busy === `location-${request.id}`} onClick={() => reviewLocation(request, 'rejected')}>رفض</Button></div>{request.note && <small>{request.note}</small>}</td>
           </tr>)}
         </tbody></table></div> : <EmptyState title="لا توجد طلبات معلقة" description="طلبات تغيير المواقع الجديدة ستظهر هنا للمراجعة." />}
@@ -177,6 +222,18 @@ export default function RepSupportAdminPage() {
           {releases.map((release) => <tr key={release.id}><td>{release.versionName} <small>({release.versionCode})</small></td><td dir="ltr">{release.sourceRevision.slice(0, 12)}</td><td dir="ltr">{release.apkSha256.slice(0, 20)}…</td><td>{release.status}</td><td>{new Date(release.publishedAt).toLocaleString('ar')}</td><td>{release.status !== 'withdrawn' && <Button size="small" variant="danger" disabled={busy === `withdraw-${release.id}`} onClick={() => withdrawRelease(release)}>سحب</Button>}</td></tr>)}
         </tbody></table></div> : <EmptyState title="لا توجد إصدارات مسجلة" description="بعد توفير أداة Android وبصمة التوقيع المعتمدة، يمكن للمدير تسجيل ملف الإصدار المحلي المتحقق منه." />}
       </section>}
+
+      {viewingSupportPhoto && (
+        <OperationalImageViewer
+          isOpen={Boolean(viewingSupportPhoto)}
+          onClose={() => setViewingSupportPhoto(null)}
+          title={viewingSupportPhoto.title}
+          subtitle={viewingSupportPhoto.subtitle}
+          machineCode={viewingSupportPhoto.machineCode}
+          phaseLabel={viewingSupportPhoto.phaseLabel}
+          photos={viewingSupportPhoto.photos}
+        />
+      )}
     </div>
   );
 }

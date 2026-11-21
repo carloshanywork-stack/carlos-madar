@@ -15,6 +15,7 @@ import Tabs from '../../components/ui/Tabs.jsx';
 import MaintenanceAreaAnalysis from './MaintenanceAreaAnalysis.jsx';
 import MaintenancePptxExportModal from '../maintenance/MaintenancePptxExportModal.jsx';
 import { Input } from '../../components/ui/Field.jsx';
+import OperationalImageViewer from '../../components/ui/OperationalImageViewer.jsx';
 
 export default function ArchivePage({ isAdmin = false }) {
   const [tab, setTab] = useState('maintenance');
@@ -30,6 +31,7 @@ export default function ArchivePage({ isAdmin = false }) {
   const [report, setReport] = useState(null);
   const [reportLoading, setReportLoading] = useState(false);
   const [reportError, setReportError] = useState('');
+  const [activeArchivePhoto, setActiveArchivePhoto] = useState(null);
   const [pptxExportOpen, setPptxExportOpen] = useState(false);
   const [pptxExportOrder, setPptxExportOrder] = useState(null);
   const orders = tab === 'maintenance' ? maintenance : tab === 'workshop' ? workshop : [];
@@ -106,7 +108,7 @@ export default function ArchivePage({ isAdmin = false }) {
         <div className="madar-report-actions"><Alert tone="info">يمكنك طباعة هذه المعاينة أو اختيار “حفظ كـ PDF” من نافذة الطباعة.</Alert><Button icon="printer" variant="secondary" onClick={() => window.print()} disabled={!report}>طباعة / حفظ PDF</Button></div>
         {reportLoading ? <LoadingState label="جارٍ تجهيز معاينة الصور" /> : reportError ? <Alert tone="error">{reportError}</Alert> : report && <div className="madar-print-report">
           <div className="madar-report-heading"><div className="madar-report-wordmark">MADAR</div><div><span>تقرير صيانة ميدانية</span><h2>{report.client?.name}</h2><p>{report.order_code} · شهر الأرشيف: {report.archive_month || 'غير محدد الشهر'}</p></div></div>
-          {report.cards.map((card) => <section className="madar-report-machine" key={card.id}><h3>{card.machine_name_ar} · {card.machine_code}</h3><p>{card.machine_area}</p><div className="madar-report-photo-columns"><ReportPhotoColumn title="قبل الصيانة" urls={card.before_photo_urls} /><ReportPhotoColumn title="بعد الصيانة" urls={card.after_photo_urls} /></div></section>)}
+          {report.cards.map((card) => <section className="madar-report-machine" key={card.id}><h3>{card.machine_name_ar} · {card.machine_code}</h3><p>{card.machine_area}</p><div className="madar-report-photo-columns"><ReportPhotoColumn title="قبل الصيانة" urls={card.before_photo_urls} onPhotoClick={(urls, index) => setActiveArchivePhoto({ urls, index, machineCode: card.machine_code, title: `${card.machine_name_ar} · قبل الصيانة`, phaseLabel: 'قبل الصيانة' })} /><ReportPhotoColumn title="بعد الصيانة" urls={card.after_photo_urls} onPhotoClick={(urls, index) => setActiveArchivePhoto({ urls, index, machineCode: card.machine_code, title: `${card.machine_name_ar} · بعد الصيانة`, phaseLabel: 'بعد الصيانة' })} /></div></section>)}
           {!report.cards.length && <EmptyState icon="image" title="لا توجد صور مرتبطة" />}
         </div>}
       </Modal>
@@ -120,10 +122,38 @@ export default function ArchivePage({ isAdmin = false }) {
         defaultScope={pptxExportOrder ? 'current' : 'archive'}
         archiveMonthFilter={month}
       />
+      {activeArchivePhoto && (
+        <OperationalImageViewer
+          isOpen={Boolean(activeArchivePhoto)}
+          onClose={() => setActiveArchivePhoto(null)}
+          photos={activeArchivePhoto.urls.map((u, i) => ({
+            url: u,
+            title: `${activeArchivePhoto.title} (${i + 1} من ${activeArchivePhoto.urls.length})`,
+            machineCode: activeArchivePhoto.machineCode,
+            phase: activeArchivePhoto.phaseLabel,
+          }))}
+          currentIndex={activeArchivePhoto.index}
+          onIndexChange={(newIdx) => setActiveArchivePhoto((prev) => ({ ...prev, index: newIdx }))}
+          machineCode={activeArchivePhoto.machineCode}
+          title={activeArchivePhoto.title}
+          phaseLabel={activeArchivePhoto.phaseLabel}
+        />
+      )}
     </>
   );
 }
 
-function ReportPhotoColumn({ title, urls }) {
-  return <div><h4>{title}</h4>{urls.length ? <div className="madar-report-photos">{urls.map((url, index) => <img src={url} key={`${url}-${index}`} alt={`${title} ${index + 1}`} />)}</div> : <p className="madar-muted madar-small">لا توجد صور</p>}</div>;
+function ReportPhotoColumn({ title, urls, onPhotoClick }) {
+  return <div><h4>{title}</h4>{urls.length ? <div className="madar-report-photos">{urls.map((url, index) => (
+    <button
+      key={`${url}-${index}`}
+      type="button"
+      onClick={() => onPhotoClick?.(urls, index)}
+      style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', textAlign: 'inherit' }}
+      title="معاينة الصورة وتنزيلها بدقة عالية"
+      aria-label={`معاينة ${title} ${index + 1}`}
+    >
+      <img src={url} alt={`${title} ${index + 1}`} />
+    </button>
+  ))}</div> : <p className="madar-muted madar-small">لا توجد صور</p>}</div>;
 }

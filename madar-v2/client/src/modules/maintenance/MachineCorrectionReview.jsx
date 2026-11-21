@@ -7,6 +7,7 @@ import Button from '../../components/ui/Button.jsx';
 import EmptyState from '../../components/ui/EmptyState.jsx';
 import LoadingState from '../../components/ui/LoadingState.jsx';
 import { Input, Select, Textarea } from '../../components/ui/Field.jsx';
+import OperationalImageViewer from '../../components/ui/OperationalImageViewer.jsx';
 
 export default function MachineCorrectionReview({ onToast }) {
   const [status, setStatus] = useState('pending');
@@ -16,6 +17,7 @@ export default function MachineCorrectionReview({ onToast }) {
   const [actionError, setActionError] = useState('');
   const corrections = data?.corrections ?? [];
   const [codeCandidateChecks, setCodeCandidateChecks] = useState({});
+  const [viewingEvidence, setViewingEvidence] = useState(null);
 
   useEffect(() => {
     setChoices((current) => {
@@ -139,10 +141,25 @@ export default function MachineCorrectionReview({ onToast }) {
                 {correction.note && <div className="full"><dt>ملاحظة المندوب</dt><dd>{correction.note}</dd></div>}
                 {correction.review_note && <div className="full"><dt>قرار المراجع · {correction.reviewer_name || 'الإدارة'}</dt><dd>{correction.review_note || '—'}{correction.resolved_machine_id ? ` · سجل الماكينة #${correction.resolved_machine_id}` : ''}{correction.approved_code ? ` · الكود المعتمد ${correction.approved_code}` : ''}</dd></div>}
               </dl>
-              {correction.has_evidence && <a className="madar-correction-evidence" href={correction.evidenceUrl} target="_blank" rel="noreferrer">
-                <img src={correction.evidenceUrl} alt={`صورة إثبات البلاغ رقم ${correction.id}`} loading="lazy" />
-                <span>فتح صورة الإثبات الأصلية · {correction.evidence_content_type}</span>
-              </a>}
+              {correction.has_evidence && (
+                <button
+                  type="button"
+                  className="madar-correction-evidence"
+                  onClick={() => setViewingEvidence({
+                    url: correction.evidenceUrl,
+                    title: `صورة إثبات البلاغ #${correction.id}`,
+                    subtitle: `${correction.reported_code} · ${correction.reported_name}`,
+                    machineCode: correction.reported_code,
+                    phase: 'evidence',
+                  })}
+                  style={{ background: 'none', border: 'none', padding: 0, textAlign: 'inherit', cursor: 'pointer', display: 'block', width: '100%' }}
+                  title="معاينة وتنزيل صورة الإثبات"
+                  aria-label="معاينة وتنزيل صورة الإثبات"
+                >
+                  <img src={correction.evidenceUrl} alt={`صورة إثبات البلاغ رقم ${correction.id}`} loading="lazy" />
+                  <span>فتح صورة الإثبات الأصلية · {correction.evidence_content_type}</span>
+                </button>
+              )}
               {(correction.codeConflict || currentCodeCheck?.hasConflict) && <div className="madar-correction-candidates">
                 <strong>السجلات المرشحة للكود {approvedCode}</strong>
                   <ul>{candidateOptions.map((candidate) => <li key={candidate.id}>
@@ -175,6 +192,18 @@ export default function MachineCorrectionReview({ onToast }) {
           })}
         </div>
       ) : <EmptyState icon="factory" title="لا توجد بلاغات بهذه الحالة" description={status === 'pending' ? 'ستظهر هنا بلاغات المندوبين الجديدة مع موقع GPS وصورة الإثبات إن وُجدت.' : 'لم تُسجل بلاغات تصحيح بعد.'} />}
+      {viewingEvidence && (
+        <OperationalImageViewer
+          isOpen={Boolean(viewingEvidence)}
+          onClose={() => setViewingEvidence(null)}
+          photos={[viewingEvidence]}
+          currentIndex={0}
+          title={viewingEvidence.title}
+          subtitle={viewingEvidence.subtitle}
+          machineCode={viewingEvidence.machineCode}
+          phaseLabel="صورة إثبات"
+        />
+      )}
     </section>
   );
 }

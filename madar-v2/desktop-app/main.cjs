@@ -1,6 +1,6 @@
 const { app, BrowserWindow, dialog, ipcMain, Menu, shell, Tray, Notification } = require('electron');
 const { autoUpdater } = require('electron-updater');
-const { readUpdateChannel, verifyWindowsInstaller } = require('./update-security.cjs');
+const { readUpdateChannel, verifyWindowsInstaller, isMediaOrApiUrl, sanitizeDiagnostics } = require('./update-security.cjs');
 const { commitWebBuild } = require('./web-cache.cjs');
 const http = require('node:http');
 const https = require('node:https');
@@ -190,13 +190,35 @@ async function fetchLiveAsset(pathname, targetOrigin, timeoutMs = 8000, bounded 
   }
 }
 
+const syncDiagnostics = {
+  electronVersion: null,
+  serverUrl: null,
+  loadedBuildVersion: null,
+  uiSource: 'initializing',
+  lastSyncTime: null,
+  lastSyncError: null,
+};
+
+function extractBuildVersion(html) {
+  if (!html || typeof html !== 'string') return 'unknown';
+  const match = html.match(/src=["']\/?(assets\/[^"'\s>]+)["']/);
+  return match ? match[1] : 'unknown';
+}
+
 const cacheUpdates = new Set();
 
 function stageWebBuild(html, origin) {
   if (cacheUpdates.has(origin)) return;
   cacheUpdates.add(origin);
   commitWebBuild(getUserWebCacheDir(origin), html, (path) => fetchLiveAsset(path, origin, 10000, true))
-    .catch((error) => console.warn('Offline web cache refresh failed:', error.message))
+    .then(() => {
+      syncDiagnostics.lastSyncTime = new Date().toISOString();
+      syncDiagnostics.lastSyncError = null;
+    })
+    .catch((error) => {
+      syncDiagnostics.lastSyncError = error.message;
+      console.warn('Offline web cache refresh failed:', error.message);
+    })
     .finally(() => cacheUpdates.delete(origin));
 }
 
@@ -385,6 +407,8 @@ function startLoopbackServer() {
       if (currentServerOrigin) {
         html = await fetchLiveIndexHtml(origin, 2500);
         if (html) {
+          syncDiagnostics.uiSource = 'live-sync';
+          syncDiagnostics.loadedBuildVersion = extractBuildVersion(html);
           stageWebBuild(html, origin);
           res.writeHead(200, {
             'Content-Type': 'text/html; charset=utf-8',
@@ -401,6 +425,8 @@ function startLoopbackServer() {
       if (existsSync(cachedIndexPath)) {
         try {
           html = readFileSync(cachedIndexPath, 'utf8');
+          syncDiagnostics.uiSource = 'offline-cache';
+          syncDiagnostics.loadedBuildVersion = extractBuildVersion(html);
           res.writeHead(200, {
             'Content-Type': 'text/html; charset=utf-8',
             'Cache-Control': 'no-cache',
@@ -418,6 +444,8 @@ function startLoopbackServer() {
       if (existsSync(packagedIndexPath)) {
         try {
           html = readFileSync(packagedIndexPath, 'utf8');
+          syncDiagnostics.uiSource = 'packaged-fallback';
+          syncDiagnostics.loadedBuildVersion = extractBuildVersion(html);
           res.writeHead(200, {
             'Content-Type': 'text/html; charset=utf-8',
             'Cache-Control': 'no-cache',
@@ -655,9 +683,12 @@ function createWindow() {
       mainWindow.webContents.downloadURL(url);
       return { action: 'deny' };
     }
-    if (isTrustedUrl(url)) {
-      void mainWindow.loadURL(url);
-    } else if (url.startsWith('https://')) {
+    // Operational images, storage files, or API endpoints must never open raw windows or replace the main window
+    if (isMediaOrApiUrl(url)) {
+      return { action: 'deny' };
+    }
+    // Safe external HTTPS links open in the system browser
+    if (url.startsWith('https://') && !isTrustedUrl(url)) {
       void shell.openExternal(url);
     }
     return { action: 'deny' };
@@ -669,11 +700,17 @@ function createWindow() {
       mainWindow.webContents.downloadURL(url);
       return;
     }
-    if (!isTrustedUrl(url)) event.preventDefault();
+    if (!isTrustedUrl(url) || isMediaOrApiUrl(url)) {
+      event.preventDefault();
+      return;
+    }
   });
 
   mainWindow.webContents.on('will-redirect', (event, url) => {
-    if (!isTrustedUrl(url)) event.preventDefault();
+    if (!isTrustedUrl(url) || isMediaOrApiUrl(url)) {
+      event.preventDefault();
+      return;
+    }
   });
 
   mainWindow.webContents.session.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
@@ -697,6 +734,9 @@ app.on('web-contents-created', (_event, contents) => {
 });
 
 ipcMain.handle('madar:desktop:version', () => app.getVersion());
+ipcMain.handle('madar:desktop:get-diagnostics', () => (
+  sanitizeDiagnostics(syncDiagnostics, app.getVersion(), currentServerOrigin)
+));
 ipcMain.handle('madar:desktop:check-updates', () => checkForUpdates({ manual: true }));
 ipcMain.handle('madar:desktop:get-server-config', () => ({
   serverUrl: currentServerOrigin,
