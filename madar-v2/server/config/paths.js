@@ -81,28 +81,27 @@ if (storageMountPath) {
     throw new Error('STORAGE_MOUNT_PATH is supported only on Linux; unset it for local development or run MADAR on Ubuntu.');
   }
   let mountMetadata;
-  try {
-    mountMetadata = lstatSync(storageMountPath);
-  } catch (error) {
-    if (error.code === 'ENOENT') {
-      throw new Error(`STORAGE_MOUNT_PATH does not exist (${storageMountPath}); refusing to create data on the system partition.`, { cause: error });
+  const maxWaitSeconds = process.env.NODE_ENV === 'test' ? 1 : 30;
+  for (let attempt = 1; attempt <= maxWaitSeconds; attempt += 1) {
+    try {
+      mountMetadata = lstatSync(storageMountPath);
+      if (mountMetadata.isSymbolicLink() || !mountMetadata.isDirectory()) {
+        throw new Error(`STORAGE_MOUNT_PATH must be an existing real directory (${storageMountPath}).`);
+      }
+      assertMountedStorage({
+        mountPath: storageMountPath,
+        mountInfo: readFileSync('/proc/self/mountinfo', 'utf8'),
+        mountRealPath: realpathSync(storageMountPath),
+        mountDevice: mountMetadata.dev,
+        rootDevice: statSync('/').dev,
+      });
+      break;
+    } catch (error) {
+      if (attempt === maxWaitSeconds) {
+        throw new Error(`STORAGE_MOUNT_PATH startup check failed: ${error.message}`, { cause: error });
+      }
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);
     }
-    throw error;
-  }
-  if (mountMetadata.isSymbolicLink() || !mountMetadata.isDirectory()) {
-    throw new Error(`STORAGE_MOUNT_PATH must be an existing real directory (${storageMountPath}).`);
-  }
-
-  try {
-    assertMountedStorage({
-      mountPath: storageMountPath,
-      mountInfo: readFileSync('/proc/self/mountinfo', 'utf8'),
-      mountRealPath: realpathSync(storageMountPath),
-      mountDevice: mountMetadata.dev,
-      rootDevice: statSync('/').dev,
-    });
-  } catch (error) {
-    throw new Error(`STORAGE_MOUNT_PATH startup check failed: ${error.message}`, { cause: error });
   }
 
   const mountDevice = mountMetadata.dev;
