@@ -1,9 +1,9 @@
-version: 1.0.3
+version: 1.0.4
 files:
-  - url: MADAR-Windows-1.0.3-Setup.exe
-    sha512: YT6EVcEbt6qUxUnxoegbbdN34jU9zYzoQ6IdQ0Zb97MDdYaIkmHRCOVIQRn3IbKz1VdLx36toyH6aGkhdIH5Jg==
-    size: 102862656
-    blockMapSize: 106856
-path: MADAR-Windows-1.0.3-Setup.exe
-sha512: YT6EVcEbt6qUxUnxoegbbdN34jU9zYzoQ6IdQ0Zb97MDdYaIkmHRCOVIQRn3IbKz1VdLx36toyH6aGkhdIH5Jg==
-releaseDate: '2026-11-20T19:32:30.940Z'
+  - url: MADAR-Windows-1.0.4-Setup.exe
+    sha512: cUuuzP8tpEsPxhoy7KnYQ5N0zsNYHWm94xHbFpHfAnYyAk3/mLwGt4gEbC0GfhVnnfLv2S4S8bX0moUtZt3Rlw==
+    size: 102858932
+    blockMapSize: 106711
+path: MADAR-Windows-1.0.4-Setup.exe
+sha512: cUuuzP8tpEsPxhoy7KnYQ5N0zsNYHWm94xHbFpHfAnYyAk3/mLwGt4gEbC0GfhVnnfLv2S4S8bX0moUtZt3Rlw==
+releaseDate: '2026-11-21T11:01:55.917Z'
