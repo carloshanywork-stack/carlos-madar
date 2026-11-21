@@ -5680,3 +5680,293 @@ export function unarchiveMaintenanceOrder(orderId, actorId = null, database = db
   unarchive.immediate();
   return getMaintenanceOrder(id, database);
 }
+
+function haversineMeters(lat1, lon1, lat2, lon2) {
+  const toRad = (deg) => (deg * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat / 2) ** 2
+    + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return 6371000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(Math.max(0, 1 - a)));
+}
+
+/**
+ * Retrieves the machine/location status and representative's actual recorded route.
+ * Bounded, segmented, and chronologically ordered with GIS jitter suppression.
+ */
+export function getMachineOrCardRoute({
+  machineId = null,
+  orderId = null,
+  cardId = null,
+  repId = null,
+  dutySessionId = null,
+  from = null,
+  to = null,
+  visitId = null,
+} = {}, database = db) {
+  let resolvedMachineId = machineId ? positiveId(machineId, 'machineId') : null;
+
+  if (cardId) {
+    const card = database.prepare(`
+      SELECT card.id, card.machine_id, card.order_id
+      FROM maintenance_cards card
+      WHERE card.id = ? AND card.deleted_at IS NULL
+    `).get(positiveId(cardId, 'cardId'));
+    if (!card) throw new HttpError(404, 'Maintenance card was not found.');
+    resolvedMachineId = card.machine_id;
+  }
+
+  if (!resolvedMachineId) {
+    throw new HttpError(400, 'A valid machineId or cardId is required to query a maintenance route.');
+  }
+
+  const machine = database.prepare(`
+    SELECT id, code, name_ar, name_en, area, area_name, latitude, longitude,
+      is_location_locked, geofence_radius_meters
+    FROM machines
+    WHERE id = ? AND deleted_at IS NULL
+  `).get(resolvedMachineId);
+
+  if (!machine) throw new HttpError(404, 'Machine was not found.');
+
+  // Determine coordinate status
+  let coordinateStatus = 'missing';
+  let finalLat = null;
+  let finalLng = null;
+
+  if (Number.isFinite(machine.latitude) && Number.isFinite(machine.longitude)) {
+    coordinateStatus = Number(machine.is_location_locked) === 1 ? 'approved' : 'unverified';
+    finalLat = Number(machine.latitude);
+    finalLng = Number(machine.longitude);
+  } else {
+    const pendingCorrection = database.prepare(`
+      SELECT id, reported_code, reported_name, location_json
+      FROM machine_correction_requests
+      WHERE machine_id = ? AND status = 'pending'
+      ORDER BY datetime(created_at) DESC, id DESC LIMIT 1
+    `).get(resolvedMachineId);
+
+    if (pendingCorrection?.location_json) {
+      try {
+        const loc = JSON.parse(pendingCorrection.location_json);
+        if (Number.isFinite(loc.latitude) && Number.isFinite(loc.longitude)) {
+          coordinateStatus = 'proposed';
+          finalLat = Number(loc.latitude);
+          finalLng = Number(loc.longitude);
+        }
+      } catch {}
+    }
+  }
+
+  // Look up associated visit
+  let visit = null;
+  if (visitId) {
+    visit = database.prepare(`
+      SELECT id, visit_uuid, rep_user_id, order_id, card_id, machine_id, captured_at, location_json
+      FROM rep_visits WHERE id = ? AND status = 'completed'
+    `).get(positiveId(visitId, 'visitId'));
+  } else if (cardId) {
+    visit = database.prepare(`
+      SELECT id, visit_uuid, rep_user_id, order_id, card_id, machine_id, captured_at, location_json
+      FROM rep_visits WHERE card_id = ? AND status = 'completed'
+      ORDER BY datetime(captured_at) DESC, id DESC LIMIT 1
+    `).get(cardId);
+  } else {
+    visit = database.prepare(`
+      SELECT id, visit_uuid, rep_user_id, order_id, card_id, machine_id, captured_at, location_json
+      FROM rep_visits WHERE machine_id = ? AND status = 'completed'
+      ORDER BY datetime(captured_at) DESC, id DESC LIMIT 1
+    `).get(resolvedMachineId);
+  }
+
+  let arrivalPoint = null;
+  if (visit?.location_json) {
+    try {
+      const parsedLoc = JSON.parse(visit.location_json);
+      if (Number.isFinite(parsedLoc.latitude) && Number.isFinite(parsedLoc.longitude)) {
+        arrivalPoint = {
+          latitude: Number(parsedLoc.latitude),
+          longitude: Number(parsedLoc.longitude),
+          accuracy: Number.isFinite(parsedLoc.accuracy) ? Number(parsedLoc.accuracy) : null,
+          capturedAt: visit.captured_at,
+        };
+      }
+    } catch {}
+  }
+
+  // Identify representative and duty session
+  const targetRepId = repId ? positiveId(repId, 'repId') : (visit?.rep_user_id ?? null);
+  let repUser = null;
+  let dutySession = null;
+
+  if (targetRepId) {
+    repUser = database.prepare('SELECT id, username, full_name, role FROM users WHERE id = ?').get(targetRepId);
+  }
+
+  if (targetRepId) {
+    if (dutySessionId) {
+      dutySession = database.prepare('SELECT id, started_at, ended_at FROM rep_duty_sessions WHERE id = ? AND rep_user_id = ?').get(dutySessionId, targetRepId);
+    } else if (visit?.captured_at) {
+      dutySession = database.prepare(`
+        SELECT id, started_at, ended_at FROM rep_duty_sessions
+        WHERE rep_user_id = ?
+          AND datetime(started_at) <= datetime(?)
+          AND (ended_at IS NULL OR datetime(ended_at) >= datetime(?))
+        ORDER BY datetime(started_at) DESC LIMIT 1
+      `).get(targetRepId, visit.captured_at, visit.captured_at);
+
+      if (!dutySession) {
+        dutySession = database.prepare(`
+          SELECT id, started_at, ended_at FROM rep_duty_sessions
+          WHERE rep_user_id = ? AND date(started_at) = date(?)
+          ORDER BY datetime(started_at) DESC LIMIT 1
+        `).get(targetRepId, visit.captured_at);
+      }
+    }
+  }
+
+  // Determine query time bounds for breadcrumbs
+  let queryStart = from;
+  let queryEnd = to;
+
+  if (!queryStart || !queryEnd) {
+    if (dutySession) {
+      queryStart = queryStart || dutySession.started_at;
+      queryEnd = queryEnd || (dutySession.ended_at || new Date(new Date(dutySession.started_at).getTime() + 18 * 3600 * 1000).toISOString());
+    } else if (visit?.captured_at) {
+      queryStart = queryStart || new Date(new Date(visit.captured_at).getTime() - 3 * 3600 * 1000).toISOString();
+      queryEnd = queryEnd || new Date(new Date(visit.captured_at).getTime() + 1 * 3600 * 1000).toISOString();
+    }
+  }
+
+  const limitations = [];
+  let rawBreadcrumbs = [];
+
+  if (targetRepId && queryStart && queryEnd) {
+    // Check if rep_tracking_breadcrumbs view exists, else query rep_location_breadcrumbs
+    const hasView = Boolean(database.prepare("SELECT 1 FROM sqlite_master WHERE type = 'view' AND name = 'rep_tracking_breadcrumbs'").get());
+    const tableName = hasView ? 'rep_tracking_breadcrumbs' : 'rep_location_breadcrumbs';
+
+    rawBreadcrumbs = database.prepare(`
+      SELECT id, user_id, duty_session_id, latitude, longitude, accuracy, speed, recorded_at,
+        is_stop, stop_name
+      FROM ${tableName}
+      WHERE user_id = ?
+        AND datetime(recorded_at) >= datetime(?)
+        AND datetime(recorded_at) <= datetime(?)
+        AND latitude BETWEEN -90 AND 90
+        AND longitude BETWEEN -180 AND 180
+      ORDER BY datetime(recorded_at) ASC, id ASC
+      LIMIT 1000
+    `).all(targetRepId, queryStart, queryEnd);
+  } else if (!targetRepId) {
+    limitations.push('لم تُسجل أي زيارات ميدانية سابقة لهذه الماكينة للتعرف على المندوب.');
+  }
+
+  if (rawBreadcrumbs.length >= 1000) {
+    limitations.push('تم تقييد نقاط المسار بأقصى سعة مسموحة (1000 نقطة).');
+  }
+
+  // Segment points and derive distance/speed
+  const segments = [];
+  let currentSegment = [];
+  let totalDistanceMeters = 0;
+  let totalMovingSeconds = 0;
+  let previousPoint = null;
+
+  for (let i = 0; i < rawBreadcrumbs.length; i += 1) {
+    const raw = rawBreadcrumbs[i];
+    const pt = {
+      pointId: `pt-${raw.id}`,
+      latitude: Number(raw.latitude),
+      longitude: Number(raw.longitude),
+      accuracyMeters: raw.accuracy !== null && raw.accuracy !== undefined ? Math.round(Number(raw.accuracy)) : null,
+      speedKph: raw.speed !== null && raw.speed !== undefined ? Math.round(Number(raw.speed) * 36) / 10 : null,
+      recordedAt: raw.recorded_at,
+      dutySessionId: raw.duty_session_id || null,
+      isStop: Number(raw.is_stop) === 1,
+      stopName: raw.stop_name || null,
+    };
+
+    if (previousPoint) {
+      const dtMs = new Date(pt.recordedAt).getTime() - new Date(previousPoint.recordedAt).getTime();
+      const dist = haversineMeters(previousPoint.latitude, previousPoint.longitude, pt.latitude, pt.longitude);
+      const dtSec = Math.max(1, dtMs / 1000);
+      const speedMps = dist / dtSec;
+
+      // Large time gap (> 30 min) or duty session change or impossible jump (> 150 km/h) -> Split segment
+      const isTimeGap = dtMs > 30 * 60 * 1000;
+      const isSessionChange = pt.dutySessionId !== previousPoint.dutySessionId;
+      const isImpossibleJump = speedMps > 41.67 && dist > 200;
+
+      if (isTimeGap || isSessionChange || isImpossibleJump) {
+        if (currentSegment.length > 0) {
+          segments.push({
+            segmentId: `seg-${segments.length + 1}`,
+            points: currentSegment,
+          });
+          currentSegment = [];
+        }
+      } else {
+        totalDistanceMeters += dist;
+        totalMovingSeconds += dtSec;
+      }
+    }
+
+    currentSegment.push(pt);
+    previousPoint = pt;
+  }
+
+  if (currentSegment.length > 0) {
+    segments.push({
+      segmentId: `seg-${segments.length + 1}`,
+      points: currentSegment,
+    });
+  }
+
+  const allFilteredPoints = segments.flatMap((s) => s.points);
+  const averageSpeedKph = totalMovingSeconds > 0
+    ? (totalDistanceMeters / 1000) / (totalMovingSeconds / 3600)
+    : 0;
+
+  return {
+    machine: {
+      id: machine.id,
+      code: machine.code,
+      nameAr: machine.name_ar,
+      nameEn: machine.name_en,
+      area: machine.area,
+      areaName: machine.area_name,
+      coordinateStatus,
+      isLocationLocked: coordinateStatus === 'approved',
+      is_location_locked: coordinateStatus === 'approved',
+      latitude: finalLat,
+      longitude: finalLng,
+      geofenceRadiusMeters: machine.geofence_radius_meters,
+    },
+    context: {
+      orderId: visit?.order_id ?? (orderId ? Number(orderId) : null),
+      cardId: visit?.card_id ?? (cardId ? Number(cardId) : null),
+      machineId: machine.id,
+      representativeId: repUser?.id ?? null,
+      representativeName: repUser?.full_name ?? null,
+      dutySessionId: dutySession?.id ?? null,
+      visitId: visit?.id ?? null,
+      visitCapturedAt: visit?.captured_at ?? null,
+    },
+    arrivalPoint,
+    segments,
+    summary: {
+      hasRoute: allFilteredPoints.length > 0,
+      pointCount: allFilteredPoints.length,
+      segmentCount: segments.length,
+      startedAt: allFilteredPoints[0]?.recordedAt ?? null,
+      endedAt: allFilteredPoints[allFilteredPoints.length - 1]?.recordedAt ?? null,
+      distanceMeters: Math.round(totalDistanceMeters),
+      totalDistanceKm: Math.round((totalDistanceMeters / 1000) * 10) / 10,
+      averageSpeedKph: Math.round(averageSpeedKph * 10) / 10,
+      averageSpeedKmh: Math.round(averageSpeedKph * 10) / 10,
+    },
+    limitations,
+  };
+}

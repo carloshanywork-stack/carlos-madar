@@ -47,6 +47,7 @@ import {
   getMachineCorrectionRequests,
   getMachineNotesHistory,
   getMachineMap,
+  getMachineOrCardRoute,
   getMaintenancePhotoTagTargets,
   getMaintenancePhotoDetails,
   getUnmatchedMaintenancePhoto,
@@ -226,6 +227,53 @@ router.get('/machines/map', requireRole('admin'), (req, res) => {
     search: req.query.search ?? req.query.q,
     locationStatus: req.query.locationStatus ?? 'all',
   }));
+});
+
+router.get('/machines/:id/route', (req, res, next) => {
+  try {
+    res.set(NO_CACHE_HEADERS);
+    const route = getMachineOrCardRoute({
+      machineId: req.params.id,
+      repId: req.query.repId,
+      dutySessionId: req.query.dutySessionId,
+      from: req.query.from,
+      to: req.query.to,
+      visitId: req.query.visitId,
+    });
+
+    if (req.user?.role === 'rep' && route.context.representativeId && route.context.representativeId !== req.user.id) {
+      res.status(403).json({ error: 'Representatives can only access their own route history.' });
+      return;
+    }
+
+    res.json(route);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/orders/:orderId/cards/:cardId/route', (req, res, next) => {
+  try {
+    res.set(NO_CACHE_HEADERS);
+    const route = getMachineOrCardRoute({
+      orderId: req.params.orderId,
+      cardId: req.params.cardId,
+      repId: req.query.repId,
+      dutySessionId: req.query.dutySessionId,
+      from: req.query.from,
+      to: req.query.to,
+      visitId: req.query.visitId,
+    });
+
+    if (req.user?.role === 'rep' && route.context.representativeId && route.context.representativeId !== req.user.id) {
+      res.status(403).json({ error: 'Representatives can only access their own route history.' });
+      return;
+    }
+
+    res.json(route);
+  } catch (error) {
+    next(error);
+  }
 });
 
 router.get('/machine-corrections', requireRole('admin'), (req, res) => {

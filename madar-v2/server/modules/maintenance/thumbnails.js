@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { lstat, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import sharp from 'sharp';
 import { thumbnailCacheDirectory } from '../../config/paths.js';
@@ -10,8 +10,10 @@ const inFlight = new Map();
 
 export const VARIANT_CONFIGS = {
   thumb: { size: 200, quality: 74, effort: 4 },
+  '800': { size: 800, quality: 78, effort: 3 },
   preview: { size: 1200, quality: 80, effort: 3 },
   high: { size: 1800, quality: 84, effort: 3 },
+  '2400': { size: 2400, quality: 86, effort: 3 },
 };
 
 async function ensureCacheDirectory() {
@@ -44,7 +46,7 @@ export async function invalidateMaintenanceVariants(absolutePath, savedRotation 
   const source = await stat(absolutePath).catch(() => null);
   if (!source || !source.isFile()) return;
   await ensureCacheDirectory();
-  for (const variant of ['thumb', 'preview', 'high', '800']) {
+  for (const variant of ['thumb', '800', 'preview', 'high', '2400']) {
     const key = computePhotoVariantKey(absolutePath, source, rotation, variant);
     const cachedPath = join(thumbnailCacheDirectory, `${key}.webp`);
     try {
@@ -122,4 +124,52 @@ export async function getMaintenancePhotoVariant(absolutePath, savedRotation = 0
 
 export async function getMaintenanceThumbnail(absolutePath, savedRotation = 0) {
   return getMaintenancePhotoVariant(absolutePath, savedRotation, 'thumb');
+}
+
+/**
+ * Prunes old or oversized server-derived WebP thumbnail cache entries
+ * to prevent unbounded disk accumulation.
+ */
+export async function pruneThumbnailCache({ maxAgeDays = 30, maxBytes = 500 * 1024 * 1024 } = {}) {
+  await ensureCacheDirectory();
+  const entries = await readdir(thumbnailCacheDirectory, { withFileTypes: true });
+  const fileStats = [];
+  let totalBytes = 0;
+  const now = Date.now();
+  const maxAgeMs = maxAgeDays * 24 * 60 * 60 * 1000;
+
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith('.webp')) continue;
+    const fullPath = join(thumbnailCacheDirectory, entry.name);
+    try {
+      const s = await stat(fullPath);
+      totalBytes += s.size;
+      fileStats.push({ path: fullPath, size: s.size, mtimeMs: s.mtimeMs });
+    } catch {}
+  }
+
+  // 1. Evict entries older than maxAgeDays
+  for (const f of fileStats) {
+    if (now - f.mtimeMs > maxAgeMs) {
+      try {
+        await rm(f.path, { force: true });
+        totalBytes -= f.size;
+      } catch {}
+    }
+  }
+
+  // 2. If total size still exceeds maxBytes, evict oldest first
+  if (totalBytes > maxBytes) {
+    fileStats.sort((a, b) => a.mtimeMs - b.mtimeMs);
+    const targetBytes = Math.floor(maxBytes * 0.8);
+    for (const f of fileStats) {
+      if (totalBytes <= targetBytes) break;
+      try {
+        await rm(f.path, { force: true });
+        totalBytes -= f.size;
+      } catch {}
+    }
+  }
+
+  return { totalBytesRemaining: totalBytes };
 }

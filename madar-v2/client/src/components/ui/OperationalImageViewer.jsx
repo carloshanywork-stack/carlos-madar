@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, ApiError } from '../../lib/api.js';
 import { sanitizeWindowsFilename, buildOperationalFilename } from '../../lib/operational-filename.js';
-import { mediaCache } from '../../lib/cache/media-cache.js';
+import { photoRepository } from '../../lib/cache/photo-repository.js';
 import { getActiveAdaptiveProfile } from '../../lib/adaptive-quality.js';
 
 export { sanitizeWindowsFilename, buildOperationalFilename };
@@ -62,7 +62,7 @@ export default function OperationalImageViewer({
         if (isCancelled) return;
         setAdaptiveTierLabel(profile.tierLabel || profile.tier);
 
-        const acquisition = await mediaCache.acquirePhotoUrl(currentUrl, {
+        const acquisition = await photoRepository.acquirePhoto(currentUrl, {
           variant: profile.variant,
           inUse: true,
         });
@@ -85,8 +85,8 @@ export default function OperationalImageViewer({
           const nextItem = photos[activeIndex + i];
           const prevUrl = typeof prevItem === 'string' ? prevItem : prevItem?.url;
           const nextUrl = typeof nextItem === 'string' ? nextItem : nextItem?.url;
-          if (prevUrl) mediaCache.prefetchPhoto(prevUrl, profile.variant);
-          if (nextUrl) mediaCache.prefetchPhoto(nextUrl, profile.variant);
+          if (prevUrl) photoRepository.prefetchPhoto(prevUrl, { variant: profile.variant });
+          if (nextUrl) photoRepository.prefetchPhoto(nextUrl, { variant: profile.variant });
         }
       } catch (err) {
         if (isCancelled) return;
@@ -105,6 +105,7 @@ export default function OperationalImageViewer({
 
     return () => {
       isCancelled = true;
+      photoRepository.cancelPrefetches();
       if (activeAcquisitionRef.current) {
         activeAcquisitionRef.current.release();
         activeAcquisitionRef.current = null;
@@ -411,7 +412,7 @@ export default function OperationalImageViewer({
                   type="button"
                   onClick={async () => {
                     await onSaveRotation(rotationAngle);
-                    await mediaCache.invalidatePhoto(currentUrl);
+                    await photoRepository.invalidatePhoto(currentUrl);
                   }}
                   disabled={isSavingRotation}
                   style={{ background: '#0284c7', border: '1px solid #38bdf8', color: '#fff', padding: '5px 10px', borderRadius: '6px', cursor: 'pointer', fontSize: '11px', fontWeight: 800 }}

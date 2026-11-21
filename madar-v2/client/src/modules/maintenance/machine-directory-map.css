@@ -19,6 +19,120 @@
 #madar-app .madar-machine-map-selection { margin: 0; padding: 8px 10px; border: 1px solid #b8d2c5; border-radius: 8px; color: var(--madar-text, #24483f); background: var(--madar-surface, #f0f7f3); font-size: 10px; line-height: 1.7; }
 #madar-app .madar-machine-map-selection small { color: var(--madar-muted, #596b79); }
 
+#madar-app .madar-machine-map-route-panel {
+  margin-top: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--madar-border, #bfcfcb);
+  border-radius: 10px;
+  background: var(--madar-surface-alt, #f7faf8);
+  display: grid;
+  gap: 8px;
+}
+#madar-app .madar-machine-map-route-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+#madar-app .madar-machine-map-route-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 13px;
+}
+#madar-app .madar-pin-badge {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+}
+#madar-app .madar-pin-badge.locked {
+  background: #e6f4ea;
+  color: #137333;
+}
+#madar-app .madar-pin-badge.unverified {
+  background: #fef7e0;
+  color: #b06000;
+}
+#madar-app .madar-pin-badge.correction {
+  background: #fce8e6;
+  color: #c5221f;
+}
+#madar-app .madar-machine-map-reset-btn {
+  background: transparent;
+  border: 1px solid var(--madar-border, #bfcfcb);
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 11px;
+  cursor: pointer;
+  color: var(--madar-muted, #596b79);
+}
+#madar-app .madar-machine-map-reset-btn:hover {
+  background: #fff;
+  color: var(--madar-text, #173548);
+}
+#madar-app .madar-machine-map-route-coords {
+  font-size: 11px;
+  color: var(--madar-muted, #596b79);
+}
+#madar-app .madar-machine-map-route-coords code {
+  font-family: monospace;
+  background: #eef2f0;
+  padding: 2px 4px;
+  border-radius: 4px;
+  font-size: 11px;
+}
+#madar-app .madar-machine-route-loading,
+#madar-app .madar-machine-route-empty,
+#madar-app .madar-machine-route-error {
+  font-size: 11px;
+  color: var(--madar-muted, #596b79);
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: #fff;
+  border: 1px dashed var(--madar-border, #d5ded9);
+}
+#madar-app .madar-machine-route-summary {
+  display: grid;
+  gap: 6px;
+  background: #fff;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid #bfdbfe;
+}
+#madar-app .madar-machine-route-summary-badge {
+  font-size: 11px;
+  font-weight: 700;
+  color: #0369a1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+#madar-app .madar-machine-route-summary-badge i.route-line-icon {
+  display: inline-block;
+  width: 16px;
+  height: 3px;
+  background: #0284c7;
+  border-radius: 2px;
+}
+#madar-app .madar-machine-route-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+  font-size: 11px;
+}
+#madar-app .madar-machine-route-stats .text-success {
+  color: #166534;
+  font-weight: 700;
+}
+#madar-app .madar-machine-route-stats .text-warning {
+  color: #9a6813;
+  font-weight: 700;
+}
+
 @media (max-width: 680px) {
   #madar-app .madar-machine-map-section .rep-offline-map-toolbar { align-items: flex-start; flex-direction: column; }
   #madar-app .madar-machine-map-section .rep-offline-map-toolbar > div { width: 100%; }

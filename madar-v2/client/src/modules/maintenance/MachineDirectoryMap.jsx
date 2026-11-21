@@ -19,11 +19,20 @@ async function fetchLocalServerTile(pack, tile) {
   return response.blob();
 }
 
-export default function MachineDirectoryMap({ machines = [], counts = {}, locationStatus = 'all' }) {
+export default function MachineDirectoryMap({
+  machines = [],
+  counts = {},
+  locationStatus = 'all',
+  selectedMachineId = null,
+  onSelectMachine = null,
+}) {
   const [packs, setPacks] = useState([]);
   const [packId, setPackId] = useState('');
   const [loading, setLoading] = useState(true);
   const [selectedPoint, setSelectedPoint] = useState(null);
+  const [routeData, setRouteData] = useState(null);
+  const [routeLoading, setRouteLoading] = useState(false);
+  const [routeError, setRouteError] = useState(null);
 
   useEffect(() => {
     let active = true;
@@ -79,13 +88,20 @@ export default function MachineDirectoryMap({ machines = [], counts = {}, locati
     const points = [];
     for (const machine of machines) {
       const base = {
+        id: machine.id,
+        machineId: machine.id,
         cardId: `machine-${machine.id}`,
         machineCode: machine.code,
+        code: machine.code,
         arabicName: machine.name_ar,
+        name_ar: machine.name_ar,
         regionName: machine.area,
+        area: machine.area,
         canVisit: true,
         isCompleted: false,
         latest_visit: machine.latest_visit,
+        is_location_locked: Boolean(machine.is_location_locked),
+        isLocationLocked: Boolean(machine.is_location_locked),
       };
       if (Number.isFinite(machine.latitude) && Number.isFinite(machine.longitude)) {
         points.push({ ...base, ...machine, ...base, isUnverifiedPin: !machine.is_location_locked });
@@ -93,6 +109,8 @@ export default function MachineDirectoryMap({ machines = [], counts = {}, locati
       if (Number.isFinite(machine.correction_latitude) && Number.isFinite(machine.correction_longitude)) {
         points.push({
           ...base,
+          id: machine.id,
+          machineId: machine.id,
           cardId: `correction-${machine.id}`,
           machineCode: `بلاغ ${machine.correction_reported_code || machine.code}`,
           arabicName: machine.correction_reported_name || 'موقع مقترح من بلاغ مندوب',
@@ -104,6 +122,75 @@ export default function MachineDirectoryMap({ machines = [], counts = {}, locati
     }
     return points;
   }, [machines]);
+
+  // Synchronize selection if selectedMachineId is supplied from parent table
+  useEffect(() => {
+    if (selectedMachineId) {
+      const match = mapMachines.find((m) => m.id === selectedMachineId && !m.isCorrectionPin);
+      if (match) setSelectedPoint(match);
+    }
+  }, [selectedMachineId, mapMachines]);
+
+  // Fetch actual recorded GPS route on machine selection
+  useEffect(() => {
+    const targetMachineId = selectedPoint?.id;
+    if (!targetMachineId) {
+      setRouteData(null);
+      setRouteLoading(false);
+      setRouteError(null);
+      return;
+    }
+
+    const controller = new AbortController();
+    setRouteLoading(true);
+    setRouteError(null);
+
+    fetch(`/api/maintenance/machines/${targetMachineId}/route`, {
+      credentials: 'include',
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          if (response.status === 404) return null;
+          const errData = await response.json().catch(() => ({}));
+          throw new Error(errData.error || `تعذر جلب مسار المندوب (${response.status})`);
+        }
+        return response.json();
+      })
+      .then((data) => {
+        setRouteData(data);
+      })
+      .catch((err) => {
+        if (controller.signal.aborted) return;
+        console.warn('Failed to fetch machine route:', err);
+        setRouteError(err.message || 'تعذر تحميل مسار المندوب');
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setRouteLoading(false);
+        }
+      });
+
+    return () => {
+      controller.abort();
+    };
+  }, [selectedPoint?.id]);
+
+  function handlePointSelect(point) {
+    setSelectedPoint(point);
+    if (onSelectMachine) {
+      onSelectMachine(point ? { id: point.id, code: point.code || point.machineCode } : null);
+    }
+  }
+
+  function handleClearSelection() {
+    setSelectedPoint(null);
+    setRouteData(null);
+    setRouteError(null);
+    if (onSelectMachine) {
+      onSelectMachine(null);
+    }
+  }
 
   return (
     <section className="madar-panel madar-section madar-machine-map-section" aria-label="خريطة دليل الماكينات">
@@ -122,16 +209,95 @@ export default function MachineDirectoryMap({ machines = [], counts = {}, locati
           <small>الإجمالي {counts.total ?? machines.length} · مواقع مثبتة {counts.located ?? '—'} · غير مثبتة {counts.unlocated ?? '—'} · بلاغات معلقة {counts.pending_correction ?? '—'} · نقاط بهذه التصفية {mapMachines.length}{locationStatus !== 'all' ? ` (${locationStatus})` : ''}</small>
         </div>
         {!mapMachines.length && <p className="madar-machine-map-unlocated">لا توجد نقاط بإحداثيات في هذه التصفية؛ الماكينات غير المحددة ستظهر بعد تسجيل GPS، بينما تظل متاحة في جدول الدليل.</p>}
-        <OfflineRouteMap pack={selectedPack} machines={mapMachines} gps={null} onMachineSelect={setSelectedPoint}
-          tileLoader={selectedPack.serverSource ? fetchLocalServerTile : undefined} />
-        {selectedPoint && <p className="madar-machine-map-selection" role="status">
-          <b>{selectedPoint.isCorrectionPin ? 'موقع مقترح في بلاغ' : selectedPoint.isUnverifiedPin ? 'موقع غير مؤكد' : 'موقع الماكينة'}:</b>
-          {' '}<span dir="ltr">{selectedPoint.machineCode}</span> · {selectedPoint.arabicName} · {selectedPoint.regionName}
-          {selectedPoint.isCorrectionPin && <small> — الإحداثيات دليل للمراجعة فقط، ولم تغيّر موقع سجل الماكينة.</small>}
-          <br /><small>{selectedPoint.latest_visit
-            ? `آخر زيارة: ${new Intl.DateTimeFormat('ar-EG', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Africa/Cairo' }).format(new Date(selectedPoint.latest_visit.captured_at))} · أمر ${selectedPoint.latest_visit.order_code} · ${selectedPoint.latest_visit.representative_name}`
-            : 'لا توجد زيارة ميدانية مسجلة لهذه الماكينة بعد.'}</small>
-        </p>}
+        <OfflineRouteMap
+          pack={selectedPack}
+          machines={mapMachines}
+          selectedMachine={selectedPoint}
+          routeData={routeData}
+          routeLoading={routeLoading}
+          gps={null}
+          onMachineSelect={handlePointSelect}
+          tileLoader={selectedPack.serverSource ? fetchLocalServerTile : undefined}
+        />
+        {selectedPoint && (
+          <div className="madar-machine-map-route-panel" role="status">
+            <div className="madar-machine-map-route-header">
+              <div className="madar-machine-map-route-title">
+                <span className={`madar-pin-badge ${selectedPoint.isCorrectionPin ? 'correction' : selectedPoint.isUnverifiedPin ? 'unverified' : 'locked'}`}>
+                  {selectedPoint.isCorrectionPin ? 'موقع مقترح في بلاغ' : selectedPoint.isUnverifiedPin ? 'موقع غير مؤكد' : 'موقع مثبت ومغلق'}
+                </span>
+                <strong><span dir="ltr">{selectedPoint.machineCode}</span> — {selectedPoint.arabicName}</strong>
+                <small>({selectedPoint.regionName || selectedPoint.area})</small>
+              </div>
+              <button
+                type="button"
+                className="madar-machine-map-reset-btn"
+                onClick={handleClearSelection}
+                title="إلغاء التحديد وتوسيع الخريطة"
+              >
+                إلغاء التحديد ✕
+              </button>
+            </div>
+
+            <div className="madar-machine-map-route-coords">
+              <span>الإحداثيات: <code>{Number(selectedPoint.latitude).toFixed(6)}, {Number(selectedPoint.longitude).toFixed(6)}</code></span>
+              {selectedPoint.isCorrectionPin && (
+                <span className="madar-muted"> — الإحداثيات دليل للمراجعة فقط، ولم تغيّر موقع سجل الماكينة.</span>
+              )}
+            </div>
+
+            {routeLoading && (
+              <div className="madar-machine-route-loading">
+                <span className="madar-spinner-icon" /> جارٍ استرجاع مسار تتبع المندوب المسجل ميدانياً…
+              </div>
+            )}
+
+            {routeError && (
+              <div className="madar-machine-route-error">
+                <small>{routeError}</small>
+              </div>
+            )}
+
+            {!routeLoading && routeData?.summary?.hasRoute && (
+              <div className="madar-machine-route-summary">
+                <div className="madar-machine-route-summary-badge">
+                  <i className="route-line-icon" /> المسار الميداني المسجل
+                </div>
+                <div className="madar-machine-route-stats">
+                  <div><strong>المندوب:</strong> {routeData.visit?.representative_name || routeData.route?.rep_name || 'مندوب الصيانة'}</div>
+                  {routeData.visit?.captured_at && (
+                    <div><strong>توقيت الزيارة:</strong> {new Intl.DateTimeFormat('ar-EG', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Africa/Cairo' }).format(new Date(routeData.visit.captured_at))}</div>
+                  )}
+                  {routeData.visit?.order_code && (
+                    <div><strong>أمر الصيانة:</strong> {routeData.visit.order_code}</div>
+                  )}
+                  <div><strong>إجمالي المسافة:</strong> {routeData.summary.totalDistanceKm} كم</div>
+                  <div><strong>متوسط السرعة:</strong> {routeData.summary.averageSpeedKmh} كم/س</div>
+                  <div><strong>نقاط الـ GPS:</strong> {routeData.summary.pointCount} نقطة مسجلة</div>
+                  <div><strong>القطاعات:</strong> {routeData.summary.segmentCount}</div>
+                  {routeData.visit?.geofence_verified !== undefined && (
+                    <div>
+                      <strong>التحقق الجغرافي:</strong>{' '}
+                      <span className={routeData.visit.geofence_verified ? 'text-success' : 'text-warning'}>
+                        {routeData.visit.geofence_verified ? 'تم التحقق داخل 50م' : 'وصول غير مؤكد'}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {!routeLoading && !routeError && !routeData?.summary?.hasRoute && (
+              <div className="madar-machine-route-empty">
+                <small>
+                  {selectedPoint.latest_visit
+                    ? `آخر زيارة مسجلة: ${new Intl.DateTimeFormat('ar-EG', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Africa/Cairo' }).format(new Date(selectedPoint.latest_visit.captured_at))} (${selectedPoint.latest_visit.order_code}) — ولكن لم تُحفظ نقاط تتبع GPS لهذه الزيارة.`
+                    : 'لا تتوفر زيارة ميدانية بنقاط تتبع GPS مسجلة لهذه الماكينة حتى الآن. الموقع الجغرافي محدد في الدليل وسيرسم المسار فور إتمام الزيارة.'}
+                </small>
+              </div>
+            )}
+          </div>
+        )}
       </> : <Alert tone="info">
         لا توجد حزمة MBTiles محلية جاهزة على هذا الجهاز. نزّل حزمة عبر لوحة خرائط المندوب أو أضف ملف الخريطة المحلي أولاً؛ سيظل دليل الماكينات والفلاتر متاحاً دون الخريطة.
       </Alert>}

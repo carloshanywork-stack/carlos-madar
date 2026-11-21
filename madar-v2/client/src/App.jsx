@@ -4,6 +4,7 @@ import AppShell from './components/layout/AppShell.jsx';
 import LoadingState from './components/ui/LoadingState.jsx';
 import SignInPage from './modules/auth/SignInPage.jsx';
 import { api } from './lib/api.js';
+import { mediaCache } from './lib/cache/media-cache.js';
 import { clearNativeSession, isNativeRepApp } from './modules/rep/native-session.js';
 import NativePermissionGate from './NativePermissionGate.jsx';
 
@@ -107,6 +108,11 @@ function AuthenticatedApplication() {
         return;
       }
       setUser(authenticatedUser);
+      if (authenticatedUser?.id) {
+        mediaCache.setSessionContext({ serverOrigin: window.location.origin, userId: authenticatedUser.id });
+      } else {
+        mediaCache.setSessionContext({ serverOrigin: window.location.origin, userId: null });
+      }
       cacheRepProfile(authenticatedUser);
       setOfflineOnly(false);
       setSetupRequired(Boolean(status.setupRequired));
@@ -174,7 +180,10 @@ function AuthenticatedApplication() {
 
   useEffect(() => {
     if (offlineOnly) return undefined;
-    const onExpired = () => { void fetchAuthStatus(); };
+    const onExpired = () => {
+      mediaCache.revokeAllObjectUrls();
+      void fetchAuthStatus();
+    };
     window.addEventListener('madar-auth-expired', onExpired);
     return () => window.removeEventListener('madar-auth-expired', onExpired);
   }, [fetchAuthStatus, offlineOnly]);
@@ -244,6 +253,9 @@ function AuthenticatedApplication() {
       return;
     }
     setUser(authenticatedUser);
+    if (authenticatedUser?.id) {
+      mediaCache.setSessionContext({ serverOrigin: window.location.origin, userId: authenticatedUser.id });
+    }
     cacheRepProfile(authenticatedUser);
     setOfflineOnly(false);
     setSetupRequired(false);
@@ -256,6 +268,7 @@ function AuthenticatedApplication() {
     } catch {
       // Leave the workspace locally; the next status check will validate the server session.
     } finally {
+      await mediaCache.onLogout();
       if (user?.role === 'rep') {
         if (isNativeRepApp()) await clearNativeSession().catch(() => undefined);
         try {

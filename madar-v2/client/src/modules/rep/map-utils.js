@@ -36,3 +36,84 @@ export function getVisibleTileCoordinates(center, zoom, width = 900, height = 50
   }
   return tiles;
 }
+
+export function calculateDistanceMeters(lat1, lon1, lat2, lon2) {
+  const nLat1 = Number(lat1);
+  const nLon1 = Number(lon1);
+  const nLat2 = Number(lat2);
+  const nLon2 = Number(lon2);
+  if (!Number.isFinite(nLat1) || !Number.isFinite(nLon1) || !Number.isFinite(nLat2) || !Number.isFinite(nLon2)) {
+    return 0;
+  }
+  const R = 6371000;
+  const dLat = (nLat2 - nLat1) * (Math.PI / 180);
+  const dLon = (nLon2 - nLon1) * (Math.PI / 180);
+  const a = Math.sin(dLat / 2) ** 2
+    + Math.cos(nLat1 * (Math.PI / 180)) * Math.cos(nLat2 * (Math.PI / 180)) * Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(Math.max(0, 1 - a)));
+}
+
+export function suppressStationaryJitter(points, thresholdMeters = 12) {
+  if (!Array.isArray(points) || points.length <= 1) return points || [];
+  const result = [points[0]];
+  for (let i = 1; i < points.length; i += 1) {
+    const prev = result[result.length - 1];
+    const curr = points[i];
+    if (i === points.length - 1) {
+      result.push(curr);
+      break;
+    }
+    const dist = calculateDistanceMeters(prev.latitude, prev.longitude, curr.latitude, curr.longitude);
+    if (dist >= thresholdMeters) {
+      result.push(curr);
+    }
+  }
+  return result;
+}
+
+export function computeFitBounds(points, viewWidth = 900, viewHeight = 500, minZoom = 5, maxZoom = 14) {
+  const valid = (points || []).filter((p) => Number.isFinite(p.latitude) && Number.isFinite(p.longitude));
+  if (!valid.length) return null;
+
+  let minLat = Infinity;
+  let maxLat = -Infinity;
+  let minLng = Infinity;
+  let maxLng = -Infinity;
+
+  for (const p of valid) {
+    if (p.latitude < minLat) minLat = p.latitude;
+    if (p.latitude > maxLat) maxLat = p.latitude;
+    if (p.longitude < minLng) minLng = p.longitude;
+    if (p.longitude > maxLng) maxLng = p.longitude;
+  }
+
+  const center = {
+    latitude: (minLat + maxLat) / 2,
+    longitude: (minLng + maxLng) / 2,
+  };
+
+  if (maxLat - minLat < 0.0001 && maxLng - minLng < 0.0001) {
+    return {
+      center,
+      zoom: Math.min(maxZoom, Math.max(minZoom, 13)),
+    };
+  }
+
+  let bestZoom = minZoom;
+  for (let z = maxZoom; z >= minZoom; z -= 1) {
+    const pMin = projectToWorld({ latitude: maxLat, longitude: minLng }, z);
+    const pMax = projectToWorld({ latitude: minLat, longitude: maxLng }, z);
+    const spanX = Math.abs(pMax.x - pMin.x);
+    const spanY = Math.abs(pMax.y - pMin.y);
+
+    if (spanX <= viewWidth * 0.70 && spanY <= viewHeight * 0.70) {
+      bestZoom = z;
+      break;
+    }
+  }
+
+  return {
+    center,
+    zoom: bestZoom,
+  };
+}

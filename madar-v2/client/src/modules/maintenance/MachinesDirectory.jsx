@@ -49,6 +49,7 @@ export default function MachinesDirectory({ isAdmin = false, initialCorrections 
   const [capturingLocation, setCapturingLocation] = useState(false);
   const { notice, showToast, clearToast } = useToast();
   const [offlineMachines, setOfflineMachines] = useState([]);
+  const [selectedMapMachineId, setSelectedMapMachineId] = useState(null);
 
   useEffect(() => {
     if (data?.machines?.length) {
@@ -221,7 +222,15 @@ export default function MachinesDirectory({ isAdmin = false, initialCorrections 
       {Boolean(!data?.machines?.length && offlineMachines.length) && (
         <div className="madar-section"><Alert tone="warning">أنت في وضع العمل دون اتصال؛ يتم عرض بيانات الماكينات المحفوظة محلياً.</Alert></div>
       )}
-      {isAdmin && <MachineDirectoryMap machines={mapData?.machines ?? []} counts={mapData?.counts} locationStatus={locationStatus} />}
+      {isAdmin && (
+        <MachineDirectoryMap
+          machines={mapData?.machines ?? []}
+          counts={mapData?.counts}
+          locationStatus={locationStatus}
+          selectedMachineId={selectedMapMachineId}
+          onSelectMachine={(m) => setSelectedMapMachineId(m?.id ?? null)}
+        />
+      )}
       <section className="madar-panel madar-section">
         {loading ? <LoadingState label="جارٍ تحميل دليل الماكينات" /> : machines.length ? <>
           <div className="madar-table-wrap"><table className="madar-table">
@@ -233,6 +242,20 @@ export default function MachinesDirectory({ isAdmin = false, initialCorrections 
                 : <span style={{ color: 'var(--madar-warning, #9a6813)' }}>بحاجة إلى تثبيت</span>}</td>
               <td>{machine.order_count}</td>
               <td><div className="madar-inline-wrap">
+                {isAdmin && Number.isFinite(machine.latitude) && Number.isFinite(machine.longitude) && (
+                  <Button
+                    variant="ghost"
+                    size="small"
+                    icon="map"
+                    title="عرض الماكينة والمسار على الخريطة"
+                    onClick={() => {
+                      setSelectedMapMachineId(machine.id);
+                      document.querySelector('.madar-machine-map-section')?.scrollIntoView({ behavior: 'smooth' });
+                    }}
+                  >
+                    الخريطة والمسار
+                  </Button>
+                )}
                 {isAdmin && <Button variant="ghost" size="small" onClick={() => {
                   setGeofenceMachine(machine);
                   setGeofenceDraft({
