@@ -1,19 +1,31 @@
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
+const temporaryDirectory = mkdtempSync(join(tmpdir(), 'madar-costing-'));
 process.env.NODE_ENV = 'test';
-process.env.MADAR_V2_DATABASE_PATH = ':memory:';
+process.env.MADAR_V2_DATABASE_PATH = join(temporaryDirectory, 'costing.sqlite');
+process.env.MADAR_V2_DATA_DIR = join(temporaryDirectory, 'data');
+process.env.MADAR_V2_STORAGE_ROOT = join(temporaryDirectory, 'storage');
+process.env.MADAR_V2_BACKUP_ROOT = join(temporaryDirectory, 'backups');
 process.env.STORAGE_MOUNT_PATH = '';
 process.env.MADAR_V2_BACKUP_MOUNT_PATH = '';
 
-const { db } = await import('../server/database/connection.js');
+let db;
+after(() => {
+  if (db?.open) db.close();
+  rmSync(temporaryDirectory, { recursive: true, force: true });
+});
+
+({ db } = await import('../server/database/connection.js'));
 const { initializeDatabase } = await import('../server/database/init.js');
 const { generateOffcutBarcode } = await import('../server/modules/warehouse/offcut-barcode.js');
 const { getLowStockMaterials } = await import('../server/modules/warehouse/service.js');
 const { getWorkshopOrderCosting, getWorkshopProfitabilitySummary } = await import('../server/modules/workshop/costing.js');
 const { generateDailyDigest, formatDailyDigestText } = await import('../server/modules/system/daily-digest.js');
 
-after(() => db.close());
 initializeDatabase({ database: db, initialAdminPassword: null });
 
 db.exec(`
