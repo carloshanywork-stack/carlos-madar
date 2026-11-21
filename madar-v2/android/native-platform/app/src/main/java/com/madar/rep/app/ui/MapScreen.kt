@@ -116,6 +116,7 @@ fun MapScreen(
 ) {
     val packs by vm.mapPacks.collectAsStateWithLifecycle()
     val download by vm.mapDownload.collectAsStateWithLifecycle()
+    val catalogState by vm.mapCatalogState.collectAsStateWithLifecycle()
     val serverPoints by vm.mapPoints.collectAsStateWithLifecycle()
 
     LaunchedEffect(Unit) { vm.refreshMapPoints() }
@@ -500,6 +501,7 @@ fun MapScreen(
             packs = packs,
             activePack = activePack,
             download = download,
+            catalogState = catalogState,
             onRefresh = { vm.refreshMapCatalog() },
             onDownload = { vm.downloadMapPack(it) },
             onSelect = { selectedPackId = it },
@@ -537,6 +539,7 @@ private fun MapPackPanel(
     packs: List<MapPackEntity>,
     activePack: MapPackEntity?,
     download: MapDownloadState,
+    catalogState: MapCatalogState,
     onRefresh: () -> Unit,
     onDownload: (String) -> Unit,
     onSelect: (String) -> Unit,
@@ -549,11 +552,27 @@ private fun MapPackPanel(
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("حزم الخرائط المرخصة", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
-                if (download.activeId != null) {
+                if (download.activeId != null || catalogState.loading) {
                     CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
                     Spacer(Modifier.width(8.dp))
                 }
-                TextButton(onClick = onRefresh) { Text("تحديث القائمة") }
+                TextButton(onClick = onRefresh, enabled = !catalogState.loading && download.activeId == null) {
+                    Text(if (catalogState.loading) "جارٍ التحديث…" else "تحديث القائمة")
+                }
+            }
+
+            if (catalogState.error != null) {
+                Text(
+                    catalogState.error,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MadarDanger,
+                )
+            } else if (catalogState.message != null && packs.isNotEmpty()) {
+                Text(
+                    catalogState.message,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MadarTeal,
+                )
             }
 
             if (packs.isEmpty()) {

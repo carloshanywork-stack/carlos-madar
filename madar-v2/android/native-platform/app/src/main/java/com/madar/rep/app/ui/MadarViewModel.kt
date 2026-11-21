@@ -92,6 +92,12 @@ data class MapDownloadState(
     val message: String? = null,
 )
 
+data class MapCatalogState(
+    val loading: Boolean = false,
+    val error: String? = null,
+    val message: String? = null,
+)
+
 data class VisitDetail(
     val visit: VisitEntity,
     val before: List<PhotoEntity>,
@@ -152,6 +158,9 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
 
     private val _mapDownload = MutableStateFlow(MapDownloadState())
     val mapDownload: StateFlow<MapDownloadState> = _mapDownload.asStateFlow()
+
+    private val _mapCatalogState = MutableStateFlow(MapCatalogState())
+    val mapCatalogState: StateFlow<MapCatalogState> = _mapCatalogState.asStateFlow()
 
     private val _claimBlockedCardId = MutableStateFlow<Long?>(null)
     val claimBlockedCardId: StateFlow<Long?> = _claimBlockedCardId.asStateFlow()
@@ -899,15 +908,34 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
 
     fun refreshMapCatalog(current: Session? = session.value) {
         val active = current ?: return
+        if (_mapCatalogState.value.loading) return
+        _mapCatalogState.value = _mapCatalogState.value.copy(loading = true, error = null, message = null)
         viewModelScope.launch { refreshMapCatalogInternal(active) }
     }
 
     private suspend fun refreshMapCatalogInternal(current: Session) {
-        runCatching {
-            withContext(Dispatchers.IO) {
+        try {
+            val packs = withContext(Dispatchers.IO) {
                 container.mapRepository.refreshCatalog(current, container.apiFactory(current.serverUrl))
             }
-        }.onFailure { if (it is MadarError.SessionExpired) container.sessions.expire() }
+            _mapCatalogState.value = MapCatalogState(
+                loading = false,
+                message = "تم تحديث قائمة الخرائط بنجاح (${packs.size} حزم متاحة)",
+            )
+        } catch (error: Throwable) {
+            val userMessage = when (error) {
+                is MadarError.SessionExpired -> {
+                    container.sessions.expire()
+                    "انتهت جلسة تسجيل الدخول؛ يرجى إعادة تسجيل الدخول."
+                }
+                is MadarError.Network -> "تعذر الاتصال بالخادم؛ تحقق من اتصال الشبكة وحاول مجددًا."
+                is MadarError.Protocol -> "استجابة خادم الخرائط غير متوافقة."
+                is MadarError.Validation -> error.message
+                is java.io.IOException -> "خطأ في الاتصال بالخادم أثناء تحديث قائمة الخرائط."
+                else -> human(error)
+            }
+            _mapCatalogState.value = MapCatalogState(loading = false, error = userMessage)
+        }
     }
 
     fun downloadMapPack(packId: String) {

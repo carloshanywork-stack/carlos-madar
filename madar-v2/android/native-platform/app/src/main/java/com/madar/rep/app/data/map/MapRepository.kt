@@ -52,15 +52,16 @@ class MapRepository(
             val existing = database.mapPacks().find(remote.id)
             val file = File(existing?.path?.takeIf { it.isNotBlank() } ?: fileFor(remote.id).absolutePath)
             val verifiedOnDisk = existing?.state == MapPackState.VERIFIED && file.isFile && file.length() > 0
+            val b = remote.effectiveBounds
             val entity = MapPackEntity(
                 id = remote.id,
                 name = remote.name,
                 minZoom = remote.minZoom,
                 maxZoom = remote.maxZoom,
-                boundsWest = remote.bounds?.west,
-                boundsSouth = remote.bounds?.south,
-                boundsEast = remote.bounds?.east,
-                boundsNorth = remote.bounds?.north,
+                boundsWest = b?.west,
+                boundsSouth = b?.south,
+                boundsEast = b?.east,
+                boundsNorth = b?.north,
                 attribution = remote.attribution,
                 sourceName = remote.sourceName,
                 license = remote.license.ifBlank { existing?.license.orEmpty() },
@@ -126,7 +127,7 @@ class MapRepository(
                         put("attribution", manifest.attribution)
                         put("license", manifest.license)
                         put("source_name", manifest.sourceName.orEmpty())
-                        manifest.bounds?.let {
+                        manifest.effectiveBounds?.let {
                             put("bounds", "${it.west},${it.south},${it.east},${it.north}")
                         }
                     },

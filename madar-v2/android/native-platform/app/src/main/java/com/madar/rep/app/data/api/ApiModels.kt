@@ -1,7 +1,22 @@
 package com.madar.rep.app.data.api
 
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerializationException
+import kotlinx.serialization.descriptors.PrimitiveKind
+import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
+import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.descriptors.buildClassSerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonDecoder
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.doubleOrNull
+import kotlinx.serialization.json.jsonPrimitive
 
 @Serializable
 data class LoginRequest(val username: String, val password: String)
@@ -245,8 +260,86 @@ data class VisitUpload(
     val photoPolicyVersion: Int = 2,
 )
 
-@Serializable
-data class MapBounds(val west: Double, val south: Double, val east: Double, val north: Double)
+object FlexibleMapBoundsSerializer : KSerializer<MapBounds> {
+    override val descriptor: SerialDescriptor = buildClassSerialDescriptor("MapBounds") {
+        element("west", PrimitiveSerialDescriptor("west", PrimitiveKind.DOUBLE))
+        element("south", PrimitiveSerialDescriptor("south", PrimitiveKind.DOUBLE))
+        element("east", PrimitiveSerialDescriptor("east", PrimitiveKind.DOUBLE))
+        element("north", PrimitiveSerialDescriptor("north", PrimitiveKind.DOUBLE))
+    }
+
+    override fun serialize(encoder: Encoder, value: MapBounds) {
+        MapBounds.Surrogate.serializer().serialize(
+            encoder,
+            MapBounds.Surrogate(value.west, value.south, value.east, value.north)
+        )
+    }
+
+    override fun deserialize(decoder: Decoder): MapBounds {
+        val jsonDecoder = decoder as? JsonDecoder
+            ?: throw SerializationException("FlexibleMapBoundsSerializer requires JsonDecoder")
+        val element = jsonDecoder.decodeJsonElement()
+        return parseElement(element)
+    }
+
+    fun parseElement(element: JsonElement): MapBounds {
+        return when (element) {
+            is JsonObject -> {
+                val west = element["west"]?.jsonPrimitive?.doubleOrNull
+                    ?: throw SerializationException("Missing or invalid 'west' coordinate in bounds object")
+                val south = element["south"]?.jsonPrimitive?.doubleOrNull
+                    ?: throw SerializationException("Missing or invalid 'south' coordinate in bounds object")
+                val east = element["east"]?.jsonPrimitive?.doubleOrNull
+                    ?: throw SerializationException("Missing or invalid 'east' coordinate in bounds object")
+                val north = element["north"]?.jsonPrimitive?.doubleOrNull
+                    ?: throw SerializationException("Missing or invalid 'north' coordinate in bounds object")
+                validateAndConstruct(west, south, east, north)
+            }
+            is JsonPrimitive -> {
+                val text = element.content.trim()
+                val parts = text.split(',').map { it.trim() }
+                if (parts.size != 4) {
+                    throw SerializationException("Bounds string must have 4 comma-separated values, got: '$text'")
+                }
+                val doubles = parts.mapIndexed { idx, part ->
+                    part.toDoubleOrNull()
+                        ?: throw SerializationException("Invalid double at index $idx in bounds string: '$part'")
+                }
+                validateAndConstruct(doubles[0], doubles[1], doubles[2], doubles[3])
+            }
+            is JsonArray -> {
+                if (element.size != 4) {
+                    throw SerializationException("Bounds array must have exactly 4 numbers, got ${element.size}")
+                }
+                val doubles = element.mapIndexed { idx, item ->
+                    item.jsonPrimitive.doubleOrNull
+                        ?: throw SerializationException("Invalid number at index $idx in bounds array: '$item'")
+                }
+                validateAndConstruct(doubles[0], doubles[1], doubles[2], doubles[3])
+            }
+            else -> throw SerializationException("Expected object, string, or array for bounds, but got: $element")
+        }
+    }
+
+    private fun validateAndConstruct(west: Double, south: Double, east: Double, north: Double): MapBounds {
+        if (!west.isFinite() || !south.isFinite() || !east.isFinite() || !north.isFinite()) {
+            throw SerializationException("Bounds coordinates must be finite: west=$west, south=$south, east=$east, north=$north")
+        }
+        if (west > east) {
+            throw SerializationException("Invalid bounds: west ($west) cannot be greater than east ($east)")
+        }
+        if (south > north) {
+            throw SerializationException("Invalid bounds: south ($south) cannot be greater than north ($north)")
+        }
+        return MapBounds(west = west, south = south, east = east, north = north)
+    }
+}
+
+@Serializable(with = FlexibleMapBoundsSerializer::class)
+data class MapBounds(val west: Double, val south: Double, val east: Double, val north: Double) {
+    @Serializable
+    internal data class Surrogate(val west: Double, val south: Double, val east: Double, val north: Double)
+}
 
 @Serializable
 data class MapPack(
@@ -255,6 +348,7 @@ data class MapPack(
     val minZoom: Int = 0,
     val maxZoom: Int = 0,
     val bounds: MapBounds? = null,
+    val coverageBounds: MapBounds? = null,
     val available: Boolean = false,
     val renderable: Boolean = false,
     val tileCount: Int = 0,
@@ -264,7 +358,9 @@ data class MapPack(
     val license: String = "",
     val sourceName: String? = null,
     val reason: String? = null,
-)
+) {
+    val effectiveBounds: MapBounds? get() = coverageBounds ?: bounds
+}
 
 @Serializable
 data class MapPacksResponse(val success: Boolean = false, val packs: List<MapPack> = emptyList())
@@ -279,6 +375,7 @@ data class MapManifest(
     val minZoom: Int = 0,
     val maxZoom: Int = 0,
     val bounds: MapBounds? = null,
+    val coverageBounds: MapBounds? = null,
     val available: Boolean = false,
     val renderable: Boolean = false,
     val tileCount: Int = 0,
@@ -288,7 +385,9 @@ data class MapManifest(
     val license: String = "",
     val sourceName: String? = null,
     val tiles: List<MapTileRef> = emptyList(),
-)
+) {
+    val effectiveBounds: MapBounds? get() = coverageBounds ?: bounds
+}
 
 @Serializable
 data class MapManifestResponse(val success: Boolean = false, val pack: MapManifest? = null)
