@@ -8,6 +8,12 @@ import { applyPhotoRotation } from './photo-images.js';
 
 const inFlight = new Map();
 
+export const VARIANT_CONFIGS = {
+  thumb: { size: 200, quality: 74, effort: 4 },
+  preview: { size: 1200, quality: 80, effort: 3 },
+  high: { size: 1800, quality: 84, effort: 3 },
+};
+
 async function ensureCacheDirectory() {
   await mkdir(thumbnailCacheDirectory, { recursive: true });
   const metadata = await lstat(thumbnailCacheDirectory);
@@ -22,33 +28,58 @@ function rotationValue(value) {
   return angle;
 }
 
-function thumbnailKey(absolutePath, source, rotation) {
+export function computePhotoVariantKey(absolutePath, source, rotation = 0, variantName = 'thumb') {
   return createHash('sha256')
-    .update(`${absolutePath}\0${source.size}\0${source.mtimeMs}\0${rotation}`)
+    .update(`${absolutePath}\0${source.size}\0${source.mtimeMs}\0${rotation}\0${variantName}`)
     .digest('hex');
 }
 
-export async function invalidateMaintenanceThumbnail(absolutePath, savedRotation = 0) {
+export function computePhotoETag(absolutePath, source, rotation = 0, variantName = 'original') {
+  const hash = computePhotoVariantKey(absolutePath, source, rotation, variantName);
+  return `"${hash}"`;
+}
+
+export async function invalidateMaintenanceVariants(absolutePath, savedRotation = 0) {
   const rotation = rotationValue(savedRotation);
-  const source = await stat(absolutePath);
-  if (!source.isFile()) throw new HttpError(404, 'Photo was not found.');
+  const source = await stat(absolutePath).catch(() => null);
+  if (!source || !source.isFile()) return;
   await ensureCacheDirectory();
-  const cachedPath = join(thumbnailCacheDirectory, `${thumbnailKey(absolutePath, source, rotation)}.webp`);
-  try {
-    const metadata = await lstat(cachedPath);
-    if (metadata.isSymbolicLink() || !metadata.isFile()) throw new HttpError(403, 'Unsafe thumbnail cache entry.');
-    await rm(cachedPath);
-  } catch (error) {
-    if (error.code !== 'ENOENT') throw error;
+  for (const variant of ['thumb', 'preview', 'high', '800']) {
+    const key = computePhotoVariantKey(absolutePath, source, rotation, variant);
+    const cachedPath = join(thumbnailCacheDirectory, `${key}.webp`);
+    try {
+      const metadata = await lstat(cachedPath);
+      if (!metadata.isSymbolicLink() && metadata.isFile()) {
+        await rm(cachedPath, { force: true });
+      }
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
   }
 }
 
-export async function getMaintenanceThumbnail(absolutePath, savedRotation = 0) {
+export async function invalidateMaintenanceThumbnail(absolutePath, savedRotation = 0) {
+  return invalidateMaintenanceVariants(absolutePath, savedRotation);
+}
+
+export async function getMaintenancePhotoVariant(absolutePath, savedRotation = 0, variantName = 'thumb') {
   const rotation = rotationValue(savedRotation);
   const source = await stat(absolutePath);
   if (!source.isFile()) throw new HttpError(404, 'Photo was not found.');
   await ensureCacheDirectory();
-  const key = thumbnailKey(absolutePath, source, rotation);
+
+  let targetConfig = VARIANT_CONFIGS[variantName];
+  if (!targetConfig) {
+    const numericSize = Number(variantName);
+    if (Number.isFinite(numericSize) && numericSize > 50 && numericSize <= 3840) {
+      targetConfig = { size: numericSize, quality: 78, effort: 3 };
+    }
+  }
+  if (!targetConfig) {
+    targetConfig = VARIANT_CONFIGS.thumb;
+  }
+
+  const key = computePhotoVariantKey(absolutePath, source, rotation, variantName);
   const cachedPath = join(thumbnailCacheDirectory, `${key}.webp`);
   try {
     const cachedMetadata = await lstat(cachedPath);
@@ -67,8 +98,8 @@ export async function getMaintenanceThumbnail(absolutePath, savedRotation = 0) {
         : absolutePath;
       const pipeline = sharp(rotatedSource, { failOn: 'none' });
       const buffer = await (rotation ? pipeline : pipeline.rotate())
-        .resize({ width: 200, height: 200, fit: 'inside', withoutEnlargement: true })
-        .webp({ quality: 74, effort: 4 })
+        .resize({ width: targetConfig.size, height: targetConfig.size, fit: 'inside', withoutEnlargement: true })
+        .webp({ quality: targetConfig.quality, effort: targetConfig.effort })
         .toBuffer();
       await writeFile(temporaryPath, buffer, { flag: 'wx', mode: 0o600 });
       try {
@@ -79,7 +110,7 @@ export async function getMaintenanceThumbnail(absolutePath, savedRotation = 0) {
       return buffer;
     } catch (error) {
       if (error instanceof HttpError) throw error;
-      throw new HttpError(415, 'This photo could not be converted to a thumbnail.');
+      throw new HttpError(415, 'This photo could not be converted to a derived variant.');
     } finally {
       await rm(temporaryPath, { force: true });
       inFlight.delete(key);
@@ -87,4 +118,8 @@ export async function getMaintenanceThumbnail(absolutePath, savedRotation = 0) {
   })();
   inFlight.set(key, generation);
   return generation;
+}
+
+export async function getMaintenanceThumbnail(absolutePath, savedRotation = 0) {
+  return getMaintenancePhotoVariant(absolutePath, savedRotation, 'thumb');
 }

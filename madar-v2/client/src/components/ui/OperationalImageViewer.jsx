@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, ApiError } from '../../lib/api.js';
 import { sanitizeWindowsFilename, buildOperationalFilename } from '../../lib/operational-filename.js';
+import { mediaCache } from '../../lib/cache/media-cache.js';
+import { getActiveAdaptiveProfile } from '../../lib/adaptive-quality.js';
 
 export { sanitizeWindowsFilename, buildOperationalFilename };
 
@@ -30,19 +32,85 @@ export default function OperationalImageViewer({
   const [downloadError, setDownloadError] = useState('');
   const [imageLoading, setImageLoading] = useState(true);
   const [imageError, setImageError] = useState(false);
+  const [displayUrl, setDisplayUrl] = useState('');
+  const [adaptiveTierLabel, setAdaptiveTierLabel] = useState('');
+  const activeAcquisitionRef = useRef(null);
 
   const activeIndex = Math.max(0, Math.min(currentIndex, photos.length - 1));
   const currentPhoto = photos[activeIndex] || null;
   const currentUrl = typeof currentPhoto === 'string' ? currentPhoto : currentPhoto?.url || '';
   const currentThumbnail = typeof currentPhoto === 'object' ? currentPhoto?.thumbnailUrl : null;
 
-  // Reset rotation and loading states when photo changes
+  // Load adaptive quality photo and manage secure object URL lifecycle
   useEffect(() => {
+    let isCancelled = false;
     setRotationAngle(0);
     setDownloadError('');
     setImageLoading(true);
     setImageError(false);
-  }, [currentUrl]);
+
+    // If a thumbnail is available, immediately display it as low-res placeholder
+    if (currentThumbnail) {
+      setDisplayUrl(currentThumbnail);
+    } else {
+      setDisplayUrl('');
+    }
+
+    async function loadAdaptivePhoto() {
+      try {
+        const profile = await getActiveAdaptiveProfile();
+        if (isCancelled) return;
+        setAdaptiveTierLabel(profile.tierLabel || profile.tier);
+
+        const acquisition = await mediaCache.acquirePhotoUrl(currentUrl, {
+          variant: profile.variant,
+          inUse: true,
+        });
+        if (isCancelled) {
+          acquisition.release();
+          return;
+        }
+
+        if (activeAcquisitionRef.current) {
+          activeAcquisitionRef.current.release();
+        }
+        activeAcquisitionRef.current = acquisition;
+        setDisplayUrl(acquisition.objectUrl);
+        setImageLoading(false);
+
+        // Preload adjacent photos based on profile prefetch window
+        const prefetchWindow = profile.prefetchWindow || 1;
+        for (let i = 1; i <= prefetchWindow; i++) {
+          const prevItem = photos[activeIndex - i];
+          const nextItem = photos[activeIndex + i];
+          const prevUrl = typeof prevItem === 'string' ? prevItem : prevItem?.url;
+          const nextUrl = typeof nextItem === 'string' ? nextItem : nextItem?.url;
+          if (prevUrl) mediaCache.prefetchPhoto(prevUrl, profile.variant);
+          if (nextUrl) mediaCache.prefetchPhoto(nextUrl, profile.variant);
+        }
+      } catch (err) {
+        if (isCancelled) return;
+        console.error('Failed to load adaptive photo:', err);
+        if (!currentThumbnail) {
+          setDisplayUrl(currentUrl);
+        }
+        setImageLoading(false);
+        setImageError(!currentThumbnail && !displayUrl);
+      }
+    }
+
+    if (currentUrl) {
+      void loadAdaptivePhoto();
+    }
+
+    return () => {
+      isCancelled = true;
+      if (activeAcquisitionRef.current) {
+        activeAcquisitionRef.current.release();
+        activeAcquisitionRef.current = null;
+      }
+    };
+  }, [currentUrl, currentThumbnail, activeIndex, photos]);
 
   const handlePrev = useCallback(() => {
     if (photos.length > 1 && activeIndex > 0) {
@@ -240,6 +308,27 @@ export default function OperationalImageViewer({
               {activeIndex + 1} من {photos.length}
             </span>
           )}
+
+          {adaptiveTierLabel && (
+            <span
+              style={{
+                fontSize: '11px',
+                color: '#a7f3d0',
+                background: 'rgba(16, 185, 129, 0.15)',
+                border: '1px solid rgba(16, 185, 129, 0.3)',
+                padding: '2px 8px',
+                borderRadius: '6px',
+                fontWeight: 700,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '4px',
+              }}
+              title="جودة الصورة تتكيف تلقائياً مع مواصفات شاشتك وجهازك"
+            >
+              <span>⚡</span>
+              <span>{adaptiveTierLabel}</span>
+            </span>
+          )}
         </div>
 
         {/* Right Side: Action Controls (Download, Rotation, Machine Nav, Close) */}
@@ -320,7 +409,10 @@ export default function OperationalImageViewer({
               {canSaveRotation && rotationAngle !== 0 && onSaveRotation && (
                 <button
                   type="button"
-                  onClick={() => onSaveRotation(rotationAngle)}
+                  onClick={async () => {
+                    await onSaveRotation(rotationAngle);
+                    await mediaCache.invalidatePhoto(currentUrl);
+                  }}
                   disabled={isSavingRotation}
                   style={{ background: '#0284c7', border: '1px solid #38bdf8', color: '#fff', padding: '5px 10px', borderRadius: '6px', cursor: 'pointer', fontSize: '11px', fontWeight: 800 }}
                   title="حفظ اتجاه الصورة في السيرفر"
@@ -464,12 +556,14 @@ export default function OperationalImageViewer({
             </div>
           ) : (
             <img
-              src={currentUrl}
+              src={displayUrl || currentUrl}
               alt={title || `صورة ${machineCode || ''}`}
               onLoad={() => setImageLoading(false)}
               onError={() => {
                 setImageLoading(false);
-                setImageError(true);
+                if (!displayUrl || displayUrl === currentThumbnail) {
+                  setImageError(true);
+                }
               }}
               style={{
                 maxWidth: '86vw',
@@ -480,7 +574,9 @@ export default function OperationalImageViewer({
                 border: '1px solid rgba(255, 255, 255, 0.1)',
                 transform: `rotate(${rotationAngle}deg)`,
                 transition: 'transform 0.25s ease-in-out',
-                display: imageLoading ? 'none' : 'block',
+                filter: imageLoading && displayUrl === currentThumbnail ? 'blur(3px)' : 'none',
+                opacity: imageLoading && displayUrl === currentThumbnail ? 0.75 : 1,
+                display: !displayUrl && imageLoading ? 'none' : 'block',
               }}
             />
           )}

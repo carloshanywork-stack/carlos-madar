@@ -1,6 +1,7 @@
 import { getOfflineMapStatus, readOfflineMapPackTile } from './offline-map-packs.js';
 import { Router } from 'express';
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { asyncHandler, HttpError } from '../http.js';
 import { requestActorId } from '../actor.js';
 import { reviewCardPhotos } from '../maintenance/photo-review.js';
@@ -146,8 +147,23 @@ router.get('/qa/queue', (_req, res) => {
 
 const sendVisitPhoto = asyncHandler(async (req, res) => {
   const absolutePath = await getSupervisorVisitPhoto(req.params.id, req.params.phase, req.params.ordinal);
+  const source = await stat(absolutePath);
+  if (!source.isFile()) throw new HttpError(404, 'Photo was not found.');
+
+  const etag = `"${createHash('sha256').update(`${absolutePath}\0${source.size}\0${source.mtimeMs}`).digest('hex')}"`;
+  if (req.headers['if-none-match'] === etag) {
+    return res.status(304).end();
+  }
+
   const contentType = req.params.phase === 'before' || req.params.phase === 'after' ? 'image/jpeg' : 'application/octet-stream';
-  res.set({ 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff', 'Content-Type': contentType });
+  res.set({
+    'Cache-Control': 'private, no-cache, must-revalidate',
+    'ETag': etag,
+    'Last-Modified': new Date(source.mtimeMs).toUTCString(),
+    'X-Content-Type-Options': 'nosniff',
+    'Content-Type': contentType,
+    'Vary': 'Accept',
+  });
   res.send(await readFile(absolutePath));
 });
 router.get('/visits/:id/photos/:phase', sendVisitPhoto);

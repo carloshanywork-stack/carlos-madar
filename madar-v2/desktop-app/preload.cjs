@@ -15,4 +15,5 @@ contextBridge.exposeInMainWorld('madarDesktop', Object.freeze({
   showNotification: (options) => ipcRenderer.invoke('madar:desktop:notification', options),
   downloadApk: (target) => ipcRenderer.invoke('madar:desktop:download-apk', target),
   getDiagnostics: () => ipcRenderer.invoke('madar:desktop:get-diagnostics'),
+  getSystemCapabilities: () => ipcRenderer.invoke('madar:desktop:get-system-capabilities'),
 }));

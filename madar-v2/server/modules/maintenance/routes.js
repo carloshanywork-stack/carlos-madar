@@ -1,13 +1,13 @@
 import { db } from '../../database/connection.js';
 import { Router } from 'express';
 import { setOrderArchiveMonth } from '../archive-period.js';
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { extname } from 'node:path';
 import { allowOnlyKeys, asyncHandler, HttpError, requireObject, requireText } from '../http.js';
 import { diskUpload, memoryUpload } from '../upload.js';
 import { requestActorId } from '../actor.js';
 import { publishOperationsEvent } from '../operations-events.js';
-import { getMaintenanceThumbnail } from './thumbnails.js';
+import { getMaintenanceThumbnail, getMaintenancePhotoVariant, computePhotoETag } from './thumbnails.js';
 import { applyPhotoRotation } from './photo-images.js';
 import { ensureStorageDirectory, listStorageDirectories, removeStorageFile } from '../storage.js';
 import {
@@ -520,6 +520,14 @@ router.get('/orders/:id/unmatched/:folderId/photos/:filename', asyncHandler(asyn
     req.query.phase,
     req.params.filename,
   );
+  const source = await stat(absolutePath);
+  if (!source.isFile()) throw new HttpError(404, 'Photo was not found.');
+
+  const etag = computePhotoETag(absolutePath, source, 0, 'original');
+  if (req.headers['if-none-match'] === etag) {
+    return res.status(304).end();
+  }
+
   const type = {
     '.jpg': 'image/jpeg',
     '.jpeg': 'image/jpeg',
@@ -527,8 +535,15 @@ router.get('/orders/:id/unmatched/:folderId/photos/:filename', asyncHandler(asyn
     '.webp': 'image/webp',
     '.heic': 'image/heic',
     '.heif': 'image/heif',
-  }[extname(req.params.filename).toLowerCase()];
-  res.set({ ...NO_CACHE_HEADERS, 'Content-Type': type, 'X-Content-Type-Options': 'nosniff' });
+  }[extname(req.params.filename).toLowerCase()] || 'image/jpeg';
+  res.set({
+    'Cache-Control': 'private, no-cache, must-revalidate',
+    'ETag': etag,
+    'Last-Modified': new Date(source.mtimeMs).toUTCString(),
+    'Content-Type': type,
+    'X-Content-Type-Options': 'nosniff',
+    'Vary': 'Accept',
+  });
   res.send(await readFile(absolutePath));
 }));
 
@@ -638,20 +653,47 @@ router.get('/orders/:id/cards/:cardId/photos/:phase/:filename', asyncHandler(asy
     req.params.phase,
     req.params.filename,
   );
-  let type = photo.rotatedPath ? 'image/jpeg' : {
-    '.jpg': 'image/jpeg',
-    '.jpeg': 'image/jpeg',
-    '.png': 'image/png',
-    '.webp': 'image/webp',
-    '.heic': 'image/heic',
-    '.heif': 'image/heif',
-  }[extname(req.params.filename).toLowerCase()];
-  let content = await readFile(photo.absolutePath);
-  if (photo.rotation) {
-    content = await applyPhotoRotation(content, photo.rotation);
-    type = 'image/jpeg';
+  const source = await stat(photo.absolutePath);
+  if (!source.isFile()) throw new HttpError(404, 'Photo was not found.');
+
+  const requestedVariant = String(req.query.size || req.query.variant || '').toLowerCase();
+  const isDerivedVariant = ['thumb', 'preview', 'high'].includes(requestedVariant) || (Number(requestedVariant) > 50 && Number(requestedVariant) <= 3840);
+  const variant = isDerivedVariant ? requestedVariant : 'original';
+
+  const etag = computePhotoETag(photo.absolutePath, source, photo.rotation, variant);
+  if (req.headers['if-none-match'] === etag) {
+    return res.status(304).end();
   }
-  res.set({ ...NO_CACHE_HEADERS, 'Content-Type': type, 'X-Content-Type-Options': 'nosniff' });
+
+  let content;
+  let type;
+  if (variant !== 'original') {
+    content = await getMaintenancePhotoVariant(photo.absolutePath, photo.rotation, variant);
+    type = 'image/webp';
+  } else {
+    type = photo.rotatedPath ? 'image/jpeg' : ({
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.png': 'image/png',
+      '.webp': 'image/webp',
+      '.heic': 'image/heic',
+      '.heif': 'image/heif',
+    }[extname(req.params.filename).toLowerCase()] || 'image/jpeg');
+    content = await readFile(photo.absolutePath);
+    if (photo.rotation) {
+      content = await applyPhotoRotation(content, photo.rotation);
+      type = 'image/jpeg';
+    }
+  }
+
+  res.set({
+    'Cache-Control': 'private, no-cache, must-revalidate',
+    'ETag': etag,
+    'Last-Modified': new Date(source.mtimeMs).toUTCString(),
+    'Content-Type': type,
+    'X-Content-Type-Options': 'nosniff',
+    'Vary': 'Accept',
+  });
   res.send(content);
 }));
 
@@ -662,11 +704,22 @@ router.get('/orders/:id/cards/:cardId/photos/:phase/:filename/thumbnail', asyncH
     req.params.phase,
     req.params.filename,
   );
+  const source = await stat(photo.absolutePath);
+  if (!source.isFile()) throw new HttpError(404, 'Photo was not found.');
+
+  const etag = computePhotoETag(photo.absolutePath, source, photo.rotation, 'thumb');
+  if (req.headers['if-none-match'] === etag) {
+    return res.status(304).end();
+  }
+
   const thumbnail = await getMaintenanceThumbnail(photo.absolutePath, photo.rotation);
   res.set({
+    'Cache-Control': 'private, no-cache, must-revalidate',
+    'ETag': etag,
+    'Last-Modified': new Date(source.mtimeMs).toUTCString(),
     'Content-Type': 'image/webp',
-    ...NO_CACHE_HEADERS,
     'X-Content-Type-Options': 'nosniff',
+    'Vary': 'Accept',
   }).send(thumbnail);
 }));
 

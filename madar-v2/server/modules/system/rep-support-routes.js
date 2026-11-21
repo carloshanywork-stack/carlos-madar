@@ -1,5 +1,7 @@
 import { Router } from 'express';
 import { ZipArchive } from 'archiver';
+import { createHash } from 'node:crypto';
+import { stat } from 'node:fs/promises';
 import rateLimit from 'express-rate-limit';
 import XLSX from 'xlsx';
 import { requireSupervisorOrAdmin } from '../auth/authorization.js';
@@ -159,8 +161,15 @@ router.post('/rep-support/reports/:reportId/diagnose', asyncHandler(async (req, 
 
 router.get('/rep-support/:reportId/attachments/:attachmentId', asyncHandler(async (req, res) => {
   const file = await downloadRepBugAttachment(req.params.reportId, req.params.attachmentId);
+  const fileStat = await stat(file.absolutePath);
+  const etag = `"${createHash('sha256').update(`${file.absolutePath}\0${fileStat.size}\0${fileStat.mtimeMs}`).digest('hex')}"`;
+  if (req.headers['if-none-match'] === etag) {
+    return res.status(304).end();
+  }
   res.set({
-    'Cache-Control': 'private, no-store',
+    'Cache-Control': 'private, no-cache, must-revalidate',
+    'ETag': etag,
+    'Last-Modified': new Date(fileStat.mtimeMs).toUTCString(),
     'X-Content-Type-Options': 'nosniff',
     'Content-Type': file.content_type,
     'Content-Length': String(file.byte_size),
@@ -175,8 +184,18 @@ router.get('/rep-location-changes', (req, res) => {
 
 router.get('/rep-location-changes/:requestId/evidence', asyncHandler(async (req, res) => {
   const file = await getRepMachineLocationChangeEvidence(req.params.requestId);
-  res.set({ 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff', 'Content-Type': file.contentType })
-    .sendFile(file.absolutePath);
+  const fileStat = await stat(file.absolutePath);
+  const etag = `"${createHash('sha256').update(`${file.absolutePath}\0${fileStat.size}\0${fileStat.mtimeMs}`).digest('hex')}"`;
+  if (req.headers['if-none-match'] === etag) {
+    return res.status(304).end();
+  }
+  res.set({
+    'Cache-Control': 'private, no-cache, must-revalidate',
+    'ETag': etag,
+    'Last-Modified': new Date(fileStat.mtimeMs).toUTCString(),
+    'X-Content-Type-Options': 'nosniff',
+    'Content-Type': file.contentType,
+  }).sendFile(file.absolutePath);
 }));
 
 router.post('/rep-location-changes/:requestId/:decision', locationDecisionLimiter, asyncHandler(async (req, res) => {
