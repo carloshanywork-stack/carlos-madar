@@ -22,6 +22,7 @@ import {
   authCookieOptions,
   REP_ACCOUNT_DISABLED_MESSAGE,
   requireActiveRep,
+  requireAuthentication,
 } from '../auth/service.js';
 import {
   claimRepMachineWork,
@@ -105,6 +106,37 @@ router.post('/login', loginRateLimiter, asyncHandler(async (req, res) => {
   if (req.get('x-madar-native-client') === 'android') response.token = result.token;
   res.json(response);
 }));
+
+router.get('/map/packs', requireAuthentication, (_req, res) => {
+  res.set({ 'Cache-Control': 'private, no-store', Pragma: 'no-cache' });
+  res.json({ success: true, packs: getOfflineMapPackCatalog() });
+});
+
+router.get('/map/packs/:packId/manifest', requireAuthentication, (req, res, next) => {
+  try {
+    res.set({ 'Cache-Control': 'private, no-store', Pragma: 'no-cache' });
+    res.json({ success: true, pack: getOfflineMapPackManifest(req.params.packId) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/map/tiles/:packId/:z/:x/:y', requireAuthentication, (req, res, next) => {
+  try {
+    const tile = readOfflineMapPackTile(req.params.packId, req.params.z, req.params.x, req.params.y);
+    if (!tile) {
+      res.status(204).end();
+      return;
+    }
+    res.set({
+      'Cache-Control': 'private, no-store',
+      'X-Content-Type-Options': 'nosniff',
+      'Content-Type': tile.contentType,
+    }).status(200).send(tile.data);
+  } catch (error) {
+    next(error);
+  }
+});
 
 router.use(requireActiveRep);
 
@@ -353,11 +385,6 @@ router.get('/fault-reasons', (_req, res) => {
   res.json(getRepFaultReasons());
 });
 
-router.get('/map/packs', (_req, res) => {
-  res.set({ 'Cache-Control': 'private, no-store', Pragma: 'no-cache' });
-  res.json({ success: true, packs: getOfflineMapPackCatalog() });
-});
-
 router.get('/map/points', (req, res) => {
   const route = getRepTodayRoute(req.user);
   const points = route.regions.flatMap((region) => region.machines)
@@ -372,32 +399,6 @@ router.get('/map/points', (req, res) => {
     }));
   res.set({ 'Cache-Control': 'private, no-store', Pragma: 'no-cache' })
     .json({ success: true, points });
-});
-
-router.get('/map/packs/:packId/manifest', (req, res, next) => {
-  try {
-    res.set({ 'Cache-Control': 'private, no-store', Pragma: 'no-cache' });
-    res.json({ success: true, pack: getOfflineMapPackManifest(req.params.packId) });
-  } catch (error) {
-    next(error);
-  }
-});
-
-router.get('/map/tiles/:packId/:z/:x/:y', (req, res, next) => {
-  try {
-    const tile = readOfflineMapPackTile(req.params.packId, req.params.z, req.params.x, req.params.y);
-    if (!tile) {
-      res.status(204).end();
-      return;
-    }
-    res.set({
-      'Cache-Control': 'private, no-store',
-      'X-Content-Type-Options': 'nosniff',
-      'Content-Type': tile.contentType,
-    }).status(200).send(tile.data);
-  } catch (error) {
-    next(error);
-  }
 });
 
 router.post(['/tracking', '/track-location'], (req, res, next) => {
