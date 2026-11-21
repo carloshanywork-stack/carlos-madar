@@ -21,7 +21,7 @@ class MbTilesStore(val file: File) : Closeable {
             SQLiteDatabase.openDatabase(file.absolutePath, null, SQLiteDatabase.OPEN_READONLY)
         } else {
             SQLiteDatabase.openOrCreateDatabase(file, null).apply {
-                execSQL("PRAGMA journal_mode=WAL")
+                enableWriteAheadLogging()
                 execSQL("PRAGMA synchronous=NORMAL")
             }
         }
@@ -32,7 +32,7 @@ class MbTilesStore(val file: File) : Closeable {
     fun create(packId: String, metadata: Map<String, String>) {
         file.parentFile?.mkdirs()
         database = SQLiteDatabase.openOrCreateDatabase(file, null).apply {
-            execSQL("PRAGMA journal_mode=WAL")
+            enableWriteAheadLogging()
             execSQL("PRAGMA synchronous=NORMAL")
             execSQL("CREATE TABLE IF NOT EXISTS metadata (name TEXT, value TEXT)")
             execSQL("CREATE TABLE IF NOT EXISTS tiles (zoom_level INTEGER, tile_column INTEGER, tile_row INTEGER, tile_data BLOB)")

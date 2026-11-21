@@ -57,6 +57,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.layout.onSizeChanged
@@ -202,6 +203,7 @@ fun MapScreen(
     }
 
     val cache = remember(activePack?.id) { mutableStateMapOf<MbTileKey, ImageBitmap>() }
+    val polygonPath = remember { Path() }
     val visibleTiles = remember(viewport, minZoom, maxZoom, store) {
         if (store == null) emptyList() else TileMath.visibleTiles(viewport, minZoom, maxZoom)
     }
@@ -305,7 +307,7 @@ fun MapScreen(
                     }
                 },
         ) {
-            Canvas(Modifier.fillMaxSize()) {
+            Canvas(Modifier.fillMaxSize().graphicsLayer()) {
                 drawRect(Color(0xFFE7EDF1))
 
                 for (tile in visibleTiles) {
@@ -332,35 +334,35 @@ fun MapScreen(
                         north = northWest.first,
                     )
                     for (governorate in governorates.all()) {
-                            for (polygon in governorate.polygons) {
-                                if (!polygon.bounds.intersects(visibleBounds)) continue
-                                for (ring in polygon.rings) {
-                                    if (ring.points.size < 3) continue
-                                    val path = Path()
-                                    var started = false
-                                    for (point in ring.points) {
-                                        val (x, y) = TileMath.worldToScreen(
-                                            point.latitude,
-                                            point.longitude,
-                                            viewport,
-                                        )
-                                        if (!started) {
-                                            path.moveTo(x.toFloat(), y.toFloat())
-                                            started = true
-                                        } else {
-                                            path.lineTo(x.toFloat(), y.toFloat())
-                                        }
-                                    }
-                                    if (started) {
-                                        path.close()
-                                        drawPath(
-                                            path = path,
-                                            color = MadarTeal.copy(alpha = 0.5f),
-                                            style = Stroke(width = 1.1.dp.toPx()),
-                                        )
+                        for (polygon in governorate.polygons) {
+                            if (!polygon.bounds.intersects(visibleBounds)) continue
+                            for (ring in polygon.rings) {
+                                if (ring.points.size < 3) continue
+                                polygonPath.reset()
+                                var started = false
+                                for (point in ring.points) {
+                                    val (x, y) = TileMath.worldToScreen(
+                                        point.latitude,
+                                        point.longitude,
+                                        viewport,
+                                    )
+                                    if (!started) {
+                                        polygonPath.moveTo(x.toFloat(), y.toFloat())
+                                        started = true
+                                    } else {
+                                        polygonPath.lineTo(x.toFloat(), y.toFloat())
                                     }
                                 }
+                                if (started) {
+                                    polygonPath.close()
+                                    drawPath(
+                                        path = polygonPath,
+                                        color = MadarTeal.copy(alpha = 0.5f),
+                                        style = Stroke(width = 1.1.dp.toPx()),
+                                    )
+                                }
                             }
+                        }
                     }
                 }
 

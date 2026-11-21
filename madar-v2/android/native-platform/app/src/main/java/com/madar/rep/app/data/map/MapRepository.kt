@@ -140,6 +140,7 @@ class MapRepository(
             var batch = 0
             var inTransaction = false
             var missing = 0
+            var lastProgressTime = 0L
             for (tile in manifest.tiles) {
                 val key = MbTileKey(tile.z, tile.x, tile.y)
                 if (key in present) continue
@@ -155,11 +156,13 @@ class MapRepository(
                 store.putTile(key, bytes)
                 downloaded += 1
                 batch += 1
-                if (batch >= 100) {
+                val now = System.currentTimeMillis()
+                if (batch >= 100 || (batch >= 20 && now - lastProgressTime >= 300L)) {
                     store.setTransactionSuccessful()
                     store.endTransaction()
                     inTransaction = false
                     batch = 0
+                    lastProgressTime = now
                     onProgress(downloaded, total)
                 }
             }
