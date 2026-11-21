@@ -47,4 +47,38 @@ async function verifyWindowsInstaller(path, publisher, execute = run) {
   }
 }
 
-module.exports = { readUpdateChannel, verifyWindowsInstaller };
+function isMediaOrApiUrl(value) {
+  try {
+    const parsed = new URL(value, 'http://localhost');
+    const pathname = parsed.pathname.toLowerCase();
+    if (pathname.startsWith('/api/') || pathname.startsWith('/storage/') || pathname.startsWith('/download/')) {
+      return true;
+    }
+    return /\.(jpe?g|png|webp|gif|svg|bmp|ico|pdf|docx?|xlsx?|zip|rar)$/i.test(pathname);
+  } catch {
+    return false;
+  }
+}
+
+function sanitizeDiagnostics(diag = {}, appVersion = '1.0.4', serverOrigin = '') {
+  let cleanServerUrl = '';
+  try {
+    if (serverOrigin) {
+      const parsed = new URL(serverOrigin);
+      cleanServerUrl = parsed.origin;
+    }
+  } catch {
+    cleanServerUrl = '';
+  }
+
+  return {
+    electronVersion: String(appVersion || 'unknown'),
+    serverUrl: cleanServerUrl,
+    loadedBuildVersion: String(diag.loadedBuildVersion || 'unknown'),
+    uiSource: ['live-sync', 'offline-cache', 'packaged-fallback'].includes(diag.uiSource) ? diag.uiSource : 'unknown',
+    lastSyncTime: diag.lastSyncTime ? String(diag.lastSyncTime) : null,
+    lastSyncError: diag.lastSyncError ? String(diag.lastSyncError) : null,
+  };
+}
+
+module.exports = { readUpdateChannel, verifyWindowsInstaller, isMediaOrApiUrl, sanitizeDiagnostics };
