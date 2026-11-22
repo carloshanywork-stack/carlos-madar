@@ -147,27 +147,27 @@ if (backupMountPath && env.nodeEnv !== 'test') {
     throw new Error('MADAR_V2_BACKUP_MOUNT_PATH is supported only on Linux.');
   }
   let mountMetadata;
-  try {
-    mountMetadata = lstatSync(backupMountPath);
-  } catch (error) {
-    if (error.code === 'ENOENT') {
-      throw new Error(`MADAR_V2_BACKUP_MOUNT_PATH does not exist (${backupMountPath}); refusing to write backups to the system partition.`, { cause: error });
+  const maxWaitSeconds = 30;
+  for (let attempt = 1; attempt <= maxWaitSeconds; attempt += 1) {
+    try {
+      mountMetadata = lstatSync(backupMountPath);
+      if (mountMetadata.isSymbolicLink() || !mountMetadata.isDirectory()) {
+        throw new Error(`MADAR_V2_BACKUP_MOUNT_PATH must be an existing real directory (${backupMountPath}).`);
+      }
+      assertMountedStorage({
+        mountPath: backupMountPath,
+        mountInfo: readFileSync('/proc/self/mountinfo', 'utf8'),
+        mountRealPath: realpathSync(backupMountPath),
+        mountDevice: mountMetadata.dev,
+        rootDevice: statSync('/').dev,
+      });
+      break;
+    } catch (error) {
+      if (attempt === maxWaitSeconds) {
+        throw new Error(`MADAR_V2_BACKUP_MOUNT_PATH startup check failed: ${error.message}`, { cause: error });
+      }
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);
     }
-    throw error;
-  }
-  if (mountMetadata.isSymbolicLink() || !mountMetadata.isDirectory()) {
-    throw new Error('MADAR_V2_BACKUP_MOUNT_PATH must be an existing real directory.');
-  }
-  try {
-    assertMountedStorage({
-      mountPath: backupMountPath,
-      mountInfo: readFileSync('/proc/self/mountinfo', 'utf8'),
-      mountRealPath: realpathSync(backupMountPath),
-      mountDevice: mountMetadata.dev,
-      rootDevice: statSync('/').dev,
-    });
-  } catch (error) {
-    throw new Error(`MADAR_V2_BACKUP_MOUNT_PATH startup check failed: ${error.message}`, { cause: error });
   }
   assertExistingPathIsSafe(backupRoot, {
     mountPath: backupMountPath,
