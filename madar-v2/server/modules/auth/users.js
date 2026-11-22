@@ -201,6 +201,7 @@ const updateUser = asyncHandler(async (req, res) => {
     syncEmployeeForUser(db, updatedUser, { actorId: requestActorId(req), audit: true });
     if (nextActive === 0 || identityChanged) {
       db.prepare('UPDATE sessions SET revoked_at = CURRENT_TIMESTAMP WHERE user_id = ? AND revoked_at IS NULL').run(id);
+      db.prepare("UPDATE native_device_sessions SET revoked_at = CURRENT_TIMESTAMP, revocation_reason = 'user_updated' WHERE user_id = ? AND revoked_at IS NULL").run(id);
     }
     if (nextActive === 0) {
       db.prepare(`UPDATE rep_duty_sessions SET ended_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP

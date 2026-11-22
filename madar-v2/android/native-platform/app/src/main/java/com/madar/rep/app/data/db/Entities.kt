@@ -304,7 +304,12 @@ data class LegacyImportEntity(
 
 @Entity(
     tableName = "gps_points",
-    indices = [Index("repId"), Index(value = ["repId", "state", "updatedAt"])],
+    indices = [
+        Index("repId"),
+        Index(value = ["repId", "state", "updatedAt"]),
+        Index("ownerScopeId"),
+        Index(value = ["ownerScopeId", "state", "updatedAt"]),
+    ],
 )
 data class GpsPointEntity(
     @PrimaryKey val clientPointId: String,
@@ -320,4 +325,5 @@ data class GpsPointEntity(
     val lastError: String? = null,
     val nextAttemptAt: Long = 0,
     val createdAt: Long = System.currentTimeMillis(),
+    val ownerScopeId: Long = repId,
 )

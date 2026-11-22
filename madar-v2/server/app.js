@@ -140,6 +140,7 @@ app.get('/api/app-version', (_req, res) => {
 
 app.use('/api', (req, res, next) => {
   if (!req.path.startsWith('/rep/') || req.path === '/rep/login'
+      || req.path === '/rep/refresh'
       || req.path.startsWith('/rep/map/')
       || env.repMinSupportedVersionCode === 0) {
     next();

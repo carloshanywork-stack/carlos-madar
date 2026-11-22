@@ -16,6 +16,17 @@ object Jwt {
         Json.parseToJsonElement(decoded).jsonObject["exp"]?.jsonPrimitive?.longOrNull
     }.getOrNull()
 
+    fun payloadJson(token: String): String? = runCatching {
+        val payload = token.split('.').getOrNull(1) ?: return null
+        String(decodeBase64Url(payload), Charsets.UTF_8)
+    }.getOrNull()
+
+    fun claim(token: String, key: String): String? = runCatching {
+        val payload = token.split('.').getOrNull(1) ?: return null
+        val decoded = String(decodeBase64Url(payload), Charsets.UTF_8)
+        Json.parseToJsonElement(decoded).jsonObject[key]?.jsonPrimitive?.content
+    }.getOrNull()
+
     private fun decodeBase64Url(value: String): ByteArray {
         val alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
         val output = ArrayList<Byte>(value.length * 3 / 4 + 3)

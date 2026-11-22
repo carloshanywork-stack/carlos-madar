@@ -24,7 +24,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         GpsPointEntity::class,
         SupportReportEntity::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = true,
 )
 abstract class MadarDatabase : RoomDatabase() {
@@ -89,6 +89,15 @@ abstract class MadarDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE gps_points ADD COLUMN ownerScopeId INTEGER NOT NULL DEFAULT 0")
+                database.execSQL("UPDATE gps_points SET ownerScopeId = repId WHERE ownerScopeId = 0")
+                database.execSQL("CREATE INDEX IF NOT EXISTS index_gps_points_ownerScopeId ON gps_points (ownerScopeId)")
+                database.execSQL("CREATE INDEX IF NOT EXISTS index_gps_points_ownerScopeId_state_updatedAt ON gps_points (ownerScopeId, state, updatedAt)")
+            }
+        }
+
         fun get(context: Context): MadarDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(
                 context.applicationContext,
@@ -98,6 +107,7 @@ abstract class MadarDatabase : RoomDatabase() {
                 .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
                 .addMigrations(MIGRATION_1_2)
                 .addMigrations(MIGRATION_2_3)
+                .addMigrations(MIGRATION_3_4)
                 .build()
                 .also { instance = it }
         }

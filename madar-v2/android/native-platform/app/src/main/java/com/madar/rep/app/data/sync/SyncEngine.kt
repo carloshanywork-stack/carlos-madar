@@ -63,10 +63,27 @@ class SyncEngine(
     }
 
     private suspend fun runOnce(): SyncRunResult {
-        val session = sessionGateway.current() ?: return SyncRunResult(
+        var session = sessionGateway.current() ?: return SyncRunResult(
             attempted = 0, acknowledged = 0, processing = 0, needsReview = 0,
             transientFailures = 0, needsLogin = true, remaining = 0
         )
+        if (session.isExpired() || session.isOfflineOnly) {
+            val refreshed = sessionGateway.refreshCredentials(session)
+            if (refreshed != null) {
+                session = refreshed
+                requeueAllNeedsLogin(refreshed.ownerScopeId, refreshed.repId)
+            } else if (session.isOfflineOnly || session.isExpired()) {
+                val remaining = database.visits().countPending(session.ownerScopeId) +
+                    database.machineActions().countPending(session.ownerScopeId) +
+                    database.attendanceActions().dueForSync(session.ownerScopeId, Long.MAX_VALUE).size +
+                    database.gpsPoints().countPending(session.ownerScopeId, session.repId) +
+                    database.supportReports().countPending(session.ownerScopeId)
+                return SyncRunResult(
+                    attempted = 0, acknowledged = 0, processing = 0, needsReview = 0,
+                    transientFailures = 1, needsLogin = false, remaining = remaining
+                )
+            }
+        }
         val api = apiFactory(session.serverUrl)
         var attempted = 0
         var acknowledged = 0
@@ -161,7 +178,7 @@ class SyncEngine(
         val remaining = database.visits().countPending(session.ownerScopeId) +
             database.machineActions().countPending(session.ownerScopeId) +
             database.attendanceActions().dueForSync(session.ownerScopeId, Long.MAX_VALUE).size +
-            database.gpsPoints().countPending(session.repId) +
+            database.gpsPoints().countPending(session.ownerScopeId, session.repId) +
             database.supportReports().countPending(session.ownerScopeId)
         return SyncRunResult(
             attempted = attempted,
@@ -420,7 +437,7 @@ class SyncEngine(
 
     private suspend fun syncGpsPoints(session: Session, api: MadarApi) {
         val now = System.currentTimeMillis()
-        val points = database.gpsPoints().pending(session.repId, now)
+        val points = database.gpsPoints().pending(session.ownerScopeId, session.repId, now)
         val attendanceActions = database.attendanceActions().listForOwner(session.ownerScopeId)
         for (point in points) {
             if (sessionGateway.current()?.ownerScopeId != session.ownerScopeId) return
@@ -526,6 +543,15 @@ class SyncEngine(
             },
             photoPolicyVersion = photoPolicyVersion,
         )
+    }
+
+    suspend fun requeueAllNeedsLogin(ownerScopeId: Long, repId: Long) {
+        val now = System.currentTimeMillis()
+        database.visits().requeueNeedsLogin(repId, ownerScopeId, now)
+        database.machineActions().requeueNeedsLogin(repId, ownerScopeId, now)
+        database.attendanceActions().requeueNeedsLogin(repId, ownerScopeId, now)
+        database.supportReports().requeueNeedsLogin(repId, ownerScopeId, now)
+        database.gpsPoints().requeueNeedsLogin(ownerScopeId, repId)
     }
 
     companion object {

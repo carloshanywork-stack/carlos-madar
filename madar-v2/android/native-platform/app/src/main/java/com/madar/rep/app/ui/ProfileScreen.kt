@@ -97,7 +97,7 @@ fun ProfileScreen(
             }
         }
         Text("لن يبدأ التثبيت إلا بعد موافقتك في مثبت Android. لا يُحذف التطبيق الحالي ولا تُمسح بياناته.")
-        Button(onClick = onLogout, modifier = Modifier.fillMaxWidth()) { Text("تسجيل الخروج") }
+        Button(onClick = onLogout, modifier = Modifier.fillMaxWidth()) { Text("قفل التطبيق (للعمل دون اتصال)") }
     }
 }
 

@@ -101,7 +101,9 @@ fun MadarRoot(container: AppContainer) {
             onLogin = { username, password ->
                 vm.login(container.defaultServerUrl(), username, password)
             },
+            onUnlockOffline = vm::unlockOffline,
             onClearError = vm::clearLoginError,
+            onRemoveAccount = vm::removeAccount,
         )
         return
     }
@@ -194,7 +196,7 @@ private fun SignedInShell(
                 onSync = { profilePage = "sync" },
                 onSupport = { profilePage = "support" },
                 onMigration = { context.startActivity(Intent(context, LegacyMigrationActivity::class.java)) },
-                onLogout = { vm.logout(); profilePage = null },
+                onLogout = { vm.lock(); profilePage = null },
             )
             "attendance" -> AttendanceHost(vm = vm, onClose = { profilePage = "profile" })
             "notifications" -> {

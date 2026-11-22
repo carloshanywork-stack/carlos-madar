@@ -58,6 +58,9 @@ interface VisitDao {
     @Query("SELECT COUNT(*) FROM visits WHERE ownerRepId = :repId AND state = :state")
     suspend fun countByState(repId: Long, state: String): Int
 
+    @Query("UPDATE visits SET state = 'queued', nextAttemptAt = :now, lastError = NULL, updatedAt = :now WHERE (ownerRepId = :repId OR ownerRepId = :scopeId) AND state = 'needs_login'")
+    suspend fun requeueNeedsLogin(repId: Long, scopeId: Long = repId, now: Long = System.currentTimeMillis()): Int
+
     @Query("UPDATE visits SET state = 'queued', nextAttemptAt = :now, lastError = NULL, updatedAt = :now WHERE visitUuid = :uuid AND state IN ('needs_login','needs_review','retry_wait','failed')")
     suspend fun retryNow(uuid: String, now: Long): Int
 
@@ -183,6 +186,9 @@ interface RouteDao {
     @Query("DELETE FROM route_snapshots")
     suspend fun clear()
 
+    @Query("DELETE FROM route_snapshots WHERE ownerRepId = :repId")
+    suspend fun clearForOwner(repId: Long)
+
     @Query("SELECT * FROM route_snapshots WHERE ownerRepId = :repId")
     fun observe(repId: Long): Flow<RouteSnapshotEntity?>
 }
@@ -231,6 +237,9 @@ interface MachineActionDao {
         now: Long,
     )
 
+    @Query("UPDATE machine_actions SET state = 'queued', nextAttemptAt = :now, lastError = NULL, updatedAt = :now WHERE (ownerRepId = :repId OR ownerRepId = :scopeId) AND state = 'needs_login'")
+    suspend fun requeueNeedsLogin(repId: Long, scopeId: Long = repId, now: Long = System.currentTimeMillis()): Int
+
     @Query("UPDATE machine_actions SET state = 'queued', nextAttemptAt = :now, lastError = NULL, updatedAt = :now WHERE actionUuid = :uuid AND state IN ('needs_login','needs_review','retry_wait','failed')")
     suspend fun retryNow(uuid: String, now: Long): Int
 }
@@ -267,6 +276,9 @@ interface AttendanceActionDao {
         nextAttemptAt: Long,
         now: Long,
     )
+
+    @Query("UPDATE attendance_actions SET state = 'queued', nextAttemptAt = :now, lastError = NULL, updatedAt = :now WHERE (ownerRepId = :repId OR ownerRepId = :scopeId) AND state = 'needs_login'")
+    suspend fun requeueNeedsLogin(repId: Long, scopeId: Long = repId, now: Long = System.currentTimeMillis()): Int
 
     @Query("UPDATE attendance_actions SET state = 'queued', nextAttemptAt = :now, lastError = NULL, updatedAt = :now WHERE actionUuid = :uuid AND state IN ('needs_login','needs_review','retry_wait','failed')")
     suspend fun retryNow(uuid: String, now: Long): Int
@@ -334,20 +346,23 @@ interface GpsPointDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(point: GpsPointEntity)
 
-    @Query("SELECT * FROM gps_points WHERE repId = :repId AND state != 'acknowledged' ORDER BY updatedAt")
-    fun observeForOwner(repId: Long): Flow<List<GpsPointEntity>>
+    @Query("SELECT * FROM gps_points WHERE (ownerScopeId = :scopeId OR repId = :repId) AND state != 'acknowledged' ORDER BY updatedAt")
+    fun observeForOwner(scopeId: Long, repId: Long = scopeId): Flow<List<GpsPointEntity>>
 
-    @Query("SELECT * FROM gps_points WHERE repId = :repId AND state IN ('queued','syncing','retry_wait','needs_login') AND nextAttemptAt <= :now ORDER BY updatedAt LIMIT :limit")
-    suspend fun pending(repId: Long, now: Long, limit: Int = 25): List<GpsPointEntity>
+    @Query("SELECT * FROM gps_points WHERE (ownerScopeId = :scopeId OR repId = :repId) AND state IN ('queued','syncing','retry_wait','needs_login') AND nextAttemptAt <= :now ORDER BY updatedAt LIMIT :limit")
+    suspend fun pending(scopeId: Long, repId: Long = scopeId, now: Long = System.currentTimeMillis(), limit: Int = 25): List<GpsPointEntity>
 
     @Update
     suspend fun update(point: GpsPointEntity)
 
-    @Query("SELECT COUNT(*) FROM gps_points WHERE repId = :repId AND state IN ('queued','syncing','retry_wait','needs_login')")
-    suspend fun countPending(repId: Long): Int
+    @Query("SELECT COUNT(*) FROM gps_points WHERE (ownerScopeId = :scopeId OR repId = :repId) AND state IN ('queued','syncing','retry_wait','needs_login')")
+    suspend fun countPending(scopeId: Long, repId: Long = scopeId): Int
 
-    @Query("UPDATE gps_points SET state = 'queued', nextAttemptAt = 0, lastError = NULL WHERE clientPointId = :clientPointId AND repId = :repId AND state IN ('needs_login','needs_review','retry_wait')")
-    suspend fun retryNow(clientPointId: String, repId: Long): Int
+    @Query("UPDATE gps_points SET state = 'queued', nextAttemptAt = 0, lastError = NULL WHERE clientPointId = :clientPointId AND (ownerScopeId = :scopeId OR repId = :scopeId) AND state IN ('needs_login','needs_review','retry_wait')")
+    suspend fun retryNow(clientPointId: String, scopeId: Long): Int
+
+    @Query("UPDATE gps_points SET state = 'queued', nextAttemptAt = 0, lastError = NULL WHERE (ownerScopeId = :scopeId OR repId = :repId) AND state = 'needs_login'")
+    suspend fun requeueNeedsLogin(scopeId: Long, repId: Long = scopeId): Int
 }
 
 @Dao
@@ -366,4 +381,7 @@ interface SupportReportDao {
 
     @Query("SELECT COUNT(*) FROM support_reports WHERE ownerRepId = :repId AND state IN ('queued','retry_wait','syncing','needs_login')")
     suspend fun countPending(repId: Long): Int
+
+    @Query("UPDATE support_reports SET state = 'queued', nextAttemptAt = :now, lastError = NULL, updatedAt = :now WHERE (ownerRepId = :repId OR ownerRepId = :scopeId) AND state = 'needs_login'")
+    suspend fun requeueNeedsLogin(repId: Long, scopeId: Long = repId, now: Long = System.currentTimeMillis()): Int
 }
