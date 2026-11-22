@@ -71,13 +71,12 @@ export function getWorkshopOrderCosting(orderId, database = db) {
     for (const log of stageLogs) {
       const minutes = Number(log.duration_minutes || 0);
       const rateCents = Number(log.technician_hourly_rate_cents || 10000); // 100 EGP/hr fallback
-      if (minutes > 0) {
-        totalLaborMinutes += minutes;
-        laborCostCents += Math.round((minutes / 60) * rateCents);
-      }
       if (log.stage_name === 'cnc_laser' && minutes > 0) {
         totalMachineMinutes += minutes;
         machineCostCents += Math.round((minutes / 60) * 20000); // 200 EGP / hr CNC rate
+      } else if (minutes > 0) {
+        totalLaborMinutes += minutes;
+        laborCostCents += Math.round((minutes / 60) * rateCents);
       }
     }
   } catch {

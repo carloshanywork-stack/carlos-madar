@@ -33,8 +33,10 @@ function materialCode(value) {
 }
 
 function activeMaterial(materialId, database) {
+  const hasReserved = database.prepare('PRAGMA table_info(materials)').all().some((c) => c.name === 'reserved_stock');
+  const reservedCol = hasReserved ? 'COALESCE(reserved_stock, 0) AS reserved_stock,' : '0 AS reserved_stock,';
   const material = database.prepare(`
-    SELECT id, code, name, specification, unit, stock, min_stock, unit_cost_cents
+    SELECT id, code, name, specification, unit, stock, ${reservedCol} min_stock, unit_cost_cents
     FROM materials WHERE id = ? AND active = 1 AND deleted_at IS NULL
   `).get(materialId);
   if (!material) throw new HttpError(404, 'Active material was not found.');
@@ -101,8 +103,10 @@ function recordStockAudit(database, actorId, entityType, entityId, action, oldVa
 }
 
 export function listMaterials(database = db) {
+  const hasReserved = database.prepare('PRAGMA table_info(materials)').all().some((c) => c.name === 'reserved_stock');
+  const reservedCol = hasReserved ? 'COALESCE(reserved_stock, 0) AS reserved_stock,' : '0 AS reserved_stock,';
   return database.prepare(`
-    SELECT id, code, name, specification, unit, stock, min_stock,
+    SELECT id, code, name, specification, unit, stock, ${reservedCol} min_stock,
       unit_cost_cents, active, created_at
     FROM materials
     WHERE active = 1 AND deleted_at IS NULL
