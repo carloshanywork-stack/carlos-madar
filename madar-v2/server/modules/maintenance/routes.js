@@ -585,7 +585,9 @@ router.get('/orders/:id/unmatched/:folderId/photos/:filename', asyncHandler(asyn
     '.heif': 'image/heif',
   }[extname(req.params.filename).toLowerCase()] || 'image/jpeg';
   res.set({
-    'Cache-Control': 'private, no-cache, must-revalidate',
+    'Cache-Control': 'private, no-cache, no-store, must-revalidate',
+    'Pragma': 'no-cache',
+    'Expires': '0',
     'ETag': etag,
     'Last-Modified': new Date(source.mtimeMs).toUTCString(),
     'Content-Type': type,
@@ -735,7 +737,9 @@ router.get('/orders/:id/cards/:cardId/photos/:phase/:filename', asyncHandler(asy
   }
 
   res.set({
-    'Cache-Control': 'private, no-cache, must-revalidate',
+    'Cache-Control': 'private, no-cache, no-store, must-revalidate',
+    'Pragma': 'no-cache',
+    'Expires': '0',
     'ETag': etag,
     'Last-Modified': new Date(source.mtimeMs).toUTCString(),
     'Content-Type': type,
@@ -762,7 +766,9 @@ router.get('/orders/:id/cards/:cardId/photos/:phase/:filename/thumbnail', asyncH
 
   const thumbnail = await getMaintenanceThumbnail(photo.absolutePath, photo.rotation);
   res.set({
-    'Cache-Control': 'private, no-cache, must-revalidate',
+    'Cache-Control': 'private, no-cache, no-store, must-revalidate',
+    'Pragma': 'no-cache',
+    'Expires': '0',
     'ETag': etag,
     'Last-Modified': new Date(source.mtimeMs).toUTCString(),
     'Content-Type': 'image/webp',
