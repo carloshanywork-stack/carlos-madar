@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { db } from '../../database/connection.js';
 import { recordAudit } from '../audit.js';
 import {
@@ -11,6 +12,10 @@ import {
   requireText,
 } from '../http.js';
 import { getWorkshopOrderCosting } from './costing.js';
+import { assertCashAvailable, getCashBalanceCents, insertTreasuryEntry } from '../finance/treasury.service.js';
+import { nextInvoiceCode } from '../finance/invoices.service.js';
+
+const PURCHASE_CATEGORY = 'مشتريات خامات ومواد';
 
 function positiveNumber(value, label) {
   const number = Number(value);
@@ -295,8 +300,30 @@ export function createGoodsReceipt(input, actorId = null, database = db) {
       let movementId = null;
 
       if (quantityAccepted > 0) {
-        // Stock increment in warehouse
-        updateMaterial.run(quantityAccepted, poItem.unit_cost_cents, poItem.material_id);
+        // Calculate moving weighted average unit cost:
+        // (currentStock * currentCost + receivedQty * itemUnitCostCents) / totalQty
+        const currentMat = database.prepare(`
+          SELECT stock, unit_cost_cents, weighted_average_cost_cents
+          FROM materials WHERE id = ?
+        `).get(poItem.material_id);
+
+        const currentStock = Number(currentMat?.stock || 0);
+        const currentCost = Number(currentMat?.weighted_average_cost_cents ?? currentMat?.unit_cost_cents ?? 0);
+        const receivedQty = quantityAccepted;
+        const itemUnitCostCents = Number(poItem.unit_cost_cents || 0);
+        const totalQty = currentStock + receivedQty;
+        const weightedAvgCost = totalQty > 0
+          ? Math.round(((currentStock * currentCost) + (receivedQty * itemUnitCostCents)) / totalQty)
+          : itemUnitCostCents;
+
+        database.prepare(`
+          UPDATE materials
+          SET stock = stock + ?,
+              unit_cost_cents = ?,
+              weighted_average_cost_cents = ?
+          WHERE id = ?
+        `).run(receivedQty, weightedAvgCost, weightedAvgCost, poItem.material_id);
+
         const movResult = insertMovement.run(
           poItem.material_id,
           quantityAccepted,
@@ -517,5 +544,260 @@ export function getWorkshopOrderTrace(orderId, database = db) {
       customerReceipts,
     },
     costing,
+    costingVariance: costing?.variance ?? null,
+    quotationSnapshot: snapshot,
+    purchaseRequests,
+    purchaseOrders,
+    matchedInvoices: supplierInvoices,
+    stageLogs,
+    qaInspections: inspections,
+    offcutCredits: costing?.offcutCreditsCents ?? 0,
   };
 }
+
+export function cashPurchase(input, actorId = null, database = db) {
+  const body = requireObject(input);
+  allowOnlyKeys(body, [
+    'supplier',
+    'supplierId',
+    'materialId',
+    'quantity',
+    'unitCostCents',
+    'warehouse',
+    'warehouseId',
+    'notes',
+    'operationId',
+    'workshopOrderId',
+  ]);
+
+  const supplier = body.supplier
+    ? requireText(body.supplier, 'supplier', { maxLength: 200 })
+    : body.supplierId !== undefined && body.supplierId !== null
+      ? String(body.supplierId)
+      : 'مورد نقدي مباشر';
+
+  const materialId = positiveId(body.materialId, 'materialId');
+  const quantity = positiveNumber(body.quantity, 'quantity');
+  const unitCostCents = nonNegativeInteger(body.unitCostCents, 'unitCostCents');
+  const totalCostCents = Math.round(quantity * unitCostCents);
+  const warehouse = (body.warehouseId === 'secondary' || body.warehouse === 'secondary') ? 'secondary' : 'main';
+  const workshopOrderId = body.workshopOrderId ? positiveId(body.workshopOrderId, 'workshopOrderId') : null;
+  const notes = optionalText(body.notes, 'notes', { maxLength: 2000 });
+  const operationId = body.operationId;
+
+  // Validate operationId if provided
+  let opId = null;
+  let payloadSha256 = null;
+  if (operationId !== undefined && operationId !== null) {
+    if (typeof operationId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(operationId)) {
+      throw new HttpError(400, 'operationId must be a UUID v4.');
+    }
+    opId = operationId.toLowerCase();
+    const payload = JSON.stringify({
+      operationType: 'cash_purchase',
+      materialId,
+      quantity,
+      unitCostCents,
+      warehouse,
+      supplier,
+      workshopOrderId,
+    });
+    payloadSha256 = createHash('sha256').update(payload).digest('hex');
+
+    // Check if operation already executed (Idempotency check)
+    const existing = database.prepare(`
+      SELECT actor_id, operation_type, invoice_id, payload_sha256, response_json
+      FROM finance_settlement_operations WHERE operation_id = ?
+    `).get(opId);
+    if (existing) {
+      if (existing.payload_sha256 !== payloadSha256) {
+        throw new HttpError(409, 'operationId was already used for different financial content.', {
+          apiCode: 'FINANCE_OPERATION_ID_CONFLICT',
+        });
+      }
+      return { ...JSON.parse(existing.response_json), idempotent: true };
+    }
+  }
+
+  // Pre-flight checks before transaction
+  const material = database.prepare('SELECT id, code, name, unit, stock, unit_cost_cents FROM materials WHERE id = ? AND active = 1 AND deleted_at IS NULL').get(materialId);
+  if (!material) throw new HttpError(404, 'Active material was not found.');
+
+  if (workshopOrderId) {
+    const order = database.prepare('SELECT id, order_code FROM workshop_orders WHERE id = ? AND deleted_at IS NULL').get(workshopOrderId);
+    if (!order) throw new HttpError(404, 'Workshop order was not found.');
+  }
+
+  // Ensure cash available in treasury
+  assertCashAvailable(totalCostCents, database);
+
+  const effectiveActorId = actorId || database.prepare('SELECT id FROM users ORDER BY id ASC LIMIT 1').get()?.id || 1;
+
+  return database.transaction(() => {
+    // Double check idempotency inside transaction
+    if (opId) {
+      const existing = database.prepare(`
+        SELECT actor_id, operation_type, invoice_id, payload_sha256, response_json
+        FROM finance_settlement_operations WHERE operation_id = ?
+      `).get(opId);
+      if (existing) {
+        if (existing.payload_sha256 !== payloadSha256) {
+          throw new HttpError(409, 'operationId was already used for different financial content.', {
+            apiCode: 'FINANCE_OPERATION_ID_CONFLICT',
+          });
+        }
+        return { ...JSON.parse(existing.response_json), idempotent: true };
+      }
+    }
+
+    // 1. Create Purchase Order in status 'received'
+    const poCode = nextCode('PO', 'purchase_orders', 'po_code', database);
+    const poResult = database.prepare(`
+      INSERT INTO purchase_orders (po_code, supplier, workshop_order_id, status, expected_date, total_cents, notes, created_by, approved_by, approved_at)
+      VALUES (?, ?, ?, 'received', CURRENT_TIMESTAMP, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    `).run(poCode, supplier, workshopOrderId, totalCostCents, notes, effectiveActorId, effectiveActorId);
+    const poId = Number(poResult.lastInsertRowid);
+
+    const poItemResult = database.prepare(`
+      INSERT INTO purchase_order_items (purchase_order_id, material_id, purchase_request_id, quantity, unit_cost_cents, line_total_cents, received_quantity)
+      VALUES (?, ?, NULL, ?, ?, ?, ?)
+    `).run(poId, materialId, quantity, unitCostCents, totalCostCents, quantity);
+    const poItemId = Number(poItemResult.lastInsertRowid);
+
+    // 2. Create Goods Receipt (GRN) in status 'confirmed', incrementing stock only in target warehouse
+    const receiptCode = nextCode('GRN', 'goods_receipts', 'receipt_code', database);
+    const grResult = database.prepare(`
+      INSERT INTO goods_receipts (receipt_code, purchase_order_id, status, received_by, notes)
+      VALUES (?, ?, 'confirmed', ?, ?)
+    `).run(receiptCode, poId, effectiveActorId, notes);
+    const grId = Number(grResult.lastInsertRowid);
+
+    // Calculate moving weighted average unit cost for direct cash purchase
+    const currentMat = database.prepare(`
+      SELECT stock, unit_cost_cents, weighted_average_cost_cents
+      FROM materials WHERE id = ?
+    `).get(materialId);
+
+    const currentStock = Number(currentMat?.stock || 0);
+    const currentCost = Number(currentMat?.weighted_average_cost_cents ?? currentMat?.unit_cost_cents ?? 0);
+    const receivedQty = quantity;
+    const itemUnitCostCents = unitCostCents;
+    const totalQty = currentStock + receivedQty;
+    const weightedAvgCost = totalQty > 0
+      ? Math.round(((currentStock * currentCost) + (receivedQty * itemUnitCostCents)) / totalQty)
+      : itemUnitCostCents;
+
+    // Increment stock and update weighted average cost in materials
+    database.prepare(`
+      UPDATE materials
+      SET stock = stock + ?,
+          unit_cost_cents = ?,
+          weighted_average_cost_cents = ?
+      WHERE id = ?
+    `).run(receivedQty, weightedAvgCost, weightedAvgCost, materialId);
+
+    // Record inventory movement
+    const movResult = database.prepare(`
+      INSERT INTO inventory_movements (material_id, kind, quantity, warehouse, unit_cost_cents, reference, source_type, source_id, notes, created_by)
+      VALUES (?, 'purchase', ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      materialId,
+      quantity,
+      warehouse,
+      unitCostCents,
+      receiptCode,
+      workshopOrderId ? 'workshop_order' : null,
+      workshopOrderId ?? null,
+      notes ?? `شراء نقدي مباشر: ${poCode}`,
+      effectiveActorId,
+    );
+    const movementId = Number(movResult.lastInsertRowid);
+
+    database.prepare(`
+      INSERT INTO goods_receipt_items (goods_receipt_id, po_item_id, material_id, quantity_received, quantity_accepted, quantity_rejected, warehouse, inventory_movement_id)
+      VALUES (?, ?, ?, ?, ?, 0, ?, ?)
+    `).run(grId, poItemId, materialId, quantity, quantity, warehouse, movementId);
+
+    // 3. Create Matched Purchase Invoice in status 'paid' (marked matched to GRN/PO to ensure ZERO duplicate stock increment)
+    const invoiceCode = nextInvoiceCode('PUR', database);
+    const invResult = database.prepare(`
+      INSERT INTO invoices
+        (code, kind, supplier, purchase_order_id, goods_receipt_id, workshop_order_id,
+         subtotal_cents, tax_cents, total_cents, paid_total_cents, remaining_cents,
+         payment_status, status, notes, created_by)
+      VALUES (?, 'purchase', ?, ?, ?, ?, ?, 0, ?, ?, 0, 'paid', 'approved', ?, ?)
+    `).run(invoiceCode, supplier, poId, grId, workshopOrderId, totalCostCents, totalCostCents, totalCostCents, notes, effectiveActorId);
+    const invoiceId = Number(invResult.lastInsertRowid);
+
+    database.prepare(`
+      INSERT INTO invoice_items
+        (invoice_id, line_number, material_id, material_code, material_name, unit, quantity, unit_cost_cents, line_total_cents)
+      VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?)
+    `).run(invoiceId, material.id, material.code, material.name, material.unit, quantity, unitCostCents, totalCostCents);
+
+    // 4. Disburse cash from treasury
+    const treasuryEntryId = insertTreasuryEntry({
+      database,
+      kind: 'expense',
+      category: PURCHASE_CATEGORY,
+      amountCents: totalCostCents,
+      invoiceId,
+      reference: invoiceCode,
+      notes: notes ?? `شراء نقدي مباشر: ${supplier}`,
+      actorId: effectiveActorId,
+    });
+
+    // 5. Audit log
+    recordAudit({
+      database,
+      actorId: effectiveActorId,
+      action: 'cash_purchase',
+      entityType: 'goods_receipt',
+      entityId: grId,
+      newValues: {
+        poCode,
+        receiptCode,
+        invoiceCode,
+        materialId,
+        quantity,
+        unitCostCents,
+        totalCostCents,
+        warehouse,
+        treasuryEntryId,
+      },
+    });
+
+    const updatedMaterial = database.prepare('SELECT stock FROM materials WHERE id = ?').get(materialId);
+    const cashBalance = getCashBalanceCents(database);
+
+    const response = {
+      success: true,
+      purchaseOrderId: poId,
+      poCode,
+      goodsReceiptId: grId,
+      receiptCode,
+      invoiceId,
+      invoiceCode,
+      transactionId: treasuryEntryId,
+      treasuryEntryId,
+      newStock: updatedMaterial.stock,
+      cashBalanceCents: cashBalance,
+      materialId,
+      quantity,
+      unitCostCents,
+      totalCostCents,
+    };
+
+    // 6. Store operation in finance_settlement_operations if operationId provided
+    if (opId) {
+      database.prepare(`
+        INSERT INTO finance_settlement_operations
+          (operation_id, actor_id, operation_type, invoice_id, payload_sha256, response_json)
+        VALUES (?, ?, 'purchase_payment', ?, ?, ?)
+      `).run(opId, effectiveActorId, invoiceId, payloadSha256, JSON.stringify(response));
+    }
+
+    return response;
+  }).immediate();
+}
+

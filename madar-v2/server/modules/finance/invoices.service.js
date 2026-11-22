@@ -83,7 +83,7 @@ function calculateLineTotalCents(item) {
   return toSafeCents(product / denominator, 'Purchase line total');
 }
 
-function nextInvoiceCode(prefix, database) {
+export function nextInvoiceCode(prefix, database) {
   const rows = database.prepare('SELECT code FROM invoices WHERE code GLOB ?').all(`${prefix}-[0-9]*`);
   const largest = rows.reduce((maximum, row) => {
     const match = new RegExp(`^${prefix}-(\\d+)$`).exec(row.code);
@@ -276,8 +276,9 @@ export function createPurchaseInvoice(input, actorId = null, database = db) {
 
 export function createMatchedPurchaseInvoice(input, actorId = null, database = db) {
   const body = requireObject(input);
-  allowOnlyKeys(body, ['purchaseOrderId', 'supplier', 'notes', 'operationId', 'items']);
+  allowOnlyKeys(body, ['purchaseOrderId', 'goodsReceiptId', 'supplier', 'notes', 'operationId', 'items']);
   const purchaseOrderId = positiveId(body.purchaseOrderId, 'purchaseOrderId');
+  const goodsReceiptId = body.goodsReceiptId ? positiveId(body.goodsReceiptId, 'goodsReceiptId') : null;
   const po = database.prepare(`
     SELECT id, po_code, supplier, workshop_order_id, status, total_cents
     FROM purchase_orders WHERE id = ?
@@ -285,6 +286,13 @@ export function createMatchedPurchaseInvoice(input, actorId = null, database = d
   if (!po) throw new HttpError(404, 'Purchase order was not found.');
   if (!['approved', 'partially_received', 'received'].includes(po.status)) {
     throw new HttpError(409, `Invoices can only be matched to approved or received purchase orders (current: ${po.status}).`);
+  }
+
+  if (goodsReceiptId) {
+    const gr = database.prepare('SELECT id, purchase_order_id FROM goods_receipts WHERE id = ?').get(goodsReceiptId);
+    if (!gr || gr.purchase_order_id !== purchaseOrderId) {
+      throw new HttpError(404, 'Goods receipt was not found for this purchase order.');
+    }
   }
 
   const existing = database.prepare(`
@@ -317,11 +325,11 @@ export function createMatchedPurchaseInvoice(input, actorId = null, database = d
     const invoiceCode = nextInvoiceCode('PUR', database);
     const invoiceResult = database.prepare(`
       INSERT INTO invoices
-        (code, kind, supplier, purchase_order_id, workshop_order_id, subtotal_cents, tax_cents,
+        (code, kind, supplier, purchase_order_id, goods_receipt_id, workshop_order_id, subtotal_cents, tax_cents,
          total_cents, paid_total_cents, remaining_cents, payment_status,
          status, notes, created_by)
-      VALUES (?, 'purchase', ?, ?, ?, ?, 0, ?, 0, ?, 'unpaid', 'approved', ?, ?)
-    `).run(invoiceCode, supplier, po.id, po.workshop_order_id, totalCents, totalCents, totalCents, notes, actorId);
+      VALUES (?, 'purchase', ?, ?, ?, ?, ?, 0, ?, 0, ?, 'unpaid', 'approved', ?, ?)
+    `).run(invoiceCode, supplier, po.id, goodsReceiptId, po.workshop_order_id, totalCents, totalCents, totalCents, notes, actorId);
     const id = Number(invoiceResult.lastInsertRowid);
 
     const insertLine = database.prepare(`

@@ -1,5 +1,45 @@
 import { db } from '../../database/connection.js';
-import { HttpError, positiveId } from '../http.js';
+import { HttpError, positiveId, nonNegativeInteger } from '../http.js';
+
+export function setWorkshopOverheadRate(input, database = db) {
+  const yearMonth = String(input.yearMonth || input.year_month || '').trim();
+  if (!/^\d{4}-\d{2}$/.test(yearMonth)) {
+    throw new HttpError(400, 'yearMonth must be in YYYY-MM format (e.g. 2026-10).');
+  }
+  const hourlyRateCents = nonNegativeInteger(input.hourlyRateCents ?? input.hourly_rate_cents, 'hourlyRateCents');
+  const rentAllocationCents = input.rentAllocationCents !== undefined || input.rent_allocation_cents !== undefined
+    ? nonNegativeInteger(input.rentAllocationCents ?? input.rent_allocation_cents, 'rentAllocationCents')
+    : 0;
+  const notes = input.notes ? String(input.notes).slice(0, 500) : null;
+
+  database.prepare(`
+    INSERT INTO workshop_overhead_rates (year_month, hourly_rate_cents, rent_allocation_cents, notes, updated_at)
+    VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(year_month) DO UPDATE SET
+      hourly_rate_cents = excluded.hourly_rate_cents,
+      rent_allocation_cents = excluded.rent_allocation_cents,
+      notes = excluded.notes,
+      updated_at = CURRENT_TIMESTAMP
+  `).run(yearMonth, hourlyRateCents, rentAllocationCents, notes);
+
+  return database.prepare('SELECT * FROM workshop_overhead_rates WHERE year_month = ?').get(yearMonth);
+}
+
+export function getWorkshopOverheadRate(yearMonth, database = db) {
+  const ym = String(yearMonth || '').trim();
+  const row = database.prepare('SELECT * FROM workshop_overhead_rates WHERE year_month = ?').get(ym);
+  if (row) return row;
+  return {
+    year_month: ym,
+    hourly_rate_cents: 20000,
+    rent_allocation_cents: 0,
+    is_default: true,
+  };
+}
+
+export function listWorkshopOverheadRates(database = db) {
+  return database.prepare('SELECT * FROM workshop_overhead_rates ORDER BY year_month DESC').all();
+}
 
 /**
  * Calculates the exact Job Costing (COGS), labor, machine time, offcut credits,
@@ -34,18 +74,17 @@ export function getWorkshopOrderCosting(orderId, database = db) {
     ORDER BY im.id ASC
   `).all(id);
 
-  let materialCostCents = 0;
-  let offcutCreditsCents = 0;
+  let grossMaterialCostCents = 0;
+  let rawOffcutCreditsCents = 0;
   const processedMovements = movements.map((item) => {
     const unitCost = Number(item.stamped_unit_cost_cents || 0);
     const lineCost = Math.round(Number(item.quantity) * unitCost);
     const isReturn = item.kind === 'return' || item.kind === 'offcut_return';
 
     if (isReturn) {
-      offcutCreditsCents += lineCost;
-      materialCostCents -= lineCost;
+      rawOffcutCreditsCents += lineCost;
     } else {
-      materialCostCents += lineCost;
+      grossMaterialCostCents += lineCost;
     }
 
     return {
@@ -55,25 +94,49 @@ export function getWorkshopOrderCosting(orderId, database = db) {
     };
   });
 
+  // Credit source job once, capped at gross issue cost
+  const offcutCreditsCents = Math.min(rawOffcutCreditsCents, grossMaterialCostCents);
+  const materialCostCents = Math.max(0, grossMaterialCostCents - offcutCreditsCents);
+
   // Calculate actual labor and machine hours from workshop_stage_logs
   let laborCostCents = 0;
   let machineCostCents = 0;
   let totalLaborMinutes = 0;
   let totalMachineMinutes = 0;
+  const monthlyOverheadAllocations = [];
 
   try {
     const stageLogs = database.prepare(`
-      SELECT id, stage_name, action, duration_minutes, technician_hourly_rate_cents
+      SELECT id, stage_name, action, duration_minutes, technician_hourly_rate_cents, created_at
       FROM workshop_stage_logs
       WHERE order_id = ?
+      ORDER BY id ASC
     `).all(id);
 
     for (const log of stageLogs) {
       const minutes = Number(log.duration_minutes || 0);
       const rateCents = Number(log.technician_hourly_rate_cents || 10000); // 100 EGP/hr fallback
+      const logMonth = (log.created_at || new Date().toISOString()).slice(0, 7);
+
+      const rateRow = database.prepare(`
+        SELECT hourly_rate_cents, rent_allocation_cents
+        FROM workshop_overhead_rates
+        WHERE year_month = ?
+      `).get(logMonth);
+      const periodMachineRateCents = rateRow ? Number(rateRow.hourly_rate_cents) : 20000;
+
       if (log.stage_name === 'cnc_laser' && minutes > 0) {
         totalMachineMinutes += minutes;
-        machineCostCents += Math.round((minutes / 60) * 20000); // 200 EGP / hr CNC rate
+        const stageMachineCost = Math.round((minutes / 60) * periodMachineRateCents);
+        machineCostCents += stageMachineCost;
+        monthlyOverheadAllocations.push({
+          stageLogId: log.id,
+          yearMonth: logMonth,
+          stageName: log.stage_name,
+          durationMinutes: minutes,
+          hourlyRateCents: periodMachineRateCents,
+          costCents: stageMachineCost,
+        });
       } else if (minutes > 0) {
         totalLaborMinutes += minutes;
         laborCostCents += Math.round((minutes / 60) * rateCents);
@@ -120,9 +183,17 @@ export function getWorkshopOrderCosting(orderId, database = db) {
           actualProfitCents: grossProfitCents,
           estimatedMarginPercent: estimatedMargin,
           actualMarginPercent: marginPercent,
+          grossMaterialCostCents,
           offcutCreditsCents,
-          laborVarianceCents: laborCostCents,
-          machineVarianceCents: machineCostCents,
+          netMaterialCostCents: Math.max(0, materialCostCents),
+          actualIssuedCostNetCents: Math.max(0, materialCostCents),
+          laborCostCents,
+          machineCostCents,
+          overheadCostCents: machineCostCents,
+          laborVarianceCents: laborCostCents - Number(payload.laborCostCents || 0),
+          machineVarianceCents: machineCostCents - Number(payload.machineCostCents || 0),
+          materialVarianceCents: Math.max(0, materialCostCents) - Number(payload.materialCostCents || 0),
+          monthlyOverheadAllocations,
         };
       }
     } catch {
@@ -138,9 +209,13 @@ export function getWorkshopOrderCosting(orderId, database = db) {
     status: order.status,
     salePriceCents,
     materialCostCents: Math.max(0, materialCostCents),
+    grossMaterialCostCents,
+    actualIssuedCostNetCents: Math.max(0, materialCostCents),
     offcutCreditsCents,
     laborCostCents,
     machineCostCents,
+    overheadCostCents: machineCostCents,
+    monthlyOverheadAllocations,
     totalLaborMinutes,
     totalMachineMinutes,
     totalCostCents,

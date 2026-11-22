@@ -72,6 +72,7 @@ function BusinessRoutes({ user }) {
         <Route path="/supervisor" element={canViewSupervisor ? <SupervisorRadarPage /> : <Navigate to="/" replace />} />
         <Route path="/attendance" element={canViewAttendance ? <AttendanceDashboardPage isAdmin={role === 'admin'} /> : <Navigate to="/" replace />} />
         <Route path="/workshop" element={<WorkshopPage canMutate={canMutateWorkshop} canViewFinance={canViewFinance} />} />
+        <Route path="/workshop/procurement" element={<WorkshopPage canMutate={canMutateWorkshop} canViewFinance={canViewFinance} defaultStage="procurement" />} />
         <Route path="/workshop/:id" element={<WorkshopOrderDetail canMutate={canMutateWorkshop} canViewFinance={canViewFinance} />} />
         <Route path="/my-workshop" element={<TechnicianWorkspacePage />} />
         <Route path="/warehouse" element={<WarehousePage canMutate={canMutateWarehouse} canViewFinancialDetails={canViewFinance} />} />

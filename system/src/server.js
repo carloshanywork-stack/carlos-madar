@@ -49,7 +49,7 @@ function assertBackupRootOnMountedDrive(backupRoot, mountPath) {
 }
 if (process.env.BACKUP_MOUNT_PATH) {
   assertBackupRootOnMountedDrive(configuredBackupRoot, process.env.BACKUP_MOUNT_PATH)
-} else if (process.env.BACKUP_ROOT_PATH && path.isAbsolute(process.env.BACKUP_ROOT_PATH)) {
+} else if (process.env.NODE_ENV !== 'test' && process.env.BACKUP_ROOT_PATH && path.isAbsolute(process.env.BACKUP_ROOT_PATH)) {
   throw new Error('BACKUP_MOUNT_PATH is required when BACKUP_ROOT_PATH is absolute.')
 }
 const { recoverInterruptedRestore } = require('./backup-restore')

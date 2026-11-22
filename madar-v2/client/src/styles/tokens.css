@@ -1,5 +1,5 @@
 #madar-app {
-  font-family: "Segoe UI", Tahoma, Arial, sans-serif;
+  font-family: "Cairo", "IBM Plex Sans Arabic", "Segoe UI", Tahoma, Arial, sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   color-scheme: light;
@@ -28,7 +28,7 @@
   --madar-safe-left: env(safe-area-inset-left, 0px);
 
   /* Typography Scale */
-  --madar-font-sans: "Segoe UI", Tahoma, Arial, sans-serif;
+  --madar-font-sans: "Cairo", "IBM Plex Sans Arabic", "Segoe UI", Tahoma, Arial, sans-serif;
   --madar-font-mono: Consolas, "SFMono-Regular", Menlo, monospace;
   --madar-text-2xs: 10px;
   --madar-text-xs: 11px;

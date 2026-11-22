@@ -1982,6 +1982,7 @@ test('purchase, fractional issue, sales and treasury stay in sync in SQLite', as
   assert.equal(pptx.response.status, 200)
   assert.match(pptx.response.headers.get('content-type'), /presentationml/)
   assert.ok(pptx.data.byteLength > 1000)
+  await new Promise((resolve) => setTimeout(resolve, 1050))
   const oversizedPptx = await request(`/reports/export.pptx?ids=${Array.from({ length: 50 }, (_, index) => index + 1).join(',')}`)
   assert.equal(oversizedPptx.response.status, 400)
   assert.equal(oversizedPptx.data.error, 'يرجى تحديد 20 أمر صيانة كحد أقصى للتصدير الواحد')

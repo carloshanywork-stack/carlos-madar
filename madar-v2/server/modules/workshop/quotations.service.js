@@ -367,15 +367,15 @@ export function approveQuotation(quotationId, actorId = null, database = db) {
 }
 
 export function convertQuotationToWorkshopOrder(quotationId, input = {}, actorId = null, database = db) {
-  const id = positiveId(quotationId, 'quotationId');
   const body = requireObject(input);
-  allowOnlyKeys(body, ['targetDeliveryDate', 'technicianIds', 'machineType', 'description']);
+  allowOnlyKeys(body, ['targetDeliveryDate', 'technicianIds', 'machineType', 'description', 'quotationId', 'quotation_id']);
+  const id = positiveId(quotationId ?? body.quotationId ?? body.quotation_id, 'quotationId');
 
   return database.transaction(() => {
     // Check existing order for idempotency first
     const existing = database.prepare('SELECT id, order_code FROM workshop_orders WHERE quotation_id = ? AND deleted_at IS NULL').get(id);
     if (existing) {
-      return { success: true, orderId: existing.id, orderCode: existing.order_code, alreadyConverted: true };
+      return { success: true, orderId: existing.id, id: existing.id, orderCode: existing.order_code, alreadyConverted: true };
     }
 
     const quote = getQuotation(id, database);
@@ -432,7 +432,9 @@ export function convertQuotationToWorkshopOrder(quotationId, input = {}, actorId
     });
 
     return {
+      success: true,
       orderId,
+      id: orderId,
       orderCode,
       quotationCode: quote.quotation_code,
     };

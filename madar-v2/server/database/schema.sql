@@ -298,6 +298,8 @@ CREATE TABLE IF NOT EXISTS materials (
   reserved_stock REAL NOT NULL DEFAULT 0 CHECK (reserved_stock >= 0),
   min_stock REAL NOT NULL DEFAULT 0 CHECK (min_stock >= 0),
   unit_cost_cents INTEGER NOT NULL DEFAULT 0 CHECK (unit_cost_cents >= 0),
+  weighted_average_cost_cents INTEGER NOT NULL DEFAULT 0 CHECK (weighted_average_cost_cents >= 0),
+  replacement_cost_cents INTEGER NOT NULL DEFAULT 0 CHECK (replacement_cost_cents >= 0),
   active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   deleted_at TEXT
@@ -359,6 +361,19 @@ CREATE TABLE IF NOT EXISTS workshop_stage_logs (
   notes TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS workshop_overhead_rates (
+  id INTEGER PRIMARY KEY,
+  year_month TEXT NOT NULL UNIQUE,
+  hourly_rate_cents INTEGER NOT NULL CHECK (hourly_rate_cents >= 0),
+  rent_allocation_cents INTEGER NOT NULL DEFAULT 0 CHECK (rent_allocation_cents >= 0),
+  notes TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_workshop_overhead_rates_month
+  ON workshop_overhead_rates(year_month);
 
 CREATE TABLE IF NOT EXISTS workshop_quality_inspections (
   id INTEGER PRIMARY KEY,

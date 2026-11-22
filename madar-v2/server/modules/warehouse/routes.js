@@ -6,6 +6,7 @@ import {
   createMaterial,
   createOffcut,
   getLowStockMaterials,
+  getMaterialCostFigures,
   issueMaterial,
   listMaterials,
   listMovements,
@@ -14,6 +15,7 @@ import {
   reserveMaterial,
   returnMaterial,
   sellScrap,
+  updateMaterialReplacementCost,
 } from './service.js';
 import { reconcileStockCount, startStockCount } from './stock-count.service.js';
 import { buildWarehouseWorkbook } from './export.js';
@@ -43,12 +45,41 @@ router.post('/materials', requireWarehouseMutationAccess, (req, res) => {
   res.status(201).json(roleAware(createMaterial(req.body, requestActorId(req)), req));
 });
 
+router.post('/materials/:id/replacement-cost', requireWarehouseMutationAccess, (req, res, next) => {
+  try {
+    const costCents = req.body?.replacementCostCents ?? req.body?.replacement_cost_cents;
+    res.json(roleAware(updateMaterialReplacementCost(req.params.id, costCents, requestActorId(req)), req));
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/materials/:id/cost-figures', (req, res, next) => {
+  try {
+    res.json(roleAware(getMaterialCostFigures(req.params.id), req));
+  } catch (error) {
+    next(error);
+  }
+});
+
 router.get('/movements', (req, res) => {
   res.json(roleAware(listMovements(), req));
 });
 
-router.post('/issue', requireWarehouseMutationAccess, (req, res) => {
-  res.status(201).json(roleAware(issueMaterial(req.body, requestActorId(req)), req));
+router.post('/issue', requireWarehouseMutationAccess, (req, res, next) => {
+  try {
+    res.status(201).json(roleAware(issueMaterial(req.body, requestActorId(req)), req));
+  } catch (error) {
+    if (error.apiCode === 'OFFCUT_DIMENSION_MISMATCH') {
+      res.status(409).json({
+        error: 'OFFCUT_DIMENSION_MISMATCH',
+        code: 'OFFCUT_DIMENSION_MISMATCH',
+        message: error.message,
+      });
+      return;
+    }
+    next(error);
+  }
 });
 
 router.post('/return', requireWarehouseMutationAccess, (req, res) => {

@@ -86,8 +86,8 @@ export function requireWorkshopMutationAccess(req, res, next) {
     res.status(401).json({ error: 'Authentication is required.' });
     return;
   }
-  if (!['admin', 'operations'].includes(req.user.role)) {
-    forbid(res, 'صلاحية العمليات أو مدير النظام مطلوبة لتعديل أوامر الورشة.');
+  if (!['admin', 'operations', 'purchasing'].includes(req.user.role)) {
+    forbid(res, 'صلاحية العمليات أو المشتريات أو مدير النظام مطلوبة لتعديل أوامر الورشة والمشتريات.');
     return;
   }
   next();

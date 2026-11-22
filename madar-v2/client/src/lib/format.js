@@ -44,12 +44,21 @@ export const statusLabels = {
   unpaid: 'غير مدفوع',
   partial: 'مدفوع جزئياً',
   paid: 'مدفوع',
+  draft: 'مسودة',
+  pending_approval: 'بانتظار الاعتماد',
+  approved: 'معتمد',
+  converted_to_po: 'تم التحويل لأمر شراء',
+  converted_to_order: 'تم التحويل للتشغيل',
+  partially_received: 'مستلم جزئياً',
+  received: 'مستلم بالكامل',
+  confirmed: 'مؤكد',
+  rework_required: 'إعادة تشغيل (Rework)',
 };
 
 export function statusTone(status) {
-  if (['archived', 'delivered_archived', 'paid'].includes(status)) return 'success';
-  if (['review', 'ready', 'partial'].includes(status)) return 'warning';
-  if (['unpaid'].includes(status)) return 'danger';
+  if (['archived', 'delivered_archived', 'paid', 'approved', 'converted_to_order', 'received', 'confirmed'].includes(status)) return 'success';
+  if (['review', 'ready', 'partial', 'pending_approval', 'partially_received'].includes(status)) return 'warning';
+  if (['unpaid', 'rework_required'].includes(status)) return 'danger';
   return 'info';
 }
 

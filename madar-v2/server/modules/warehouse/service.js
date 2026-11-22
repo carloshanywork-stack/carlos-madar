@@ -16,6 +16,84 @@ const SCRAP_SALE_REFERENCE = 'بيع خردة بواقي ورشة';
 const MAX_SCRAP_SALE_CENTS = 5_000_000;
 const MAX_QUANTITY = 1_000_000_000_000;
 
+export function ensureWarehouseSchema(database = db) {
+  try {
+    const offcutCols = database.prepare('PRAGMA table_info(secondary_warehouse_offcuts)').all();
+    if (!offcutCols.some((c) => c.name === 'is_scrap')) {
+      database.prepare('ALTER TABLE secondary_warehouse_offcuts ADD COLUMN is_scrap INTEGER NOT NULL DEFAULT 0').run();
+    }
+    if (!offcutCols.some((c) => c.name === 'client_id')) {
+      database.prepare('ALTER TABLE secondary_warehouse_offcuts ADD COLUMN client_id INTEGER REFERENCES clients(id)').run();
+    }
+    if (!offcutCols.some((c) => c.name === 'is_customer_owned')) {
+      database.prepare('ALTER TABLE secondary_warehouse_offcuts ADD COLUMN is_customer_owned INTEGER NOT NULL DEFAULT 0').run();
+    }
+    if (!offcutCols.some((c) => c.name === 'location')) {
+      database.prepare('ALTER TABLE secondary_warehouse_offcuts ADD COLUMN location TEXT').run();
+    }
+    if (!offcutCols.some((c) => c.name === 'finish')) {
+      database.prepare('ALTER TABLE secondary_warehouse_offcuts ADD COLUMN finish TEXT').run();
+    }
+  } catch {
+    // Ignore schema checks if already altered
+  }
+  try {
+    const matCols = database.prepare('PRAGMA table_info(materials)').all();
+    if (!matCols.some((c) => c.name === 'is_customer_owned')) {
+      database.prepare('ALTER TABLE materials ADD COLUMN is_customer_owned INTEGER NOT NULL DEFAULT 0').run();
+    }
+    if (!matCols.some((c) => c.name === 'client_id')) {
+      database.prepare('ALTER TABLE materials ADD COLUMN client_id INTEGER REFERENCES clients(id)').run();
+    }
+    if (!matCols.some((c) => c.name === 'weighted_average_cost_cents')) {
+      database.prepare('ALTER TABLE materials ADD COLUMN weighted_average_cost_cents INTEGER NOT NULL DEFAULT 0').run();
+      database.exec('UPDATE materials SET weighted_average_cost_cents = unit_cost_cents WHERE unit_cost_cents > 0');
+    }
+    if (!matCols.some((c) => c.name === 'replacement_cost_cents')) {
+      database.prepare('ALTER TABLE materials ADD COLUMN replacement_cost_cents INTEGER NOT NULL DEFAULT 0').run();
+      database.exec('UPDATE materials SET replacement_cost_cents = unit_cost_cents WHERE unit_cost_cents > 0');
+    }
+  } catch {
+    // Ignore schema checks if already altered
+  }
+}
+
+export function parseDimensionsToCm(value) {
+  if (!value) return null;
+  if (typeof value === 'object') {
+    if (value.widthMm !== undefined && value.heightMm !== undefined) {
+      return { widthCm: Number(value.widthMm) / 10, heightCm: Number(value.heightMm) / 10 };
+    }
+    if (value.widthCm !== undefined && value.heightCm !== undefined) {
+      return { widthCm: Number(value.widthCm), heightCm: Number(value.heightCm) };
+    }
+    if (value.widthM !== undefined && value.heightM !== undefined) {
+      return { widthCm: Number(value.widthM) * 100, heightCm: Number(value.heightM) * 100 };
+    }
+    if (value.width !== undefined && value.height !== undefined) {
+      const unit = String(value.unit || 'cm').toLowerCase();
+      const mult = unit === 'mm' ? 0.1 : (unit === 'm' || unit === 'meter' || unit === 'meters') ? 100 : 1;
+      return { widthCm: Number(value.width) * mult, heightCm: Number(value.height) * mult };
+    }
+  }
+  const str = String(value).trim();
+  const match = str.match(/([0-9]+(?:\.[0-9]+)?)\s*[*xX×/]\s*([0-9]+(?:\.[0-9]+)?)/);
+  if (!match) return null;
+  let w = parseFloat(match[1]);
+  let h = parseFloat(match[2]);
+  if (!Number.isFinite(w) || !Number.isFinite(h)) return null;
+
+  const lower = str.toLowerCase();
+  if (lower.includes('mm')) {
+    w /= 10;
+    h /= 10;
+  } else if ((lower.includes('m') || lower.includes('متر')) && !lower.includes('cm') && !lower.includes('سم')) {
+    w *= 100;
+    h *= 100;
+  }
+  return { widthCm: w, heightCm: h };
+}
+
 function quantity(value, label, { allowZero = false } = {}) {
   if (typeof value !== 'number' || !Number.isFinite(value) || value > MAX_QUANTITY
       || (allowZero ? value < 0 : value <= 0)) {
@@ -33,10 +111,17 @@ function materialCode(value) {
 }
 
 function activeMaterial(materialId, database) {
-  const hasReserved = database.prepare('PRAGMA table_info(materials)').all().some((c) => c.name === 'reserved_stock');
+  const tableCols = database.prepare('PRAGMA table_info(materials)').all();
+  const hasReserved = tableCols.some((c) => c.name === 'reserved_stock');
   const reservedCol = hasReserved ? 'COALESCE(reserved_stock, 0) AS reserved_stock,' : '0 AS reserved_stock,';
+  const hasCustOwned = tableCols.some((c) => c.name === 'is_customer_owned');
+  const custOwnedCol = hasCustOwned ? 'COALESCE(is_customer_owned, 0) AS is_customer_owned, client_id,' : '0 AS is_customer_owned, NULL AS client_id,';
+  const hasWeighted = tableCols.some((c) => c.name === 'weighted_average_cost_cents');
+  const weightedCol = hasWeighted ? 'COALESCE(weighted_average_cost_cents, unit_cost_cents, 0) AS weighted_average_cost_cents,' : 'unit_cost_cents AS weighted_average_cost_cents,';
+  const hasReplacement = tableCols.some((c) => c.name === 'replacement_cost_cents');
+  const replacementCol = hasReplacement ? 'COALESCE(replacement_cost_cents, unit_cost_cents, 0) AS replacement_cost_cents,' : 'unit_cost_cents AS replacement_cost_cents,';
   const material = database.prepare(`
-    SELECT id, code, name, specification, unit, stock, ${reservedCol} min_stock, unit_cost_cents
+    SELECT id, code, name, specification, unit, stock, ${reservedCol} ${custOwnedCol} ${weightedCol} ${replacementCol} min_stock, unit_cost_cents
     FROM materials WHERE id = ? AND active = 1 AND deleted_at IS NULL
   `).get(materialId);
   if (!material) throw new HttpError(404, 'Active material was not found.');
@@ -45,7 +130,7 @@ function activeMaterial(materialId, database) {
 
 function activeWorkshopOrder(orderId, database) {
   const order = database.prepare(`
-    SELECT id, order_code, status FROM workshop_orders
+    SELECT id, order_code, status, client_id FROM workshop_orders
     WHERE id = ? AND deleted_at IS NULL
   `).get(orderId);
   if (!order) throw new HttpError(404, 'Workshop order was not found.');
@@ -103,10 +188,15 @@ function recordStockAudit(database, actorId, entityType, entityId, action, oldVa
 }
 
 export function listMaterials(database = db) {
-  const hasReserved = database.prepare('PRAGMA table_info(materials)').all().some((c) => c.name === 'reserved_stock');
+  const tableCols = database.prepare('PRAGMA table_info(materials)').all();
+  const hasReserved = tableCols.some((c) => c.name === 'reserved_stock');
   const reservedCol = hasReserved ? 'COALESCE(reserved_stock, 0) AS reserved_stock,' : '0 AS reserved_stock,';
+  const hasWeighted = tableCols.some((c) => c.name === 'weighted_average_cost_cents');
+  const weightedCol = hasWeighted ? 'COALESCE(weighted_average_cost_cents, unit_cost_cents, 0) AS weighted_average_cost_cents,' : 'unit_cost_cents AS weighted_average_cost_cents,';
+  const hasReplacement = tableCols.some((c) => c.name === 'replacement_cost_cents');
+  const replacementCol = hasReplacement ? 'COALESCE(replacement_cost_cents, unit_cost_cents, 0) AS replacement_cost_cents,' : 'unit_cost_cents AS replacement_cost_cents,';
   return database.prepare(`
-    SELECT id, code, name, specification, unit, stock, ${reservedCol} min_stock,
+    SELECT id, code, name, specification, unit, stock, ${reservedCol} ${weightedCol} ${replacementCol} min_stock,
       unit_cost_cents, active, created_at
     FROM materials
     WHERE active = 1 AND deleted_at IS NULL
@@ -119,13 +209,26 @@ export function listMaterials(database = db) {
 
 export function createMaterial(input, actorId = null, database = db) {
   const body = requireObject(input);
-  allowOnlyKeys(body, ['code', 'name', 'specification', 'unit', 'minStock', 'unitCostCents', 'initialStock']);
+  allowOnlyKeys(body, [
+    'code', 'name', 'specification', 'unit', 'minStock', 'unitCostCents', 'initialStock',
+    'isCustomerOwned', 'is_customer_owned', 'clientId', 'client_id',
+    'replacementCostCents', 'replacement_cost_cents', 'weightedAverageCostCents', 'weighted_average_cost_cents',
+  ]);
+  ensureWarehouseSchema(database);
   const code = materialCode(body.code);
   const name = requireText(body.name, 'name', { maxLength: 200 });
   const specification = optionalText(body.specification, 'specification', { maxLength: 1000 });
   const unit = requireText(body.unit, 'unit', { maxLength: 50 });
   const minStock = quantity(body.minStock, 'minStock', { allowZero: true });
   const unitCostCents = nonNegativeInteger(body.unitCostCents, 'unitCostCents');
+  const replacementCostCents = body.replacementCostCents !== undefined || body.replacement_cost_cents !== undefined
+    ? nonNegativeInteger(body.replacementCostCents ?? body.replacement_cost_cents, 'replacementCostCents')
+    : unitCostCents;
+  const weightedAverageCostCents = body.weightedAverageCostCents !== undefined || body.weighted_average_cost_cents !== undefined
+    ? nonNegativeInteger(body.weightedAverageCostCents ?? body.weighted_average_cost_cents, 'weightedAverageCostCents')
+    : unitCostCents;
+  const isCustomerOwned = (body.isCustomerOwned === 1 || body.isCustomerOwned === true || body.is_customer_owned === 1) ? 1 : 0;
+  const clientId = body.clientId || body.client_id ? positiveId(body.clientId || body.client_id, 'clientId') : null;
   const initialStock = body.initialStock === undefined
     ? 0
     : quantity(body.initialStock, 'initialStock', { allowZero: true });
@@ -136,9 +239,9 @@ export function createMaterial(input, actorId = null, database = db) {
   try {
     const materialId = database.transaction(() => {
       const result = database.prepare(`
-        INSERT INTO materials (code, name, specification, unit, stock, min_stock, unit_cost_cents)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-      `).run(code, name, specification, unit, initialStock, minStock, unitCostCents);
+        INSERT INTO materials (code, name, specification, unit, stock, min_stock, unit_cost_cents, weighted_average_cost_cents, replacement_cost_cents, is_customer_owned, client_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(code, name, specification, unit, initialStock, minStock, unitCostCents, weightedAverageCostCents, replacementCostCents, isCustomerOwned, clientId);
       const id = Number(result.lastInsertRowid);
       let movementId = null;
       if (initialStock > 0) {
@@ -156,7 +259,11 @@ export function createMaterial(input, actorId = null, database = db) {
       }
       recordStockAudit(database, actorId, 'material', id, 'create', null, {
         code, name, specification, unit, min_stock: minStock,
-        unit_cost_cents: unitCostCents, stock: initialStock, initial_movement_id: movementId,
+        unit_cost_cents: unitCostCents,
+        weighted_average_cost_cents: weightedAverageCostCents,
+        replacement_cost_cents: replacementCostCents,
+        stock: initialStock, initial_movement_id: movementId,
+        is_customer_owned: isCustomerOwned, client_id: clientId,
       });
       return id;
     }).immediate();
@@ -166,6 +273,65 @@ export function createMaterial(input, actorId = null, database = db) {
     if (error.code === 'SQLITE_CONSTRAINT_UNIQUE') throw new HttpError(409, 'Material code already exists.');
     throw error;
   }
+}
+
+export function updateMaterialReplacementCost(materialId, replacementCostCents, actorId = null, database = db) {
+  const id = positiveId(materialId, 'materialId');
+  const costCents = nonNegativeInteger(replacementCostCents, 'replacementCostCents');
+  ensureWarehouseSchema(database);
+
+  return database.transaction(() => {
+    const material = database.prepare('SELECT * FROM materials WHERE id = ? AND active = 1 AND deleted_at IS NULL').get(id);
+    if (!material) throw new HttpError(404, 'Active material was not found.');
+
+    const oldCost = material.replacement_cost_cents ?? material.unit_cost_cents ?? 0;
+    database.prepare(`
+      UPDATE materials
+      SET replacement_cost_cents = ?
+      WHERE id = ?
+    `).run(costCents, id);
+
+    recordStockAudit(
+      database,
+      actorId,
+      'material',
+      id,
+      'update_replacement_cost',
+      { replacement_cost_cents: oldCost },
+      { replacement_cost_cents: costCents },
+    );
+
+    const updated = database.prepare('SELECT * FROM materials WHERE id = ?').get(id);
+    return {
+      materialId: updated.id,
+      id: updated.id,
+      code: updated.code,
+      name: updated.name,
+      stock: updated.stock,
+      unit_cost_cents: updated.unit_cost_cents,
+      weighted_average_cost_cents: updated.weighted_average_cost_cents ?? updated.unit_cost_cents ?? 0,
+      replacement_cost_cents: updated.replacement_cost_cents,
+    };
+  }).immediate();
+}
+
+export function getMaterialCostFigures(materialId, database = db) {
+  const id = positiveId(materialId, 'materialId');
+  ensureWarehouseSchema(database);
+  const material = database.prepare('SELECT * FROM materials WHERE id = ? AND deleted_at IS NULL').get(id);
+  if (!material) throw new HttpError(404, 'Material was not found.');
+
+  return {
+    materialId: material.id,
+    id: material.id,
+    code: material.code,
+    name: material.name,
+    unit: material.unit,
+    stock: material.stock,
+    unit_cost_cents: material.unit_cost_cents,
+    weighted_average_cost_cents: material.weighted_average_cost_cents ?? material.unit_cost_cents ?? 0,
+    replacement_cost_cents: material.replacement_cost_cents ?? material.unit_cost_cents ?? 0,
+  };
 }
 
 export function listMovements(database = db) {
@@ -192,7 +358,8 @@ export function issueMaterial(input, actorId = null, database = db) {
   const body = requireObject(input);
   allowOnlyKeys(body, [
     'workshopOrderId', 'sourceWarehouse', 'materialId', 'offcutId', 'quantity', 'notes',
-    'mainWithdrawalMode', 'offcutName', 'offcutDimensions',
+    'mainWithdrawalMode', 'offcutName', 'offcutDimensions', 'requiredDimensions',
+    'widthMm', 'heightMm', 'widthCm', 'heightCm',
   ]);
   const workshopOrderId = positiveId(body.workshopOrderId, 'workshopOrderId');
   const sourceWarehouse = body.sourceWarehouse;
@@ -226,11 +393,21 @@ export function issueMaterial(input, actorId = null, database = db) {
   const remainderQuantity = sourceWarehouse === 'main' ? mainWithdrawalQuantity - requestedQuantity : 0;
 
   const result = database.transaction(() => {
+    ensureWarehouseSchema(database);
     const order = activeWorkshopOrder(workshopOrderId, database);
     let selectedMaterial = null;
     let selectedOffcut = null;
+    let fitsChecked = null;
+
     if (sourceWarehouse === 'main') {
       selectedMaterial = activeMaterial(materialId, database);
+      if (selectedMaterial.is_customer_owned === 1) {
+        if (!order.client_id || (selectedMaterial.client_id && order.client_id !== selectedMaterial.client_id)) {
+          throw new HttpError(409, 'Customer-owned stock is strictly separated and cannot be issued to general or other client jobs.', {
+            apiCode: 'CUSTOMER_STOCK_SEPARATION',
+          });
+        }
+      }
       if (!Number.isInteger(selectedMaterial.stock)) {
         throw new HttpError(409, `Main stock for ${selectedMaterial.code} has a fractional legacy balance; reconcile a physical stock count before issuing.`);
       }
@@ -259,14 +436,50 @@ export function issueMaterial(input, actorId = null, database = db) {
       }
     } else {
       selectedOffcut = database.prepare(`
-        SELECT id, material_id, name, dimensions, quantity, unit, unit_cost_cents, status
+        SELECT *
         FROM secondary_warehouse_offcuts WHERE id = ?
       `).get(offcutId);
       if (!selectedOffcut) throw new HttpError(404, 'Offcut was not found.');
       if (selectedOffcut.status !== 'available') throw new HttpError(409, 'Offcut is not available for reuse.');
+      if (selectedOffcut.is_scrap === 1 || selectedOffcut.status === 'scrap' || selectedOffcut.status === 'scrapped_sold') {
+        throw new HttpError(409, 'Scrap offcuts cannot be issued to production jobs.', {
+          apiCode: 'SCRAP_CANNOT_BE_ISSUED',
+        });
+      }
+      if (selectedOffcut.is_customer_owned === 1) {
+        if (!order.client_id || (selectedOffcut.client_id && order.client_id !== selectedOffcut.client_id)) {
+          throw new HttpError(409, 'Customer-owned stock is strictly separated and cannot be issued to general or other client jobs.', {
+            apiCode: 'CUSTOMER_STOCK_SEPARATION',
+          });
+        }
+      }
       if (selectedOffcut.quantity < requestedQuantity) {
         throw new HttpError(409, 'Insufficient offcut quantity.');
       }
+
+      // 2D rectangular fit verification
+      const reqDimInput = body.requiredDimensions
+        || ((body.widthMm !== undefined && body.heightMm !== undefined) || (body.widthCm !== undefined && body.heightCm !== undefined) ? body : null);
+      if (reqDimInput) {
+        const reqDim = parseDimensionsToCm(reqDimInput);
+        const offcutDim = parseDimensionsToCm(selectedOffcut.dimensions);
+        if (reqDim && offcutDim) {
+          const offcutW = offcutDim.widthCm;
+          const offcutH = offcutDim.heightCm;
+          const reqW = reqDim.widthCm;
+          const reqH = reqDim.heightCm;
+          const fits = (offcutW >= reqW && offcutH >= reqH) || (offcutH >= reqW && offcutW >= reqH);
+          fitsChecked = fits;
+          if (!fits) {
+            throw new HttpError(
+              409,
+              'Offcut dimensions do not fit the required piece dimensions (same area does not guarantee geometric fit).',
+              { apiCode: 'OFFCUT_DIMENSION_MISMATCH' }
+            );
+          }
+        }
+      }
+
       const remaining = selectedOffcut.quantity - requestedQuantity;
       if (remaining === 0) {
         database.prepare(`
@@ -367,10 +580,16 @@ export function issueMaterial(input, actorId = null, database = db) {
       requestedQuantity,
       mainWithdrawalQuantity: sourceWarehouse === 'main' ? mainWithdrawalQuantity : null,
       remainderQuantity,
+      fits: fitsChecked === null ? true : fitsChecked,
+      movementUnitCostCents,
     };
   }).immediate();
 
   return {
+    success: true,
+    movementId: result.movementId,
+    stampedUnitCostCents: result.movementUnitCostCents,
+    fits: result.fits,
     movement: database.prepare('SELECT * FROM inventory_movements WHERE id = ?').get(result.movementId),
     offcutMovement: result.offcutMovementId
       ? database.prepare('SELECT * FROM inventory_movements WHERE id = ?').get(result.offcutMovementId)
@@ -392,12 +611,22 @@ function activeOptionalMaterial(materialId, database) {
 }
 
 export function listOffcuts(status = 'available', database = db) {
-  const allowedStatuses = ['available', 'consumed', 'scrapped_sold', 'variance_lost', 'all'];
+  const allowedStatuses = ['available', 'consumed', 'scrapped_sold', 'scrap', 'variance_lost', 'all'];
   if (!allowedStatuses.includes(status)) {
     throw new HttpError(400, `status must be one of: ${allowedStatuses.join(', ')}.`);
   }
-  const where = status === 'all' ? '' : 'WHERE offcut.status = ?';
-  const parameters = status === 'all' ? [] : [status];
+  let where = '';
+  const parameters = [];
+  if (status === 'available') {
+    where = 'WHERE offcut.status = ? AND (offcut.is_scrap IS NULL OR offcut.is_scrap = 0)';
+    parameters.push('available');
+  } else if (status === 'scrap') {
+    where = 'WHERE (offcut.status = ? OR offcut.is_scrap = 1)';
+    parameters.push('scrap');
+  } else if (status !== 'all') {
+    where = 'WHERE offcut.status = ?';
+    parameters.push(status);
+  }
   return database.prepare(`
     SELECT offcut.id, offcut.material_id, material.code AS material_code,
       offcut.name, offcut.dimensions, offcut.quantity, offcut.unit,
@@ -415,7 +644,12 @@ export function listOffcuts(status = 'available', database = db) {
 
 export function createOffcut(input, actorId = null, database = db) {
   const body = requireObject(input);
-  allowOnlyKeys(body, ['name', 'dimensions', 'quantity', 'unit', 'materialId', 'unitCostCents', 'notes']);
+  allowOnlyKeys(body, [
+    'name', 'dimensions', 'quantity', 'unit', 'materialId', 'unitCostCents', 'notes',
+    'isScrap', 'is_scrap', 'status', 'isCustomerOwned', 'is_customer_owned',
+    'clientId', 'client_id', 'location', 'finish',
+  ]);
+  ensureWarehouseSchema(database);
   const name = requireText(body.name, 'name', { maxLength: 200 });
   const dimensions = requireText(body.dimensions, 'dimensions', { maxLength: 200 });
   const quantityValue = quantity(body.quantity, 'quantity');
@@ -423,12 +657,36 @@ export function createOffcut(input, actorId = null, database = db) {
   const materialId = activeOptionalMaterial(body.materialId, database);
   const unitCostCents = body.unitCostCents === undefined ? 0 : nonNegativeInteger(body.unitCostCents, 'unitCostCents');
   const notes = optionalText(body.notes, 'notes', { maxLength: 2000 });
+  const isScrap = (body.isScrap === 1 || body.isScrap === true || body.is_scrap === 1 || body.status === 'scrap') ? 1 : 0;
+  const isCustomerOwned = (body.isCustomerOwned === 1 || body.isCustomerOwned === true || body.is_customer_owned === 1) ? 1 : 0;
+  const clientId = body.clientId || body.client_id ? positiveId(body.clientId || body.client_id, 'clientId') : null;
+  const location = optionalText(body.location, 'location', { maxLength: 100 });
+  const finish = optionalText(body.finish, 'finish', { maxLength: 100 });
+  const initialStatus = isScrap ? 'scrap' : 'available';
+
   const id = database.transaction(() => {
-    const result = database.prepare(`
-      INSERT INTO secondary_warehouse_offcuts
-        (material_id, name, dimensions, quantity, unit, unit_cost_cents, notes, status)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 'available')
-    `).run(materialId, name, dimensions, quantityValue, unit, unitCostCents, notes);
+    let result;
+    try {
+      result = database.prepare(`
+        INSERT INTO secondary_warehouse_offcuts
+          (material_id, name, dimensions, quantity, unit, unit_cost_cents, notes, status,
+           is_scrap, is_customer_owned, client_id, location, finish)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(materialId, name, dimensions, quantityValue, unit, unitCostCents, notes, initialStatus,
+             isScrap, isCustomerOwned, clientId, location, finish);
+    } catch (err) {
+      if (err.message && err.message.includes('CHECK constraint failed')) {
+        result = database.prepare(`
+          INSERT INTO secondary_warehouse_offcuts
+            (material_id, name, dimensions, quantity, unit, unit_cost_cents, notes, status,
+             is_scrap, is_customer_owned, client_id, location, finish)
+          VALUES (?, ?, ?, ?, ?, ?, ?, 'available', ?, ?, ?, ?, ?)
+        `).run(materialId, name, dimensions, quantityValue, unit, unitCostCents, notes,
+               isScrap, isCustomerOwned, clientId, location, finish);
+      } else {
+        throw err;
+      }
+    }
     const offcutId = Number(result.lastInsertRowid);
     recordStockAudit(database, actorId, 'warehouse_offcut', offcutId, 'manual_register', null, {
       material_id: materialId,
@@ -436,7 +694,10 @@ export function createOffcut(input, actorId = null, database = db) {
       dimensions,
       quantity: quantityValue,
       unit,
-      status: 'available',
+      status: initialStatus,
+      is_scrap: isScrap,
+      is_customer_owned: isCustomerOwned,
+      client_id: clientId,
     });
     return offcutId;
   }).immediate();
@@ -528,7 +789,9 @@ export function returnMaterial(input, actorId = null, database = db) {
   const body = requireObject(input);
   allowOnlyKeys(body, [
     'workshopOrderId', 'targetWarehouse', 'materialId', 'quantity', 'notes',
-    'offcutName', 'offcutDimensions', 'unit',
+    'offcutName', 'offcutDimensions', 'unit', 'unitCostCents',
+    'finish', 'location', 'warehouseLocation', 'isScrap', 'is_scrap',
+    'isCustomerOwned', 'is_customer_owned', 'clientId', 'client_id',
   ]);
   const workshopOrderId = positiveId(body.workshopOrderId, 'workshopOrderId');
   const targetWarehouse = body.targetWarehouse;
@@ -537,9 +800,10 @@ export function returnMaterial(input, actorId = null, database = db) {
   }
   const returnQty = quantity(body.quantity, 'quantity');
   const notes = optionalText(body.notes, 'notes', { maxLength: 2000 });
+  ensureWarehouseSchema(database);
 
   return database.transaction(() => {
-    const order = database.prepare('SELECT id, order_code, status FROM workshop_orders WHERE id = ? AND deleted_at IS NULL').get(workshopOrderId);
+    const order = database.prepare('SELECT id, order_code, status, client_id FROM workshop_orders WHERE id = ? AND deleted_at IS NULL').get(workshopOrderId);
     if (!order) throw new HttpError(404, 'Workshop order was not found.');
 
     let movementId = null;
@@ -568,15 +832,48 @@ export function returnMaterial(input, actorId = null, database = db) {
       const offcutDimensions = requireText(body.offcutDimensions, 'offcutDimensions', { maxLength: 200 });
       const unit = body.unit ? requireText(body.unit, 'unit', { maxLength: 50 }) : 'قطعة';
       let unitCostCents = 0;
-      if (materialId) {
+      if (body.unitCostCents !== undefined) {
+        unitCostCents = nonNegativeInteger(body.unitCostCents, 'unitCostCents');
+      } else if (materialId) {
         selectedMaterial = activeMaterial(materialId, database);
         unitCostCents = selectedMaterial.unit_cost_cents;
       }
+
+      // Check credit capping: credit source job once, capped at issue cost
+      const issuedTotal = database.prepare(`
+        SELECT COALESCE(SUM(quantity * COALESCE(unit_cost_cents, 0)), 0) AS total_cents
+        FROM inventory_movements
+        WHERE source_type = 'workshop_order' AND source_id = ? AND kind = 'issue'
+      `).get(order.id).total_cents;
+
+      const alreadyCredited = database.prepare(`
+        SELECT COALESCE(SUM(quantity * COALESCE(unit_cost_cents, 0)), 0) AS total_cents
+        FROM inventory_movements
+        WHERE source_type = 'workshop_order' AND source_id = ? AND kind IN ('return', 'offcut_return')
+      `).get(order.id).total_cents;
+
+      const maxEligibleCredit = Math.max(0, issuedTotal - alreadyCredited);
+      if (returnQty * unitCostCents > maxEligibleCredit && maxEligibleCredit > 0) {
+        unitCostCents = Math.floor(maxEligibleCredit / returnQty);
+      }
+
+      const finish = optionalText(body.finish, 'finish', { maxLength: 100 });
+      const location = optionalText(body.location || body.warehouseLocation, 'location', { maxLength: 100 });
+      const isScrap = (body.isScrap === 1 || body.isScrap === true || body.is_scrap === 1) ? 1 : 0;
+      const isCustomerOwned = (body.isCustomerOwned === 1 || body.isCustomerOwned === true || body.is_customer_owned === 1) ? 1 : 0;
+      const clientId = isCustomerOwned
+        ? (body.clientId || body.client_id ? positiveId(body.clientId || body.client_id, 'clientId') : (order.client_id ?? null))
+        : null;
+
       const inserted = database.prepare(`
         INSERT INTO secondary_warehouse_offcuts
-          (material_id, name, dimensions, quantity, unit, unit_cost_cents, origin_workshop_order_id, status, notes)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 'available', ?)
-      `).run(materialId, offcutName, offcutDimensions, returnQty, unit, unitCostCents, order.id, notes);
+          (material_id, name, dimensions, quantity, unit, unit_cost_cents, origin_workshop_order_id, status, notes,
+           finish, location, is_scrap, is_customer_owned, client_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'available', ?, ?, ?, ?, ?, ?)
+      `).run(
+        materialId, offcutName, offcutDimensions, returnQty, unit, unitCostCents, order.id, notes,
+        finish, location, isScrap, isCustomerOwned, clientId,
+      );
       const offcutId = Number(inserted.lastInsertRowid);
       createdOffcut = database.prepare('SELECT * FROM secondary_warehouse_offcuts WHERE id = ?').get(offcutId);
 

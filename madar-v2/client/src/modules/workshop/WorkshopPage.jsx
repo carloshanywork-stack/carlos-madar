@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '../../lib/api.js';
 import { egpToCents, errorMessage, formatDate, formatMoney } from '../../lib/format.js';
 import { useApi } from '../../lib/useApi.js';
@@ -18,21 +18,26 @@ import PageHeader from '../../components/ui/PageHeader.jsx';
 import Tabs from '../../components/ui/Tabs.jsx';
 import Toast from '../../components/ui/Toast.jsx';
 import QuotationEstimatorModal from './QuotationEstimatorModal.jsx';
+import ProcurementHub from './ProcurementHub.jsx';
 
 const stages = [
   { value: 'in_production', label: 'قيد التشغيل' },
   { value: 'ready', label: 'جاهز للتسليم' },
   { value: 'delivered_archived', label: 'تم التسليم ومؤرشف' },
   { value: 'quotations', label: 'عروض الأسعار والتسعير' },
+  { value: 'procurement', label: 'المشتريات والتوريدات' },
 ];
 const machineLabels = { cnc_router: 'CNC Router', laser: 'Laser', both: 'Both', manual: 'Manual' };
 
-export default function WorkshopPage({ canMutate = false, canViewFinance = false }) {
-  const [stage, setStage] = useState('in_production');
+export default function WorkshopPage({ canMutate = false, canViewFinance = false, defaultStage = null }) {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const queryTab = searchParams.get('tab');
+  const [stage, setStage] = useState(defaultStage || queryTab || 'in_production');
   const isQuotationsTab = stage === 'quotations';
+  const isProcurementTab = stage === 'procurement';
 
   const { data: orders, loading: ordersLoading, error: ordersError, reload: reloadOrders } = useApi(
-    isQuotationsTab ? null : `/api/workshop/orders?status=${stage}`
+    isQuotationsTab || isProcurementTab ? null : `/api/workshop/orders?status=${stage}`
   );
   const { data: quotations, loading: quotesLoading, error: quotesError, reload: reloadQuotes } = useApi(
     isQuotationsTab ? '/api/workshop/quotations' : null
@@ -170,26 +175,34 @@ export default function WorkshopPage({ canMutate = false, canViewFinance = false
             count: item.value === 'quotations' ? quotations?.length : (stage === item.value ? orders?.length : undefined),
           }))}
           value={stage}
-          onChange={setStage}
+          onChange={(val) => { setStage(val); setSearchParams({ tab: val }); }}
           ariaLabel="مراحل تشغيل الورشة"
         />
-        <label className="madar-field madar-search">
-          <Icon name="search" size={15} />
-          <input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder={isQuotationsTab ? 'ابحث برقم العرض أو العميل أو العنوان' : 'ابحث برقم الأمر أو العميل أو المنتج'}
-            aria-label="بحث أوامر الورشة"
-          />
-        </label>
+        {!isProcurementTab && (
+          <label className="madar-field madar-search">
+            <Icon name="search" size={15} />
+            <input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder={isQuotationsTab ? 'ابحث برقم العرض أو العميل أو العنوان' : 'ابحث برقم الأمر أو العميل أو المنتج'}
+              aria-label="بحث أوامر الورشة"
+            />
+          </label>
+        )}
       </div>
 
-      {error && <div className="madar-section"><Alert tone="error">{error}</Alert></div>}
+      {isProcurementTab ? (
+        <section className="madar-section">
+          <ProcurementHub canMutate={canMutate} canViewFinance={canViewFinance} />
+        </section>
+      ) : (
+        <>
+          {error && <div className="madar-section"><Alert tone="error">{error}</Alert></div>}
 
-      <section className="madar-panel madar-section">
-        {loading ? (
-          <LoadingState label={isQuotationsTab ? 'جارٍ تحميل عروض الأسعار' : 'جارٍ تحميل أوامر الورشة'} />
-        ) : isQuotationsTab ? (
+          <section className="madar-panel madar-section">
+            {loading ? (
+              <LoadingState label={isQuotationsTab ? 'جارٍ تحميل عروض الأسعار' : 'جارٍ تحميل أوامر الورشة'} />
+            ) : isQuotationsTab ? (
           filteredQuotes.length ? (
             <div className="madar-table-wrap">
               <table className="madar-table">
@@ -304,6 +317,8 @@ export default function WorkshopPage({ canMutate = false, canViewFinance = false
           />
         )}
       </section>
+      </>
+      )}
 
       {/* Estimator Modal */}
       <QuotationEstimatorModal

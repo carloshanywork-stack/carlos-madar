@@ -2383,6 +2383,35 @@ export function migrateProcurementAndReceiptMatching(database) {
   })();
 }
 
+export function migrateCostValuationAndOverheadRates(database) {
+  const version = '20261122-cost-valuation-variance';
+  if (database.prepare('SELECT 1 FROM schema_migrations WHERE version = ?').get(version)) return;
+  database.transaction(() => {
+    const matCols = database.prepare('PRAGMA table_info(materials)').all();
+    if (!matCols.some((c) => c.name === 'weighted_average_cost_cents')) {
+      database.exec('ALTER TABLE materials ADD COLUMN weighted_average_cost_cents INTEGER NOT NULL DEFAULT 0');
+      database.exec('UPDATE materials SET weighted_average_cost_cents = unit_cost_cents WHERE unit_cost_cents > 0');
+    }
+    if (!matCols.some((c) => c.name === 'replacement_cost_cents')) {
+      database.exec('ALTER TABLE materials ADD COLUMN replacement_cost_cents INTEGER NOT NULL DEFAULT 0');
+      database.exec('UPDATE materials SET replacement_cost_cents = unit_cost_cents WHERE unit_cost_cents > 0');
+    }
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS workshop_overhead_rates (
+        id INTEGER PRIMARY KEY,
+        year_month TEXT NOT NULL UNIQUE,
+        hourly_rate_cents INTEGER NOT NULL CHECK (hourly_rate_cents >= 0),
+        rent_allocation_cents INTEGER NOT NULL DEFAULT 0 CHECK (rent_allocation_cents >= 0),
+        notes TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_workshop_overhead_rates_month ON workshop_overhead_rates(year_month);
+    `);
+    database.prepare('INSERT INTO schema_migrations (version) VALUES (?)').run(version);
+  })();
+}
+
 export function initializeDatabase({ database = db, initialAdminPassword = env.initialAdminPassword } = {}) {
   const schema = readFileSync(schemaPath, 'utf8');
   let adminCreated = false;
@@ -2453,6 +2482,7 @@ export function initializeDatabase({ database = db, initialAdminPassword = env.i
     migrateNativeDeviceSessions(database);
     migrateWorkshopJobCostingProductionSystem(database);
     migrateProcurementAndReceiptMatching(database);
+    migrateCostValuationAndOverheadRates(database);
 
     const hasUsers = database.prepare('SELECT 1 FROM users LIMIT 1').get();
 
