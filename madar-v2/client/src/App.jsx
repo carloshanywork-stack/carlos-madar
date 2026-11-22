@@ -18,6 +18,7 @@ const MaintenancePage = lazy(() => import('./modules/maintenance/MaintenancePage
 const MaintenanceOrderDetail = lazy(() => import('./modules/maintenance/OrderDetail.jsx'));
 const WorkshopPage = lazy(() => import('./modules/workshop/WorkshopPage.jsx'));
 const WorkshopOrderDetail = lazy(() => import('./modules/workshop/WorkshopOrderDetail.jsx'));
+const TechnicianWorkspacePage = lazy(() => import('./modules/workshop/TechnicianWorkspacePage.jsx'));
 const WarehousePage = lazy(() => import('./modules/warehouse/WarehousePage.jsx'));
 const FinancePage = lazy(() => import('./modules/finance/FinancePage.jsx'));
 const AccountingPage = lazy(() => import('./modules/accounting/AccountingPage.jsx'));
@@ -72,6 +73,7 @@ function BusinessRoutes({ user }) {
         <Route path="/attendance" element={canViewAttendance ? <AttendanceDashboardPage isAdmin={role === 'admin'} /> : <Navigate to="/" replace />} />
         <Route path="/workshop" element={<WorkshopPage canMutate={canMutateWorkshop} canViewFinance={canViewFinance} />} />
         <Route path="/workshop/:id" element={<WorkshopOrderDetail canMutate={canMutateWorkshop} canViewFinance={canViewFinance} />} />
+        <Route path="/my-workshop" element={<TechnicianWorkspacePage />} />
         <Route path="/warehouse" element={<WarehousePage canMutate={canMutateWarehouse} canViewFinancialDetails={canViewFinance} />} />
         <Route path="/finance" element={canViewFinance ? <FinancePage /> : <Navigate to="/" replace />} />
         <Route path="/accounting" element={canViewFinance ? <AccountingPage isAdmin={role === 'admin'} canViewPayroll /> : <Navigate to="/" replace />} />

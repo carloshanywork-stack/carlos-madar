@@ -223,10 +223,41 @@ CREATE TABLE IF NOT EXISTS rep_location_breadcrumbs (
 CREATE INDEX IF NOT EXISTS idx_rep_breadcrumbs_user_date
   ON rep_location_breadcrumbs(user_id, work_date, recorded_at, id);
 
+CREATE TABLE IF NOT EXISTS product_quotations (
+  id INTEGER PRIMARY KEY,
+  quotation_code TEXT NOT NULL UNIQUE,
+  client_id INTEGER NOT NULL REFERENCES clients(id),
+  title TEXT NOT NULL,
+  product_type TEXT NOT NULL CHECK (product_type IN ('channel_letters', 'banner_flex', 'cladding_facade', 'custom_signage')),
+  specifications_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(specifications_json)),
+  target_margin REAL NOT NULL DEFAULT 0.25 CHECK (target_margin >= 0 AND target_margin < 1.0),
+  estimated_cost_cents INTEGER NOT NULL DEFAULT 0 CHECK (estimated_cost_cents >= 0),
+  net_sale_price_cents INTEGER NOT NULL DEFAULT 0 CHECK (net_sale_price_cents >= 0),
+  tax_cents INTEGER NOT NULL DEFAULT 0 CHECK (tax_cents >= 0),
+  status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'pending_approval', 'approved', 'rejected', 'converted_to_order')),
+  approved_by INTEGER REFERENCES users(id),
+  approved_at TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS quotation_snapshots (
+  id INTEGER PRIMARY KEY,
+  quotation_id INTEGER NOT NULL REFERENCES product_quotations(id) ON DELETE CASCADE,
+  version_number INTEGER NOT NULL DEFAULT 1,
+  snapshot_payload_json TEXT NOT NULL CHECK (json_valid(snapshot_payload_json)),
+  snapshot_hash TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(quotation_id, version_number)
+);
+
 CREATE TABLE IF NOT EXISTS workshop_orders (
   id INTEGER PRIMARY KEY,
   order_code TEXT NOT NULL UNIQUE,
   client_id INTEGER NOT NULL REFERENCES clients(id),
+  quotation_id INTEGER REFERENCES product_quotations(id),
   product_name TEXT NOT NULL,
   description TEXT,
   machine_type TEXT NOT NULL CHECK (machine_type IN ('cnc_router', 'laser', 'both', 'manual')),
@@ -264,6 +295,7 @@ CREATE TABLE IF NOT EXISTS materials (
   specification TEXT,
   unit TEXT NOT NULL,
   stock REAL NOT NULL DEFAULT 0 CHECK (stock >= 0),
+  reserved_stock REAL NOT NULL DEFAULT 0 CHECK (reserved_stock >= 0),
   min_stock REAL NOT NULL DEFAULT 0 CHECK (min_stock >= 0),
   unit_cost_cents INTEGER NOT NULL DEFAULT 0 CHECK (unit_cost_cents >= 0),
   active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
@@ -290,9 +322,10 @@ CREATE TABLE IF NOT EXISTS inventory_movements (
   id INTEGER PRIMARY KEY,
   material_id INTEGER REFERENCES materials(id),
   offcut_id INTEGER REFERENCES secondary_warehouse_offcuts(id),
-  kind TEXT NOT NULL CHECK (kind IN ('purchase', 'issue', 'offcut_return', 'scrap_sale', 'variance_gain', 'variance_loss')),
+  kind TEXT NOT NULL CHECK (kind IN ('purchase', 'issue', 'offcut_return', 'scrap_sale', 'variance_gain', 'variance_loss', 'return')),
   quantity REAL NOT NULL CHECK (quantity > 0),
   warehouse TEXT NOT NULL CHECK (warehouse IN ('main', 'secondary')),
+  unit_cost_cents INTEGER,
   reference TEXT,
   source_type TEXT CHECK (source_type IN ('workshop_order', 'maintenance_custody', 'manual', 'stock_count')),
   source_id INTEGER,
@@ -300,6 +333,42 @@ CREATE TABLE IF NOT EXISTS inventory_movements (
   created_by INTEGER REFERENCES users(id),
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CHECK (material_id IS NOT NULL OR offcut_id IS NOT NULL)
+);
+
+CREATE TABLE IF NOT EXISTS inventory_reservations (
+  id INTEGER PRIMARY KEY,
+  workshop_order_id INTEGER NOT NULL REFERENCES workshop_orders(id) ON DELETE CASCADE,
+  material_id INTEGER REFERENCES materials(id),
+  offcut_id INTEGER REFERENCES secondary_warehouse_offcuts(id),
+  warehouse TEXT NOT NULL CHECK (warehouse IN ('main', 'secondary')),
+  reserved_quantity REAL NOT NULL CHECK (reserved_quantity > 0),
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'fulfilled', 'released')),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CHECK (material_id IS NOT NULL OR offcut_id IS NOT NULL)
+);
+
+CREATE TABLE IF NOT EXISTS workshop_stage_logs (
+  id INTEGER PRIMARY KEY,
+  order_id INTEGER NOT NULL REFERENCES workshop_orders(id) ON DELETE CASCADE,
+  employee_id INTEGER NOT NULL REFERENCES employees(id),
+  stage_name TEXT NOT NULL CHECK (stage_name IN ('design_cam', 'cnc_laser', 'bending_assembly', 'wiring_led', 'finishing', 'qa_inspection', 'site_installation')),
+  action TEXT NOT NULL CHECK (action IN ('start', 'pause', 'complete')),
+  duration_minutes INTEGER NOT NULL DEFAULT 0 CHECK (duration_minutes >= 0),
+  technician_hourly_rate_cents INTEGER NOT NULL DEFAULT 0,
+  notes TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS workshop_quality_inspections (
+  id INTEGER PRIMARY KEY,
+  order_id INTEGER NOT NULL REFERENCES workshop_orders(id) ON DELETE CASCADE,
+  inspector_user_id INTEGER NOT NULL REFERENCES users(id),
+  decision TEXT NOT NULL CHECK (decision IN ('approved', 'rework_required')),
+  defect_category TEXT,
+  notes TEXT,
+  photo_paths_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(photo_paths_json)),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS stock_count_sessions (

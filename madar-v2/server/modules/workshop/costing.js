@@ -2,16 +2,14 @@ import { db } from '../../database/connection.js';
 import { HttpError, positiveId } from '../http.js';
 
 /**
- * Calculates the exact Job Costing (COGS) and profitability for a workshop order:
- * Material Cost = sum(issued_quantity * unit_cost_cents)
- * Gross Profit = sale_price_cents - Material Cost
- * Margin % = (Gross Profit / sale_price_cents) * 100
+ * Calculates the exact Job Costing (COGS), labor, machine time, offcut credits,
+ * and profitability/variance analysis for a workshop order.
  */
 export function getWorkshopOrderCosting(orderId, database = db) {
   const id = positiveId(orderId, 'orderId');
   const order = database.prepare(`
     SELECT o.id, o.order_code, o.product_name, o.client_id, o.status,
-      o.sale_price_cents, o.created_at, o.delivered_at,
+      o.sale_price_cents, o.quotation_id, o.created_at, o.delivered_at,
       c.name as client_name
     FROM workshop_orders o
     LEFT JOIN clients c ON c.id = o.client_id
@@ -20,22 +18,118 @@ export function getWorkshopOrderCosting(orderId, database = db) {
 
   if (!order) throw new HttpError(404, 'Workshop order was not found.');
 
-  const issuedMaterials = database.prepare(`
-    SELECT m.id, m.code, m.name, m.specification, m.unit, m.unit_cost_cents,
-      im.id as movement_id, im.quantity, im.created_at as issued_at,
-      ROUND(im.quantity * m.unit_cost_cents) as total_cost_cents
+  // Fetch all inventory movements linked to this workshop order
+  const movements = database.prepare(`
+    SELECT
+      im.id as movement_id, im.material_id, im.offcut_id, im.kind, im.quantity, im.warehouse,
+      im.created_at as issued_at,
+      COALESCE(im.unit_cost_cents, m.unit_cost_cents, ofc.unit_cost_cents, 0) as stamped_unit_cost_cents,
+      COALESCE(m.name, ofc.name, 'خامة ورشة') as material_name,
+      COALESCE(m.code, 'OFC') as material_code,
+      COALESCE(m.unit, ofc.unit, 'قطعة') as unit
     FROM inventory_movements im
-    JOIN materials m ON m.id = im.material_id
+    LEFT JOIN materials m ON m.id = im.material_id
+    LEFT JOIN secondary_warehouse_offcuts ofc ON ofc.id = im.offcut_id
     WHERE im.source_type = 'workshop_order' AND im.source_id = ?
     ORDER BY im.id ASC
   `).all(id);
 
-  const materialCostCents = issuedMaterials.reduce((sum, item) => sum + Number(item.total_cost_cents || 0), 0);
+  let materialCostCents = 0;
+  let offcutCreditsCents = 0;
+  const processedMovements = movements.map((item) => {
+    const unitCost = Number(item.stamped_unit_cost_cents || 0);
+    const lineCost = Math.round(Number(item.quantity) * unitCost);
+    const isReturn = item.kind === 'return' || item.kind === 'offcut_return';
+
+    if (isReturn) {
+      offcutCreditsCents += lineCost;
+      materialCostCents -= lineCost;
+    } else {
+      materialCostCents += lineCost;
+    }
+
+    return {
+      ...item,
+      total_cost_cents: isReturn ? -lineCost : lineCost,
+      is_return: isReturn,
+    };
+  });
+
+  // Calculate actual labor and machine hours from workshop_stage_logs
+  let laborCostCents = 0;
+  let machineCostCents = 0;
+  let totalLaborMinutes = 0;
+  let totalMachineMinutes = 0;
+
+  try {
+    const stageLogs = database.prepare(`
+      SELECT id, stage_name, action, duration_minutes, technician_hourly_rate_cents
+      FROM workshop_stage_logs
+      WHERE order_id = ?
+    `).all(id);
+
+    for (const log of stageLogs) {
+      const minutes = Number(log.duration_minutes || 0);
+      const rateCents = Number(log.technician_hourly_rate_cents || 10000); // 100 EGP/hr fallback
+      if (minutes > 0) {
+        totalLaborMinutes += minutes;
+        laborCostCents += Math.round((minutes / 60) * rateCents);
+      }
+      if (log.stage_name === 'cnc_laser' && minutes > 0) {
+        totalMachineMinutes += minutes;
+        machineCostCents += Math.round((minutes / 60) * 20000); // 200 EGP / hr CNC rate
+      }
+    }
+  } catch {
+    // Stage logs table may not be queried in legacy setups
+  }
+
+  // Net actual cost
+  const totalCostCents = Math.max(0, materialCostCents) + laborCostCents + machineCostCents;
   const salePriceCents = Number(order.sale_price_cents || 0);
-  const grossProfitCents = salePriceCents - materialCostCents;
+  const grossProfitCents = salePriceCents - totalCostCents;
   const marginPercent = salePriceCents > 0
     ? Math.round((grossProfitCents / salePriceCents) * 1000) / 10
     : 0;
+  const markupPercent = totalCostCents > 0
+    ? Math.round((grossProfitCents / totalCostCents) * 1000) / 10
+    : 0;
+
+  // Check if linked to an approved quotation snapshot
+  let variance = null;
+  if (order.quotation_id) {
+    try {
+      const snapshot = database.prepare(`
+        SELECT snapshot_payload_json FROM quotation_snapshots
+        WHERE quotation_id = ?
+        ORDER BY version_number DESC LIMIT 1
+      `).get(order.quotation_id);
+
+      if (snapshot) {
+        const payload = JSON.parse(snapshot.snapshot_payload_json);
+        const estimatedTotal = Number(payload.estimatedCostCents || 0);
+        const estimatedPrice = Number(payload.netSalePriceCents || 0);
+        const estimatedProfit = estimatedPrice - estimatedTotal;
+        const estimatedMargin = estimatedPrice > 0 ? Math.round((estimatedProfit / estimatedPrice) * 1000) / 10 : 0;
+        const varianceCents = totalCostCents - estimatedTotal;
+
+        variance = {
+          estimatedTotalCostCents: estimatedTotal,
+          actualTotalCostCents: totalCostCents,
+          varianceCents,
+          estimatedProfitCents: estimatedProfit,
+          actualProfitCents: grossProfitCents,
+          estimatedMarginPercent: estimatedMargin,
+          actualMarginPercent: marginPercent,
+          offcutCreditsCents,
+          laborVarianceCents: laborCostCents,
+          machineVarianceCents: machineCostCents,
+        };
+      }
+    } catch {
+      // Snapshot parsing fallback
+    }
+  }
 
   return {
     orderId: order.id,
@@ -44,11 +138,19 @@ export function getWorkshopOrderCosting(orderId, database = db) {
     clientName: order.client_name,
     status: order.status,
     salePriceCents,
-    materialCostCents,
+    materialCostCents: Math.max(0, materialCostCents),
+    offcutCreditsCents,
+    laborCostCents,
+    machineCostCents,
+    totalLaborMinutes,
+    totalMachineMinutes,
+    totalCostCents,
     grossProfitCents,
     marginPercent,
-    materialsCount: issuedMaterials.length,
-    materialsUsed: issuedMaterials,
+    markupPercent,
+    materialsCount: processedMovements.length,
+    materialsUsed: processedMovements,
+    variance,
   };
 }
 
@@ -65,8 +167,8 @@ export function getWorkshopProfitabilitySummary(database = db) {
 
   const summaries = orders.map((o) => getWorkshopOrderCosting(o.id, database));
   const totalRevenueCents = summaries.reduce((sum, o) => sum + o.salePriceCents, 0);
-  const totalMaterialCostCents = summaries.reduce((sum, o) => sum + o.materialCostCents, 0);
-  const totalProfitCents = totalRevenueCents - totalMaterialCostCents;
+  const totalCostCents = summaries.reduce((sum, o) => sum + o.totalCostCents, 0);
+  const totalProfitCents = totalRevenueCents - totalCostCents;
   const overallMarginPercent = totalRevenueCents > 0
     ? Math.round((totalProfitCents / totalRevenueCents) * 1000) / 10
     : 0;
@@ -74,7 +176,10 @@ export function getWorkshopProfitabilitySummary(database = db) {
   return {
     totalOrders: orders.length,
     totalRevenueCents,
-    totalMaterialCostCents,
+    totalMaterialCostCents: summaries.reduce((sum, o) => sum + o.materialCostCents, 0),
+    totalLaborCostCents: summaries.reduce((sum, o) => sum + o.laborCostCents, 0),
+    totalMachineCostCents: summaries.reduce((sum, o) => sum + o.machineCostCents, 0),
+    totalCostCents,
     totalProfitCents,
     overallMarginPercent,
     orders: summaries,

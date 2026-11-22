@@ -6,6 +6,7 @@ const sections = [
   { path: '/clients', label: 'العملاء', icon: 'users' },
   { path: '/maintenance', label: 'الصيانة الميدانية', icon: 'wrench' },
   { path: '/workshop', label: 'تشغيل الورشة', icon: 'factory' },
+  { path: '/my-workshop', label: 'شغلي في الورشة', icon: 'wrench' },
   { path: '/warehouse', label: 'المخزون والمواد', icon: 'boxes' },
   { path: '/finance', label: 'الخزينة والفواتير', icon: 'wallet' },
   { path: '/accounting', label: 'المحاسبة والموظفون', icon: 'chart' },

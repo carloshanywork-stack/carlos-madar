@@ -10,6 +10,9 @@ import {
   listMaterials,
   listMovements,
   listOffcuts,
+  releaseReservation,
+  reserveMaterial,
+  returnMaterial,
   sellScrap,
 } from './service.js';
 import { reconcileStockCount, startStockCount } from './stock-count.service.js';
@@ -46,6 +49,18 @@ router.get('/movements', (req, res) => {
 
 router.post('/issue', requireWarehouseMutationAccess, (req, res) => {
   res.status(201).json(roleAware(issueMaterial(req.body, requestActorId(req)), req));
+});
+
+router.post('/return', requireWarehouseMutationAccess, (req, res) => {
+  res.status(201).json(roleAware(returnMaterial(req.body, requestActorId(req)), req));
+});
+
+router.post('/reservations', requireWarehouseMutationAccess, (req, res) => {
+  res.status(201).json(roleAware(reserveMaterial(req.body, requestActorId(req)), req));
+});
+
+router.post('/reservations/:id/release', requireWarehouseMutationAccess, (req, res) => {
+  res.json(roleAware(releaseReservation(req.params.id, requestActorId(req)), req));
 });
 
 router.get('/offcuts', (req, res) => {

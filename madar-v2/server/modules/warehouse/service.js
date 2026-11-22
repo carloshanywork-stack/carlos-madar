@@ -54,6 +54,28 @@ function activeWorkshopOrder(orderId, database) {
 }
 
 function logMovement(database, movement) {
+  const hasUnitCost = database.prepare('PRAGMA table_info(inventory_movements)').all().some((c) => c.name === 'unit_cost_cents');
+  if (hasUnitCost) {
+    const result = database.prepare(`
+      INSERT INTO inventory_movements
+        (material_id, offcut_id, kind, quantity, warehouse, reference,
+         source_type, source_id, notes, unit_cost_cents, created_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      movement.materialId ?? null,
+      movement.offcutId ?? null,
+      movement.kind,
+      movement.quantity,
+      movement.warehouse,
+      movement.reference ?? null,
+      movement.sourceType ?? null,
+      movement.sourceId ?? null,
+      movement.notes ?? null,
+      movement.unitCostCents ?? null,
+      movement.actorId ?? null,
+    );
+    return Number(result.lastInsertRowid);
+  }
   const result = database.prepare(`
     INSERT INTO inventory_movements
       (material_id, offcut_id, kind, quantity, warehouse, reference,
@@ -257,6 +279,10 @@ export function issueMaterial(input, actorId = null, database = db) {
       }
     }
 
+    const movementUnitCostCents = sourceWarehouse === 'main'
+      ? selectedMaterial.unit_cost_cents
+      : (selectedOffcut.unit_cost_cents || 0);
+
     const movementId = logMovement(database, {
       materialId: selectedMaterial?.id ?? selectedOffcut?.material_id ?? null,
       offcutId: sourceWarehouse === 'secondary' ? offcutId : null,
@@ -267,6 +293,7 @@ export function issueMaterial(input, actorId = null, database = db) {
       sourceType: 'workshop_order',
       sourceId: order.id,
       notes,
+      unitCostCents: movementUnitCostCents,
       actorId,
     });
     let offcutMovementId = null;
@@ -280,6 +307,7 @@ export function issueMaterial(input, actorId = null, database = db) {
         sourceType: 'workshop_order',
         sourceId: order.id,
         notes: `Remainder returned from ${mainWithdrawalQuantity} whole-unit main-warehouse withdrawal.`,
+        unitCostCents: selectedMaterial.unit_cost_cents,
         actorId,
       });
       recordStockAudit(database, actorId, 'warehouse_offcut', selectedOffcut.id, 'created_from_main_withdrawal', null, {
@@ -288,6 +316,29 @@ export function issueMaterial(input, actorId = null, database = db) {
         quantity: remainderQuantity,
         unit: selectedMaterial.unit,
       });
+    }
+
+    // Fulfill active reservations if present
+    if (sourceWarehouse === 'main' && selectedMaterial) {
+      try {
+        const reservation = database.prepare(`
+          SELECT id, reserved_quantity FROM inventory_reservations
+          WHERE workshop_order_id = ? AND material_id = ? AND status = 'active'
+          LIMIT 1
+        `).get(order.id, selectedMaterial.id);
+        if (reservation) {
+          const fulfillQty = Math.min(reservation.reserved_quantity, mainWithdrawalQuantity);
+          const remainingReserved = reservation.reserved_quantity - fulfillQty;
+          if (remainingReserved <= 0) {
+            database.prepare("UPDATE inventory_reservations SET status = 'fulfilled', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(reservation.id);
+          } else {
+            database.prepare("UPDATE inventory_reservations SET reserved_quantity = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(remainingReserved, reservation.id);
+          }
+          database.prepare("UPDATE materials SET reserved_stock = MAX(0, reserved_stock - ?) WHERE id = ?").run(fulfillQty, selectedMaterial.id);
+        }
+      } catch {
+        // Table may not exist yet in legacy tests before migration
+      }
     }
     recordStockAudit(database, actorId, 'inventory_movement', movementId, 'workshop_issue', null, {
       workshop_order_id: order.id,
@@ -467,5 +518,145 @@ export function getLowStockMaterials(database = db) {
     WHERE active = 1 AND deleted_at IS NULL AND min_stock > 0 AND stock <= min_stock
     ORDER BY (stock / CASE WHEN min_stock = 0 THEN 1 ELSE min_stock END) ASC
   `).all();
+}
+
+export function returnMaterial(input, actorId = null, database = db) {
+  const body = requireObject(input);
+  allowOnlyKeys(body, [
+    'workshopOrderId', 'targetWarehouse', 'materialId', 'quantity', 'notes',
+    'offcutName', 'offcutDimensions', 'unit',
+  ]);
+  const workshopOrderId = positiveId(body.workshopOrderId, 'workshopOrderId');
+  const targetWarehouse = body.targetWarehouse;
+  if (!['main', 'secondary'].includes(targetWarehouse)) {
+    throw new HttpError(400, 'targetWarehouse must be main or secondary.');
+  }
+  const returnQty = quantity(body.quantity, 'quantity');
+  const notes = optionalText(body.notes, 'notes', { maxLength: 2000 });
+
+  return database.transaction(() => {
+    const order = database.prepare('SELECT id, order_code, status FROM workshop_orders WHERE id = ? AND deleted_at IS NULL').get(workshopOrderId);
+    if (!order) throw new HttpError(404, 'Workshop order was not found.');
+
+    let movementId = null;
+    let selectedMaterial = null;
+    let createdOffcut = null;
+
+    if (targetWarehouse === 'main') {
+      const materialId = positiveId(body.materialId, 'materialId');
+      selectedMaterial = activeMaterial(materialId, database);
+      database.prepare('UPDATE materials SET stock = stock + ? WHERE id = ?').run(returnQty, materialId);
+      movementId = logMovement(database, {
+        materialId,
+        kind: 'return',
+        quantity: returnQty,
+        warehouse: 'main',
+        reference: order.order_code,
+        sourceType: 'workshop_order',
+        sourceId: order.id,
+        unitCostCents: selectedMaterial.unit_cost_cents,
+        notes: notes || `Returned whole-unit material from ${order.order_code}`,
+        actorId,
+      });
+    } else {
+      const materialId = body.materialId ? positiveId(body.materialId, 'materialId') : null;
+      const offcutName = requireText(body.offcutName, 'offcutName', { maxLength: 200 });
+      const offcutDimensions = requireText(body.offcutDimensions, 'offcutDimensions', { maxLength: 200 });
+      const unit = body.unit ? requireText(body.unit, 'unit', { maxLength: 50 }) : 'قطعة';
+      let unitCostCents = 0;
+      if (materialId) {
+        selectedMaterial = activeMaterial(materialId, database);
+        unitCostCents = selectedMaterial.unit_cost_cents;
+      }
+      const inserted = database.prepare(`
+        INSERT INTO secondary_warehouse_offcuts
+          (material_id, name, dimensions, quantity, unit, unit_cost_cents, origin_workshop_order_id, status, notes)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'available', ?)
+      `).run(materialId, offcutName, offcutDimensions, returnQty, unit, unitCostCents, order.id, notes);
+      const offcutId = Number(inserted.lastInsertRowid);
+      createdOffcut = database.prepare('SELECT * FROM secondary_warehouse_offcuts WHERE id = ?').get(offcutId);
+
+      movementId = logMovement(database, {
+        materialId,
+        offcutId,
+        kind: 'offcut_return',
+        quantity: returnQty,
+        warehouse: 'secondary',
+        reference: order.order_code,
+        sourceType: 'workshop_order',
+        sourceId: order.id,
+        unitCostCents,
+        notes: notes || `Offcut return from ${order.order_code}`,
+        actorId,
+      });
+    }
+
+    recordStockAudit(database, actorId, 'inventory_movement', movementId, 'workshop_return', null, {
+      order_id: order.id,
+      order_code: order.order_code,
+      warehouse: targetWarehouse,
+      quantity: returnQty,
+      movement_id: movementId,
+    });
+
+    return {
+      movementId,
+      orderCode: order.order_code,
+      warehouse: targetWarehouse,
+      quantity: returnQty,
+      material: selectedMaterial,
+      offcut: createdOffcut,
+    };
+  }).immediate();
+}
+
+export function reserveMaterial(input, actorId = null, database = db) {
+  const body = requireObject(input);
+  allowOnlyKeys(body, ['workshopOrderId', 'materialId', 'offcutId', 'warehouse', 'quantity']);
+  const workshopOrderId = positiveId(body.workshopOrderId, 'workshopOrderId');
+  const warehouse = body.warehouse ?? 'main';
+  const reqQuantity = quantity(body.quantity, 'quantity');
+
+  return database.transaction(() => {
+    const order = database.prepare('SELECT id, order_code FROM workshop_orders WHERE id = ? AND deleted_at IS NULL').get(workshopOrderId);
+    if (!order) throw new HttpError(404, 'Workshop order was not found.');
+
+    if (warehouse === 'main') {
+      const materialId = positiveId(body.materialId, 'materialId');
+      const material = activeMaterial(materialId, database);
+      const available = material.stock - (material.reserved_stock ?? 0);
+      if (available < reqQuantity) {
+        throw new HttpError(409, `Insufficient unreserved stock for ${material.code}. Available: ${available}, Requested: ${reqQuantity}`);
+      }
+      database.prepare('UPDATE materials SET reserved_stock = reserved_stock + ? WHERE id = ?').run(reqQuantity, materialId);
+      const res = database.prepare(`
+        INSERT INTO inventory_reservations (workshop_order_id, material_id, warehouse, reserved_quantity, status)
+        VALUES (?, ?, 'main', ?, 'active')
+      `).run(workshopOrderId, materialId, reqQuantity);
+      return { id: Number(res.lastInsertRowid), workshopOrderId, materialId, reservedQuantity: reqQuantity };
+    } else {
+      const offcutId = positiveId(body.offcutId, 'offcutId');
+      const offcut = database.prepare('SELECT * FROM secondary_warehouse_offcuts WHERE id = ?').get(offcutId);
+      if (!offcut || offcut.status !== 'available') throw new HttpError(409, 'Offcut not available for reservation.');
+      const res = database.prepare(`
+        INSERT INTO inventory_reservations (workshop_order_id, offcut_id, warehouse, reserved_quantity, status)
+        VALUES (?, ?, 'secondary', ?, 'active')
+      `).run(workshopOrderId, offcutId, reqQuantity);
+      return { id: Number(res.lastInsertRowid), workshopOrderId, offcutId, reservedQuantity: reqQuantity };
+    }
+  }).immediate();
+}
+
+export function releaseReservation(reservationId, actorId = null, database = db) {
+  const id = positiveId(reservationId, 'reservationId');
+  return database.transaction(() => {
+    const res = database.prepare('SELECT * FROM inventory_reservations WHERE id = ?').get(id);
+    if (!res || res.status !== 'active') throw new HttpError(404, 'Active reservation was not found.');
+    if (res.warehouse === 'main' && res.material_id) {
+      database.prepare('UPDATE materials SET reserved_stock = MAX(0, reserved_stock - ?) WHERE id = ?').run(res.reserved_quantity, res.material_id);
+    }
+    database.prepare("UPDATE inventory_reservations SET status = 'released', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(id);
+    return { released: true, id };
+  }).immediate();
 }
 
