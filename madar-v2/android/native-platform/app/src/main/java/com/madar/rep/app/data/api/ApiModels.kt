@@ -19,7 +19,20 @@ import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.jsonPrimitive
 
 @Serializable
-data class LoginRequest(val username: String, val password: String)
+data class LoginRequest(
+    val username: String,
+    val password: String,
+    val deviceId: String? = null,
+    val deviceName: String? = null,
+    val appVersion: String? = null,
+)
+
+@Serializable
+data class SessionPolicy(
+    val offlineLeaseDurationDays: Int = 14,
+    val refreshTokenDurationDays: Int = 30,
+    val tokenType: String = "Bearer",
+)
 
 @Serializable
 data class RepIdentity(
@@ -34,7 +47,29 @@ data class RepIdentity(
 data class LoginResponse(
     val success: Boolean = false,
     val token: String? = null,
+    val refreshToken: String? = null,
+    val offlineLease: String? = null,
+    val deviceSessionId: String? = null,
+    val policy: SessionPolicy? = null,
     val rep: RepIdentity? = null,
+    val message: String? = null,
+    val error: String? = null,
+)
+
+@Serializable
+data class RefreshRequest(
+    val deviceId: String,
+    val refreshToken: String,
+)
+
+@Serializable
+data class RefreshResponse(
+    val success: Boolean = false,
+    val token: String? = null,
+    val refreshToken: String? = null,
+    val offlineLease: String? = null,
+    val deviceSessionId: String? = null,
+    val policy: SessionPolicy? = null,
     val message: String? = null,
     val error: String? = null,
 )

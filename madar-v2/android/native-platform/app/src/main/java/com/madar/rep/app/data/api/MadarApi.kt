@@ -44,11 +44,40 @@ class MadarApi(
     private val baseUrl = normalizeServerUrl(serverUrl)
     private val json = Json { ignoreUnknownKeys = true; explicitNulls = false; encodeDefaults = true }
 
-    fun login(username: String, password: String): HttpResult {
-        val payload = json.encodeToString(LoginRequest.serializer(), LoginRequest(username.trim(), password))
+    fun login(
+        username: String,
+        password: String,
+        deviceId: String? = null,
+        deviceName: String? = null,
+        appVersion: String? = null,
+    ): HttpResult {
+        val payload = json.encodeToString(
+            LoginRequest.serializer(),
+            LoginRequest(
+                username = username.trim(),
+                password = password,
+                deviceId = deviceId,
+                deviceName = deviceName,
+                appVersion = appVersion,
+            )
+        )
         return execute(
             Request.Builder()
                 .url("$baseUrl/api/rep/login")
+                .header("x-madar-native-client", "android")
+                .post(payload.toRequestBody(JSON_MEDIA))
+                .build()
+        )
+    }
+
+    fun refresh(deviceId: String, refreshToken: String): HttpResult {
+        val payload = json.encodeToString(
+            RefreshRequest.serializer(),
+            RefreshRequest(deviceId = deviceId, refreshToken = refreshToken)
+        )
+        return execute(
+            Request.Builder()
+                .url("$baseUrl/api/rep/refresh")
                 .header("x-madar-native-client", "android")
                 .post(payload.toRequestBody(JSON_MEDIA))
                 .build()

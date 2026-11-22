@@ -67,6 +67,8 @@ import android.os.Build
 data class LoginUiState(
     val busy: Boolean = false,
     val error: String? = null,
+    val enrolledIdentity: com.madar.rep.app.data.session.LocalIdentity? = null,
+    val isLocked: Boolean = false,
 )
 
 data class SyncUiState(
@@ -135,7 +137,12 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
     private val breadcrumbStartAllowed = MutableStateFlow(false)
     val session: StateFlow<Session?> = container.sessions.session
 
-    private val _login = MutableStateFlow(LoginUiState())
+    private val _login = MutableStateFlow(
+        LoginUiState(
+            enrolledIdentity = container.sessions.enrolledIdentity(),
+            isLocked = container.sessions.isLocked(),
+        )
+    )
     val login: StateFlow<LoginUiState> = _login.asStateFlow()
 
     private val _messages = MutableSharedFlow<String>(extraBufferCapacity = 16)
@@ -222,7 +229,7 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val gpsPoints = session.flatMapLatest { current ->
-        if (current == null) flowOf(emptyList()) else container.database.gpsPoints().observeForOwner(current.repId)
+        if (current == null) flowOf(emptyList()) else container.database.gpsPoints().observeForOwner(current.ownerScopeId, current.repId)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val mapPacks: StateFlow<List<MapPackEntity>> = container.mapRepository.observePacks()
@@ -298,17 +305,49 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
-    fun login(serverUrl: String, username: String, password: String) {
+    fun unlockOffline() {
         if (_login.value.busy) return
-        _login.value = LoginUiState(busy = true)
+        _login.value = _login.value.copy(busy = true, error = null)
         viewModelScope.launch {
             try {
                 withContext(Dispatchers.IO) {
-                    container.sessions.login(serverUrl, username, password)
+                    val unlocked = container.sessions.unlockOffline()
+                    container.syncEngine.requeueAllNeedsLogin(unlocked.ownerScopeId, unlocked.repId)
                 }
-                _login.value = LoginUiState()
+                _login.value = LoginUiState(
+                    enrolledIdentity = container.sessions.enrolledIdentity(),
+                    isLocked = false,
+                )
+                viewModelScope.launch(Dispatchers.IO) {
+                    container.sessions.refreshCredentials()
+                }
             } catch (error: Exception) {
-                _login.value = LoginUiState(error = human(error))
+                _login.value = _login.value.copy(busy = false, error = human(error))
+            }
+        }
+    }
+
+    fun login(serverUrl: String, username: String, password: String) {
+        if (_login.value.busy) return
+        _login.value = _login.value.copy(busy = true, error = null)
+        viewModelScope.launch {
+            try {
+                val newSession = withContext(Dispatchers.IO) {
+                    val s = container.sessions.login(serverUrl, username, password)
+                    container.syncEngine.requeueAllNeedsLogin(s.ownerScopeId, s.repId)
+                    s
+                }
+                _login.value = LoginUiState(
+                    enrolledIdentity = container.sessions.enrolledIdentity(),
+                    isLocked = false,
+                )
+                syncNow()
+            } catch (error: Exception) {
+                _login.value = _login.value.copy(
+                    busy = false,
+                    error = human(error),
+                    enrolledIdentity = container.sessions.enrolledIdentity(),
+                )
             }
         }
     }
@@ -663,18 +702,34 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
-    fun logout() {
+    fun lock() {
         viewModelScope.launch {
             try {
                 com.madar.rep.app.location.GpsBreadcrumbService.stop(container.appContext)
                 withContext(Dispatchers.IO) {
-                    container.sessions.logout()
-                    container.database.routes().clear()
-                    container.photoStore.clearOrphans()
-                    container.photoStore.pruneOldPhotos(7)
+                    container.sessions.lock()
                 }
                 _sync.value = SyncUiState()
-                _login.value = LoginUiState()
+                _login.value = LoginUiState(
+                    enrolledIdentity = container.sessions.enrolledIdentity(),
+                    isLocked = true,
+                )
+                _location.value = LocationUiState()
+            } catch (error: Exception) { _messages.emit(human(error)) }
+        }
+    }
+
+    fun logout() = lock()
+
+    fun removeAccount() {
+        viewModelScope.launch {
+            try {
+                com.madar.rep.app.location.GpsBreadcrumbService.stop(container.appContext)
+                withContext(Dispatchers.IO) {
+                    container.sessions.removeAccount()
+                }
+                _sync.value = SyncUiState()
+                _login.value = LoginUiState(enrolledIdentity = null, isLocked = false)
                 _location.value = LocationUiState()
             } catch (error: Exception) { _messages.emit(human(error)) }
         }
@@ -1303,9 +1358,9 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun retryGpsPoint(clientPointId: String) {
-        val owner = session.value?.repId ?: return
+        val current = session.value ?: return
         viewModelScope.launch {
-            container.database.gpsPoints().retryNow(clientPointId, owner)
+            container.database.gpsPoints().retryNow(clientPointId, current.ownerScopeId)
             syncNow()
         }
     }

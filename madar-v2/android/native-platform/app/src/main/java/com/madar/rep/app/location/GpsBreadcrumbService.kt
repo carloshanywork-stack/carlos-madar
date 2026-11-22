@@ -113,6 +113,7 @@ class GpsBreadcrumbService : Service() {
             state = GpsPointState.QUEUED,
             contentHash = Hashing.sha256Hex(payload.toString().toByteArray()),
             createdAt = System.currentTimeMillis(),
+            ownerScopeId = if (scopeAtCapture > 0) scopeAtCapture else repId,
         )
         serviceScope.launch {
             val container = (application as MadarApplication).container

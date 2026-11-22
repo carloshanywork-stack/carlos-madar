@@ -18,6 +18,11 @@ import {
   syncRepAttendanceAction,
 } from '../employees/attendance.js';
 import {
+  enrollNativeDeviceSession,
+  rotateNativeDeviceSession,
+  revokeDeviceSession,
+} from '../auth/device-session.js';
+import {
   authenticateRepUser,
   authCookieOptions,
   REP_ACCOUNT_DISABLED_MESSAGE,
@@ -82,7 +87,7 @@ function setSessionCookie(req, res, token) {
 
 router.post('/login', loginRateLimiter, asyncHandler(async (req, res) => {
   const body = requireObject(req.body);
-  allowOnlyKeys(body, ['username', 'password']);
+  allowOnlyKeys(body, ['username', 'password', 'deviceId', 'deviceName', 'appVersion']);
   const username = requireText(body.username, 'Username', { minLength: 1, maxLength: 64 });
   if (typeof body.password !== 'string' || !body.password || body.password.length > 1024) {
     throw new HttpError(400, 'Username and password are required.');
@@ -101,10 +106,65 @@ router.post('/login', loginRateLimiter, asyncHandler(async (req, res) => {
 
   setSessionCookie(req, res, result.token);
   const response = { success: true, rep: result.user };
-  // Only the native Android client needs the bearer credential for WorkManager jobs.
-  // Browser sessions continue to use the HttpOnly cookie exclusively.
-  if (req.get('x-madar-native-client') === 'android') response.token = result.token;
+  const isNative = req.get('x-madar-native-client') === 'android' || Boolean(body.deviceId);
+  if (isNative) {
+    response.token = result.token;
+    if (body.deviceId && typeof body.deviceId === 'string') {
+      const serverOrigin = `${req.protocol}://${req.get('host') || 'localhost'}`;
+      const enrollment = enrollNativeDeviceSession({
+        user: result.user,
+        deviceId: body.deviceId,
+        deviceName: body.deviceName,
+        appVersion: body.appVersion,
+        serverOrigin,
+        database: db,
+      });
+      response.token = enrollment.token;
+      response.refreshToken = enrollment.refreshToken;
+      response.offlineLease = enrollment.offlineLease;
+      response.deviceSessionId = enrollment.deviceSessionId;
+      response.policy = enrollment.policy;
+    }
+  }
   res.json(response);
+}));
+
+const refreshRateLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'تم تجاوز الحد المسموح لطلبات تجديد الجلسة. حاول مرة أخرى بعد دقيقة.' },
+});
+
+router.post('/refresh', refreshRateLimiter, asyncHandler(async (req, res) => {
+  const body = requireObject(req.body);
+  allowOnlyKeys(body, ['deviceId', 'refreshToken']);
+  const deviceId = requireText(body.deviceId, 'deviceId', { minLength: 1, maxLength: 128 });
+  const refreshToken = requireText(body.refreshToken, 'refreshToken', { minLength: 16, maxLength: 128 });
+
+  const serverOrigin = `${req.protocol}://${req.get('host') || 'localhost'}`;
+  const rotation = rotateNativeDeviceSession({
+    deviceId,
+    refreshToken,
+    serverOrigin,
+    database: db,
+  });
+
+  setSessionCookie(req, res, rotation.token);
+  res.json(rotation);
+}));
+
+router.post('/device/revoke', requireAuthentication, asyncHandler(async (req, res) => {
+  const body = req.body ? requireObject(req.body) : {};
+  const deviceSessionId = body.deviceSessionId || req.get('x-device-session-id') || null;
+  revokeDeviceSession({
+    deviceSessionId,
+    userId: req.user?.id ? Number(req.user.id) : null,
+    reason: 'rep_logout',
+    database: db,
+  });
+  res.json({ success: true, message: 'Device session revoked.' });
 }));
 
 router.get('/map/packs', requireAuthentication, (_req, res) => {

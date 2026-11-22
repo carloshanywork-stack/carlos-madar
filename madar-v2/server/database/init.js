@@ -2168,6 +2168,45 @@ export function migrateMaintenanceCardPhotoReviews(database) {
   }).immediate();
 }
 
+export function migrateNativeDeviceSessions(database) {
+  const version = '20261122-native-device-sessions';
+  if (database.prepare('SELECT 1 FROM schema_migrations WHERE version = ?').get(version)) return;
+  database.transaction(() => {
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS native_device_sessions (
+        id TEXT PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        device_id TEXT NOT NULL,
+        device_name TEXT,
+        app_version TEXT,
+        refresh_token_hash TEXT NOT NULL,
+        token_family_id TEXT NOT NULL,
+        family_generation INTEGER NOT NULL DEFAULT 1,
+        offline_lease_expires_at TEXT NOT NULL,
+        refresh_expires_at TEXT NOT NULL,
+        last_used_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        revoked_at TEXT,
+        revocation_reason TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_native_device_sessions_user_device ON native_device_sessions(user_id, device_id);
+      CREATE INDEX IF NOT EXISTS idx_native_device_sessions_token_hash ON native_device_sessions(refresh_token_hash);
+      CREATE INDEX IF NOT EXISTS idx_native_device_sessions_family ON native_device_sessions(token_family_id);
+
+      CREATE TABLE IF NOT EXISTS native_device_session_tokens (
+        token_hash TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL REFERENCES native_device_sessions(id) ON DELETE CASCADE,
+        family_id TEXT NOT NULL,
+        generation INTEGER NOT NULL,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_native_tokens_session ON native_device_session_tokens(session_id);
+      CREATE INDEX IF NOT EXISTS idx_native_tokens_family ON native_device_session_tokens(family_id);
+    `);
+    database.prepare('INSERT INTO schema_migrations (version) VALUES (?)').run(version);
+  })();
+}
+
 export function initializeDatabase({ database = db, initialAdminPassword = env.initialAdminPassword } = {}) {
   const schema = readFileSync(schemaPath, 'utf8');
   let adminCreated = false;
@@ -2235,6 +2274,7 @@ export function initializeDatabase({ database = db, initialAdminPassword = env.i
     migrateMaintenanceCardPhotoReviews(database);
     migrateTransactionalEventOutbox(database);
     migrateMachineTimestampMetadata(database);
+    migrateNativeDeviceSessions(database);
 
     const hasUsers = database.prepare('SELECT 1 FROM users LIMIT 1').get();
 
