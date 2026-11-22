@@ -372,14 +372,16 @@ export function convertQuotationToWorkshopOrder(quotationId, input = {}, actorId
   allowOnlyKeys(body, ['targetDeliveryDate', 'technicianIds', 'machineType', 'description']);
 
   return database.transaction(() => {
+    // Check existing order for idempotency first
+    const existing = database.prepare('SELECT id, order_code FROM workshop_orders WHERE quotation_id = ? AND deleted_at IS NULL').get(id);
+    if (existing) {
+      return { success: true, orderId: existing.id, orderCode: existing.order_code, alreadyConverted: true };
+    }
+
     const quote = getQuotation(id, database);
     if (quote.status !== 'approved') {
       throw new HttpError(409, 'Only approved quotations can be converted into workshop production orders.');
     }
-
-    // Check existing order
-    const existing = database.prepare('SELECT id FROM workshop_orders WHERE quotation_id = ? AND deleted_at IS NULL').get(id);
-    if (existing) throw new HttpError(409, 'A workshop order already exists for this quotation.');
 
     // Compute next order code MFG-XXXX
     const orderCodes = database.prepare("SELECT order_code FROM workshop_orders WHERE order_code GLOB 'MFG-[0-9]*'").all();

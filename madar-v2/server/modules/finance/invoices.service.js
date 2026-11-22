@@ -274,6 +274,113 @@ export function createPurchaseInvoice(input, actorId = null, database = db) {
   return readInvoice(invoiceId, database);
 }
 
+export function createMatchedPurchaseInvoice(input, actorId = null, database = db) {
+  const body = requireObject(input);
+  allowOnlyKeys(body, ['purchaseOrderId', 'supplier', 'notes', 'operationId', 'items']);
+  const purchaseOrderId = positiveId(body.purchaseOrderId, 'purchaseOrderId');
+  const po = database.prepare(`
+    SELECT id, po_code, supplier, workshop_order_id, status, total_cents
+    FROM purchase_orders WHERE id = ?
+  `).get(purchaseOrderId);
+  if (!po) throw new HttpError(404, 'Purchase order was not found.');
+  if (!['approved', 'partially_received', 'received'].includes(po.status)) {
+    throw new HttpError(409, `Invoices can only be matched to approved or received purchase orders (current: ${po.status}).`);
+  }
+
+  const existing = database.prepare(`
+    SELECT id FROM invoices
+    WHERE purchase_order_id = ? AND kind = 'purchase' AND deleted_at IS NULL
+  `).get(purchaseOrderId);
+  if (existing) {
+    return readInvoice(existing.id, database);
+  }
+
+  const supplier = requireText(body.supplier ?? po.supplier, 'supplier', { maxLength: 200 });
+  const notes = optionalText(body.notes, 'notes', { maxLength: 2000 });
+
+  const poItems = database.prepare(`
+    SELECT poi.*, m.code AS material_code, m.name AS material_name, m.unit
+    FROM purchase_order_items AS poi
+    JOIN materials AS m ON m.id = poi.material_id
+    WHERE poi.purchase_order_id = ?
+    ORDER BY poi.id ASC
+  `).all(purchaseOrderId);
+
+  if (!poItems.length) throw new HttpError(400, 'Purchase order has no items to invoice.');
+
+  const totalCents = poItems.reduce((acc, it) => {
+    const qty = it.received_quantity > 0 ? it.received_quantity : it.quantity;
+    return acc + Math.round(qty * it.unit_cost_cents);
+  }, 0);
+
+  const invoiceId = database.transaction(() => {
+    const invoiceCode = nextInvoiceCode('PUR', database);
+    const invoiceResult = database.prepare(`
+      INSERT INTO invoices
+        (code, kind, supplier, purchase_order_id, workshop_order_id, subtotal_cents, tax_cents,
+         total_cents, paid_total_cents, remaining_cents, payment_status,
+         status, notes, created_by)
+      VALUES (?, 'purchase', ?, ?, ?, ?, 0, ?, 0, ?, 'unpaid', 'approved', ?, ?)
+    `).run(invoiceCode, supplier, po.id, po.workshop_order_id, totalCents, totalCents, totalCents, notes, actorId);
+    const id = Number(invoiceResult.lastInsertRowid);
+
+    const insertLine = database.prepare(`
+      INSERT INTO invoice_items
+        (invoice_id, line_number, material_id, material_code, material_name,
+         unit, quantity, unit_cost_cents, line_total_cents)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    const auditItems = [];
+    for (const [index, item] of poItems.entries()) {
+      const billedQty = item.received_quantity > 0 ? item.received_quantity : item.quantity;
+      const lineTotal = Math.round(billedQty * item.unit_cost_cents);
+      insertLine.run(
+        id,
+        index + 1,
+        item.material_id,
+        item.material_code,
+        item.material_name,
+        item.unit,
+        billedQty,
+        item.unit_cost_cents,
+        lineTotal,
+      );
+      auditItems.push({
+        material_id: item.material_id,
+        material_code: item.material_code,
+        quantity: billedQty,
+        unit_cost_cents: item.unit_cost_cents,
+        line_total_cents: lineTotal,
+      });
+    }
+
+    recordAudit({
+      database,
+      actorId,
+      action: 'purchase_invoice',
+      entityType: 'invoice',
+      entityId: id,
+      newValues: {
+        code: invoiceCode,
+        kind: 'purchase',
+        purchase_order_id: po.id,
+        workshop_order_id: po.workshop_order_id,
+        supplier,
+        total_cents: totalCents,
+        paid_total_cents: 0,
+        remaining_cents: totalCents,
+        payment_status: 'unpaid',
+        items: auditItems,
+      },
+    });
+
+    return id;
+  }).immediate();
+
+  return readInvoice(invoiceId, database);
+}
+
 export function insertSalesInvoiceForWorkshopOrder(workshopOrderId, actorId = null, database = db) {
   const id = positiveId(workshopOrderId, 'workshopOrderId');
   const order = database.prepare(`

@@ -30,6 +30,18 @@ import {
   logStageAction,
   submitOrderQualityInspection,
 } from './technician.service.js';
+import {
+  createPurchaseRequest,
+  listPurchaseRequests,
+  createPurchaseOrder,
+  approvePurchaseOrder,
+  readPurchaseOrder,
+  listPurchaseOrders,
+  createGoodsReceipt,
+  readGoodsReceipt,
+  listGoodsReceipts,
+  getWorkshopOrderTrace,
+} from './procurement.service.js';
 
 const router = Router();
 const designUpload = memoryUpload({
@@ -199,6 +211,87 @@ router.get('/profitability', (req, res, next) => {
 router.get('/orders/:id/costing', (req, res, next) => {
   try {
     res.json(roleAware(getWorkshopOrderCosting(req.params.id), req));
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/orders/:id/trace', (req, res, next) => {
+  try {
+    res.json(roleAware(getWorkshopOrderTrace(req.params.id), req));
+  } catch (error) {
+    next(error);
+  }
+});
+
+// --- Procurement & Goods Receipts ---
+router.post('/procurement/requests', requireWorkshopMutationAccess, (req, res, next) => {
+  try {
+    res.status(201).json(createPurchaseRequest(req.body, requestActorId(req)));
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/procurement/requests', (req, res, next) => {
+  try {
+    res.json(listPurchaseRequests(req.query));
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/procurement/orders', requireWorkshopMutationAccess, (req, res, next) => {
+  try {
+    res.status(201).json(createPurchaseOrder(req.body, requestActorId(req)));
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/procurement/orders', (req, res, next) => {
+  try {
+    res.json(listPurchaseOrders(req.query));
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/procurement/orders/:id', (req, res, next) => {
+  try {
+    res.json(readPurchaseOrder(req.params.id));
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/procurement/orders/:id/approve', requireWorkshopMutationAccess, (req, res, next) => {
+  try {
+    res.json(approvePurchaseOrder(req.params.id, requestActorId(req)));
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/procurement/receipts', requireWorkshopMutationAccess, (req, res, next) => {
+  try {
+    res.status(201).json(createGoodsReceipt(req.body, requestActorId(req)));
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/procurement/receipts', (req, res, next) => {
+  try {
+    res.json(listGoodsReceipts(req.query));
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/procurement/receipts/:id', (req, res, next) => {
+  try {
+    res.json(readGoodsReceipt(req.params.id));
   } catch (error) {
     next(error);
   }

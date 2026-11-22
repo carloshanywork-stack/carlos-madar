@@ -399,12 +399,74 @@ CREATE TABLE IF NOT EXISTS stock_count_lines (
   UNIQUE (session_id, offcut_id)
 );
 
+CREATE TABLE IF NOT EXISTS purchase_requests (
+  id INTEGER PRIMARY KEY,
+  request_code TEXT NOT NULL UNIQUE,
+  workshop_order_id INTEGER REFERENCES workshop_orders(id) ON DELETE CASCADE,
+  material_id INTEGER NOT NULL REFERENCES materials(id),
+  requested_quantity REAL NOT NULL CHECK (requested_quantity > 0),
+  status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'converted_to_po', 'canceled')),
+  notes TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS purchase_orders (
+  id INTEGER PRIMARY KEY,
+  po_code TEXT NOT NULL UNIQUE,
+  supplier TEXT NOT NULL,
+  workshop_order_id INTEGER REFERENCES workshop_orders(id) ON DELETE CASCADE,
+  status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'approved', 'partially_received', 'received', 'canceled')),
+  approved_by INTEGER REFERENCES users(id),
+  approved_at TEXT,
+  expected_date TEXT,
+  total_cents INTEGER NOT NULL DEFAULT 0 CHECK (total_cents >= 0),
+  notes TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS purchase_order_items (
+  id INTEGER PRIMARY KEY,
+  purchase_order_id INTEGER NOT NULL REFERENCES purchase_orders(id) ON DELETE CASCADE,
+  material_id INTEGER NOT NULL REFERENCES materials(id),
+  purchase_request_id INTEGER REFERENCES purchase_requests(id),
+  quantity REAL NOT NULL CHECK (quantity > 0),
+  unit_cost_cents INTEGER NOT NULL CHECK (unit_cost_cents >= 0),
+  line_total_cents INTEGER NOT NULL CHECK (line_total_cents >= 0),
+  received_quantity REAL NOT NULL DEFAULT 0 CHECK (received_quantity >= 0)
+);
+
+CREATE TABLE IF NOT EXISTS goods_receipts (
+  id INTEGER PRIMARY KEY,
+  receipt_code TEXT NOT NULL UNIQUE,
+  purchase_order_id INTEGER NOT NULL REFERENCES purchase_orders(id) ON DELETE CASCADE,
+  status TEXT NOT NULL DEFAULT 'confirmed' CHECK (status IN ('draft', 'confirmed', 'canceled')),
+  received_by INTEGER REFERENCES users(id),
+  received_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  notes TEXT
+);
+
+CREATE TABLE IF NOT EXISTS goods_receipt_items (
+  id INTEGER PRIMARY KEY,
+  goods_receipt_id INTEGER NOT NULL REFERENCES goods_receipts(id) ON DELETE CASCADE,
+  po_item_id INTEGER NOT NULL REFERENCES purchase_order_items(id),
+  material_id INTEGER NOT NULL REFERENCES materials(id),
+  quantity_received REAL NOT NULL CHECK (quantity_received >= 0),
+  quantity_accepted REAL NOT NULL CHECK (quantity_accepted >= 0),
+  quantity_rejected REAL NOT NULL DEFAULT 0 CHECK (quantity_rejected >= 0),
+  warehouse TEXT NOT NULL DEFAULT 'main' CHECK (warehouse IN ('main', 'secondary')),
+  inventory_movement_id INTEGER REFERENCES inventory_movements(id)
+);
+
 CREATE TABLE IF NOT EXISTS invoices (
   id INTEGER PRIMARY KEY,
   code TEXT NOT NULL UNIQUE,
   kind TEXT NOT NULL CHECK (kind IN ('sales', 'purchase', 'other_expense')),
   client_id INTEGER REFERENCES clients(id),
   workshop_order_id INTEGER REFERENCES workshop_orders(id),
+  purchase_order_id INTEGER REFERENCES purchase_orders(id),
+  goods_receipt_id INTEGER REFERENCES goods_receipts(id),
   supplier TEXT,
   employee_id INTEGER REFERENCES employees(id),
   subtotal_cents INTEGER NOT NULL DEFAULT 0 CHECK (subtotal_cents >= 0),

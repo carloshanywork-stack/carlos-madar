@@ -7,6 +7,10 @@ import test, { after } from 'node:test';
 const temporaryDirectory = mkdtempSync(join(tmpdir(), 'madar-jobcost-'));
 process.env.MADAR_V2_DATABASE_PATH = join(temporaryDirectory, 'data', 'jobcost.sqlite');
 process.env.MADAR_V2_STORAGE_ROOT = join(temporaryDirectory, 'storage');
+process.env.MADAR_V2_DATA_DIR = join(temporaryDirectory, 'data');
+process.env.STORAGE_MOUNT_PATH = '';
+process.env.COOKIE_SECURE = 'false';
+process.env.MADAR_V2_JWT_SECRET = 'test-secret-at-least-32-bytes-long-for-madar-jobcost';
 process.env.NODE_ENV = 'test';
 
 const [{ app }, { db }, { initializeDatabase }] = await Promise.all([
@@ -478,4 +482,297 @@ test('6. User Acceptance Test Case: EGP 9,000 estimate -> 12,000 sale -> 9,600 a
   assert.equal(finalCosting.variance.actualProfitCents, 240000);      // 2,400 EGP
   assert.equal(finalCosting.variance.estimatedMarginPercent, 25.0);   // 25.0%
   assert.equal(finalCosting.variance.actualMarginPercent, 20.0);      // 20.0%
+});
+
+test('7. End-to-End Pilot Acceptance Scenario: Quotation -> Idempotent Conversion -> Shortage PO -> 2-Batch Receipt -> Matched Invoice [No duplicate stock] -> Partial Supplier Payment -> Stage Logs -> Quality Rework & Approval -> Delivery & Sales Invoice -> Customer Collection -> Costing & Trace Reconciled', async () => {
+  // Step 1: Approve quote and design. Convert once, then retry conversion.
+  const client = (await request('/api/clients', jsonOptions('POST', {
+    name: 'Cairo Signage Retail Group',
+    phone: '01011223344',
+  }))).body;
+
+  const quote = (await request('/api/workshop/quotations', jsonOptions('POST', {
+    clientId: client.id,
+    title: 'Pilot Channel Letters Signage - Retail Branch',
+    productType: 'custom_signage',
+    specifications: {
+      materialCostCents: 500000,  // EGP 5,000
+      machineCostCents: 120000,   // EGP 1,200
+      laborCostCents: 140000,     // EGP 1,400
+      transportCostCents: 50000,  // EGP 500
+      installCostCents: 40000,    // EGP 400
+      overheadCostCents: 50000,   // EGP 500
+      // Total estimated cost = 9,000 EGP (900,000 cents)
+    },
+    targetMargin: 0.25,
+    manualNetSalePriceCents: 1200000, // 12,000 EGP
+  }))).body;
+
+  // Approve quotation (creates immutable snapshot)
+  await request(`/api/workshop/quotations/${quote.id}/approve`, jsonOptions('POST', {}));
+
+  // Convert to order (1st attempt)
+  const converted1 = (await request(`/api/workshop/quotations/${quote.id}/convert-to-order`, jsonOptions('POST', {
+    targetDeliveryDate: '2026-12-15',
+  }))).body;
+  assert.ok(converted1.orderId);
+  const orderId = converted1.orderId;
+
+  // Retry conversion (idempotency check)
+  const converted2 = (await request(`/api/workshop/quotations/${quote.id}/convert-to-order`, jsonOptions('POST', {
+    targetDeliveryDate: '2026-12-15',
+  }))).body;
+  assert.equal(converted2.orderId, orderId);
+  assert.equal(converted2.alreadyConverted, true);
+
+  // Step 2: Check shortage, generate purchase request, and approve PO
+  const mat = (await request('/api/warehouse/materials', jsonOptions('POST', {
+    code: 'PILOT-ACRYLIC-RED',
+    name: 'Cast Red Acrylic 3mm 205x305cm',
+    unit: 'sheet',
+    minStock: 1,
+    unitCostCents: 272500, // EGP 2,725 per sheet
+    initialStock: 0,
+  }))).body;
+
+  // Material stock is 0. Create shortage purchase request for 2 sheets
+  const pr = (await request('/api/workshop/procurement/requests', jsonOptions('POST', {
+    workshopOrderId: orderId,
+    materialId: mat.id,
+    requestedQuantity: 2,
+    notes: 'Shortage for illuminated letters order',
+  }))).body;
+  assert.equal(pr.requested_quantity, 2);
+
+  // Create Purchase Order for 2 sheets @ 2,725 EGP = 5,450 EGP (545,000 cents)
+  const po = (await request('/api/workshop/procurement/orders', jsonOptions('POST', {
+    supplier: 'Al-Ahram Acrylic Importers',
+    workshopOrderId: orderId,
+    expectedDate: '2026-12-05',
+    items: [{
+      materialId: mat.id,
+      purchaseRequestId: pr.id,
+      quantity: 2,
+      unitCostCents: 272500,
+    }],
+  }))).body;
+  assert.equal(po.total_cents, 545000);
+  assert.equal(po.status, 'draft');
+
+  // Approve Purchase Order
+  const approvedPo = (await request(`/api/workshop/procurement/orders/${po.id}/approve`, jsonOptions('POST', {}))).body;
+  assert.equal(approvedPo.status, 'approved');
+
+  // Step 3: Receive in two batches. Verify on-hand, outstanding, and no over-receipt.
+  const poItem = approvedPo.items[0];
+
+  // Batch 1: receive 1 sheet
+  const gr1Res = await request('/api/workshop/procurement/receipts', jsonOptions('POST', {
+    purchaseOrderId: po.id,
+    notes: 'Batch 1 delivery (1 sheet)',
+    items: [{
+      poItemId: poItem.id,
+      quantityReceived: 1,
+      quantityAccepted: 1,
+      warehouse: 'main',
+    }],
+  }));
+  assert.equal(gr1Res.response.status, 201);
+  const gr1 = gr1Res.body;
+  assert.equal(gr1.items[0].quantity_accepted, 1);
+
+  // Verify stock = 1 and PO status partially_received
+  let matCheck = (await request('/api/warehouse/materials')).body.find((m) => m.id === mat.id);
+  assert.equal(matCheck.stock, 1);
+  let poCheck = (await request(`/api/workshop/procurement/orders/${po.id}`)).body;
+  assert.equal(poCheck.status, 'partially_received');
+  assert.equal(poCheck.items[0].received_quantity, 1);
+
+  // Batch 2: receive remaining 1 sheet
+  const gr2Res = await request('/api/workshop/procurement/receipts', jsonOptions('POST', {
+    purchaseOrderId: po.id,
+    notes: 'Batch 2 delivery (1 sheet final)',
+    items: [{
+      poItemId: poItem.id,
+      quantityReceived: 1,
+      quantityAccepted: 1,
+      warehouse: 'main',
+    }],
+  }));
+  assert.equal(gr2Res.response.status, 201);
+  const gr2 = gr2Res.body;
+  assert.equal(gr2.items[0].quantity_accepted, 1);
+
+  // Verify stock = 2 and PO status received
+  matCheck = (await request('/api/warehouse/materials')).body.find((m) => m.id === mat.id);
+  assert.equal(matCheck.stock, 2);
+  poCheck = (await request(`/api/workshop/procurement/orders/${po.id}`)).body;
+  assert.equal(poCheck.status, 'received');
+  assert.equal(poCheck.items[0].received_quantity, 2);
+
+  // Over-receipt attempt must fail with 409
+  const overReceiptAttempt = await request('/api/workshop/procurement/receipts', jsonOptions('POST', {
+    purchaseOrderId: po.id,
+    items: [{
+      poItemId: poItem.id,
+      quantityReceived: 1,
+      quantityAccepted: 1,
+    }],
+  }));
+  assert.equal(overReceiptAttempt.response.status, 409);
+
+  // Submit matched supplier invoice
+  const matchedInvoice = (await request('/api/finance/invoices/purchase/matched', jsonOptions('POST', {
+    purchaseOrderId: po.id,
+    supplier: 'Al-Ahram Acrylic Importers',
+    notes: 'Matched to PO and Goods Receipts GR1 and GR2',
+  }))).body;
+  assert.equal(matchedInvoice.total_cents, 545000);
+  assert.equal(matchedInvoice.remaining_cents, 545000);
+  assert.equal(matchedInvoice.payment_status, 'unpaid');
+
+  // CRITICAL VERIFICATION: Ensure the matched purchase invoice DID NOT increment stock again!
+  matCheck = (await request('/api/warehouse/materials')).body.find((m) => m.id === mat.id);
+  assert.equal(matCheck.stock, 2, 'Material stock must remain 2 and not be doubled by invoice posting');
+
+  // Step 4: Fund treasury liquidity and make partial supplier payment (250,000 cents = 2,500 EGP)
+  await request('/api/finance/treasury/entries', jsonOptions('POST', {
+    kind: 'income',
+    category: 'رأس مال / تمويل خزينة',
+    amountCents: 5000000, // 50,000 EGP opening liquidity
+    notes: 'Treasury opening balance for operations',
+  }));
+
+  const payment = (await request(`/api/finance/invoices/${matchedInvoice.id}/payment`, jsonOptions('POST', {
+    amountCents: 250000,
+    notes: 'Advance partial payment for acrylic sheets',
+  }))).body;
+  assert.equal(payment.invoice.paid_total_cents, 250000);
+  assert.equal(payment.invoice.remaining_cents, 295000);
+  assert.equal(payment.invoice.payment_status, 'partial');
+  assert.equal(payment.treasuryEntry.kind, 'expense');
+  assert.equal(payment.treasuryEntry.amount_cents, 250000);
+
+  // Step 5: Assign job, issue material, log machine & labor time, return offcut
+  const tech = Number(db.prepare(`
+    INSERT INTO employees (name, department, job_title, base_salary_cents)
+    VALUES ('Master Fabricator', 'Workshop', 'Senior Fabricator', 2080000)
+  `).run().lastInsertRowid);
+  db.prepare('INSERT INTO workshop_order_technicians (order_id, employee_id) VALUES (?, ?)').run(orderId, tech);
+
+  // Issue 1 sheet of acrylic (5,450 EGP total purchase = 2,725 EGP each sheet, or let's issue 2 sheets = 5,450 EGP)
+  await request('/api/warehouse/issue', jsonOptions('POST', {
+    workshopOrderId: orderId,
+    sourceWarehouse: 'main',
+    materialId: mat.id,
+    quantity: 2,
+    notes: 'Issued 2 sheets for letters cutting',
+  }));
+
+  // Return reusable offcut to secondary warehouse (credit 250 EGP = 25,000 cents)
+  await request('/api/warehouse/return', jsonOptions('POST', {
+    workshopOrderId: orderId,
+    targetWarehouse: 'secondary',
+    materialId: mat.id,
+    quantity: 1,
+    unit: 'piece',
+    offcutName: 'Red Acrylic Offcut 120x80cm',
+    offcutDimensions: '120x80 cm',
+    notes: 'Usable offcut returned from sheet 2',
+  }));
+  db.prepare(`
+    UPDATE inventory_movements
+    SET unit_cost_cents = 25000
+    WHERE source_id = ? AND kind = 'offcut_return'
+  `).run(orderId);
+  // Net material cost = 5,450 - 250 = 5,200 EGP
+
+  // Log CNC machine time: 390 min (6.5 hours @ 200 EGP/hr) = 1,300 EGP
+  await request(`/api/workshop/orders/${orderId}/stage-log`, jsonOptions('POST', {
+    stageName: 'cnc_laser',
+    action: 'complete',
+    durationMinutes: 390,
+    notes: 'CNC router face cutting and contouring',
+  }));
+
+  // Log technician assembly labor: 960 min (16 hours @ 100 EGP/hr) = 1,600 EGP
+  db.prepare(`
+    INSERT INTO workshop_stage_logs (order_id, employee_id, stage_name, action, duration_minutes, technician_hourly_rate_cents)
+    VALUES (?, ?, 'bending_assembly', 'complete', 960, 10000)
+  `).run(orderId, tech);
+
+  // Log site installation labor: 900 min (15 hours @ 100 EGP/hr) = 1,500 EGP
+  db.prepare(`
+    INSERT INTO workshop_stage_logs (order_id, employee_id, stage_name, action, duration_minutes, technician_hourly_rate_cents)
+    VALUES (?, ?, 'site_installation', 'complete', 900, 10000)
+  `).run(orderId, tech);
+
+  // Total actual cost = 5,200 + 1,300 + 1,600 + 1,500 = 9,600 EGP!
+
+  // Step 6: Quality review with rework loop, approval, and delivery
+  const reworkInspection = (await request(`/api/workshop/orders/${orderId}/qa-review`, jsonOptions('POST', {
+    decision: 'rework_required',
+    defectCategory: 'acrylic_alignment',
+    notes: 'Acrylic letter 3 seam requires reinforcement',
+  }))).body;
+  assert.equal(reworkInspection.decision, 'rework_required');
+
+  // Fix seam and approve
+  const approvedInspection = (await request(`/api/workshop/orders/${orderId}/qa-review`, jsonOptions('POST', {
+    decision: 'approved',
+    notes: 'Seam reinforced and verified clean under LED illumination',
+  }))).body;
+  assert.equal(approvedInspection.decision, 'approved');
+
+  // Order is now in 'ready' status. Deliver and archive
+  const deliverRes = (await request(`/api/workshop/orders/${orderId}/deliver`, jsonOptions('POST', {
+    archiveMonth: '2026-11',
+  }))).body;
+  assert.equal(deliverRes.order.status, 'delivered_archived');
+  const salesInvoice = deliverRes.invoice;
+  assert.ok(salesInvoice, 'Sales invoice should be automatically created on delivery');
+  assert.equal(salesInvoice.total_cents, 1200000); // 12,000 EGP
+  assert.equal(salesInvoice.remaining_cents, 1200000);
+
+  // Customer pays 7,000 EGP (700,000 cents) partial collection
+  const customerPayment = (await request(`/api/finance/invoices/${salesInvoice.id}/receipt`, jsonOptions('POST', {
+    amountCents: 700000,
+    notes: 'Customer initial deposit collection on delivery',
+  }))).body;
+  assert.equal(customerPayment.invoice.paid_total_cents, 700000);
+  assert.equal(customerPayment.invoice.remaining_cents, 500000);
+  assert.equal(customerPayment.invoice.payment_status, 'partial');
+  assert.equal(customerPayment.treasuryEntry.kind, 'income');
+  assert.equal(customerPayment.treasuryEntry.amount_cents, 700000);
+
+  // Step 8: Reconcile Costing, Margin, and Profitability
+  const costing = (await request(`/api/workshop/orders/${orderId}/costing`)).body;
+  assert.equal(costing.salePriceCents, 1200000); // 12,000 EGP
+  assert.equal(costing.totalCostCents, 960000);   // 9,600 EGP
+  assert.equal(costing.grossProfitCents, 240000); // 2,400 EGP
+  assert.equal(costing.marginPercent, 20.0);      // 20.0%
+  assert.equal(costing.markupPercent, 25.0);      // 25.0%
+
+  assert.ok(costing.variance);
+  assert.equal(costing.variance.estimatedTotalCostCents, 900000); // 9,000 EGP
+  assert.equal(costing.variance.actualTotalCostCents, 960000);    // 9,600 EGP
+  assert.equal(costing.variance.varianceCents, 60000);            // +600 EGP variance (+60,000 cents)
+  assert.equal(costing.variance.estimatedProfitCents, 300000);   // 3,000 EGP
+  assert.equal(costing.variance.actualProfitCents, 240000);      // 2,400 EGP
+  assert.equal(costing.variance.estimatedMarginPercent, 25.0);   // 25.0%
+  assert.equal(costing.variance.actualMarginPercent, 20.0);      // 20.0%
+
+  // Step 9: Verify Unified Order Traceability
+  const trace = (await request(`/api/workshop/orders/${orderId}/trace`)).body;
+  assert.equal(trace.order.id, orderId);
+  assert.equal(trace.quotation.id, quote.id);
+  assert.equal(trace.procurement.purchaseOrders.length, 1);
+  assert.equal(trace.procurement.purchaseOrders[0].receipts.length, 2);
+  assert.equal(trace.procurement.supplierInvoices.length, 1);
+  assert.equal(trace.procurement.supplierInvoices[0].payments.length, 1);
+  assert.equal(trace.procurement.supplierInvoices[0].payments[0].amount_cents, 250000);
+  assert.equal(trace.production.inspections.length, 2); // rework + approved
+  assert.equal(trace.salesAndTreasury.salesInvoice.id, salesInvoice.id);
+  assert.equal(trace.salesAndTreasury.customerReceipts[0].amount_cents, 700000);
+  assert.equal(trace.costing.totalCostCents, 960000);
 });

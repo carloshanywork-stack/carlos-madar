@@ -30,7 +30,7 @@ export function getWorkshopOrderCosting(orderId, database = db) {
     FROM inventory_movements im
     LEFT JOIN materials m ON m.id = im.material_id
     LEFT JOIN secondary_warehouse_offcuts ofc ON ofc.id = im.offcut_id
-    WHERE im.source_type = 'workshop_order' AND im.source_id = ?
+    WHERE im.source_type = 'workshop_order' AND im.source_id = ? AND im.kind IN ('issue', 'return', 'offcut_return')
     ORDER BY im.id ASC
   `).all(id);
 

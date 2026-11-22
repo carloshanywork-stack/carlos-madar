@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { requestActorId } from '../actor.js';
 import { requireFinanceOrAdmin } from '../auth/authorization.js';
-import { createPurchaseInvoice, listInvoices, recordPurchasePayment, recordSalesReceipt } from './invoices.service.js';
+import { createPurchaseInvoice, createMatchedPurchaseInvoice, listInvoices, recordPurchasePayment, recordSalesReceipt } from './invoices.service.js';
 import { createTreasuryEntry, getTreasury } from './treasury.service.js';
 
 const router = Router();
@@ -20,6 +20,10 @@ router.get('/invoices', requireFinanceOrAdmin, (req, res) => {
 
 router.post('/invoices/purchase', requireFinanceOrAdmin, (req, res) => {
   res.status(201).json(createPurchaseInvoice(req.body, requestActorId(req)));
+});
+
+router.post('/invoices/purchase/matched', requireFinanceOrAdmin, (req, res) => {
+  res.status(201).json(createMatchedPurchaseInvoice(req.body, requestActorId(req)));
 });
 
 router.post('/invoices/:id/receipt', requireFinanceOrAdmin, (req, res) => {

@@ -2304,6 +2304,85 @@ export function migrateWorkshopJobCostingProductionSystem(database) {
   })();
 }
 
+export function migrateProcurementAndReceiptMatching(database) {
+  const version = '20261122-procurement-receipt-matching';
+  if (database.prepare('SELECT 1 FROM schema_migrations WHERE version = ?').get(version)) return;
+  database.transaction(() => {
+    if (!database.prepare('PRAGMA table_info(invoices)').all().some((c) => c.name === 'purchase_order_id')) {
+      database.exec('ALTER TABLE invoices ADD COLUMN purchase_order_id INTEGER REFERENCES purchase_orders(id)');
+    }
+    if (!database.prepare('PRAGMA table_info(invoices)').all().some((c) => c.name === 'goods_receipt_id')) {
+      database.exec('ALTER TABLE invoices ADD COLUMN goods_receipt_id INTEGER REFERENCES goods_receipts(id)');
+    }
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS purchase_requests (
+        id INTEGER PRIMARY KEY,
+        request_code TEXT NOT NULL UNIQUE,
+        workshop_order_id INTEGER REFERENCES workshop_orders(id) ON DELETE CASCADE,
+        material_id INTEGER NOT NULL REFERENCES materials(id),
+        requested_quantity REAL NOT NULL CHECK (requested_quantity > 0),
+        status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'converted_to_po', 'canceled')),
+        notes TEXT,
+        created_by INTEGER REFERENCES users(id),
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_purchase_requests_order ON purchase_requests(workshop_order_id, status);
+
+      CREATE TABLE IF NOT EXISTS purchase_orders (
+        id INTEGER PRIMARY KEY,
+        po_code TEXT NOT NULL UNIQUE,
+        supplier TEXT NOT NULL,
+        workshop_order_id INTEGER REFERENCES workshop_orders(id) ON DELETE CASCADE,
+        status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'approved', 'partially_received', 'received', 'canceled')),
+        approved_by INTEGER REFERENCES users(id),
+        approved_at TEXT,
+        expected_date TEXT,
+        total_cents INTEGER NOT NULL DEFAULT 0 CHECK (total_cents >= 0),
+        notes TEXT,
+        created_by INTEGER REFERENCES users(id),
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_purchase_orders_order ON purchase_orders(workshop_order_id, status);
+
+      CREATE TABLE IF NOT EXISTS purchase_order_items (
+        id INTEGER PRIMARY KEY,
+        purchase_order_id INTEGER NOT NULL REFERENCES purchase_orders(id) ON DELETE CASCADE,
+        material_id INTEGER NOT NULL REFERENCES materials(id),
+        purchase_request_id INTEGER REFERENCES purchase_requests(id),
+        quantity REAL NOT NULL CHECK (quantity > 0),
+        unit_cost_cents INTEGER NOT NULL CHECK (unit_cost_cents >= 0),
+        line_total_cents INTEGER NOT NULL CHECK (line_total_cents >= 0),
+        received_quantity REAL NOT NULL DEFAULT 0 CHECK (received_quantity >= 0)
+      );
+      CREATE INDEX IF NOT EXISTS idx_po_items_po ON purchase_order_items(purchase_order_id);
+
+      CREATE TABLE IF NOT EXISTS goods_receipts (
+        id INTEGER PRIMARY KEY,
+        receipt_code TEXT NOT NULL UNIQUE,
+        purchase_order_id INTEGER NOT NULL REFERENCES purchase_orders(id) ON DELETE CASCADE,
+        status TEXT NOT NULL DEFAULT 'confirmed' CHECK (status IN ('draft', 'confirmed', 'canceled')),
+        received_by INTEGER REFERENCES users(id),
+        received_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        notes TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_goods_receipts_po ON goods_receipts(purchase_order_id);
+
+      CREATE TABLE IF NOT EXISTS goods_receipt_items (
+        id INTEGER PRIMARY KEY,
+        goods_receipt_id INTEGER NOT NULL REFERENCES goods_receipts(id) ON DELETE CASCADE,
+        po_item_id INTEGER NOT NULL REFERENCES purchase_order_items(id),
+        material_id INTEGER NOT NULL REFERENCES materials(id),
+        quantity_received REAL NOT NULL CHECK (quantity_received >= 0),
+        quantity_accepted REAL NOT NULL CHECK (quantity_accepted >= 0),
+        quantity_rejected REAL NOT NULL DEFAULT 0 CHECK (quantity_rejected >= 0),
+        warehouse TEXT NOT NULL DEFAULT 'main' CHECK (warehouse IN ('main', 'secondary')),
+        inventory_movement_id INTEGER REFERENCES inventory_movements(id)
+      );
+    `);
+    database.prepare('INSERT INTO schema_migrations (version) VALUES (?)').run(version);
+  })();
+}
+
 export function initializeDatabase({ database = db, initialAdminPassword = env.initialAdminPassword } = {}) {
   const schema = readFileSync(schemaPath, 'utf8');
   let adminCreated = false;
@@ -2373,6 +2452,7 @@ export function initializeDatabase({ database = db, initialAdminPassword = env.i
     migrateMachineTimestampMetadata(database);
     migrateNativeDeviceSessions(database);
     migrateWorkshopJobCostingProductionSystem(database);
+    migrateProcurementAndReceiptMatching(database);
 
     const hasUsers = database.prepare('SELECT 1 FROM users LIMIT 1').get();
 
