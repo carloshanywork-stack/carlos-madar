@@ -11,6 +11,7 @@
 | **Coordinator & Release Gatekeeper (الشات الرئيسي)** | `main` | `/home/carlos/Desktop/MADAR` | السيرفر الحي (`server/`), إدارة قواعد البيانات، مراجعة الكود، الدمج إلى `main`, والرفع إلى `origin/main`. | لا يكتب ميزات فرعية بنفسه أثناء عمل الوكلاء. |
 | **Desktop & Windows Specialist (شات الديسكتوب)** | `feat/desktop-system` | `/home/carlos/Desktop/MADAR-desktop` | حزم الويندوز، Electron (`madar-v2/desktop-app/**`), الشهادات وسكربتات التوقيع (`sign_and_deploy.sh`, `install.ps1`). | ❌ ممنوع لمس `android/` أو `server/` أو الدمج في `main`. |
 | **Mobile & Android Specialist (شات الموبايل)** | `feat/mobile-app` | `/home/carlos/Desktop/MADAR-mobile` | تطبيقات أندرويد (`madar-v2/android/**`), شاشات المناديل والمشرفين (`client/src/modules/rep/**`), سكربتات بناء الـ APK (`scripts/build-android.js`). | ❌ ممنوع لمس `desktop-app/` أو `server/` أو الدمج في `main`. |
+| **Web & ERP Specialist (شات الويب والـ ERP)** | `feat/system-enhancements` | `/home/carlos/Desktop/MADAR-web` | واجهة الويب المشتركة (`madar-v2/client/**`), خدمات الـ API (`madar-v2/server/**`), وحدات الورشة والمخازن والحسابات. | ❌ ممنوع لمس `android/` الأصلي أو `desktop-app/` أو الدمج المباشر في `main`. |
 
 ---
 
@@ -51,3 +52,4 @@
 | 2026-11-18 17:10 | Mobile Agent | `feat/mobile-app` | `madar-v2/android/version.properties`, `madar-rep-release.apk` | ترقية رقم الإصدار إلى Build 27 (v2.4.7)، وبناء وتوقيع حزمة الـ Release الرسمية وحل مشكلة عدم ظهور التحديث لدى المناديب. |
 | 2026-11-18 17:22 | Desktop Agent | `feat/desktop-system` | `madar-v2/desktop-app/main.cjs`, `madar-v2/dist-desktop/*` | تعطيل verifyUpdateCodeSignature لدعم التحديث التلقائي مع الشهادات الداخلية، وإعادة بناء وتوقيع حزمة الديسكتوب 1.0.1. |
 | 2026-11-18 17:25 | Coordinator | `main` | كامل الإنتاج والمزامنة | دمج Build 27 للـ APK وتسجيلها في جدول apk_releases وتحديث الـ status، دمج حزمة الديسكتوب 1.0.1 والتحقق الشامل من السيرفر. |
+| 2026-11-22 12:37 | Coordinator | `main` | كامل نظام الورشة والمخازن والويب | دمج feat/system-enhancements (53b9d03): تسعير اللوحات البارامتري، حجز الخامات، فضلات التقطيع، واجهة الفنيين، واجتياز 27 اختباراً بنجاح، وتحديث الإنتاج. |
