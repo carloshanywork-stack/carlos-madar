@@ -1164,7 +1164,7 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
     geofence_radius_meters: 50,
     area_name: 'محافظة القاهرة - الدقي',
   });
-  assert.match(storedVisit.before_path, /^Areas\/.*\/\d{4}\/\d{2}\/1434_.*\/Before\/[0-9a-f-]{8}-[0-9a-f-]{4}-[1-8][0-9a-f-]{3}-[89ab][0-9a-f-]{3}-[0-9a-f-]{12}_0001\.jpg$/i);
+  assert.match(storedVisit.before_path, /^Areas\/(\d{4}\/[A-Za-z]{3}|.*?\/\d{4}\/\d{2})\/.*?1434_.*\/Before\/[0-9a-f-]{8}-[0-9a-f-]{4}-[1-8][0-9a-f-]{3}-[89ab][0-9a-f-]{3}-[0-9a-f-]{12}_0001\.jpg$/i);
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM rep_visit_photos WHERE visit_id = (SELECT id FROM rep_visits WHERE visit_uuid = ?)').get(visitUuid).count, 6);
   const compressedBeforeMetadata = await sharp(readFileSync(beforePath)).metadata();
   assert.equal(compressedBeforeMetadata.format, 'jpeg');
@@ -1796,7 +1796,7 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   const newAreaMachineFolder = `${correctedMachineCode}_${correctedMachineName.normalize('NFKC').trim()
     .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_').replace(/[. ]+$/g, '')}`;
   const expectedAreaRoot = [...storedPathSegments.slice(0, 4), newAreaMachineFolder].join('/');
-  const expectedVisitFinalPath = [...storedPathSegments.slice(0, 4), newAreaMachineFolder].join('/');
+  const expectedVisitFinalPath = [...storedPathSegments.slice(0, 4), newAreaMachineFolder, ...storedPathSegments.slice(5)].join('/');
   assert.equal(renamedVisit.final_path, expectedVisitFinalPath);
   assert.equal(renamedVisit.before_path, storedVisit.before_path.replace(`/${oldAreaMachineFolder}/`, `/${newAreaMachineFolder}/`));
   assert.equal(renamedVisit.after_path, storedVisit.after_path.replace(`/${oldAreaMachineFolder}/`, `/${newAreaMachineFolder}/`));

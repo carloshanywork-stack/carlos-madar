@@ -207,7 +207,7 @@ export async function saveWorkshopDesign(orderId, file, actorId = null, database
   const extension = extname(file.originalname).toLowerCase();
   if (!DESIGN_EXTENSIONS.has(extension)) throw new HttpError(400, 'Unsupported design extension.');
   const originalName = safeOriginalName(file.originalname);
-  const storedPath = `${storageDirectory('clients', order.client_storage_code, 'workshop', order.order_code, 'designs')}/${randomUUID()}${extension}`;
+  const storedPath = `${storageDirectory('Workshop', 'Orders', String(order.id), 'designs')}/${randomUUID()}${extension}`;
   const savedFile = await writeStorageFile(storedPath, file.buffer);
   try {
     const fileId = database.transaction(() => {
@@ -248,8 +248,9 @@ export function getWorkshopDesign(fileId, database = db) {
     WHERE design.id = ? AND order_record.deleted_at IS NULL
   `).get(id);
   if (!file) throw new HttpError(404, 'Workshop design file was not found.');
-  const expectedPrefix = `${storageDirectory('clients', file.client_storage_code, 'workshop', file.order_code, 'designs')}/`;
-  if (!file.stored_path.startsWith(expectedPrefix)) {
+  const canonicalPrefix = `${storageDirectory('Workshop', 'Orders', String(file.order_id), 'designs')}/`;
+  const legacyPrefix = `${storageDirectory('clients', file.client_storage_code, 'workshop', file.order_code, 'designs')}/`;
+  if (!file.stored_path.startsWith(canonicalPrefix) && !file.stored_path.startsWith(legacyPrefix)) {
     throw new HttpError(403, 'Workshop design is outside its order storage directory.');
   }
   return file;

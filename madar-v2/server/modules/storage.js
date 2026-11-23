@@ -16,7 +16,7 @@ function parseRelativePath(value) {
   return segments;
 }
 
-async function getStorageRoot() {
+export async function getStorageRoot() {
   await mkdir(storageRoot, { recursive: true });
   const metadata = await lstat(storageRoot);
   // The configured root may itself be a symlink (e.g. a transparent bridge to a
@@ -275,21 +275,51 @@ export async function listStorageDirectories(relativePath, { photoExtensions = [
   return directories.sort((left, right) => left.name.localeCompare(right.name, 'ar'));
 }
 
+async function resolveStorageStep(current, segment, index, segments, isDirectoryExpected) {
+  let target = join(current, segment);
+  let metadata;
+  try {
+    metadata = await lstat(target);
+  } catch (error) {
+    if (error.code === 'ENOENT') {
+      // Month-folder aliasing ONLY at year/month level under Areas/ (index 2: Areas/<YYYY>/<MMM>)
+      const isMonthLevel = index === 2 && segments[0] === 'Areas';
+      if (isMonthLevel) {
+        try {
+          const entries = await readdir(current);
+          const matched = entries.filter((e) => e.toLowerCase() === segment.toLowerCase());
+          if (matched.length > 1) {
+            throw new HttpError(409, `Month folder conflict: multiple aliases (${matched.join(', ')}) exist under Areas/${segments[1]}`);
+          }
+          if (matched.length === 1) {
+            target = join(current, matched[0]);
+            metadata = await lstat(target);
+          } else {
+            throw new HttpError(404, isDirectoryExpected ? 'Storage folder was not found.' : 'Stored file was not found.');
+          }
+        } catch (dirErr) {
+          if (dirErr instanceof HttpError) throw dirErr;
+          throw new HttpError(404, isDirectoryExpected ? 'Storage folder was not found.' : 'Stored file was not found.');
+        }
+      } else {
+        throw new HttpError(404, isDirectoryExpected ? 'Storage folder was not found.' : 'Stored file was not found.');
+      }
+    } else {
+      throw error;
+    }
+  }
+  return { target, metadata };
+}
+
 export async function resolveStorageDirectory(relativePath) {
   const segments = parseRelativePath(relativePath);
   const root = await getStorageRoot();
   let current = root;
-  for (const segment of segments) {
-    current = join(current, segment);
-    let metadata;
-    try {
-      metadata = await lstat(current);
-    } catch (error) {
-      if (error.code === 'ENOENT') throw new HttpError(404, 'Storage folder was not found.');
-      throw error;
-    }
+  for (const [index, segment] of segments.entries()) {
+    const { target, metadata } = await resolveStorageStep(current, segment, index, segments, true);
     if (metadata.isSymbolicLink()) throw new HttpError(403, 'Symbolic links are not allowed in storage paths.');
     if (!metadata.isDirectory()) throw new HttpError(404, 'Storage folder was not found.');
+    current = target;
   }
   const resolved = await realpath(current);
   assertInsideRoot(root, resolved);
@@ -301,14 +331,8 @@ export async function resolveStorageFile(relativePath) {
   const root = await getStorageRoot();
   let current = root;
   for (const [index, segment] of segments.entries()) {
-    current = join(current, segment);
-    let metadata;
-    try {
-      metadata = await lstat(current);
-    } catch (error) {
-      if (error.code === 'ENOENT') throw new HttpError(404, 'Stored file was not found.');
-      throw error;
-    }
+    const isTargetFile = index === segments.length - 1;
+    const { target, metadata } = await resolveStorageStep(current, segment, index, segments, !isTargetFile);
     if (metadata.isSymbolicLink()) throw new HttpError(403, 'Symbolic links are not allowed in storage paths.');
     if (index < segments.length - 1 && !metadata.isDirectory()) {
       throw new HttpError(404, 'Stored file path is invalid.');
@@ -316,6 +340,7 @@ export async function resolveStorageFile(relativePath) {
     if (index === segments.length - 1 && !metadata.isFile()) {
       throw new HttpError(404, 'Stored file was not found.');
     }
+    current = target;
   }
   const resolved = await realpath(current);
   assertInsideRoot(root, resolved);

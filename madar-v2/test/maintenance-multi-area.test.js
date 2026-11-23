@@ -759,7 +759,7 @@ test('maintenance card photos can be moved or deleted without losing files on DB
   const afterPhoto = await uploadPhoto('after', 0);
   const movedPhoto = beforePhotos[0];
   const movedFilename = movedPhoto.path.split('/').at(-1);
-  const movedStoredPath = movedPhoto.path.replace(/\/before\//i, '/after/');
+  const movedStoredPath = movedPhoto.path.replace(/\/before\//i, '/After/');
   db.prepare("UPDATE maintenance_cards SET status = 'completed' WHERE id = ?").run(card.id);
 
   // Unrelated edits should not revalidate paths left in the old phase by earlier move operations.
@@ -792,7 +792,7 @@ test('maintenance card photos can be moved or deleted without losing files on DB
   assert.equal(moved.body.path, movedStoredPath);
   assert.equal(existsSync(join(storageRoot, ...movedPhoto.path.split('/'))), false, 'the old phase path should no longer exist');
   assert.equal(existsSync(join(storageRoot, ...movedStoredPath.split('/'))), true, 'moving a photo should relocate its file');
-  assert.ok(moved.body.path.includes('/after/'), 'the stored path should reflect the destination phase');
+  assert.ok(moved.body.path.toLowerCase().includes('/after/'), 'the stored path should reflect the destination phase');
   const movedDownload = await request(`/api/maintenance/orders/${orderResponse.body.id}/cards/${card.id}/photos/after/${encodeURIComponent(movedFilename)}`);
   assert.equal(movedDownload.response.status, 200);
   const movedMetadata = await sharp(movedDownload.body).metadata();

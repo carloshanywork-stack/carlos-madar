@@ -10,8 +10,10 @@ import { publishOperationsEvent, enqueueOperationsEvent } from '../operations-ev
 import { allowOnlyKeys, HttpError, optionalText, positiveId, requireObject, requireText } from '../http.js';
 import { compressFieldImage } from '../upload.js';
 import { withMachineStorageLock } from '../maintenance/deletion-lock.js';
+import { resolveMonthDirectory } from '../maintenance/photo-routing.js';
 import {
   ensureStorageDirectory,
+  getStorageRoot,
   listStorageFiles,
   moveStorageFile,
   removeStorageFile,
@@ -67,8 +69,8 @@ function normalizeRepLocation(value, label = 'location') {
   allowOnlyKeys(point, ['latitude', 'longitude', 'accuracy', 'updatedAt', 'speed', 'isMock', 'is_mock', 'mocked', 'mock_flag']);
   const { latitude, longitude, accuracy } = point;
   if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90
-      || !Number.isFinite(longitude) || longitude < -180 || longitude > 180
-      || !Number.isFinite(accuracy) || accuracy < 0 || accuracy > 100000) {
+    || !Number.isFinite(longitude) || longitude < -180 || longitude > 180
+    || !Number.isFinite(accuracy) || accuracy < 0 || accuracy > 100000) {
     throw new HttpError(400, `${label} must contain valid latitude, longitude, and accuracy values.`);
   }
   const updatedAt = requireText(point.updatedAt, `${label}.updatedAt`, { maxLength: 64 });
@@ -111,7 +113,7 @@ function validateMachineGeofence(machine, location) {
   if (!location) throw new HttpError(400, 'يلزم تفعيل GPS وإرسال الموقع الحالي قبل رفع صور الزيارة.');
   const radius = Math.max(1, Number(machine.geofence_radius_meters) || 50);
   if (Number(machine.is_location_locked) !== 1
-      || !Number.isFinite(machine.latitude) || !Number.isFinite(machine.longitude)) {
+    || !Number.isFinite(machine.latitude) || !Number.isFinite(machine.longitude)) {
     throw new HttpError(409, 'يلزم تثبيت موقع الماكينة من الإدارة قبل التصوير؛ لا يمكن اعتماد أول زيارة كمرجع جغرافي.');
   }
   const distance = calculateDistanceMeters(location.latitude, location.longitude, machine.latitude, machine.longitude);
@@ -422,13 +424,15 @@ export function claimRepMachineWork(rep, cardIdValue, input, database = db) {
       SELECT user_id FROM maintenance_order_reps WHERE order_id = ?
     `).all(card.workOrderId).map((row) => Number(row.user_id));
     if (!(previous && Number(previous.rep_user_id) === Number(rep.id) && previous.visit_uuid === visitUuid && previous.expires_at_ms > now)) {
-      enqueueOperationsEvent('rep.machine.work-started', {userId: rep.id, cardId, recipientUserIds: recipients}, database);
+      enqueueOperationsEvent('rep.machine.work-started', { userId: rep.id, cardId, recipientUserIds: recipients }, database);
     }
-    return { success: true, status: 'in_progress', cardId, visitUuid,
+    return {
+      success: true, status: 'in_progress', cardId, visitUuid,
       expiresAt: new Date(now + 30 * 60 * 1000).toISOString(),
       recipientUserIds: recipients,
       idempotent: Boolean(previous && Number(previous.rep_user_id) === Number(rep.id)
-        && previous.visit_uuid === visitUuid && previous.expires_at_ms > now) };
+        && previous.visit_uuid === visitUuid && previous.expires_at_ms > now)
+    };
   }).immediate();
   return result;
 }
@@ -449,7 +453,7 @@ export function releaseRepMachineWork(rep, cardIdValue, input, database = db) {
       WHERE card.id = ?
     `).all(cardId).map((row) => Number(row.user_id));
     database.prepare('DELETE FROM rep_machine_work_leases WHERE card_id = ?').run(cardId);
-    enqueueOperationsEvent('rep.machine.work-ended', {userId: rep.id, cardId, recipientUserIds: recipients}, database);
+    enqueueOperationsEvent('rep.machine.work-ended', { userId: rep.id, cardId, recipientUserIds: recipients }, database);
     return { success: true, released: true, recipientUserIds: recipients };
   }).immediate();
 }
@@ -662,7 +666,7 @@ function findRepVisitCard(rep, visit, database) {
     WHERE card.id = ? AND card.deleted_at IS NULL AND order_record.deleted_at IS NULL
   `).get(visit.cardId);
   if (!card || card.client_deleted_at || card.machine_deleted_at || !card.machine_active
-      || card.card_status === 'excluded' || card.order_status === 'archived' || card.order_status === 'review') {
+    || card.card_status === 'excluded' || card.order_status === 'archived' || card.order_status === 'review') {
     throw new HttpError(409, 'This machine visit is no longer available on the active route.');
   }
   if (card.correction_pending) {
@@ -684,8 +688,8 @@ function findRepVisitCard(rep, visit, database) {
     throw new HttpError(403, 'This machine is outside the work order regions.');
   }
   if (regionKey(visit.regionName) !== regionKey(card.machine_area)
-      || visit.machineCode.normalize('NFKC').toLocaleLowerCase('en-US')
-        !== card.machine_code.normalize('NFKC').toLocaleLowerCase('en-US')) {
+    || visit.machineCode.normalize('NFKC').toLocaleLowerCase('en-US')
+    !== card.machine_code.normalize('NFKC').toLocaleLowerCase('en-US')) {
     throw new HttpError(409, 'The selected machine changed since this route was downloaded. Refresh the route and try again.');
   }
   if (visit.reasonIds.length) {
@@ -714,7 +718,7 @@ function findRepVisitCard(rep, visit, database) {
     }
   }
   if (Number(card.is_location_locked) !== 1
-      || !Number.isFinite(card.latitude) || !Number.isFinite(card.longitude)) {
+    || !Number.isFinite(card.latitude) || !Number.isFinite(card.longitude)) {
     throw new HttpError(409, 'يلزم تثبيت موقع الماكينة قبل رفع صور الزيارة.');
   }
   return card;
@@ -740,7 +744,7 @@ function evaluateSelfApproval(repId, visit, machine, beforePhotos, afterPhotos, 
   }
 
   if (Number(machine.is_location_locked) !== 1
-      || !Number.isFinite(machine.latitude) || !Number.isFinite(machine.longitude)) {
+    || !Number.isFinite(machine.latitude) || !Number.isFinite(machine.longitude)) {
     reasons.push('MACHINE_LOCATION_NOT_CONFIRMED');
   }
 
@@ -754,7 +758,7 @@ function evaluateSelfApproval(repId, visit, machine, beforePhotos, afterPhotos, 
     // This is a conservative client-reported signal, not Android hardware attestation.
     if (location.isMock === true) reasons.push('MOCK_LOCATION');
     if (Number(machine.is_location_locked) === 1
-        && Number.isFinite(machine.latitude) && Number.isFinite(machine.longitude)) {
+      && Number.isFinite(machine.latitude) && Number.isFinite(machine.longitude)) {
       const distance = calculateDistanceMeters(location.latitude, location.longitude, machine.latitude, machine.longitude);
       const effectiveDistance = Math.max(0, distance - location.accuracy);
       const radius = Math.max(1, Number(machine.geofence_radius_meters) || 50);
@@ -789,8 +793,8 @@ function findAssignedRepMachine(rep, machineId, cardId, database) {
     WHERE machine.id = ? AND card.id = ?
   `).get(id, selectedCardId);
   if (!machine || machine.machine_active !== 1 || machine.machine_deleted_at !== null
-      || machine.card_deleted_at !== null || machine.card_status === 'excluded'
-      || machine.order_deleted_at !== null || machine.order_status === 'archived' || machine.order_status === 'review' || machine.client_deleted_at !== null) {
+    || machine.card_deleted_at !== null || machine.card_status === 'excluded'
+    || machine.order_deleted_at !== null || machine.order_status === 'archived' || machine.order_status === 'review' || machine.client_deleted_at !== null) {
     throw new HttpError(409, 'This machine is no longer available on the active route. Refresh the route and try again.');
   }
   if (machine.correction_pending) {
@@ -821,8 +825,8 @@ function actionPayloadHash(payload, evidenceBuffer = null) {
 
 function requireSameAction(existing, repId, machineId, payloadHash) {
   if (Number(existing.rep_user_id) !== Number(repId)
-      || Number(existing.machine_id) !== Number(machineId)
-      || existing.payload_sha256 !== payloadHash) {
+    || Number(existing.machine_id) !== Number(machineId)
+    || existing.payload_sha256 !== payloadHash) {
     throw new HttpError(409, 'This action UUID was already used with different content.');
   }
 }
@@ -1000,7 +1004,7 @@ export async function submitRepMachineLocationChange(rep, machineId, input, evid
   const note = optionalText(body.note, 'note', { maxLength: 2000 });
   const machine = findAssignedRepMachine(rep, id, cardId, database);
   if (Number(machine.is_location_locked) !== 1
-      || !Number.isFinite(machine.latitude) || !Number.isFinite(machine.longitude)) {
+    || !Number.isFinite(machine.latitude) || !Number.isFinite(machine.longitude)) {
     throw new HttpError(409, 'Only a previously confirmed machine position can be changed through this approval workflow.');
   }
 
@@ -1029,7 +1033,7 @@ export async function submitRepMachineLocationChange(rep, machineId, input, evid
       const current = database.prepare(`SELECT latitude, longitude, is_location_locked FROM machines
         WHERE id = ? AND active = 1 AND deleted_at IS NULL`).get(id);
       if (!current || Number(current.is_location_locked) !== 1
-          || current.latitude !== machine.latitude || current.longitude !== machine.longitude) {
+        || current.latitude !== machine.latitude || current.longitude !== machine.longitude) {
         throw new HttpError(409, 'The machine location changed; refresh and submit a new request.');
       }
       if (database.prepare(`SELECT 1 FROM rep_machine_location_change_requests
@@ -1046,11 +1050,15 @@ export async function submitRepMachineLocationChange(rep, machineId, input, evid
           calculateDistanceMeters(location.latitude, location.longitude, machine.latitude, machine.longitude),
           location.updatedAt, note, evidencePath, evidence ? 'image/jpeg' : null);
       const insertedId = Number(result.lastInsertRowid);
-      recordAudit({ database, actorId: rep.id, action: 'created', entityType: 'rep_machine_location_change', entityId: insertedId,
-        newValues: { machine_id: id, card_id: cardId, old_latitude: machine.latitude, old_longitude: machine.longitude,
+      recordAudit({
+        database, actorId: rep.id, action: 'created', entityType: 'rep_machine_location_change', entityId: insertedId,
+        newValues: {
+          machine_id: id, card_id: cardId, old_latitude: machine.latitude, old_longitude: machine.longitude,
           proposed_latitude: location.latitude, proposed_longitude: location.longitude, gps_accuracy: location.accuracy,
           distance_meters: calculateDistanceMeters(location.latitude, location.longitude, machine.latitude, machine.longitude),
-          evidence_attached: Boolean(evidencePath), status: 'pending' } });
+          evidence_attached: Boolean(evidencePath), status: 'pending'
+        }
+      });
       return insertedId;
     }).immediate();
     publishOperationsEvent('rep.machine.location-change-requested', { userId: rep.id, machineId: id, requestId });
@@ -1116,8 +1124,10 @@ export async function reviewRepMachineLocationChange(requestIdValue, input, acto
     if (!request) throw new HttpError(404, 'Location change request was not found.');
     if (request.status !== 'pending') {
       if (request.status === decision && (request.review_note ?? null) === (note ?? null)) {
-        return { repId: Number(request.rep_user_id), machineId: Number(request.machine_id), requestId,
-          status: decision, idempotent: true };
+        return {
+          repId: Number(request.rep_user_id), machineId: Number(request.machine_id), requestId,
+          status: decision, idempotent: true
+        };
       }
       throw new HttpError(409, 'This location change request has already been reviewed.');
     }
@@ -1136,11 +1146,15 @@ export async function reviewRepMachineLocationChange(requestIdValue, input, acto
     database.prepare(`UPDATE rep_machine_location_change_requests SET status = ?, reviewer_user_id = ?,
       review_note = ?, reviewed_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'pending'`)
       .run(decision, actor, note, requestId);
-    recordAudit({ database, actorId: actor, action: `location_change_${decision}`, entityType: 'machine', entityId: request.machine_id,
+    recordAudit({
+      database, actorId: actor, action: `location_change_${decision}`, entityType: 'machine', entityId: request.machine_id,
       oldValues: { latitude: request.old_latitude, longitude: request.old_longitude, request_status: request.status },
-      newValues: { latitude: decision === 'approved' ? request.proposed_latitude : machine.latitude,
+      newValues: {
+        latitude: decision === 'approved' ? request.proposed_latitude : machine.latitude,
         longitude: decision === 'approved' ? request.proposed_longitude : machine.longitude,
-        request_status: decision, request_id: requestId, review_note: note } });
+        request_status: decision, request_id: requestId, review_note: note
+      }
+    });
     const repId = Number(request.rep_user_id);
     const machineId = Number(request.machine_id);
     enqueueOperationsEvent('rep.machine.location-change-reviewed', {
@@ -1204,12 +1218,12 @@ function reviewRepMachineLocationCorrection(correctionId, input, actorId, decisi
       throw new HttpError(409, 'The proposed machine location no longer meets the GPS accuracy requirement.');
     }
     if (decision === 'approved') {
-    const changed = database.prepare(`UPDATE machines SET latitude = ?, longitude = ?, is_location_locked = 1,
+      const changed = database.prepare(`UPDATE machines SET latitude = ?, longitude = ?, is_location_locked = 1,
       geofence_radius_meters = 50, area_name = COALESCE(NULLIF(trim(area_name), ''), area)
       WHERE id = ? AND is_location_locked = 0 AND active = 1 AND deleted_at IS NULL`).run(
-      proposedLocation.latitude, proposedLocation.longitude, machine.id,
-    );
-    if (changed.changes !== 1) throw new HttpError(409, 'The machine location changed before the confirmation could be approved.');
+        proposedLocation.latitude, proposedLocation.longitude, machine.id,
+      );
+      if (changed.changes !== 1) throw new HttpError(409, 'The machine location changed before the confirmation could be approved.');
     }
     database.prepare(`UPDATE machine_correction_requests SET status = ?, resolved_machine_id = ?,
       updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'pending'`).run(decision, decision === 'approved' ? machine.id : null, id);
@@ -1394,7 +1408,7 @@ function createVisitReservation(rep, visit, payloadHash, card, stagingPath, fina
     const lastReview = database.prepare(`SELECT review.status FROM rep_visits visit JOIN rep_visit_reviews review ON review.visit_id = visit.id
       WHERE visit.card_id = ? AND visit.status = 'completed' ORDER BY visit.id DESC LIMIT 1`).get(card.card_id);
     if ((card.card_status === 'completed' || card.order_status === 'review')
-        && lastReview?.status !== 'reshoot' && manualReview?.status !== 'reshoot') {
+      && lastReview?.status !== 'reshoot' && manualReview?.status !== 'reshoot') {
       throw new HttpError(409, 'This machine is completed or waiting for approval. Refresh the route.');
     }
     const activeWork = database.prepare(`
@@ -1432,8 +1446,8 @@ function createVisitReservation(rep, visit, payloadHash, card, stagingPath, fina
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'receiving', ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       visit.visitUuid, rep.id, card.order_id, card.card_id, card.machine_id, card.order_code,
-       card.machine_code, card.machine_area, payloadHash, visit.machineCondition, JSON.stringify(visit.reasonIds),
-        visit.notes, visit.capturedAt, visit.beforeCapturedAt[0], visit.afterCapturedAt[0] ?? null,
+      card.machine_code, card.machine_area, payloadHash, visit.machineCondition, JSON.stringify(visit.reasonIds),
+      visit.notes, visit.capturedAt, visit.beforeCapturedAt[0], visit.afterCapturedAt[0] ?? null,
       visit.location ? JSON.stringify(visit.location) : null,
       stagingPath, finalPath,
     );
@@ -1620,15 +1634,18 @@ export async function syncRepVisit(rep, input, files, database = db) {
     }
 
     const card = findRepVisitCard(rep, visit, database);
+    const root = await getStorageRoot();
     const workDay = getLocalDateParts(new Date(visit.capturedAt), getTimeZone(database));
-    const workDate = `${workDay.year}-${String(workDay.month).padStart(2, '0')}-${String(workDay.day).padStart(2, '0')}`;
-    const machineArea = safeStorageSegment(card.machine_area);
-    const machineFolder = safeStorageSegment(`${card.machine_code}_${card.machine_name_ar}`);
-    const yearFolder = workDate.slice(0, 4);
-    const monthFolder = workDate.slice(5, 7);
+    const MONTH_ABBREVS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+    const yearFolder = String(workDay.year);
+    const nominalMonth = MONTH_ABBREVS[workDay.month - 1] || 'JAN';
+    const monthFolder = resolveMonthDirectory(yearFolder, nominalMonth, root);
+    const machineArea = safeStorageSegment(card.machine_area || 'Unassigned Area');
+    const machineFolder = safeStorageSegment(`${card.machine_code}_${card.machine_name_ar || ''}`);
+    const orderKey = safeStorageSegment(card.order_code || `order_${card.order_id}`);
     const stagingPath = storageDirectory('.madar-recovery', 'rep-visits', visit.visitUuid);
-    // UUID-based names keep each visit immutable while the hierarchy is area/year/month/machine/phase.
-    const finalPath = storageDirectory('Areas', machineArea, yearFolder, monthFolder, machineFolder);
+    // Canonical routing: Areas/<YYYY>/<MMM>/<area>/<machine>/<stable-order-key>/
+    const finalPath = storageDirectory('Areas', yearFolder, monthFolder, machineArea, machineFolder, orderKey);
     const reservation = createVisitReservation(rep, visit, payloadHash, card, stagingPath, finalPath, database);
     if (reservation.kind === 'completed') return visitResult(reservation.row, database, { idempotent: true });
     if (reservation.kind === 'processing') return visitResult(reservation.row, database, { processing: true });
@@ -1693,9 +1710,9 @@ function normalizeTrackPoint(value, label = 'location') {
   const speed = point.speed === undefined || point.speed === null ? 0 : point.speed;
   const rawTimestamp = point.updatedAt ?? (Number.isFinite(point.timestamp) ? new Date(point.timestamp).toISOString() : null);
   if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90
-      || !Number.isFinite(longitude) || longitude < -180 || longitude > 180
-      || !Number.isFinite(accuracy) || accuracy < 0 || accuracy > 100000
-      || !Number.isFinite(speed) || speed < 0 || speed > 200) {
+    || !Number.isFinite(longitude) || longitude < -180 || longitude > 180
+    || !Number.isFinite(accuracy) || accuracy < 0 || accuracy > 100000
+    || !Number.isFinite(speed) || speed < 0 || speed > 200) {
     throw new HttpError(400, `${label} must contain valid latitude, longitude, and accuracy values.`);
   }
   const updatedAt = requireText(rawTimestamp, `${label}.updatedAt`, { maxLength: 64 });
@@ -1761,7 +1778,7 @@ export function recordRepLocationSignal(database, userId, rawLocation, { dutySes
   const latitude = Number(rawLocation.latitude);
   const longitude = Number(rawLocation.longitude);
   if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90
-      || !Number.isFinite(longitude) || longitude < -180 || longitude > 180) {
+    || !Number.isFinite(longitude) || longitude < -180 || longitude > 180) {
     return null;
   }
   const accuracy = Number.isFinite(Number(rawLocation.accuracy)) && Number(rawLocation.accuracy) >= 0 ? Number(rawLocation.accuracy) : 10;
@@ -1882,8 +1899,10 @@ export function syncRepTracking(rep, input, database = db, { transitionDuty = tr
           VALUES (?, ?, ?)
         `).run(rep.id, startedAt, JSON.stringify(freshPoint));
         session = { id: Number(result.lastInsertRowid), started_at: startedAt };
-        recordAudit({ database, actorId: rep.id, action: 'start_duty', entityType: 'rep_duty_session',
-          entityId: session.id, newValues: { started_at: startedAt, auto_healed: true, from_gps: true } });
+        recordAudit({
+          database, actorId: rep.id, action: 'start_duty', entityType: 'rep_duty_session',
+          entityId: session.id, newValues: { started_at: startedAt, auto_healed: true, from_gps: true }
+        });
       }
     }
     if (transitionDuty && body.onDuty && !session) {
@@ -1893,8 +1912,10 @@ export function syncRepTracking(rep, input, database = db, { transitionDuty = tr
         VALUES (?, ?, ?)
       `).run(rep.id, startedAt, location ? JSON.stringify(location) : null);
       session = { id: Number(result.lastInsertRowid), started_at: startedAt };
-      recordAudit({ database, actorId: rep.id, action: 'start_duty', entityType: 'rep_duty_session', entityId: session.id,
-        newValues: { started_at: startedAt, location } });
+      recordAudit({
+        database, actorId: rep.id, action: 'start_duty', entityType: 'rep_duty_session', entityId: session.id,
+        newValues: { started_at: startedAt, location }
+      });
     }
     let pointSessionId = session?.id ?? null;
     if (transitionDuty && !body.onDuty && session) {
@@ -1903,12 +1924,14 @@ export function syncRepTracking(rep, input, database = db, { transitionDuty = tr
         WHERE id = ? AND ended_at IS NULL
       `).run(now, location ? JSON.stringify(location) : null, session.id);
       pointSessionId = session.id;
-      recordAudit({ database, actorId: rep.id, action: 'stop_duty', entityType: 'rep_duty_session', entityId: session.id,
-        oldValues: { started_at: session.started_at }, newValues: { ended_at: now, location } });
+      recordAudit({
+        database, actorId: rep.id, action: 'stop_duty', entityType: 'rep_duty_session', entityId: session.id,
+        oldValues: { started_at: session.started_at }, newValues: { ended_at: now, location }
+      });
       session = null;
     }
 
-  const insertPoint = database.prepare(`
+    const insertPoint = database.prepare(`
       INSERT OR IGNORE INTO rep_location_points
         (rep_user_id, duty_session_id, latitude, longitude, accuracy, captured_at)
       VALUES (?, ?, ?, ?, ?, ?)
@@ -2048,7 +2071,7 @@ export function getRepFaultReasons(database = db) {
 export function requireRepUsername(queryValue, authenticatedUsername) {
   const username = requireText(queryValue, 'username', { maxLength: 64 });
   if (username.normalize('NFKC').toLocaleLowerCase('en-US')
-      !== String(authenticatedUsername).normalize('NFKC').toLocaleLowerCase('en-US')) {
+    !== String(authenticatedUsername).normalize('NFKC').toLocaleLowerCase('en-US')) {
     throw new HttpError(403, 'A field representative may only request their own route.');
   }
   return username;

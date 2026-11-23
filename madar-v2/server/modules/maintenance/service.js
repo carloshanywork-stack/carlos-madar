@@ -4,6 +4,7 @@ import { lstat, mkdtemp, readFile, readdir, rename, rm, stat } from 'node:fs/pro
 import sharp from 'sharp';
 import * as XLSX from 'xlsx';
 import { applyPhotoRotation } from './photo-images.js';
+import { buildMaintenancePhotoStoredPath } from './photo-routing.js';
 import { db } from '../../database/connection.js';
 import { archiveMonth, addArchiveMonthFilter } from '../archive-period.js';
 import { queueCardPhotoReview, reconcileCardPhotoReviewPaths } from './photo-review.js';
@@ -30,6 +31,7 @@ import {
   copyStorageFile,
   removeStorageFile,
   ensureStorageDirectory,
+  getStorageRoot,
   listStorageFiles,
   resolveStorageDirectory,
   resolveStorageFile,
@@ -604,7 +606,12 @@ function machineCorrectionRenameTargets(operation) {
         && /^\d{4}$/.test(source[2]) && /^(0[1-9]|1[0-2])$/.test(source[3])
         && source[4].toLocaleLowerCase('en').startsWith(oldFolderPrefix)
         && destination[4] === newMachineFolder;
-      valid = directAreaFolder || yearMonthMachineFolder;
+      const canonicalYearMonthMachineFolder = source.length === 5 && destination.length === 5
+        && source.slice(1, 4).every((segment, index) => segment === destination[index + 1])
+        && /^\d{4}$/.test(source[1]) && /^[A-Za-z]{3}$/i.test(source[2])
+        && source[4].toLocaleLowerCase('en').startsWith(oldFolderPrefix)
+        && destination[4] === newMachineFolder;
+      valid = directAreaFolder || yearMonthMachineFolder || canonicalYearMonthMachineFolder;
     } else if (source[0]?.toLocaleLowerCase('en') === 'clients'
       && destination[0]?.toLocaleLowerCase('en') === 'clients') {
       const section = source[2]?.toLocaleLowerCase('en');
@@ -742,6 +749,12 @@ async function collectMachineCorrectionRenamePlan(machine, database) {
     if (typeof storedPath !== 'string' || storedPath.includes('\\')) return;
     const segments = storedPath.split('/');
     if (segments[0] !== 'Areas') return;
+    if (segments.length >= 5 && /^\d{4}$/.test(segments[1]) && /^[A-Za-z]{3}$/i.test(segments[2])
+        && segments[4].toLocaleLowerCase('en').startsWith(`${oldCodeFolder}_`.toLocaleLowerCase('en'))) {
+      const sourcePath = segments.slice(0, 5).join('/');
+      addMapping(sourcePath, storageDirectory('Areas', segments[1], segments[2], segments[3], newMachineFolder));
+      return;
+    }
     if (segments.length >= 5 && /^\d{4}$/.test(segments[2]) && /^(0[1-9]|1[0-2])$/.test(segments[3])
         && segments[4].toLocaleLowerCase('en').startsWith(`${oldCodeFolder}_`.toLocaleLowerCase('en'))) {
       const sourcePath = segments.slice(0, 5).join('/');
@@ -1976,6 +1989,12 @@ async function maintenanceMachineAreaDirectoryPaths(relativeAreaDirectory, area,
 function isMaintenanceCardAreaPath(storedPath, order, card, database) {
   const segments = storedPath.split('/');
   if (segments.length < 4 || segments[0] !== 'Areas') return false;
+  if (segments.length >= 5 && /^\d{4}$/.test(segments[1]) && /^[A-Za-z]{3}$/i.test(segments[2])) {
+    const area = parseMaintenanceOrderAreas(order.area)
+      .find((candidate) => safeStorageFolderName(candidate).toLowerCase() === segments[3]?.toLowerCase());
+    const machineFolder = segments[4];
+    return Boolean(area && findMachineForAreaFolder(machineFolder, area, card.machine_id, database));
+  }
   const area = parseMaintenanceOrderAreas(order.area)
     .find((candidate) => safeStorageFolderName(candidate) === segments[1]);
   const machineFolder = segments.length >= 5 && /^\d{4}$/.test(segments[2]) && /^\d{2}$/.test(segments[3])
@@ -1987,6 +2006,12 @@ function isMaintenanceCardAreaPath(storedPath, order, card, database) {
 function isMaintenanceMachineAreaDirectory(path, order, machine, database) {
   const segments = path.split('/');
   if (segments[0] !== 'Areas') return false;
+  if (segments.length === 5 && /^\d{4}$/.test(segments[1]) && /^[A-Za-z]{3}$/i.test(segments[2])) {
+    const area = parseMaintenanceOrderAreas(order.area)
+      .find((candidate) => safeStorageFolderName(candidate).toLowerCase() === segments[3]?.toLowerCase());
+    const machineFolder = segments[4];
+    return Boolean(area && machineFolder && findMachineForAreaFolder(machineFolder, area, machine.id, database));
+  }
   const area = parseMaintenanceOrderAreas(order.area)
     .find((candidate) => safeStorageFolderName(candidate) === segments[1]);
   const isNestedPath = segments.length === 5 && /^\d{4}$/.test(segments[2]) && /^(0[1-9]|1[0-2])$/.test(segments[3]);
@@ -4887,18 +4912,19 @@ async function uploadMaintenancePhotoUnlocked(orderId, cardId, phase, file, acto
   if (!metadata) throw new HttpError(404, 'Active inspection card was not found on this order.');
 
   const now = new Date();
-  const dateParts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
-    timeZone: getTimeZone(database), year: 'numeric', month: '2-digit', day: '2-digit',
-  }).formatToParts(now).filter((part) => part.type !== 'literal').map(({ type, value }) => [type, value]));
-  const workDate = `${dateParts.year}-${dateParts.month}-${dateParts.day}`;
-  const areaSegment = safeMachineStorageSegment(metadata.area_name || metadata.area, 'Unassigned Area');
-  const machineSegment = safeMachineStorageSegment(
-    `${metadata.machine_code}_${metadata.machine_name_ar || ''}`, metadata.machine_code,
-  );
-  const orderSegment = `${workDate}_${metadata.order_id}`;
-  const storedPath = storageDirectory(
-    'Areas', areaSegment, machineSegment, orderSegment, phase, `${randomUUID()}.jpg`,
-  );
+  const root = await getStorageRoot();
+  const storedPath = buildMaintenancePhotoStoredPath({
+    date: now,
+    timeZone: getTimeZone(database),
+    area: metadata.area_name || metadata.area,
+    machineCode: metadata.machine_code,
+    machineName: metadata.machine_name_ar || '',
+    orderCode: metadata.order_code,
+    orderId: metadata.order_id,
+    phase,
+    filename: `${randomUUID()}.jpg`,
+    storageRoot: root,
+  });
   const savedFile = await writeStorageFile(storedPath, compressed.buffer);
   try {
     const update = database.transaction(() => {
@@ -4961,8 +4987,10 @@ function listRepCardPhotos(orderId, cardId, database) {
   `).all(orderId, cardId);
 }
 
-function findRepCardPhoto(orderId, cardId, filename, database) {
-  return listRepCardPhotos(orderId, cardId, database).find((photo) => photo.stored_path.split('/').at(-1) === filename);
+function findRepCardPhoto(orderId, cardId, filename, database, phase = null) {
+  return listRepCardPhotos(orderId, cardId, database).find(
+    (photo) => photo.stored_path.split('/').at(-1) === filename && (!phase || photo.phase === phase),
+  );
 }
 
 // The visit keeps the original file, phase and approval. Only the card/report placement changes.
@@ -5029,7 +5057,14 @@ export async function deleteCardPhoto(orderId, cardId, phase, filename, actorId 
         throw new HttpError(409, 'Archived maintenance orders do not allow photo changes.');
       }
 
-      const repPhoto = findRepCardPhoto(id, targetCardId, name, database);
+      let repPhoto = findRepCardPhoto(id, targetCardId, name, database, phase);
+      if (!repPhoto) {
+        const otherPhase = phase === 'before' ? 'after' : 'before';
+        const inOtherPhase = findRepCardPhoto(id, targetCardId, name, database, otherPhase);
+        if (inOtherPhase) {
+          throw new HttpError(409, 'تغيرت مرحلة الصورة. حدّث البطاقة وحاول مرة أخرى.');
+        }
+      }
       if (repPhoto) {
         const status = editRepCardPhoto(card, repPhoto, name, phase, 'hidden', actorId, database);
         return { status, removedStoredPath: null };
@@ -5135,7 +5170,14 @@ export async function moveCardPhoto(orderId, cardId, input, actorId = null, data
       throw new HttpError(409, 'Archived maintenance orders do not allow photo changes.');
     }
 
-    const repPhoto = findRepCardPhoto(id, targetCardId, name, database);
+    let repPhoto = findRepCardPhoto(id, targetCardId, name, database, fromPhase);
+    if (!repPhoto) {
+      const otherPhase = fromPhase === 'before' ? 'after' : 'before';
+      const inOtherPhase = findRepCardPhoto(id, targetCardId, name, database, otherPhase);
+      if (inOtherPhase) {
+        throw new HttpError(409, 'تغيرت مرحلة الصورة. حدّث البطاقة وحاول مرة أخرى.');
+      }
+    }
     if (repPhoto) {
       const status = database.transaction(() => editRepCardPhoto(card, repPhoto, name, fromPhase, toPhase, actorId, database)).immediate();
       return { ok: true, cardId: targetCardId, status, path: repPhoto.stored_path };
@@ -5426,7 +5468,7 @@ function findMaintenancePhotoMetadata(orderId, cardId, phase, filename, database
   const storedPath = photos.includes(`${prefix}${name}`)
     ? `${prefix}${name}`
     : photos.find((photoPath) => typeof photoPath === 'string' && photoPath.split('/').at(-1) === name);
-  const repPhoto = findRepCardPhoto(id, targetCardId, name, database);
+  const repPhoto = findRepCardPhoto(id, targetCardId, name, database, phase);
   const attachedStoredPath = repPhoto ? (repPhoto.phase === phase ? repPhoto.stored_path : null) : storedPath;
   if (!PHOTO_EXTENSIONS.has(extname(name).toLowerCase()) || !attachedStoredPath) {
     throw new HttpError(404, 'Photo is not attached to this inspection card.');

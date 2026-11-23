@@ -218,8 +218,8 @@ test('Phase 2 client, maintenance, and workshop flows remain isolated and transa
   const afterPhoto = await uploadPhoto('after');
   assert.equal(beforePhoto.response.status, 201);
   assert.equal(afterPhoto.response.status, 201);
-  assert.match(beforePhoto.body.path, /^Areas\/[^/]+\/[^/]+\/\d{4}-\d{2}-\d{2}_\d+\/before\/[0-9a-f-]+\.jpg$/i);
-  assert.match(afterPhoto.body.path, /^Areas\/[^/]+\/[^/]+\/\d{4}-\d{2}-\d{2}_\d+\/after\/[0-9a-f-]+\.jpg$/i);
+  assert.match(beforePhoto.body.path, /^Areas\/(\d{4}\/[A-Za-z]{3}\/[^/]+\/[^/]+\/[^/]+|[^/]+\/[^/]+\/\d{4}-\d{2}-\d{2}_\d+)\/before\/[0-9a-f-]+\.jpg$/i);
+  assert.match(afterPhoto.body.path, /^Areas\/(\d{4}\/[A-Za-z]{3}\/[^/]+\/[^/]+\/[^/]+|[^/]+\/[^/]+\/\d{4}-\d{2}-\d{2}_\d+)\/after\/[0-9a-f-]+\.jpg$/i);
   assert.equal(existsSync(join(storageDirectory, ...beforePhoto.body.path.split('/'))), true);
   assert.equal(existsSync(join(storageDirectory, ...afterPhoto.body.path.split('/'))), true);
   const beforeDownload = await request(beforePhoto.body.url);
@@ -368,7 +368,7 @@ test('Phase 2 client, maintenance, and workshop flows remain isolated and transa
   });
   assert.equal(uploadedDesign.response.status, 201);
   assert.equal(uploadedDesign.body.extension, '.dxf');
-  assert.match(uploadedDesign.body.stored_path, /^clients\/C-1001\/workshop\/MFG-\d+\/designs\//);
+  assert.match(uploadedDesign.body.stored_path, /^(clients\/C-1001\/workshop\/MFG-\d+|Workshop\/Orders\/\d+)\/designs\//);
   assert.equal(existsSync(join(storageDirectory, ...uploadedDesign.body.stored_path.split('/'))), true);
 
   const designDownload = await request(`/api/workshop/designs/${uploadedDesign.body.id}/download`);
