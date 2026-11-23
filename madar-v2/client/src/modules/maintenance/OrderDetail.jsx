@@ -413,7 +413,10 @@ export default function MaintenanceOrderDetail() {
   }
 
   async function handleDeletePhoto(card, phase, filename, sourceOrderId = id) {
-    if (!window.confirm('هل تريد حذف هذه الصورة نهائياً من كارت الفحص؟')) return false;
+    const isRepPhoto = Boolean(card.rep_photo_metadata?.[filename]);
+    if (!window.confirm(isRepPhoto
+      ? 'هل تريد إزالة الصورة من البطاقة والتقرير؟ ستبقى الصورة الأصلية في سجل الزيارة.'
+      : 'هل تريد حذف هذه الصورة نهائياً من كارت الفحص؟')) return false;
     setSaving(true);
     try {
       await api.delete(`/api/maintenance/orders/${sourceOrderId}/cards/${card.id}/photos/${phase}/${encodeURIComponent(filename)}`);
@@ -1188,6 +1191,7 @@ export default function MaintenanceOrderDetail() {
                 urls={card.before_photo_urls}
                 thumbnailUrls={card.before_thumbnail_urls}
                 photoMetadata={card.rep_photo_metadata}
+                canEditRepPhotos={order.canRotatePhotos === true}
                 card={card}
                 disabled={saving || order.status === 'archived'}
                 canUpload={order.status !== 'archived'}
@@ -1202,6 +1206,7 @@ export default function MaintenanceOrderDetail() {
                 urls={card.after_photo_urls}
                 thumbnailUrls={card.after_thumbnail_urls}
                 photoMetadata={card.rep_photo_metadata}
+                canEditRepPhotos={order.canRotatePhotos === true}
                 card={card}
                 disabled={saving || order.status === 'archived'}
                 canUpload={order.status !== 'archived'}
@@ -1856,7 +1861,7 @@ function maintenancePhotoFilename(url) {
   return decodeURIComponent(new URL(url, window.location.origin).pathname.split('/').at(-1) ?? '');
 }
 
-function PhotoPhase({ title, phase, urls, thumbnailUrls, photoMetadata = {}, card, disabled, canUpload = true, onUpload, onDeletePhoto, onMovePhoto, onOpenLightbox }) {
+function PhotoPhase({ title, phase, urls, thumbnailUrls, photoMetadata = {}, card, disabled, canUpload = true, canEditRepPhotos, onUpload, onDeletePhoto, onMovePhoto, onOpenLightbox }) {
   const [isDragOver, setIsDragOver] = useState(false);
 
   function handleDragOver(event) {
@@ -1877,7 +1882,7 @@ function PhotoPhase({ title, phase, urls, thumbnailUrls, photoMetadata = {}, car
     setIsDragOver(false);
     try {
       const data = JSON.parse(event.dataTransfer.getData('text/plain'));
-      if (data && ['before', 'after'].includes(data.phase) && data.phase !== phase && typeof data.filename === 'string' && data.filename) {
+      if (data?.cardId === card.id && ['before', 'after'].includes(data.phase) && data.phase !== phase && typeof data.filename === 'string' && data.filename) {
         onMovePhoto(card, data.phase, phase, data.filename);
       }
     } catch {
@@ -1906,17 +1911,18 @@ function PhotoPhase({ title, phase, urls, thumbnailUrls, photoMetadata = {}, car
           {urls.map((url, index) => {
             const filename = maintenancePhotoFilename(url);
             const evidence = photoMetadata?.[filename];
+            const canEditPhoto = !disabled && (!evidence || (canEditRepPhotos && evidence.reviewStatus === 'approved'));
             return (
               <div
                 key={`${url}-${index}`}
                 className="madar-photo-wrapper"
-                draggable={!disabled && !evidence}
+                draggable={canEditPhoto}
                 onDragStart={(event) => {
-                  if (evidence) { event.preventDefault(); return; }
-                  event.dataTransfer.setData('text/plain', JSON.stringify({ phase, filename }));
+                  if (!canEditPhoto) { event.preventDefault(); return; }
+                  event.dataTransfer.setData('text/plain', JSON.stringify({ cardId: card.id, phase, filename }));
                   event.dataTransfer.effectAllowed = 'move';
                 }}
-                style={{ position: 'relative', display: 'inline-block', cursor: disabled || evidence ? 'default' : 'grab' }}
+                style={{ position: 'relative', display: 'inline-block', cursor: canEditPhoto ? 'grab' : 'default' }}
               >
                 <button
                   type="button"
@@ -1927,7 +1933,7 @@ function PhotoPhase({ title, phase, urls, thumbnailUrls, photoMetadata = {}, car
                 >
                   <img className="madar-photo" src={thumbnailUrls?.[index] ?? url} alt={`${title} ${index + 1}`} loading="lazy" />
                 </button>
-                {!disabled && !evidence && (
+                {canEditPhoto && (
                   <div
                     className="madar-photo-actions"
                     style={{
@@ -2035,12 +2041,13 @@ function PhotoLightboxModal({
   const [tagTargetsLoading, setTagTargetsLoading] = useState(false);
   const [quantityModal, setQuantityModal] = useState(null);
   const [downloadingPhoto, setDownloadingPhoto] = useState(false);
+  const displayedCards = Number(viewerOrderId) === Number(orderId) ? cards : viewerCards;
   const currentCardIndex = lightboxState
-    ? viewerCards.findIndex((card) => card.id === lightboxState.cardId)
+    ? displayedCards.findIndex((card) => card.id === lightboxState.cardId)
     : -1;
-  const currentCard = currentCardIndex >= 0 ? viewerCards[currentCardIndex] : null;
-  const prevCard = currentCardIndex > 0 ? viewerCards[currentCardIndex - 1] : null;
-  const nextCard = currentCardIndex >= 0 && currentCardIndex < viewerCards.length - 1 ? viewerCards[currentCardIndex + 1] : null;
+  const currentCard = currentCardIndex >= 0 ? displayedCards[currentCardIndex] : null;
+  const prevCard = currentCardIndex > 0 ? displayedCards[currentCardIndex - 1] : null;
+  const nextCard = currentCardIndex >= 0 && currentCardIndex < displayedCards.length - 1 ? displayedCards[currentCardIndex + 1] : null;
   const beforeUrls = currentCard?.before_photo_urls ?? [];
   const afterUrls = currentCard?.after_photo_urls ?? [];
   const allPhotos = [
@@ -2135,6 +2142,8 @@ function PhotoLightboxModal({
   if (!currentCard || !currentPhoto) return null;
 
   const currentFilename = maintenancePhotoFilename(currentPhoto.url);
+  const evidence = currentCard.rep_photo_metadata?.[currentFilename];
+  const canEditPhoto = !disabled && (!evidence || (canTagPhotos && evidence.reviewStatus === 'approved'));
   const phasePhotoCount = currentPhoto.phase === 'before' ? beforeUrls.length : afterUrls.length;
 
   function openLightboxQuantityEditor(reason, initialValue = '') {
@@ -2156,7 +2165,7 @@ function PhotoLightboxModal({
   }
 
   async function savePhotoTag() {
-    const [targetOrderText, targetCardText] = tagTargetKey.split(':');
+    const [targetOrderText, targetCardText] = (evidence ? `${viewerOrderId}:${currentCard.id}` : tagTargetKey).split(':');
     const targetOrderId = Number(targetOrderText);
     const targetCardId = Number(targetCardText);
     if (!Number.isSafeInteger(targetOrderId) || !Number.isSafeInteger(targetCardId)) return;
@@ -2188,6 +2197,10 @@ function PhotoLightboxModal({
   async function deleteCurrentPhoto() {
       const deleted = await onDeletePhoto(currentCard, currentPhoto.phase, currentFilename, viewerOrderId);
     if (!deleted) return;
+    if (Number(viewerOrderId) !== Number(orderId)) {
+      onClose(null);
+      return;
+    }
     const remainingPhotos = allPhotos.filter((_, index) => index !== currentPhotoIndex);
     if (!remainingPhotos.length) {
       onClose(null);
@@ -2406,10 +2419,10 @@ function PhotoLightboxModal({
               })}
             </div>
           </div>
-          {canTagPhotos && (
+          {canTagPhotos && canEditPhoto && (
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }} aria-label="تغيير أمر أو مرحلة الصورة">
-              <strong style={{ fontSize: '11px', color: '#cbd5e1' }}>ربط الصورة:</strong>
-              <select
+              <strong style={{ fontSize: '11px', color: '#cbd5e1' }}>{evidence ? 'مرحلة الصورة:' : 'ربط الصورة:'}</strong>
+              {!evidence && <select
                 aria-label="أمر الصيانة والماكينة المرتبطان بالصورة"
                 value={tagTargetKey}
                 disabled={disabled || tagTargetsLoading || !tagTargets.length}
@@ -2425,7 +2438,7 @@ function PhotoLightboxModal({
                     ))}
                   </optgroup>
                 ))}
-              </select>
+              </select>}
               <select
                 aria-label="مرحلة الصورة"
                 value={tagTargetPhase}
@@ -2439,10 +2452,10 @@ function PhotoLightboxModal({
               <button
                 type="button"
                 className="madar-button madar-button-small madar-button-secondary"
-                disabled={disabled || tagTargetsLoading || !tagTargetKey
+                disabled={evidence ? tagTargetPhase === currentPhoto.phase : tagTargetsLoading || !tagTargetKey
                   || (tagTargetKey === `${viewerOrderId}:${currentCard.id}` && tagTargetPhase === currentPhoto.phase)}
                 onClick={() => { void savePhotoTag(); }}
-              >{tagTargetsLoading ? 'جارٍ تحميل الأوامر…' : 'حفظ ربط الصورة'}</button>
+              >{evidence ? 'نقل الصورة' : tagTargetsLoading ? 'جارٍ تحميل الأوامر…' : 'حفظ ربط الصورة'}</button>
             </div>
           )}
         </div>
@@ -2469,14 +2482,14 @@ function PhotoLightboxModal({
             </button>
           </div>
 
-          {!disabled && (
+          {canEditPhoto && (
             <>
               <button
                 type="button"
                 className="madar-button madar-button-small"
                 style={{ background: 'rgba(239, 68, 68, 0.2)', color: '#f87171', border: '1px solid #b91c1c', fontSize: '11px', fontWeight: 'bold' }}
                 onClick={() => { void deleteCurrentPhoto(); }}
-                title="حذف هذه الصورة نهائياً"
+                title={evidence ? 'إزالة الصورة من البطاقة والتقرير' : 'حذف هذه الصورة نهائياً'}
               >
                 🗑️ حذف الصورة
               </button>

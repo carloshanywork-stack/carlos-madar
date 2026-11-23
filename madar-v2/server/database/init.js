@@ -2168,6 +2168,18 @@ export function migrateMaintenanceCardPhotoReviews(database) {
   }).immediate();
 }
 
+function migrateMaintenanceRepPhotoEdits(database) {
+  database.transaction(() => {
+    const version = '20261123-maintenance-rep-photo-edits';
+    if (database.prepare('SELECT 1 FROM schema_migrations WHERE version = ?').get(version)) return;
+    database.exec(`CREATE TABLE IF NOT EXISTS maintenance_rep_photo_edits (
+      photo_id INTEGER PRIMARY KEY REFERENCES rep_visit_photos(id) ON DELETE CASCADE,
+      display_phase TEXT NOT NULL CHECK (display_phase IN ('before', 'after', 'hidden'))
+    )`);
+    database.prepare('INSERT INTO schema_migrations (version) VALUES (?)').run(version);
+  }).immediate();
+}
+
 export function migrateNativeDeviceSessions(database) {
   const version = '20261122-native-device-sessions';
   if (database.prepare('SELECT 1 FROM schema_migrations WHERE version = ?').get(version)) return;
@@ -2477,6 +2489,7 @@ export function initializeDatabase({ database = db, initialAdminPassword = env.i
     migrateMaintenanceUnmatchedFolderDuplicates(database);
     migrateOrderArchiveMonths(database);
     migrateMaintenanceCardPhotoReviews(database);
+    migrateMaintenanceRepPhotoEdits(database);
     migrateTransactionalEventOutbox(database);
     migrateMachineTimestampMetadata(database);
     migrateNativeDeviceSessions(database);

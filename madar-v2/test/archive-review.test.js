@@ -274,6 +274,57 @@ test('an office reshoot after an approved field visit allows exactly a new pendi
   assert.equal((await request('/api/rep/sync-visit', other.cookie, visitForm(f))).status, 409);
 });
 
+test('approved representative photos can move or be removed from the card without altering visit evidence', async () => {
+  const f = fixture();
+  const orderUrl = `/api/maintenance/orders/${f.orderId}`;
+  const photosUrl = `${orderUrl}/cards/${f.cardId}/photos`;
+  const readCard = async () => {
+    const response = await request(orderUrl, admin);
+    assert.equal(response.status, 200);
+    return response.body.cards.find((card) => card.id === f.cardId);
+  };
+  const submitted = await request('/api/rep/sync-visit', rep.cookie, visitForm(f));
+  assert.equal(submitted.status, 200);
+  const visitId = db.prepare('SELECT id FROM rep_visits WHERE card_id = ?').get(f.cardId).id;
+  const reviewUrl = `/api/supervisor/visits/${visitId}/review`;
+  const [pendingUrl] = (await readCard()).before_photo_urls;
+  assert.equal((await request(pendingUrl, admin, undefined, 'DELETE')).status, 409);
+  assert.equal((await request(reviewUrl, admin, { action: 'approve' })).status, 200);
+
+  const originalRows = db.prepare('SELECT * FROM rep_visit_photos WHERE visit_id = ? ORDER BY id').all(visitId);
+  const originalUrl = `/api/supervisor/visits/${visitId}/photos/before/${originalRows[0].ordinal + 1}`;
+  const original = await request(originalUrl, admin);
+  assert.equal(original.status, 200);
+
+  // Older approvals can be visible through the visit even if the card did not copy the paths.
+  db.prepare("UPDATE maintenance_cards SET before_photos_json = '[]' WHERE id = ?").run(f.cardId);
+  const [beforeUrl] = (await readCard()).before_photo_urls;
+  const filename = decodeURIComponent(beforeUrl.split('/').at(-1));
+  const movement = { fromPhase: 'before', toPhase: 'after', filename };
+  assert.equal((await request(`${photosUrl}/move`, rep.cookie, movement)).status, 403);
+  const moved = await request(`${photosUrl}/move`, admin, movement);
+  assert.equal(moved.status, 200, JSON.stringify(moved.body));
+  const afterUrl = `${photosUrl}/after/${encodeURIComponent(filename)}`;
+  const movedCard = await readCard();
+  assert.equal(movedCard.before_photo_urls.length, 2);
+  assert.deepEqual(movedCard.after_photo_urls, [afterUrl]);
+  assert.equal(movedCard.rep_photo_metadata[filename].phase, 'after');
+  assert.equal((await request(beforeUrl, admin)).status, 404);
+  assert.deepEqual((await request(afterUrl, admin)).body, original.body);
+  assert.equal((await request(beforeUrl, admin, undefined, 'DELETE')).status, 409);
+
+  assert.equal((await request(afterUrl, admin, undefined, 'DELETE')).status, 200);
+  const editedCard = await readCard();
+  assert.equal(editedCard.before_photo_urls.length, 2);
+  assert.deepEqual(editedCard.after_photo_urls, []);
+  assert.equal((await request(afterUrl, admin)).status, 404);
+  assert.deepEqual((await request(originalUrl, admin)).body, original.body);
+  assert.deepEqual(db.prepare('SELECT * FROM rep_visit_photos WHERE visit_id = ? ORDER BY id').all(visitId), originalRows);
+  assert.equal(db.prepare('SELECT status FROM rep_visit_reviews WHERE visit_id = ?').get(visitId).status, 'approved');
+  assert.deepEqual(db.prepare(`SELECT action FROM audit_log WHERE entity_type = 'maintenance_card' AND entity_id = ?
+    AND action IN ('photo_move', 'photo_delete') ORDER BY id`).pluck().all(f.cardId), ['photo_move', 'photo_delete']);
+});
+
 test('workshop delivery and historical month corrections filter archive without posting receipts or changing invoice balances', async () => {
   const f = fixture();
   const id = Number(db.prepare(`INSERT INTO workshop_orders (order_code,client_id,product_name,machine_type,status,sale_price_cents)

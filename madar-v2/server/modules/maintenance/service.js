@@ -3444,12 +3444,14 @@ export function getMaintenanceOrder(orderId, database = db) {
   const reasonMap = new Map(allReasons.map((r) => [r.id, r.name]));
   const repPhotosByCard = new Map();
   const repPhotoRows = database.prepare(`
-    SELECT visit.card_id, visit.visit_uuid, photo.phase, photo.stored_path, photo.captured_at,
+    SELECT visit.card_id, visit.visit_uuid, COALESCE(edit.display_phase, photo.phase) AS phase,
+      edit.display_phase AS edited_phase, photo.stored_path, photo.captured_at,
       user.full_name AS rep_name, review.status AS review_status
     FROM rep_visit_photos photo
     JOIN rep_visits visit ON visit.id = photo.visit_id AND visit.status = 'completed'
     JOIN users user ON user.id = visit.rep_user_id
     LEFT JOIN rep_visit_reviews review ON review.visit_id = visit.id
+    LEFT JOIN maintenance_rep_photo_edits edit ON edit.photo_id = photo.id
     WHERE visit.order_id = ? AND visit.card_id IS NOT NULL
     ORDER BY visit.id, photo.phase, photo.ordinal, photo.id
   `).all(order.id);
@@ -3482,11 +3484,14 @@ export function getMaintenanceOrder(orderId, database = db) {
     rotationsByCard.get(cardId).set(`${rotation.phase}\0${rotation.filename}`, rotation.angle);
   }
   const mappedCards = cards.map((card) => {
-    const beforePhotos = parsePhotoJson(card.before_photos_json);
-    const afterPhotos = parsePhotoJson(card.after_photos_json);
+    const repPhotos = repPhotosByCard.get(Number(card.id)) ?? [];
+    const repPhaseByPath = new Map(repPhotos.map((photo) => [photo.stored_path, photo.edited_phase]));
+    const beforePhotos = parsePhotoJson(card.before_photos_json).filter((path) => (repPhaseByPath.get(path) ?? 'before') === 'before');
+    const afterPhotos = parsePhotoJson(card.after_photos_json).filter((path) => (repPhaseByPath.get(path) ?? 'after') === 'after');
     const photoRotations = rotationsByCard.get(Number(card.id)) ?? new Map();
     const repPhotoMetadata = {};
-    for (const photo of repPhotosByCard.get(Number(card.id)) ?? []) {
+    for (const photo of repPhotos) {
+      if (photo.phase === 'hidden') continue;
       const list = photo.phase === 'before' ? beforePhotos : afterPhotos;
       if (!list.includes(photo.stored_path)) list.push(photo.stored_path);
       repPhotoMetadata[photo.stored_path.split('/').at(-1)] = {
@@ -4943,6 +4948,64 @@ export async function uploadMaintenancePhoto(orderId, cardId, phase, file, actor
     () => uploadMaintenancePhotoUnlocked(orderId, cardId, phase, file, actorId, database));
 }
 
+function listRepCardPhotos(orderId, cardId, database) {
+  return database.prepare(`
+    SELECT photo.id, photo.stored_path, COALESCE(edit.display_phase, photo.phase) AS phase,
+      review.status AS review_status
+    FROM rep_visit_photos photo
+    JOIN rep_visits visit ON visit.id = photo.visit_id AND visit.status = 'completed'
+    LEFT JOIN rep_visit_reviews review ON review.visit_id = visit.id
+    LEFT JOIN maintenance_rep_photo_edits edit ON edit.photo_id = photo.id
+    WHERE visit.order_id = ? AND visit.card_id = ?
+    ORDER BY visit.id, photo.phase, photo.ordinal, photo.id
+  `).all(orderId, cardId);
+}
+
+function findRepCardPhoto(orderId, cardId, filename, database) {
+  return listRepCardPhotos(orderId, cardId, database).find((photo) => photo.stored_path.split('/').at(-1) === filename);
+}
+
+// The visit keeps the original file, phase and approval. Only the card/report placement changes.
+function editRepCardPhoto(card, photo, filename, fromPhase, toPhase, actorId, database) {
+  const actor = database.prepare('SELECT role FROM users WHERE id = ? AND active = 1 AND deleted_at IS NULL').get(actorId);
+  if (!['admin', 'operations'].includes(actor?.role)) throw new HttpError(403, 'تعديل صور المندوب متاح للإدارة والعمليات.');
+  if (photo.phase !== fromPhase) throw new HttpError(409, 'تغيرت مرحلة الصورة. حدّث البطاقة وحاول مرة أخرى.');
+  if (photo.review_status !== 'approved') throw new HttpError(409, 'اعتمد صورة المندوب قبل تعديلها من بطاقة الصيانة.');
+  if (fromPhase === toPhase) return card.status;
+
+  const before = parsePhotoJson(card.before_photos_json).filter((path) => path !== photo.stored_path);
+  const after = parsePhotoJson(card.after_photos_json).filter((path) => path !== photo.stored_path);
+  // Legacy approved visits may still be displayed from the visit rows only.
+  for (const other of listRepCardPhotos(card.order_id, card.id, database)) {
+    if (other.id === photo.id || other.review_status !== 'approved' || other.phase === 'hidden') continue;
+    const list = other.phase === 'before' ? before : after;
+    if (!list.includes(other.stored_path)) list.push(other.stored_path);
+  }
+  if (toPhase !== 'hidden') {
+    const destination = toPhase === 'before' ? before : after;
+    if (destination.length >= MAX_MANUAL_CARD_PHASE_PHOTOS) throw new HttpError(400, 'وصلت المرحلة إلى الحد الأقصى للصور.');
+    destination.push(photo.stored_path);
+  }
+  const status = card.status === 'excluded' ? card.status : 'pending';
+  database.prepare(`INSERT INTO maintenance_rep_photo_edits (photo_id, display_phase) VALUES (?, ?)
+    ON CONFLICT(photo_id) DO UPDATE SET display_phase = excluded.display_phase`).run(photo.id, toPhase);
+  database.prepare(`UPDATE maintenance_cards SET before_photos_json = ?, after_photos_json = ?,
+    status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(JSON.stringify(before), JSON.stringify(after), status, card.id);
+  if (toPhase === 'hidden') {
+    database.prepare('DELETE FROM maintenance_card_photo_rotations WHERE card_id = ? AND phase = ? AND filename = ?')
+      .run(card.id, fromPhase, filename);
+  } else {
+    database.prepare(`UPDATE maintenance_card_photo_rotations SET phase = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE card_id = ? AND phase = ? AND filename = ?`).run(toPhase, card.id, fromPhase, filename);
+  }
+  queueCardPhotoReview(card.id, actorId, database);
+  const next = database.prepare('SELECT status FROM maintenance_cards WHERE id = ?').get(card.id);
+  recordAudit({ database, actorId, action: toPhase === 'hidden' ? 'photo_delete' : 'photo_move',
+    entityType: 'maintenance_card', entityId: card.id,
+    oldValues: { photoId: photo.id, phase: fromPhase }, newValues: { displayPhase: toPhase, status: next.status } });
+  return next.status;
+}
+
 export async function deleteCardPhoto(orderId, cardId, phase, filename, actorId = null, database = db) {
   const id = positiveId(orderId, 'orderId');
   const targetCardId = positiveId(cardId, 'cardId');
@@ -4964,6 +5027,12 @@ export async function deleteCardPhoto(orderId, cardId, phase, filename, actorId 
       if (!card) throw new HttpError(404, 'Active inspection card was not found.');
       if (card.order_status === 'archived') {
         throw new HttpError(409, 'Archived maintenance orders do not allow photo changes.');
+      }
+
+      const repPhoto = findRepCardPhoto(id, targetCardId, name, database);
+      if (repPhoto) {
+        const status = editRepCardPhoto(card, repPhoto, name, phase, 'hidden', actorId, database);
+        return { status, removedStoredPath: null };
       }
 
       const beforePaths = parsePhotoJson(card.before_photos_json);
@@ -5009,6 +5078,8 @@ export async function deleteCardPhoto(orderId, cardId, phase, filename, actorId 
         afterCount: afterPaths.length,
       };
     }).immediate();
+
+    if (!removedPhoto.removedStoredPath) return { ok: true, cardId: targetCardId, status: removedPhoto.status };
 
     let fileCleanupPending = false;
     try {
@@ -5062,6 +5133,12 @@ export async function moveCardPhoto(orderId, cardId, input, actorId = null, data
     if (!card) throw new HttpError(404, 'Active inspection card was not found.');
     if (card.order_status === 'archived') {
       throw new HttpError(409, 'Archived maintenance orders do not allow photo changes.');
+    }
+
+    const repPhoto = findRepCardPhoto(id, targetCardId, name, database);
+    if (repPhoto) {
+      const status = database.transaction(() => editRepCardPhoto(card, repPhoto, name, fromPhase, toPhase, actorId, database)).immediate();
+      return { ok: true, cardId: targetCardId, status, path: repPhoto.stored_path };
     }
 
     const beforePaths = parsePhotoJson(card.before_photos_json);
@@ -5203,6 +5280,9 @@ export async function retagMaintenancePhoto(orderId, cardId, input, actorId = nu
     }
     if (sourceCard.order_status === 'archived' || targetCard.order_status === 'archived') {
       throw new HttpError(409, 'Archived maintenance orders do not allow photo changes.');
+    }
+    if (findRepCardPhoto(sourceOrderId, sourceCardId, filename, database)) {
+      throw new HttpError(409, 'صور المندوب تظل مرتبطة بالزيارة الأصلية. يمكن تغيير مرحلتها داخل نفس البطاقة.');
     }
 
     const sourceBefore = parsePhotoJson(sourceCard.before_photos_json);
@@ -5346,14 +5426,8 @@ function findMaintenancePhotoMetadata(orderId, cardId, phase, filename, database
   const storedPath = photos.includes(`${prefix}${name}`)
     ? `${prefix}${name}`
     : photos.find((photoPath) => typeof photoPath === 'string' && photoPath.split('/').at(-1) === name);
-  const repPhotoPath = database.prepare(`
-    SELECT photo.stored_path
-    FROM rep_visit_photos photo
-    JOIN rep_visits visit ON visit.id = photo.visit_id AND visit.status = 'completed'
-    WHERE visit.order_id = ? AND visit.card_id = ? AND photo.phase = ?
-    ORDER BY photo.id
-  `).all(id, targetCardId, phase).find((photo) => photo.stored_path.split('/').at(-1) === name)?.stored_path;
-  const attachedStoredPath = storedPath ?? repPhotoPath;
+  const repPhoto = findRepCardPhoto(id, targetCardId, name, database);
+  const attachedStoredPath = repPhoto ? (repPhoto.phase === phase ? repPhoto.stored_path : null) : storedPath;
   if (!PHOTO_EXTENSIONS.has(extname(name).toLowerCase()) || !attachedStoredPath) {
     throw new HttpError(404, 'Photo is not attached to this inspection card.');
   }
