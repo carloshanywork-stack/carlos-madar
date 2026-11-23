@@ -87,6 +87,11 @@ export default function OfflineRouteMap({
     return machines.filter((machine) => Number.isFinite(machine.latitude) && Number.isFinite(machine.longitude));
   }, [machines]);
 
+  const activeMachine = useMemo(() => {
+    if (!selectedMachineId) return selectedMachine || null;
+    return machines.find((m) => Number(m.machineId || m.id) === Number(selectedMachineId)) || selectedMachine || null;
+  }, [machines, selectedMachineId, selectedMachine]);
+
   const needsLocation = useMemo(() => {
     return machines.filter((machine) => !Number.isFinite(machine.latitude) || !Number.isFinite(machine.longitude));
   }, [machines]);
@@ -438,6 +443,29 @@ export default function OfflineRouteMap({
             );
           })()}
         </svg>
+
+        {activeMachine && (
+          <aside className="rep-map-machine-popup" role="dialog" aria-label={`تفاصيل الماكينة ${activeMachine.machineCode || activeMachine.code}`}>
+            <button type="button" className="rep-map-machine-popup-close" aria-label="إغلاق تفاصيل الماكينة" onClick={() => setSelectedMachineId(null)}>×</button>
+            <span className="rep-map-machine-status" style={{ '--machine-status-color': getMachineStatus(activeMachine).color }}>
+              <i aria-hidden="true" />{getMachineStatus(activeMachine).label}
+            </span>
+            <strong>{activeMachine.machineCode || activeMachine.code} · {activeMachine.arabicName || activeMachine.name_ar || 'ماكينة'}</strong>
+            <small>{activeMachine.address || 'العنوان غير مسجل'}{(activeMachine.regionName || activeMachine.area) ? ` · ${activeMachine.regionName || activeMachine.area}` : ''}</small>
+            <button
+              type="button"
+              className="rep-button rep-button-primary"
+              disabled={activeMachine.canVisit === false}
+              onClick={() => {
+                if (activeMachine.canVisit !== false) {
+                  onMachineSelect?.({ ...activeMachine, regionName: activeMachine.regionName || activeMachine.area });
+                }
+              }}
+            >
+              {activeMachine.canVisit === false ? 'الزيارة غير متاحة حالياً' : 'ابدأ الزيارة'}
+            </button>
+          </aside>
+        )}
 
         {/* Status Overlays */}
         {tilesLoading && <span className="rep-map-loading">{pack.serverSource ? 'جارٍ تحميل البلاطات من MBTiles المحلي…' : 'جارٍ فتح بلاطات الخريطة من ذاكرة الهاتف…'}</span>}

@@ -86,8 +86,20 @@ export function requireWorkshopMutationAccess(req, res, next) {
     res.status(401).json({ error: 'Authentication is required.' });
     return;
   }
+  if (!['admin', 'operations'].includes(req.user.role)) {
+    forbid(res, 'صلاحية العمليات أو مدير النظام مطلوبة لتعديل أوامر الورشة.');
+    return;
+  }
+  next();
+}
+
+export function requireProcurementMutationAccess(req, res, next) {
+  if (!req.user) {
+    res.status(401).json({ error: 'Authentication is required.' });
+    return;
+  }
   if (!['admin', 'operations', 'purchasing'].includes(req.user.role)) {
-    forbid(res, 'صلاحية العمليات أو المشتريات أو مدير النظام مطلوبة لتعديل أوامر الورشة والمشتريات.');
+    forbid(res, 'صلاحية العمليات أو المشتريات أو مدير النظام مطلوبة لإدارة المشتريات.');
     return;
   }
   next();

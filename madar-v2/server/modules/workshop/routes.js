@@ -7,7 +7,7 @@ import { safeOriginalName, asyncHandler } from '../http.js';
 import { resolveStorageFile } from '../storage.js';
 import { memoryUpload } from '../upload.js';
 import { requestActorId } from '../actor.js';
-import { requireWorkshopMutationAccess } from '../auth/authorization.js';
+import { requireWorkshopMutationAccess, requireProcurementMutationAccess } from '../auth/authorization.js';
 import { financeAware as roleAware } from '../visibility.js';
 import {
   createWorkshopOrder,
@@ -354,7 +354,7 @@ router.get('/orders/:id/trace', (req, res, next) => {
 });
 
 // --- Procurement & Goods Receipts ---
-router.post('/procurement/requests', requireWorkshopMutationAccess, (req, res, next) => {
+router.post('/procurement/requests', requireProcurementMutationAccess, (req, res, next) => {
   try {
     res.status(201).json(createPurchaseRequest(req.body, requestActorId(req)));
   } catch (error) {
@@ -370,7 +370,7 @@ router.get('/procurement/requests', (req, res, next) => {
   }
 });
 
-router.post('/procurement/orders', requireWorkshopMutationAccess, (req, res, next) => {
+router.post('/procurement/orders', requireProcurementMutationAccess, (req, res, next) => {
   try {
     res.status(201).json(createPurchaseOrder(req.body, requestActorId(req)));
   } catch (error) {
@@ -394,7 +394,7 @@ router.get('/procurement/orders/:id', (req, res, next) => {
   }
 });
 
-router.post('/procurement/orders/:id/approve', requireWorkshopMutationAccess, (req, res, next) => {
+router.post('/procurement/orders/:id/approve', requireProcurementMutationAccess, (req, res, next) => {
   try {
     res.json(approvePurchaseOrder(req.params.id, requestActorId(req)));
   } catch (error) {
@@ -402,7 +402,7 @@ router.post('/procurement/orders/:id/approve', requireWorkshopMutationAccess, (r
   }
 });
 
-router.post('/procurement/receipts', requireWorkshopMutationAccess, (req, res, next) => {
+router.post('/procurement/receipts', requireProcurementMutationAccess, (req, res, next) => {
   try {
     res.status(201).json(createGoodsReceipt(req.body, requestActorId(req)));
   } catch (error) {
