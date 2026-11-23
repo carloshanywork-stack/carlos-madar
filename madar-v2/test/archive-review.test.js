@@ -57,8 +57,8 @@ function fixture() {
   for (const owner of [rep, other]) db.prepare('INSERT INTO maintenance_order_reps (order_id,user_id) VALUES (?,?)').run(orderId, owner.id);
   return { code, clientId, orderId, machineId, cardId };
 }
-async function upload(f, phase = 'before') {
-  const form = new FormData(); form.append('photo', new Blob([jpeg], { type: 'image/jpeg' }), phase + '.jpg');
+async function upload(f, phase = 'before', photo = jpeg) {
+  const form = new FormData(); form.append('photo', new Blob([photo], { type: 'image/jpeg' }), phase + '.jpg');
   return request(`/api/maintenance/orders/${f.orderId}/cards/${f.cardId}/photos/${phase}`, admin, form);
 }
 async function routeCard(f, owner = rep) {
@@ -76,17 +76,73 @@ function visitForm(f) {
   for (let i = 0; i < 3; i++) form.append('beforePhoto', new Blob([jpeg], { type: 'image/jpeg' }), `before-${i}.jpg`);
   return form;
 }
-function zipXml(buffer) {
+function inspectPptx(buffer) {
   return new Promise((resolve, reject) => yauzl.fromBuffer(buffer, { lazyEntries: true }, (error, zip) => {
-    if (error) return reject(error); const parts = []; zip.readEntry();
+    if (error) return reject(error); const parts = []; const slides = []; const jpegs = []; zip.readEntry();
     zip.on('entry', entry => {
-      if (!entry.fileName.endsWith('.xml')) return zip.readEntry();
+      const isJpeg = /^ppt\/media\/.+\.jpe?g$/i.test(entry.fileName);
+      if (!isJpeg && !entry.fileName.endsWith('.xml')) return zip.readEntry();
       zip.openReadStream(entry, (e, stream) => { if (e) return reject(e); const chunks = [];
         stream.on('data', c => chunks.push(c)); stream.on('error', reject);
-        stream.on('end', () => { parts.push(Buffer.concat(chunks).toString()); zip.readEntry(); }); });
-    }); zip.on('end', () => resolve(parts.join('\n'))); zip.on('error', reject);
+        stream.on('end', () => {
+          const data = Buffer.concat(chunks);
+          if (isJpeg) {
+            jpegs.push(data);
+          } else {
+            const xml = data.toString();
+            parts.push(xml);
+            if (/^ppt\/slides\/slide\d+\.xml$/.test(entry.fileName)) slides.push(xml);
+          }
+          zip.readEntry();
+        }); });
+    }); zip.on('end', () => resolve({ xml: parts.join('\n'), slides, jpegs })); zip.on('error', reject);
   }));
 }
+
+test('a single archived order exported asynchronously embeds both before and after photos', async () => {
+  const f = fixture();
+  const afterPhoto = await sharp({ create: { width: 60, height: 50, channels: 3, background: '#cc4422' } }).jpeg().toBuffer();
+  assert.equal((await upload(f, 'before')).status, 201);
+  assert.equal((await upload(f, 'after', afterPhoto)).status, 201);
+  assert.equal((await decide(f)).status, 200);
+  db.prepare("UPDATE maintenance_orders SET status='review' WHERE id=?").run(f.orderId);
+  const archived = await request(`/api/maintenance/orders/${f.orderId}/archive`, admin, {
+    warrantyPeriodMonths: 3, actualExpensesCents: 0, archiveMonth: '2025-01',
+  });
+  assert.equal(archived.status, 200, JSON.stringify(archived.body));
+  const details = await request(`/api/maintenance/orders/${f.orderId}`, admin);
+  assert.equal(details.status, 200);
+  const [card] = details.body.cards;
+  for (const urls of [card.before_photo_urls, card.after_photo_urls]) {
+    assert.equal(urls.length, 1);
+    assert.equal((await request(urls[0], admin)).status, 200);
+  }
+
+  const exportId = randomUUID();
+  const accepted = await request('/api/maintenance/export/pptx', admin, { orderIds: [f.orderId], mode: 'async', exportId });
+  assert.equal(accepted.status, 202, JSON.stringify(accepted.body));
+  const deadline = Date.now() + 10_000;
+  let progress;
+  while (Date.now() < deadline) {
+    const result = await request(`/api/maintenance/export/pptx/progress?exportId=${exportId}`, admin);
+    assert.equal(result.status, 200);
+    progress = result.body;
+    if (progress.ready || progress.error) break;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  assert.ok(progress?.ready && progress.downloadUrl, progress?.error || 'The archived PPTX did not finish');
+  const report = await request(progress.downloadUrl, admin);
+  assert.equal(report.status, 200);
+  const { slides, jpegs } = await inspectPptx(report.body);
+  const photoSlide = slides.find((slide) => slide.includes('>Before<') && slide.includes('>After<'));
+  assert.ok(photoSlide, 'The archived order must contain a before/after slide');
+  const photoRefs = new Set(Array.from(photoSlide.matchAll(/<a:blip\b[^>]*r:embed="([^"]+)"/g), (match) => match[1]));
+  assert.ok(photoRefs.size >= 2, 'The before/after slide must reference both photos');
+  const pixels = await Promise.all(jpegs.map((photo) => sharp(photo).resize(1, 1).toColourspace('srgb').raw().toBuffer()));
+  const includesColor = (rgb) => pixels.some((pixel) => rgb.every((value, index) => Math.abs(pixel[index] - value) < 12));
+  assert.ok(includesColor([68, 102, 136]), 'The blue before photo must be embedded');
+  assert.ok(includesColor([204, 68, 34]), 'The red after photo must be embedded');
+});
 
 test('manual photos become durable pending review, stale approvals conflict, approval and reshoot reconcile representative work', async () => {
   const f = fixture(); assert.equal((await routeCard(f)).canVisit, true);
@@ -167,7 +223,7 @@ test('archive month is owner-selected, changes are audited without cash effects,
   assert.equal(sheet[0].includes('شهر الأرشيف'), true); assert.equal(sheet.length, 2); assert.equal(sheet[1].at(-1), '2026-02');
   const pptx = await request('/api/maintenance/export/pptx', admin, { orderIds: [f.orderId, old.orderId], archiveMonth: '2026-02', groupBy: 'area' });
   assert.equal(pptx.status, 200, Buffer.isBuffer(pptx.body) ? '' : JSON.stringify(pptx.body));
-  const xml = await zipXml(pptx.body); assert.match(xml, /فبراير 2026/); assert.equal(xml.includes(old.code), false);
+  const { xml } = await inspectPptx(pptx.body); assert.match(xml, /فبراير 2026/); assert.equal(xml.includes(old.code), false);
   const before = db.prepare('SELECT archived_at,petty_cash_refund_cents,actual_expenses_cents FROM maintenance_orders WHERE id=?').get(f.orderId);
   const cashRows = db.prepare('SELECT count(*) AS n FROM treasury_entries').get().n;
   for (const invalid of ['2026-13','2026-00','2026-02-12','0000-01']) assert.equal((await request(`/api/maintenance/orders/${f.orderId}/archive-month`, admin, { archiveMonth: invalid }, 'PATCH')).status, 400);

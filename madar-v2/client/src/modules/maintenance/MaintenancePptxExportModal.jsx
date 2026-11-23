@@ -7,7 +7,6 @@ import Modal from '../../components/ui/Modal.jsx';
 import { errorMessage } from '../../lib/format.js';
 import { api, apiUrl } from '../../lib/api.js';
 import { useApi } from '../../lib/useApi.js';
-import { exportMaintenanceOrderToPptxClient } from '../../lib/exports/client-pptx-export.js';
 
 function statusLabel(status) {
   return ({ in_progress: 'قيد التنفيذ', review: 'بانتظار المراجعة', archived: 'مؤرشف' })[status] ?? status;
@@ -150,24 +149,6 @@ export default function MaintenancePptxExportModal({
         return;
       }
       orderIds = [currentOrder.id];
-
-      // Perform fast, zero-server-load client-side export
-      setExporting(true);
-      setLiveProgress({ active: true, total: 100, current: 0, percent: 5, stage: 'تحميل بيانات الأمر والصور محلياً...' });
-      try {
-        const orderDetail = await api.get(`/api/maintenance/orders/${currentOrder.id}`);
-        await exportMaintenanceOrderToPptxClient(orderDetail.order || currentOrder, orderDetail.cards || [], {
-          onProgress: (percent, stage) => {
-            setLiveProgress({ active: percent < 100, total: 100, current: percent, percent, stage });
-          },
-        });
-        setExporting(false);
-        onClose?.();
-        return;
-      } catch (clientErr) {
-        // If client canvas/blob creation fails, proceed below to server-side export fallback
-        console.warn('Client-side PPTX generation fallback to server:', clientErr);
-      }
     } else if (scope === 'archive') {
       orderIds = (archivedOrders ?? []).map((order) => order.id);
       if (!orderIds.length) { setError('لا توجد أوامر مؤرشفة ضمن الشهر المحدد للتصدير.'); return; }
