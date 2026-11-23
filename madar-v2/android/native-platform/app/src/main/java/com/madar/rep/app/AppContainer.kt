@@ -57,6 +57,7 @@ class AppContainer(context: Context) {
         sessionGateway = sessionGateway,
         apiFactory = apiFactory,
         onSessionExpired = { sessions.expire() },
+        photoStore = photoStore,
     )
     val scheduler = SyncScheduler(appContext)
 

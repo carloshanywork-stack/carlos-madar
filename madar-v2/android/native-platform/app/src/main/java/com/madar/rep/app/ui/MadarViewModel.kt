@@ -42,6 +42,7 @@ import com.madar.rep.app.data.repo.VisitRepository
 import com.madar.rep.app.data.session.Session
 import com.madar.rep.app.data.sync.SyncRunResult
 import com.madar.rep.app.location.LocationResult
+import com.madar.rep.app.location.VisitLocationStatus
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -83,7 +84,10 @@ data class LocationUiState(
     val busy: Boolean = false,
     val message: String? = null,
     val permissionDenied: Boolean = false,
+    val approximateOnly: Boolean = false,
     val providersDisabled: Boolean = false,
+    val weakSignal: Boolean = false,
+    val weakSignalAccuracy: Float? = null,
 )
 
 data class MapDownloadState(
@@ -241,11 +245,59 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
 
     val migration = container.migrationManager.state
 
+    val visitLocationStatus: StateFlow<VisitLocationStatus> = container.locationProvider.visitStatus
+
+    fun startVisitLocationTracking() = container.locationProvider.startVisitTracking()
+
+    fun stopVisitLocationTracking(force: Boolean = false) = container.locationProvider.stopVisitTracking(force)
+
     fun refreshMigrationMarkers() {
         viewModelScope.launch { container.migrationManager.refreshMarkers() }
     }
 
     init {
+        viewModelScope.launch {
+            container.locationProvider.visitStatus.collect { status ->
+                when (status) {
+                    is VisitLocationStatus.HighAccuracy -> {
+                        applyLocationPoint(status.point)
+                    }
+                    is VisitLocationStatus.Provisional -> {
+                        val currentPt = _location.value.point
+                        if (currentPt == null || !currentPt.isFresh(System.currentTimeMillis(), 30_000L)) {
+                            applyLocationPoint(status.point, "موقع تقريبي مبدئي (±${status.point.accuracyMeters.toInt()} م). جارٍ تحسين الدقة عبر GPS...")
+                        }
+                    }
+                    is VisitLocationStatus.WeakSignal -> {
+                        if (_location.value.point != null) {
+                            _location.value = _location.value.copy(
+                                weakSignal = true,
+                                weakSignalAccuracy = status.accuracyMeters,
+                            )
+                        }
+                    }
+                    is VisitLocationStatus.ApproximateOnly -> {
+                        _location.value = _location.value.copy(
+                            approximateOnly = true,
+                            message = "تم منح إذن الموقع التقريبي فقط. يلزم إذن الموقع الدقيق لاعتماد الماكينة.",
+                        )
+                    }
+                    is VisitLocationStatus.Disabled -> {
+                        _location.value = _location.value.copy(
+                            providersDisabled = true,
+                            message = "خدمة الموقع مغلقة. شغّل GPS أو الشبكة ثم أعد المحاولة.",
+                        )
+                    }
+                    is VisitLocationStatus.PermissionDenied -> {
+                        _location.value = _location.value.copy(
+                            permissionDenied = true,
+                            message = "يلزم إذن الموقع لاعتماد الزيارة وتسجيل الحضور.",
+                        )
+                    }
+                    else -> {}
+                }
+            }
+        }
         viewModelScope.launch {
             session.collect { current ->
                 if (current == null) {
@@ -639,8 +691,9 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
                             it.state in setOf("queued", "syncing", "retry_wait", "needs_login")
                     }
                 val action = if (activeAction != null) activeAction else {
-                    val result = container.locationProvider.currentFix(7_000)
-                    val point = (result as? LocationResult.Success)?.point ?: container.locationProvider.lastKnown()
+                    val point = container.locationProvider.lastKnownValid(60_000L)
+                        ?: (container.locationProvider.currentFix(4_000) as? LocationResult.Success)?.point
+                        ?: container.locationProvider.lastKnown()
                         ?: throw MadarError.Validation("لم يصل الموقع بعد. تأكد من تشغيل GPS وحاول اعتماد الماكينة مرة أخرى.")
                     val now = System.currentTimeMillis()
                     val age = now - point.capturedAtMillis
@@ -669,8 +722,10 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
                     ).also { container.database.machineActions().upsert(it) }
                 }
 
-                container.syncEngine.run()
-                val saved = container.database.machineActions().find(action.actionUuid)
+                // High-priority immediate decoupled dispatch
+                val saved = container.syncEngine.dispatchMachineActionImmediate(action.actionUuid)
+                    ?: container.database.machineActions().find(action.actionUuid)
+
                 when (saved?.state) {
                     MachineActionState.APPROVED -> {
                         val location = JSONObject(action.payloadJson).getJSONObject("location")
@@ -685,10 +740,24 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
                             provider = "GPS",
                             isMock = false,
                         ), "تم اعتماد موقع الماكينة. يمكنك الآن استكمال الزيارة.")
-                        container.routeRepository.refresh(current, container.apiFactory(current.serverUrl))
-                        _messages.tryEmit("تم اعتماد موقع الماكينة بنجاح.")
+                        viewModelScope.launch(Dispatchers.IO) {
+                            runCatching { container.routeRepository.refresh(current, container.apiFactory(current.serverUrl)) }
+                        }
+                        _messages.tryEmit("تم اعتماد موقع الماكينة بنجاح من الخادم.")
                     }
                     MachineActionState.QUEUED, MachineActionState.RETRY_WAIT, MachineActionState.SYNCING -> {
+                        val location = JSONObject(action.payloadJson).getJSONObject("location")
+                        val latitude = location.getDouble("latitude")
+                        val longitude = location.getDouble("longitude")
+                        container.visitRepository.confirmDraftMachineLocation(visit.visitUuid, latitude, longitude)
+                        applyLocationPoint(GeoPoint(
+                            latitude = latitude,
+                            longitude = longitude,
+                            accuracyMeters = location.getDouble("accuracy").toFloat(),
+                            capturedAtMillis = MadarTime.parseIso(location.getString("updatedAt")) ?: System.currentTimeMillis(),
+                            provider = "GPS",
+                            isMock = false,
+                        ), "تم حفظ الاعتماد على هذا الجهاز. يمكنك المتابعة وسيُزامن مع الخادم عند توفر الاتصال.")
                         container.scheduler.enqueueNow()
                         _messages.tryEmit("تم حفظ طلب اعتماد الماكينة على الهاتف؛ سيُرسل تلقائيًا عند توفر الاتصال.")
                     }
@@ -1131,9 +1200,24 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
 
     fun refreshLocation() {
         if (_location.value.busy) return
-        _location.value = _location.value.copy(busy = true, message = null, permissionDenied = false, providersDisabled = false)
+        _location.value = _location.value.copy(
+            busy = true,
+            message = null,
+            permissionDenied = false,
+            approximateOnly = false,
+            providersDisabled = false,
+            weakSignal = false,
+            weakSignalAccuracy = null,
+        )
         viewModelScope.launch {
-            val result = withContext(Dispatchers.IO) { container.locationProvider.currentFix(7_000) }
+            val result = withContext(Dispatchers.IO) {
+                val fastFix = container.locationProvider.lastKnownValid(15_000L)
+                if (fastFix != null) {
+                    LocationResult.Success(fastFix, gpsEnabled = true)
+                } else {
+                    container.locationProvider.currentFix(7_000)
+                }
+            }
             when (result) {
                 is LocationResult.Success -> applyLocationPoint(result.point)
                 LocationResult.PermissionDenied -> {
@@ -1143,12 +1227,39 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
                         message = "يلزم إذن الموقع لاعتماد الزيارة وتسجيل الحضور.",
                     )
                 }
+                LocationResult.ApproximateOnlyPermission -> {
+                    _location.value = _location.value.copy(
+                        busy = false,
+                        approximateOnly = true,
+                        message = "تم منح إذن الموقع التقريبي فقط. يلزم إذن الموقع الدقيق لاعتماد الماكينة وتسجيل الحضور.",
+                    )
+                }
                 LocationResult.ProvidersDisabled -> {
                     _location.value = _location.value.copy(
                         busy = false,
                         providersDisabled = true,
                         message = "خدمة الموقع مغلقة. شغّل GPS أو الشبكة ثم أعد المحاولة.",
                     )
+                }
+                is LocationResult.WeakSignal -> {
+                    val candidate = result.candidate ?: container.locationProvider.lastKnown()
+                    if (candidate != null) {
+                        applyLocationPoint(
+                            candidate,
+                            "إشارة GPS ضعيفة (دقة ±${result.accuracyMeters.toInt()} م). يلزم دقة ${GeoPolicy.MAX_ACCURACY_METERS.toInt()} م أو أفضل للاعتماد.",
+                        )
+                        _location.value = _location.value.copy(
+                            weakSignal = true,
+                            weakSignalAccuracy = result.accuracyMeters,
+                        )
+                    } else {
+                        _location.value = _location.value.copy(
+                            busy = false,
+                            weakSignal = true,
+                            weakSignalAccuracy = result.accuracyMeters,
+                            message = "إشارة GPS ضعيفة (دقة ±${result.accuracyMeters.toInt()} م). تحرك لمكان مكشوف لتحسين الإشارة.",
+                        )
+                    }
                 }
                 LocationResult.Timeout -> {
                     val fallback = container.locationProvider.lastKnown()

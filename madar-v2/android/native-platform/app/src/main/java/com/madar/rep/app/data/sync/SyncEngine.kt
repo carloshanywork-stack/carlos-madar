@@ -48,6 +48,7 @@ class SyncEngine(
     private val sessionGateway: SessionGateway,
     private val apiFactory: (String) -> MadarApi = { MadarApi(it) },
     private val onSessionExpired: () -> Unit = {},
+    private val photoStore: com.madar.rep.app.media.PhotoStore? = null,
 ) {
     private val json = Json { ignoreUnknownKeys = true; explicitNulls = false; encodeDefaults = true }
 
@@ -215,8 +216,33 @@ class SyncEngine(
         }
         val files = ArrayList<VisitPhotoFile>(photos.size)
         for (photo in before + after) {
-            val file = File(photo.processedPath)
-            if (!file.isFile || file.length() <= 0L || file.length() != photo.sizeBytes) {
+            var file = File(photo.processedPath)
+            if (photo.sha256.isBlank() || !file.isFile || file.length() <= 0L) {
+                // Background watermarking is still rendering or was interrupted by process death
+                val recovered = runCatching {
+                    val d = File(photo.originalPath).parentFile
+                    if (d != null && File(d, "capture.json").isFile) {
+                        val rendered = photoStore?.renderWatermark(photo)
+                            ?: (context.applicationContext as? com.madar.rep.app.MadarApplication)
+                                ?.container?.photoStore?.renderWatermark(photo)
+                        if (rendered != null) {
+                            database.photos().upsert(rendered)
+                            rendered
+                        } else null
+                    } else null
+                }.getOrNull()
+                file = File(recovered?.processedPath ?: photo.processedPath)
+                if (!file.isFile || file.length() <= 0L) {
+                    // Processing still in progress off-thread, defer upload safely
+                    database.visits().updateSyncState(
+                        visit.visitUuid, VisitState.PROCESSING,
+                        "جارٍ معالجة الصور وضبط العلامة المائية؛ ستُرفع فور جاهزيتها.",
+                        visit.attempts, now + 3_000L, "processing", now
+                    )
+                    return SyncSignal.PROCESSING
+                }
+            }
+            if (photo.sizeBytes > 0 && file.length() != photo.sizeBytes) {
                 val message = "صورة محلية مفقودة أو تغيّر حجمها؛ الزيارة محفوظة للمراجعة."
                 database.visits().updateSyncState(
                     visit.visitUuid, VisitState.NEEDS_REVIEW, message, visit.attempts + 1,
@@ -365,62 +391,88 @@ class SyncEngine(
     private suspend fun syncMachineActions(session: Session, api: MadarApi) {
         val actions = database.machineActions().dueForSync(session.ownerScopeId, System.currentTimeMillis())
         for (action in actions) {
-            val now = System.currentTimeMillis()
-            database.machineActions().updateState(
-                action.actionUuid, MachineActionState.SYNCING, null, action.attempts, 0,
-                action.correctionId, action.serverStatus, now
-            )
-            try {
-                val response = if (action.type == "confirm_location") {
-                    api.confirmMachineLocation(session.token, action.machineId, action.payloadJson)
-                } else {
-                    val evidence = action.evidencePath?.let { File(it) }?.takeIf { it.isFile }
-                    api.submitMachineCorrection(
-                        session.token, action.machineId, action.payloadJson,
-                        evidence, action.evidenceContentType
-                    )
-                }
-                if (response.success) {
-                    val state = when {
-                        action.type == "confirm_location" && response.status == "approved" -> MachineActionState.APPROVED
-                        action.type == "confirm_location" && response.status == "rejected" -> MachineActionState.REJECTED
-                        action.type == "confirm_location" -> MachineActionState.PENDING_APPROVAL
-                        else -> "synced"
-                    }
-                    database.machineActions().updateState(
-                        action.actionUuid, state, null, action.attempts + 1, 0,
-                        response.correctionId ?: response.id ?: action.correctionId,
-                        response.status ?: action.serverStatus, now
-                    )
-                } else {
-                    database.machineActions().updateState(
-                        action.actionUuid, MachineActionState.RETRY_WAIT,
-                        response.message ?: response.error ?: "لم يؤكد الخادم العملية",
-                        action.attempts + 1,
-                        now + SyncPolicy.retryDelayMillis(action.attempts + 1),
-                        action.correctionId, action.serverStatus, now,
-                    )
-                }
-            } catch (error: MadarError.SessionExpired) {
-                database.machineActions().updateState(
-                    action.actionUuid, MachineActionState.NEEDS_LOGIN,
-                    "انتهت الجلسة؛ سجّل الدخول من جديد", action.attempts + 1, 0,
-                    action.correctionId, action.serverStatus, now
-                )
-                throw error
-            } catch (error: MadarError.Network) {
-                database.machineActions().updateState(
-                    action.actionUuid, MachineActionState.RETRY_WAIT, error.message,
-                    action.attempts + 1, now + SyncPolicy.retryDelayMillis(action.attempts + 1),
-                    action.correctionId, action.serverStatus, now
-                )
-            } catch (error: MadarError) {
-                database.machineActions().updateState(
-                    action.actionUuid, MachineActionState.NEEDS_REVIEW, error.message,
-                    action.attempts + 1, 0, action.correctionId, action.serverStatus, now
+            executeSingleMachineAction(action, session, api)
+        }
+    }
+
+    suspend fun executeSingleMachineAction(action: MachineActionEntity, session: Session, api: MadarApi): MachineActionEntity {
+        val now = System.currentTimeMillis()
+        database.machineActions().updateState(
+            action.actionUuid, MachineActionState.SYNCING, null, action.attempts, 0,
+            action.correctionId, action.serverStatus, now
+        )
+        try {
+            val response = if (action.type == "confirm_location") {
+                api.confirmMachineLocation(session.token, action.machineId, action.payloadJson)
+            } else {
+                val evidence = action.evidencePath?.let { File(it) }?.takeIf { it.isFile }
+                api.submitMachineCorrection(
+                    session.token, action.machineId, action.payloadJson,
+                    evidence, action.evidenceContentType
                 )
             }
+            if (response.success) {
+                val state = when {
+                    action.type == "confirm_location" && response.status == "approved" -> MachineActionState.APPROVED
+                    action.type == "confirm_location" && response.status == "rejected" -> MachineActionState.REJECTED
+                    action.type == "confirm_location" -> MachineActionState.PENDING_APPROVAL
+                    else -> "synced"
+                }
+                database.machineActions().updateState(
+                    action.actionUuid, state, null, action.attempts + 1, 0,
+                    response.correctionId ?: response.id ?: action.correctionId,
+                    response.status ?: action.serverStatus, now
+                )
+            } else {
+                database.machineActions().updateState(
+                    action.actionUuid, MachineActionState.RETRY_WAIT,
+                    response.message ?: response.error ?: "لم يؤكد الخادم العملية",
+                    action.attempts + 1,
+                    now + SyncPolicy.retryDelayMillis(action.attempts + 1),
+                    action.correctionId, action.serverStatus, now,
+                )
+            }
+        } catch (error: MadarError.SessionExpired) {
+            database.machineActions().updateState(
+                action.actionUuid, MachineActionState.NEEDS_LOGIN,
+                "انتهت الجلسة؛ سجّل الدخول من جديد", action.attempts + 1, 0,
+                action.correctionId, action.serverStatus, now
+            )
+            throw error
+        } catch (error: MadarError.Network) {
+            database.machineActions().updateState(
+                action.actionUuid, MachineActionState.RETRY_WAIT, error.message,
+                action.attempts + 1, now + SyncPolicy.retryDelayMillis(action.attempts + 1),
+                action.correctionId, action.serverStatus, now
+            )
+        } catch (error: MadarError) {
+            database.machineActions().updateState(
+                action.actionUuid, MachineActionState.NEEDS_REVIEW, error.message,
+                action.attempts + 1, 0, action.correctionId, action.serverStatus, now
+            )
         }
+        return database.machineActions().find(action.actionUuid) ?: action
+    }
+
+    /**
+     * Dedicated, targeted dispatch path for an individual machine action (such as location confirmation).
+     * Bypasses the queue-draining runMutex so pending photo uploads, attendance punches, and GPS batches
+     * cannot block this high-priority user operation.
+     */
+    suspend fun dispatchMachineActionImmediate(actionUuid: String): MachineActionEntity? = withContext(Dispatchers.IO) {
+        var session = sessionGateway.current() ?: return@withContext null
+        if (session.isExpired() || session.isOfflineOnly) {
+            val refreshed = sessionGateway.refreshCredentials(session)
+            if (refreshed != null) {
+                session = refreshed
+            } else if (session.isOfflineOnly || session.isExpired()) {
+                // Return action in its durable queued/retry state
+                return@withContext database.machineActions().find(actionUuid)
+            }
+        }
+        val action = database.machineActions().find(actionUuid) ?: return@withContext null
+        val api = apiFactory(session.serverUrl)
+        executeSingleMachineAction(action, session, api)
     }
 
     private fun reviewReasonLabel(code: String): String? = when (code) {

@@ -53,6 +53,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -72,6 +73,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.madar.rep.app.core.GeoPoint
 import com.madar.rep.app.core.GeoPolicy
@@ -157,6 +161,22 @@ fun VisitScreen(
             vm.showMessage(error)
         } else if (result.resultCode == android.app.Activity.RESULT_OK) {
             vm.refreshLocation()
+        }
+    }
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, visitUuid) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> vm.startVisitLocationTracking()
+                Lifecycle.Event.ON_PAUSE -> vm.stopVisitLocationTracking()
+                else -> {}
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            vm.stopVisitLocationTracking()
         }
     }
 
@@ -722,6 +742,39 @@ private fun LocationCard(
         subtitle = if (visit.locationLocked) "يلزم موقع حديث بدقة 50 مترًا أو أفضل، مع احتساب هامش الدقة داخل نطاق الماكينة." else null,
     ) {
         if (!visit.locationLocked) {
+            val point = location.point
+            if (point != null) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        Icons.Default.LocationOn,
+                        contentDescription = null,
+                        tint = if (point.accuracyMeters <= 50f) MadarTeal else MadarWarning,
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        "إشارة GPS الحالية: ±%d م".format(point.accuracyMeters.toInt()),
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+            } else {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+                    Spacer(Modifier.width(6.dp))
+                    Text("جارٍ التقاط إشارة GPS…", style = MaterialTheme.typography.bodySmall, color = MadarMuted)
+                }
+            }
+            if (location.approximateOnly) {
+                InlineMessage("تم منح إذن الموقع التقريبي فقط. يلزم إذن الموقع الدقيق لاعتماد الماكينة.", MessageTone.Warning)
+            }
+            if (location.providersDisabled) {
+                InlineMessage("خدمة الموقع مغلقة. شغّل GPS من إعدادات الجهاز.", MessageTone.Error)
+            }
+            if (location.weakSignal) {
+                val acc = location.weakSignalAccuracy?.toInt() ?: 0
+                InlineMessage("إشارة GPS ضعيفة (±$acc م). يرجى التواجد في مكان مكشوف لتحسين دقة الإشارة.", MessageTone.Warning)
+            }
+            Spacer(Modifier.height(8.dp))
             Button(
                 onClick = onApproveMachine,
                 enabled = !approvingMachineLocation,
@@ -733,6 +786,12 @@ private fun LocationCard(
                     Text("جارٍ اعتماد الماكينة…")
                 } else {
                     Text("اعتماد الماكينة")
+                }
+            }
+            if (location.permissionDenied) {
+                Spacer(Modifier.height(4.dp))
+                Button(onClick = onRequestPermission, modifier = Modifier.fillMaxWidth()) {
+                    Text("منح إذن الموقع")
                 }
             }
         } else {
@@ -787,6 +846,13 @@ private fun LocationCard(
                     else Text("تحديث الموقع")
                 }
                 if (location.permissionDenied) Button(onClick = onRequestPermission) { Text("منح إذن الموقع") }
+            }
+            if (location.approximateOnly) {
+                InlineMessage("تم منح إذن الموقع التقريبي فقط. يلزم إذن الموقع الدقيق لتسجيل الحضور وتحديث الزيارة.", MessageTone.Warning)
+            }
+            if (location.weakSignal) {
+                val acc = location.weakSignalAccuracy?.toInt() ?: 0
+                InlineMessage("إشارة GPS ضعيفة (±$acc م). تحرك لمكان مكشوف لتحسين دقة الإشارة.", MessageTone.Warning)
             }
             if (location.providersDisabled) InlineMessage("افتح إعدادات الجهاز وشغّل خدمة الموقع ثم أعد المحاولة.", MessageTone.Warning)
             if (visit.machineLatitude != null && visit.machineLongitude != null) {
