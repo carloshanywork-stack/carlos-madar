@@ -115,6 +115,16 @@ class CameraActivity : ComponentActivity() {
         }
     }
 
+    override fun onStart() {
+        super.onStart()
+        (application as? MadarApplication)?.container?.locationProvider?.startVisitTracking()
+    }
+
+    override fun onStop() {
+        (application as? MadarApplication)?.container?.locationProvider?.stopVisitTracking()
+        super.onStop()
+    }
+
     override fun onDestroy() {
         executor.shutdown()
         super.onDestroy()
@@ -130,14 +140,8 @@ class CameraActivity : ComponentActivity() {
         val state = CaptureUiState.busy
         assignCaptureState(state)
         val capturedAt = System.currentTimeMillis()
-        var frozenLocation = livePoint?.takeIf { it.isFresh(capturedAt) && !it.isMock }
-        if (frozenLocation == null) {
-            val freshFix = kotlinx.coroutines.runBlocking { container.locationProvider.currentFix(2000L) }
-            val point = (freshFix as? com.madar.rep.app.location.LocationResult.Success)?.point
-            if (point != null && point.isFresh(capturedAt) && !point.isMock) {
-                frozenLocation = point
-            }
-        }
+        val frozenLocation = container.locationProvider.lastKnownValid(20_000L)
+            ?: livePoint?.takeIf { it.isFresh(capturedAt, 30_000L) && !it.isMock }
         val captureFile = container.photoStore.newCaptureFile(visitUuid, phase)
         capture.takePicture(
             ImageCapture.OutputFileOptions.Builder(captureFile).build(),
@@ -158,7 +162,9 @@ class CameraActivity : ComponentActivity() {
                             val position = (0 until PhotoPolicy.MAX_PER_PHASE).firstOrNull { it !in usedPositions }
                                 ?: throw MadarError.Validation("بلغت الحد التقني لصور هذه المرحلة")
                             val location = frozenLocation
-                            val photo = container.photoStore.commit(
+
+                            // Fast durable step: Commits immutable original and journal to disk immediately (<300ms)
+                            val durablePhoto = container.photoStore.commitFastDurable(
                                 visitUuid = visitUuid,
                                 phase = phase,
                                 position = position,
@@ -170,22 +176,37 @@ class CameraActivity : ComponentActivity() {
                                 regionName = visit.regionName,
                                 areaName = visit.areaName,
                             )
-                            kotlinx.coroutines.runBlocking { container.visitRepo.addPhoto(visitUuid, photo) }
-                            val galleryExportFailed = runCatching {
-                                container.photoStore.publishOriginalToGallery(photo, visit.machineCode)
-                            }.isFailure
+                            kotlinx.coroutines.runBlocking { container.visitRepo.addPhoto(visitUuid, durablePhoto) }
+
+                            // Immediately unblock the shutter and show preview to allow the next shot
                             runOnUiThread {
                                 setResult(
                                     RESULT_OK,
-                                    Intent().putExtra("photoId", photo.id).putExtra("phase", phase)
+                                    Intent().putExtra("photoId", durablePhoto.id).putExtra("phase", phase)
                                 )
                                 capturedCount += 1
-                                previewPath = photo.processedPath
+                                previewPath = durablePhoto.originalPath
                                 assignCaptureState(CaptureUiState.idle)
-                                if (galleryExportFailed) {
-                                    Toast.makeText(this@CameraActivity, "تم حفظ الصورة داخل التطبيق، لكن تعذر نسخها إلى Pictures/MADAR.", Toast.LENGTH_LONG).show()
-                                }
                             }
+
+                            // Run watermarking, compression, SHA-256, and gallery export off-thread with bounded concurrency
+                            PhotoProcessingPipeline.enqueue(
+                                photo = durablePhoto,
+                                machineCode = visit.machineCode,
+                                container = container,
+                                onComplete = { processed ->
+                                    runOnUiThread {
+                                        if (previewPath == durablePhoto.originalPath) {
+                                            previewPath = processed.processedPath
+                                        }
+                                    }
+                                },
+                                onGalleryError = {
+                                    runOnUiThread {
+                                        Toast.makeText(this@CameraActivity, "تم حفظ الصورة داخل التطبيق، لكن تعذر نسخها إلى Pictures/MADAR.", Toast.LENGTH_LONG).show()
+                                    }
+                                }
+                            )
                         } catch (error: Exception) {
                             // The raw capture remains durable for recovery on processing failure.
                             val message = error.message ?: "تعذر حفظ الصورة"
@@ -291,16 +312,14 @@ class CameraActivity : ComponentActivity() {
         var clock by remember { mutableStateOf(System.currentTimeMillis()) }
         LaunchedEffect(Unit) { while (kotlinx.coroutines.currentCoroutineContext().isActive) { clock=System.currentTimeMillis(); delay(1000) } }
         LaunchedEffect(Unit) {
-            val container=(application as MadarApplication).container
-            livePoint = container.locationProvider.lastKnown()
-            while(kotlinx.coroutines.currentCoroutineContext().isActive) {
-                val fix=container.locationProvider.currentFix(3000)
-                val updated=(fix as? com.madar.rep.app.location.LocationResult.Success)?.point
-                if (updated != null) livePoint=updated
-                else if (livePoint?.isFresh(System.currentTimeMillis()) != true) {
-                    livePoint=container.locationProvider.lastKnown()
+            val container = (application as MadarApplication).container
+            livePoint = container.locationProvider.lastKnownValid()
+            container.locationProvider.visitStatus.collect { status ->
+                when (status) {
+                    is com.madar.rep.app.location.VisitLocationStatus.HighAccuracy -> livePoint = status.point
+                    is com.madar.rep.app.location.VisitLocationStatus.Provisional -> livePoint = status.point
+                    else -> Unit
                 }
-                delay(12_000)
             }
         }
         LaunchedEffect(Unit) {
