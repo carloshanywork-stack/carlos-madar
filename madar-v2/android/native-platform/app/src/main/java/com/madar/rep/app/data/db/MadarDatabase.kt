@@ -23,8 +23,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         LegacyImportEntity::class,
         GpsPointEntity::class,
         SupportReportEntity::class,
+        ActionQueueEntity::class,
     ],
-    version = 4,
+    version = 5,
     exportSchema = true,
 )
 abstract class MadarDatabase : RoomDatabase() {
@@ -42,6 +43,7 @@ abstract class MadarDatabase : RoomDatabase() {
     abstract fun migration(): MigrationDao
     abstract fun gpsPoints(): GpsPointDao
     abstract fun supportReports(): SupportReportDao
+    abstract fun actionQueue(): ActionQueueDao
 
     companion object {
         @Volatile private var instance: MadarDatabase? = null
@@ -98,6 +100,23 @@ abstract class MadarDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE visits ADD COLUMN arrivalConfirmedAt INTEGER")
+                database.execSQL("""CREATE TABLE IF NOT EXISTS action_queue (
+                    actionUuid TEXT NOT NULL PRIMARY KEY,
+                    ownerRepId INTEGER NOT NULL,
+                    type TEXT NOT NULL,
+                    contentHash TEXT NOT NULL,
+                    queuedAt INTEGER NOT NULL
+                )""".trimIndent())
+                database.execSQL("""INSERT INTO action_queue (actionUuid, ownerRepId, type, contentHash, queuedAt)
+                    SELECT visitUuid, ownerRepId, 'visit', contentHash, updatedAt FROM visits
+                    WHERE state IN ('queued', 'retry_wait', 'processing', 'syncing', 'needs_login', 'needs_review')
+                """.trimIndent())
+            }
+        }
+
         fun get(context: Context): MadarDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(
                 context.applicationContext,
@@ -108,6 +127,7 @@ abstract class MadarDatabase : RoomDatabase() {
                 .addMigrations(MIGRATION_1_2)
                 .addMigrations(MIGRATION_2_3)
                 .addMigrations(MIGRATION_3_4)
+                .addMigrations(MIGRATION_4_5)
                 .build()
                 .also { instance = it }
         }

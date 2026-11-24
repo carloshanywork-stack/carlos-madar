@@ -80,7 +80,6 @@ class PhotoStore(private val context: Context, private val governorates: Governo
      * and writes capture.json journal. Returns PhotoEntity ready for Room persistence
      * so that the UI can allow the next shot in <300ms without waiting for watermarking.
      */
-    @Synchronized
     fun commitFastDurable(
         visitUuid: String,
         phase: String,

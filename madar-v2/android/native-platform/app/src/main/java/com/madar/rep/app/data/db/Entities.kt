@@ -34,6 +34,15 @@ object MachineActionState {
     const val FAILED = "failed"
 }
 
+@Entity(tableName = "action_queue")
+data class ActionQueueEntity(
+    @PrimaryKey val actionUuid: String,
+    val ownerRepId: Long,
+    val type: String,
+    val contentHash: String,
+    val queuedAt: Long,
+)
+
 object AttendanceActionState {
     const val QUEUED = "queued"
     const val SYNCING = "syncing"
@@ -126,6 +135,7 @@ data class VisitEntity(
     val contentHash: String = "",
     val createdAt: Long,
     val updatedAt: Long,
+    val arrivalConfirmedAt: Long? = null,
 ) {
     val isTerminal: Boolean get() = state == VisitState.APPROVED
 }

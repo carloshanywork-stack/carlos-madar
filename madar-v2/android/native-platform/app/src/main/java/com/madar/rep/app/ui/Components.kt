@@ -26,7 +26,6 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -52,12 +51,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.madar.rep.app.core.GeoPoint
-import com.madar.rep.app.core.GeoPolicy
 import com.madar.rep.app.core.LocationDecision
 import com.madar.rep.app.data.db.AttendanceActionState
 import com.madar.rep.app.data.db.MachineActionState
 import com.madar.rep.app.data.db.MapPackState
 import com.madar.rep.app.data.db.VisitEntity
+import com.madar.rep.app.domain.fsm.VisitFsm
 import com.madar.rep.app.data.db.VisitState
 import com.madar.rep.app.ui.theme.MadarDanger
 import com.madar.rep.app.ui.theme.MadarGold
@@ -398,14 +397,11 @@ fun GeofencedArrivalCard(
     onRefreshLocation: () -> Unit,
     onRequestLocationChange: () -> Unit,
     onRequestPermission: () -> Unit,
-    onReportUnableToService: (() -> Unit)? = null,
-    onConfirmDifferentLocation: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     SectionCard(
         modifier = modifier,
-        title = "تأكيد التواجد الميداني (Geofence)",
-        subtitle = "التحقق من التواجد الجغرافي الفعلي داخل نطاق أمان الماكينة.",
+        title = "تأكيد الوصول",
     ) {
         if (!visit.locationLocked) {
             InlineMessage(
@@ -430,151 +426,36 @@ fun GeofencedArrivalCard(
             }
         } else {
             val point = location.point
-            val hasLockedCoords = visit.machineLatitude != null && visit.machineLongitude != null
-            val distance = if (point != null && hasLockedCoords) {
-                GeoPolicy.distanceMeters(
-                    point.latitude, point.longitude,
-                    visit.machineLatitude!!, visit.machineLongitude!!,
-                )
-            } else null
-
-            val decision = if (point != null) {
-                GeoPolicy.evaluate(
-                    point,
-                    visit.machineLatitude,
-                    visit.machineLongitude,
-                    visit.geofenceRadiusMeters,
-                )
-            } else LocationDecision.Missing
-
-            val isInsideGeofence = decision == LocationDecision.Valid
-
-            if (point != null && point.isMock) {
-                InlineMessage(
-                    "⚠️ تم اكتشاف أداة تزييف موقع (Mock GPS)! لا يمكن اعتماد الحضور بموقع غير حقيقي.",
-                    MessageTone.Error,
-                )
-            } else if (isArrived) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(MadarTeal.copy(alpha = 0.12f))
-                        .padding(12.dp),
-                ) {
-                    Icon(Icons.Default.CheckCircle, contentDescription = null, tint = MadarTeal)
-                    Column {
-                        Text(
-                            "تم تأكيد الوصول والتواجد عند الماكينة بنجاح",
-                            fontWeight = FontWeight.Bold,
-                            color = MadarTeal,
-                            fontSize = 14.sp,
-                        )
-                        if (distance != null) {
-                            Text(
-                                "المسافة المقاسة: ${distance.toInt()}م (ضمن نطاق الـ ${visit.geofenceRadiusMeters.toInt()}م)",
-                                fontSize = 12.sp,
-                                color = MadarTeal.copy(alpha = 0.85f),
-                            )
-                        }
-                    }
-                }
+            val decision = VisitFsm.arrivalDecision(visit, point)
+            val canConfirm = decision == LocationDecision.Valid && !location.busy &&
+                !location.permissionDenied && !location.approximateOnly && !location.providersDisabled
+            if (isArrived) {
+                InlineMessage("تم حفظ تأكيد الوصول عند الماكينة.", MessageTone.Success)
             } else {
-                if (distance != null) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.LocationOn, contentDescription = null, tint = if (isInsideGeofence) MadarTeal else MadarWarning)
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            if (isInsideGeofence) "أنت داخل نطاق الماكينة (على بُعد ${distance.toInt()}م)"
-                            else "أنت خارج نطاق الماكينة (على بُعد ${distance.toInt()}م · المسموح ${visit.geofenceRadiusMeters.toInt()}م)",
-                            fontWeight = FontWeight.SemiBold,
-                            color = if (isInsideGeofence) MadarTeal else MadarWarning,
-                            fontSize = 14.sp,
-                        )
-                    }
+                val (message, tone) = when (decision) {
+                    LocationDecision.Valid -> "أنت داخل نطاق الماكينة. أكّد وصولك لبدء الزيارة." to MessageTone.Success
+                    LocationDecision.Missing -> "بانتظار قراءة GPS." to MessageTone.Warning
+                    LocationDecision.Mocked -> "تم اكتشاف موقع مزيّف." to MessageTone.Error
+                    LocationDecision.InvalidCoordinates -> "إحداثيات الموقع غير صالحة." to MessageTone.Error
+                    is LocationDecision.Invalid -> decision.reason to MessageTone.Error
+                    is LocationDecision.Stale -> "قراءة الموقع قديمة. حدّث GPS." to MessageTone.Warning
+                    is LocationDecision.Inaccurate -> "دقة الموقع غير كافية. حاول في مكان مكشوف." to MessageTone.Warning
+                    is LocationDecision.Outside -> "أنت خارج نطاق الماكينة، على بُعد ${decision.distanceMeters.toInt()} م." to MessageTone.Warning
                 }
-
+                InlineMessage(message, tone)
                 Button(
-                    onClick = { point?.let { onConfirmArrival(it) } },
-                    enabled = isInsideGeofence && !location.busy && point != null && !point.isMock,
+                    onClick = { point?.let(onConfirmArrival) },
+                    enabled = canConfirm,
                     modifier = Modifier.fillMaxWidth().height(52.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (isInsideGeofence) MadarTeal else MaterialTheme.colorScheme.surfaceVariant,
-                        contentColor = if (isInsideGeofence) Color.White else MadarMuted,
-                    ),
                     shape = RoundedCornerShape(14.dp),
                 ) {
                     Icon(Icons.Default.LocationOn, contentDescription = null)
                     Spacer(Modifier.width(8.dp))
-                    Text(
-                        if (isInsideGeofence) "📍 أنا في الموقع (تأكيد الوصول)"
-                        else "اقترب من الماكينة لتأكيد الوصول (${distance?.toInt() ?: 0}م)",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 15.sp,
-                    )
+                    Text("تأكيد الوصول عند الماكينة", fontWeight = FontWeight.Bold)
                 }
-
-                if (!isInsideGeofence && distance != null && point != null) {
-                    val isAccurateEnough = point.accuracyMeters <= GeoPolicy.MAX_FIELD_CONFIRMATION_ACCURACY_METERS
-                    if (!isAccurateEnough) {
-                        InlineMessage(
-                            "دقة إشارة GPS الحالية (±${point.accuracyMeters.toInt()}م) غير كافية للتحقق بدقة. يرجى الوقوف في مكان مكشوف للحصول على إشارة أفضل.",
-                            MessageTone.Warning,
-                        )
-                    } else if (onConfirmDifferentLocation != null) {
-                        Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = MadarGold.copy(alpha = 0.15f),
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                        ) {
-                            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                ) {
-                                    Icon(Icons.Default.Warning, contentDescription = null, tint = MadarGold)
-                                    Text(
-                                        text = "أنت في موقع مختلف عن الموقع المسجل للماكينة",
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 14.sp,
-                                        color = MadarInk,
-                                    )
-                                }
-                                Text(
-                                    text = "المسافة الحالية عن الموقع المسجل: ${distance.toInt()}م. إذا كانت الماكينة نُقلت أو كان الموقع المسجل غير صحيح، يمكنك اعتماد موقعك الحالي للزيارة والمتابعة فوراً.",
-                                    fontSize = 12.sp,
-                                    color = MadarMuted,
-                                )
-                                Button(
-                                    onClick = onConfirmDifferentLocation,
-                                    colors = ButtonDefaults.buttonColors(containerColor = MadarTeal, contentColor = Color.White),
-                                    shape = RoundedCornerShape(10.dp),
-                                    modifier = Modifier.fillMaxWidth().height(46.dp),
-                                ) {
-                                    Icon(Icons.Default.LocationOn, contentDescription = null, Modifier.size(18.dp))
-                                    Spacer(Modifier.width(6.dp))
-                                    Text("اعتماد الموقع الحالي للزيارة", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                                }
-                            }
-                        }
-                    }
-
-                    OutlinedButton(
-                        onClick = onRequestLocationChange,
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp),
-                    ) {
-                        Text("الماكينة نُقلت لمكان آخر؟ طلب تصحيح موقع", fontSize = 12.sp)
-                    }
-                }
-                if (onReportUnableToService != null) {
-                    TextButton(
-                        onClick = onReportUnableToService,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text("تعذر إجراء الزيارة؟ إثبات العذر للمشرف", color = MadarDanger, fontSize = 12.sp)
+                if (decision is LocationDecision.Outside) {
+                    OutlinedButton(onClick = onRequestLocationChange, modifier = Modifier.fillMaxWidth()) {
+                        Text("طلب تصحيح موقع الماكينة")
                     }
                 }
             }
@@ -600,7 +481,10 @@ fun GeofencedArrivalCard(
                     }
                 }
             }
-            if (location.permissionDenied) {
+            if (location.providersDisabled) {
+                InlineMessage("فعّل خدمة الموقع من إعدادات الهاتف.", MessageTone.Warning)
+            }
+            if (location.permissionDenied || location.approximateOnly) {
                 Button(onClick = onRequestPermission, modifier = Modifier.fillMaxWidth()) {
                     Text("منح إذن الموقع الجغرافي")
                 }

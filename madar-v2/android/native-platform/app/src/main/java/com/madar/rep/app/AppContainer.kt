@@ -46,7 +46,7 @@ class AppContainer(context: Context) {
     val routeRepository = RouteRepository(database)
     val notificationRepository = NotificationRepository(database)
     val attendanceRepository = AttendanceRepository(database)
-    val visitRepository = VisitRepository(database, governorates)
+    val visitRepository = VisitRepository(database, governorates, routeRepository)
     val visitRepo get() = visitRepository
     val mapRepository = MapRepository(appContext, database)
     val migrationManager = MigrationManager(appContext, database, governorates)
@@ -98,8 +98,16 @@ class MadarApplication : android.app.Application() {
                         container.photoStore.recoverPending().forEach { photo ->
                             runCatching {
                                 val visit = container.visitRepository.find(photo.visitUuid)
-                                if (visit != null && visit.state == "draft" && container.visitRepository.photos(photo.visitUuid).none { it.id == photo.id })
-                                    container.visitRepository.addPhoto(photo.visitUuid, photo)
+                                if (visit?.ownerRepId == session.ownerScopeId && visit.state == "draft") {
+                                    val saved = container.visitRepository.photo(photo.id)
+                                    if (saved == null) {
+                                        container.visitRepository.addPhoto(photo.visitUuid, photo, recovered = true)
+                                    } else if (saved.sha256.isBlank()) {
+                                        container.database.photos().updateProcessed(
+                                            photo.id, photo.processedPath, photo.watermarkText, photo.sha256, photo.sizeBytes,
+                                        )
+                                    }
+                                }
                             }
                         }
                     }

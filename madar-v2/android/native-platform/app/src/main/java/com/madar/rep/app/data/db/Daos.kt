@@ -42,11 +42,13 @@ interface VisitDao {
 
     @Query(
         """
-        SELECT * FROM visits
-        WHERE ownerRepId = :repId
-          AND state IN ('queued', 'retry_wait', 'processing', 'syncing')
-          AND nextAttemptAt <= :now
-        ORDER BY createdAt
+        SELECT visits.* FROM visits
+        JOIN action_queue ON action_queue.actionUuid = visits.visitUuid
+          AND action_queue.ownerRepId = visits.ownerRepId AND action_queue.type = 'visit'
+        WHERE visits.ownerRepId = :repId
+          AND visits.state IN ('queued', 'retry_wait', 'processing', 'syncing')
+          AND visits.nextAttemptAt <= :now
+        ORDER BY action_queue.queuedAt
         LIMIT :limit
         """
     )
@@ -98,9 +100,25 @@ interface VisitDao {
 }
 
 @Dao
+interface ActionQueueDao {
+    @Insert
+    suspend fun append(action: ActionQueueEntity)
+
+    @Query("""
+        INSERT OR IGNORE INTO action_queue (actionUuid, ownerRepId, type, contentHash, queuedAt)
+        SELECT visitUuid, ownerRepId, 'visit', contentHash, updatedAt FROM visits
+        WHERE ownerRepId = :repId AND state IN ('queued', 'retry_wait', 'processing', 'syncing')
+    """)
+    suspend fun appendLegacyVisits(repId: Long)
+}
+
+@Dao
 interface PhotoDao {
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun upsert(photo: PhotoEntity)
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertNew(photo: PhotoEntity): Long
+
+    @Query("UPDATE photos SET processedPath = :path, watermarkText = :watermark, sha256 = :hash, sizeBytes = :size WHERE id = :id")
+    suspend fun updateProcessed(id: String, path: String, watermark: String, hash: String, size: Long): Int
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertAll(photos: List<PhotoEntity>)

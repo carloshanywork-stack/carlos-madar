@@ -373,7 +373,7 @@ private fun ForcedUpdateScreen(vm: MadarViewModel) {
     BackHandler(enabled = true) { }
     Surface(color = MaterialTheme.colorScheme.background) {
         Column(
-            Modifier.fillMaxSize().padding(28.dp),
+            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(28.dp),
             verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
@@ -382,6 +382,10 @@ private fun ForcedUpdateScreen(vm: MadarViewModel) {
             Text("هذا الإصدار لم يعد مدعومًا. حدّث التطبيق للعودة إلى العمل. لن تُرسل البيانات من هذا الإصدار.")
             Spacer(Modifier.height(12.dp))
             update.availableVersion?.let { Text("الإصدار المطلوب: $it") }
+            update.releaseNotes?.let { notes ->
+                Spacer(Modifier.height(8.dp))
+                Text(notes, style = MaterialTheme.typography.bodyMedium)
+            }
             update.message?.let {
                 Spacer(Modifier.height(8.dp))
                 Text(it, style = MaterialTheme.typography.bodyMedium)
