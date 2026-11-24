@@ -39,6 +39,7 @@ sealed interface LocationDecision {
 object GeoPolicy {
     const val MAX_FIX_AGE_MILLIS = 300_000L
     const val MAX_ACCURACY_METERS = 250f
+    const val MAX_FIELD_CONFIRMATION_ACCURACY_METERS = 50f
     const val REJECTION_COMPROMISED_ENVIRONMENT = "تم رفض تسجيل الموقع: تم اكتشاف بيئة نظام غير موثوقة أو أداة تزييف موقع"
 
     val COMMON_ROOT_PATHS: List<String> = listOf(

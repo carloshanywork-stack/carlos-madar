@@ -7,6 +7,7 @@ import com.madar.rep.app.core.SyncSignal
 import com.madar.rep.app.core.SupportDiagnostics
 import com.madar.rep.app.data.api.ApiLocation
 import com.madar.rep.app.data.api.AttendanceActionRequest
+import com.madar.rep.app.data.api.MachineActionResponse
 import com.madar.rep.app.data.api.MadarApi
 import com.madar.rep.app.data.api.MaintenanceLine
 import com.madar.rep.app.data.api.VisitPhotoFile
@@ -402,20 +403,35 @@ class SyncEngine(
             action.correctionId, action.serverStatus, now
         )
         try {
-            val response = if (action.type == "confirm_location") {
-                api.confirmMachineLocation(session.token, action.machineId, action.payloadJson)
-            } else {
-                val evidence = action.evidencePath?.let { File(it) }?.takeIf { it.isFile }
-                api.submitMachineCorrection(
-                    session.token, action.machineId, action.payloadJson,
-                    evidence, action.evidenceContentType
-                )
+            val response = when (action.type) {
+                "confirm_location" -> api.confirmMachineLocation(session.token, action.machineId, action.payloadJson)
+                "location_change" -> {
+                    val evidence = action.evidencePath?.let { File(it) }?.takeIf { it.isFile }
+                    val submitResp = api.submitLocationChangeRequest(session.token, action.machineId, action.payloadJson, evidence)
+                    MachineActionResponse(
+                        success = submitResp.success,
+                        status = submitResp.status,
+                        correctionId = submitResp.requestId?.toLong(),
+                        id = submitResp.requestId?.toLong(),
+                    )
+                }
+                else -> {
+                    val evidence = action.evidencePath?.let { File(it) }?.takeIf { it.isFile }
+                    api.submitMachineCorrection(
+                        session.token, action.machineId, action.payloadJson,
+                        evidence, action.evidenceContentType
+                    )
+                }
             }
             if (response.success) {
                 val state = when {
                     action.type == "confirm_location" && response.status == "approved" -> MachineActionState.APPROVED
                     action.type == "confirm_location" && response.status == "rejected" -> MachineActionState.REJECTED
                     action.type == "confirm_location" -> MachineActionState.PENDING_APPROVAL
+                    action.type == "location_change" && response.status == "approved" -> MachineActionState.APPROVED
+                    action.type == "location_change" && response.status == "exception_only" -> "exception_only"
+                    action.type == "location_change" && response.status == "rejected" -> MachineActionState.REJECTED
+                    action.type == "location_change" -> MachineActionState.PENDING_APPROVAL
                     else -> "synced"
                 }
                 database.machineActions().updateState(

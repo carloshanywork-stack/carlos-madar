@@ -46,6 +46,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -64,6 +65,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -129,6 +131,7 @@ fun VisitScreen(
     var showLocationChange by rememberSaveable(visitUuid) { mutableStateOf(false) }
     var showUnableToServiceDialog by rememberSaveable(visitUuid) { mutableStateOf(false) }
     var showBeforeOnlyDialog by rememberSaveable(visitUuid) { mutableStateOf(false) }
+    var showDifferentLocationDialog by rememberSaveable(visitUuid) { mutableStateOf(false) }
 
     val visit = detail?.visit
     val editable = visit?.state == VisitState.DRAFT
@@ -331,6 +334,7 @@ fun VisitScreen(
                     onRefreshLocation = { vm.refreshLocation() },
                     onRequestLocationChange = { showLocationChange = true },
                     onReportUnableToService = { showUnableToServiceDialog = true },
+                    onConfirmDifferentLocation = { showDifferentLocationDialog = true },
                     onRequestPermission = {
                         permissionLauncher.launch(
                             arrayOf(
@@ -597,6 +601,14 @@ fun VisitScreen(
     }
     if (showLocationChange && visit != null) {
         LocationChangeDialog(vm = vm, visit = visit, onDismiss = { showLocationChange = false })
+    }
+    if (showDifferentLocationDialog && visit != null) {
+        DifferentLocationVisitDialog(
+            vm = vm,
+            visit = visit,
+            location = location,
+            onDismiss = { showDifferentLocationDialog = false },
+        )
     }
     if (showUnableToServiceDialog && visit != null) {
         com.madar.rep.app.ui.components.UnableToServiceDialog(
@@ -1038,4 +1050,164 @@ private fun PhotoPreviewDialog(photo: PhotoEntity, onDismiss: () -> Unit) {
             }
         }
     }
+}
+
+@Composable
+private fun DifferentLocationVisitDialog(
+    vm: MadarViewModel,
+    visit: VisitEntity,
+    location: LocationUiState,
+    onDismiss: () -> Unit,
+) {
+    val point = location.point
+    val now = System.currentTimeMillis()
+    val coordinatesValid = point != null && !point.isMock &&
+        point.accuracyMeters in 0f..GeoPolicy.MAX_FIELD_CONFIRMATION_ACCURACY_METERS &&
+        (now - point.capturedAtMillis in -60_000L..300_000L)
+    val distance = if (point != null && visit.machineLatitude != null && visit.machineLongitude != null) {
+        GeoPolicy.distanceMeters(point.latitude, point.longitude, visit.machineLatitude, visit.machineLongitude)
+    } else null
+
+    val reasons = listOf(
+        "تم نقل الماكينة إلى موقع جديد",
+        "الموقع المسجل للماكينة غير صحيح",
+        "صيانة مؤقتة في موقع خارجي / ورشة",
+        "أخرى",
+    )
+    var selectedReason by rememberSaveable(visit.cardId) { mutableStateOf(reasons[0]) }
+    var customReason by rememberSaveable(visit.cardId) { mutableStateOf("") }
+    var isSubmitting by rememberSaveable(visit.cardId) { mutableStateOf(false) }
+
+    val finalReason = if (selectedReason == "أخرى") customReason.trim() else selectedReason
+    val canSubmit = coordinatesValid && finalReason.isNotBlank() && !isSubmitting
+
+    AlertDialog(
+        onDismissRequest = { if (!isSubmitting) onDismiss() },
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Icon(Icons.Default.Warning, contentDescription = null, tint = MadarGold)
+                Text("اعتماد موقع مختلف للزيارة", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+            }
+        },
+        text = {
+            Column(
+                Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = MadarGold.copy(alpha = 0.12f),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            "أنت في موقع مختلف عن الموقع المسجل للماكينة",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp,
+                            color = MadarInk,
+                        )
+                        Text(
+                            "المسافة عن الموقع المسجل: ${distance?.toInt() ?: "—"} متر. سيتم اعتماد موقعك الحالي للزيارة لتمكينك من إتمام العمل دون انتظار، وسيُرفع طلب للمشرف لمراجعة تغيير الموقع.",
+                            fontSize = 12.sp,
+                            color = MadarMuted,
+                        )
+                    }
+                }
+
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("الموقع المسجل: %.6f, %.6f".format(visit.machineLatitude ?: 0.0, visit.machineLongitude ?: 0.0), fontSize = 12.sp)
+                        Text(
+                            if (point != null) "الموقع الحالي: %.6f, %.6f (±%dم)".format(point.latitude, point.longitude, point.accuracyMeters.toInt())
+                            else "الموقع الحالي: غير متاح",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+                }
+
+                if (!coordinatesValid) {
+                    val warningText = when {
+                        point == null -> "يرجى تشغيل GPS والانتظار لالتقاط الإشارة."
+                        point.isMock -> "تم اكتشاف أداة تزييف موقع (Mock GPS)! غير مسموح بها."
+                        point.accuracyMeters > GeoPolicy.MAX_FIELD_CONFIRMATION_ACCURACY_METERS -> "دقة الإشارة الحالية (±${point.accuracyMeters.toInt()}م) غير كافية (المطلوب 50م أو أفضل)."
+                        now - point.capturedAtMillis > 300_000L -> "قراءة الموقع انتهت صلاحيتها. يرجى تحديث الإشارة."
+                        else -> "إشارة الموقع غير صالحة."
+                    }
+                    InlineMessage(warningText, MessageTone.Warning)
+                    OutlinedButton(
+                        onClick = vm::refreshLocation,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(8.dp),
+                    ) {
+                        Text("تحديث قراءة GPS")
+                    }
+                }
+
+                Text("سبب اختلاف الموقع (مطلوب):", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+
+                reasons.forEach { r ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { selectedReason = r }
+                            .padding(vertical = 4.dp, horizontal = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        RadioButton(
+                            selected = (selectedReason == r),
+                            onClick = { selectedReason = r },
+                        )
+                        Text(r, fontSize = 13.sp)
+                    }
+                }
+
+                if (selectedReason == "أخرى") {
+                    OutlinedTextField(
+                        value = customReason,
+                        onValueChange = { customReason = it.take(200) },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("اكتب سبب التواجد في هذا الموقع") },
+                        minLines = 2,
+                        maxLines = 3,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (canSubmit && point != null) {
+                        isSubmitting = true
+                        vm.confirmDifferentLocationVisit(visit, point, finalReason)
+                        onDismiss()
+                    }
+                },
+                enabled = canSubmit,
+                colors = ButtonDefaults.buttonColors(containerColor = MadarTeal),
+                shape = RoundedCornerShape(10.dp),
+            ) {
+                if (isSubmitting) {
+                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = Color.White)
+                    Spacer(Modifier.width(6.dp))
+                }
+                Text("اعتماد ومتابعة الزيارة", fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            OutlinedButton(
+                onClick = onDismiss,
+                enabled = !isSubmitting,
+                shape = RoundedCornerShape(10.dp),
+            ) {
+                Text("إلغاء")
+            }
+        },
+    )
 }
