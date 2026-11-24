@@ -122,17 +122,23 @@ app.get('/api/health', async (req, res) => {
   res.json({ status, service: 'madar-v2', storage, ...runtimeIdentity });
 });
 
-app.get('/api/app-version', (_req, res) => {
+app.get('/api/app-version', (req, res) => {
+  const target = req.query.target === 'system' ? 'system' : 'rep';
+  const artifactName = target === 'system' ? 'madar-manager-release.apk' : 'madar-rep-release.apk';
   const latest = db.prepare(`SELECT version_code AS versionCode, version_name AS versionName,
       apk_sha256 AS sha256, notes AS releaseNotes
-    FROM apk_releases WHERE status = 'available' ORDER BY version_code DESC, id DESC LIMIT 1`).get();
+    FROM apk_releases WHERE status = 'available' AND artifact_path = ? ORDER BY version_code DESC, id DESC LIMIT 1`).get(artifactName)
+    ?? (target === 'rep' ? db.prepare(`SELECT version_code AS versionCode, version_name AS versionName,
+      apk_sha256 AS sha256, notes AS releaseNotes
+    FROM apk_releases WHERE status = 'available' ORDER BY version_code DESC, id DESC LIMIT 1`).get() : null);
   const latestVersionCode = latest ? Number(latest.versionCode) : 0;
   res.set({ 'Cache-Control': 'no-store', Pragma: 'no-cache' }).json({
     success: true,
+    target,
     latestVersionCode,
-    minSupportedVersionCode: env.repMinSupportedVersionCode,
+    minSupportedVersionCode: target === 'system' ? 0 : env.repMinSupportedVersionCode,
     versionName: latest?.versionName ?? null,
-    apkUrl: latest ? '/download/apk' : null,
+    apkUrl: latest ? `/download/apk?target=${target}` : null,
     sha256: latest?.sha256 ?? null,
     releaseNotes: latest?.releaseNotes ?? '',
   });
@@ -231,12 +237,18 @@ function readVerifiedApkMetadata(apkPath, apkDescriptor, { required = false } = 
 // for download when the exact bytes and signer of its version code are recorded
 // and still marked available. Anything else (unrecorded, rebuilt under the same
 // version code, withdrawn, retained for history) fails closed.
-function readReleaseRegistration(metadata) {
+function readReleaseRegistration(metadata, artifactPath) {
   if (!metadata) return null;
-  const row = db.prepare(`SELECT id, version_code AS versionCode, version_name AS versionName,
-      apk_sha256 AS apkSha256, signer_certificate_sha256 AS signerCertificateSha256,
-      status, published_at AS publishedAt
-    FROM apk_releases WHERE version_code = ?`).get(metadata.versionCode);
+  const artifactName = artifactPath ? basename(artifactPath) : null;
+  const row = artifactName
+    ? db.prepare(`SELECT id, version_code AS versionCode, version_name AS versionName,
+        apk_sha256 AS apkSha256, signer_certificate_sha256 AS signerCertificateSha256,
+        status, published_at AS publishedAt, artifact_path AS artifactPath
+      FROM apk_releases WHERE version_code = ? AND (artifact_path = ? OR artifact_path IS NULL)`).get(metadata.versionCode, artifactName)
+    : db.prepare(`SELECT id, version_code AS versionCode, version_name AS versionName,
+        apk_sha256 AS apkSha256, signer_certificate_sha256 AS signerCertificateSha256,
+        status, published_at AS publishedAt, artifact_path AS artifactPath
+      FROM apk_releases WHERE version_code = ?`).get(metadata.versionCode);
   if (!row) {
     return {
       recorded: false,
@@ -291,7 +303,7 @@ function downloadApkArtifact(req, res, next, path, downloadName, { release = fal
     if (release) {
       const verified = readVerifiedApkMetadata(path, descriptor, { required: true });
       if (checkRegistry) {
-        const distribution = releaseDistributionState(readReleaseRegistration(verified));
+        const distribution = releaseDistributionState(readReleaseRegistration(verified, path));
         if (!distribution.distributable) {
           closeSync(descriptor);
           const rejection = RELEASE_DISTRIBUTION_ERRORS[distribution.reason] ?? {
@@ -367,12 +379,12 @@ function apkTarget(req, res) {
     res.status(400).json({ error: 'target must be rep or system.' });
     return null;
   }
-  if (target === 'system' && req.user?.role !== 'admin') {
-    res.status(403).json({ error: 'Administrator access is required for the manager APK.' });
+  if (target === 'system' && req.user && !['admin', 'supervisor'].includes(req.user.role)) {
+    res.status(403).json({ error: 'Administrator or supervisor access is required for the manager APK.' });
     return null;
   }
-  if (target === 'rep' && req.user && !['admin', 'rep'].includes(req.user.role)) {
-    res.status(403).json({ error: 'Administrator or field representative access is required.' });
+  if (target === 'rep' && req.user && !['admin', 'supervisor', 'rep'].includes(req.user.role)) {
+    res.status(403).json({ error: 'Administrator, supervisor, or field representative access is required.' });
     return null;
   }
   return target;
@@ -385,7 +397,7 @@ app.get('/download/apk', apkDownloadLimiter, (req, res, next) => {
   if (target === 'system') {
     downloadApkArtifact(req, res, next, managerApkPath, 'madar-manager.apk', {
       release: basename(managerApkPath) === 'madar-manager-release.apk',
-      checkRegistry: false,
+      checkRegistry: true,
     });
     return;
   }
@@ -417,8 +429,10 @@ app.get('/download/apk/status', apkDownloadLimiter, (req, res) => {
     } finally { closeSync(descriptor); }
     const releaseFile = basename(artifactPath) === (target === 'rep' ? 'madar-rep-release.apk' : 'madar-manager-release.apk');
     const artifactType = releaseFile ? 'release' : 'fallback';
-    const releaseRegistry = target === 'rep' && artifactType === 'release' ? readReleaseRegistration(releaseMetadata) : null;
-    const distribution = target === 'rep' ? releaseDistributionState(releaseRegistry) : { distributable: artifactType === 'release', reason: artifactType === 'release' ? null : 'artifact_not_release' };
+    const releaseRegistry = artifactType === 'release' ? readReleaseRegistration(releaseMetadata, artifactPath) : null;
+    const distribution = releaseRegistry
+      ? releaseDistributionState(releaseRegistry)
+      : { distributable: artifactType === 'release', reason: artifactType === 'release' ? null : 'artifact_not_release' };
     res.set('Cache-Control', 'private, no-store').json({
       available: distribution.distributable,
       ...(target === 'system' ? { target } : {}),

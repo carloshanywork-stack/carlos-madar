@@ -222,6 +222,15 @@ export default function SignInPage({ setupRequired, initialError = '', onLoginSu
               <span className="auth-security-icon" aria-hidden="true">⌑</span>
               <span><strong>جلسة محمية</strong><small>يُحفظ تسجيل الدخول في ملف ارتباط محمي من نوع HTTP-only. لا يُخزّن التوكن في الهاتف.</small></span>
             </div>
+
+            <div className="auth-download-links" style={{ marginTop: '16px', display: 'flex', gap: '8px', justifyContent: 'center', flexWrap: 'wrap' }}>
+              <a href="/download/apk?target=system" download="madar-manager.apk" className="madar-button madar-button-secondary madar-button-small" style={{ textDecoration: 'none', fontSize: '0.8rem', padding: '6px 12px' }}>
+                <span>تنزيل تطبيق الإدارة (APK)</span>
+              </a>
+              <a href="/download/apk?target=rep" download="madar-rep.apk" className="madar-button madar-button-secondary madar-button-small" style={{ textDecoration: 'none', fontSize: '0.8rem', padding: '6px 12px' }}>
+                <span>تنزيل تطبيق المناديب (APK)</span>
+              </a>
+            </div>
           </div>
           <p className="auth-local-note"><span /> مساحة عمل خاصة <b>·</b> بيانات محلية</p>
         </div>

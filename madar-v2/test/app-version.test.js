@@ -10,6 +10,7 @@ process.env.MADAR_V2_STORAGE_ROOT = join(temporaryDirectory, 'storage');
 process.env.MADAR_V2_OFFLINE_MAP_PATH = join(temporaryDirectory, 'local-map.mbtiles');
 process.env.MADAR_V2_OFFLINE_MAPS_DIR = '';
 process.env.MADAR_REP_APK_PATH = join(temporaryDirectory, 'missing.apk');
+process.env.MADAR_MANAGER_APK_PATH = join(temporaryDirectory, 'missing-manager.apk');
 process.env.STORAGE_MOUNT_PATH = '';
 process.env.MADAR_V2_BACKUP_MOUNT_PATH = '';
 process.env.MADAR_V2_JWT_SECRET = 'version-gate-test-secret-with-more-than-32-bytes';
@@ -92,4 +93,18 @@ test('unauthenticated client can access download route without 401 or 403', asyn
   assert.equal(response.status, 404);
   assert.notEqual(response.status, 401);
   assert.notEqual(response.status, 403);
+});
+
+test('manager app version and download routes are public and return target metadata', async () => {
+  const versionRes = await fetch(`${baseUrl}/api/app-version?target=system`);
+  assert.equal(versionRes.status, 200);
+  const body = await versionRes.json();
+  assert.equal(body.success, true);
+  assert.equal(body.target, 'system');
+  assert.equal(body.minSupportedVersionCode, 0);
+
+  const downloadRes = await fetch(`${baseUrl}/download/apk?target=system`);
+  assert.equal(downloadRes.status, 404);
+  assert.notEqual(downloadRes.status, 401);
+  assert.notEqual(downloadRes.status, 403);
 });

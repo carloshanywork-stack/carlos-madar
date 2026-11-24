@@ -4,14 +4,18 @@
 // POST /api/system/rep-releases/publish is applied (clean release manifest,
 // artifact SHA-256, approved signer fingerprint), and the change is audited.
 //
-// Usage: node scripts/record-release.mjs <adminUserId> [notes]
+// Usage: node scripts/record-release.mjs <adminUserId> [--manager|--system] [notes]
 import { db } from '../server/database/connection.js';
 import { recordVerifiedRelease } from '../server/modules/system/rep-release-routes.js';
 
-const actorId = Number(process.argv[2]);
-const notes = process.argv.slice(3).join(' ').trim() || null;
+const rawArgs = process.argv.slice(2);
+const isManager = rawArgs.includes('--manager') || rawArgs.includes('--system');
+const args = rawArgs.filter((arg) => arg !== '--manager' && arg !== '--system');
+const actorId = Number(args[0]);
+const notes = args.slice(1).join(' ').trim() || null;
+const target = isManager ? 'system' : 'rep';
 if (!Number.isSafeInteger(actorId) || actorId < 1) {
-  console.error('Usage: node scripts/record-release.mjs <adminUserId> [notes]');
+  console.error('Usage: node scripts/record-release.mjs <adminUserId> [--manager|--system] [notes]');
   process.exit(2);
 }
 
@@ -25,8 +29,8 @@ if (!admin) {
 }
 
 try {
-  const release = recordVerifiedRelease({ actorId, notes });
-  console.log(JSON.stringify({ status: 'RECORDED', actor: admin.username, release }, null, 2));
+  const release = recordVerifiedRelease({ actorId, notes, target });
+  console.log(JSON.stringify({ status: 'RECORDED', target, actor: admin.username, release }, null, 2));
 } catch (error) {
   console.error(`Release was not recorded: ${error.message}`);
   process.exitCode = 1;

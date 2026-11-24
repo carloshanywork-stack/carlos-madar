@@ -3,7 +3,7 @@ import { constants as fsConstants, closeSync, fstatSync, lstatSync, openSync, re
 import { basename } from 'node:path';
 import { Router } from 'express';
 import { env } from '../../config/env.js';
-import { repApkPath } from '../../config/paths.js';
+import { repApkPath, managerApkPath } from '../../config/paths.js';
 import { db } from '../../database/connection.js';
 import { recordAudit } from '../audit.js';
 import { requireAdmin } from '../auth/authorization.js';
@@ -12,20 +12,23 @@ import { HttpError, asyncHandler, optionalText } from '../http.js';
 const router = Router();
 router.use(requireAdmin);
 
-function readVerifiedRelease() {
-  if (basename(repApkPath) !== 'madar-rep-release.apk') {
-    throw new HttpError(409, 'The configured APK is not the signed release artifact.');
+function readVerifiedRelease(target = 'rep') {
+  const isSystem = target === 'system';
+  const configuredApkPath = isSystem ? managerApkPath : repApkPath;
+  const expectedArtifactName = isSystem ? 'madar-manager-release.apk' : 'madar-rep-release.apk';
+  if (basename(configuredApkPath) !== expectedArtifactName) {
+    throw new HttpError(409, `The configured APK is not the signed ${target} release artifact.`);
   }
-  const manifestPath = `${repApkPath}.manifest.json`;
+  const manifestPath = `${configuredApkPath}.manifest.json`;
   let apkDescriptor;
   let manifestDescriptor;
   try {
-    for (const path of [repApkPath, manifestPath]) {
+    for (const path of [configuredApkPath, manifestPath]) {
       const metadata = lstatSync(path);
       if (metadata.isSymbolicLink() || !metadata.isFile()) throw new HttpError(409, 'Release artifacts must be regular files, not symbolic links.');
     }
     const noFollow = fsConstants.O_NOFOLLOW ?? 0;
-    apkDescriptor = openSync(repApkPath, fsConstants.O_RDONLY | noFollow);
+    apkDescriptor = openSync(configuredApkPath, fsConstants.O_RDONLY | noFollow);
     manifestDescriptor = openSync(manifestPath, fsConstants.O_RDONLY | noFollow);
     if (!fstatSync(apkDescriptor).isFile() || !fstatSync(manifestDescriptor).isFile()) {
       throw new HttpError(409, 'Release artifacts must be regular files.');
@@ -33,7 +36,7 @@ function readVerifiedRelease() {
   } catch (error) {
     if (apkDescriptor !== undefined) closeSync(apkDescriptor);
     if (manifestDescriptor !== undefined) closeSync(manifestDescriptor);
-    if (error.code === 'ENOENT' || error.code === 'ENOTDIR') throw new HttpError(409, 'No verified signed release artifact is available.');
+    if (error.code === 'ENOENT' || error.code === 'ENOTDIR') throw new HttpError(409, `No verified signed ${target} release artifact is available.`);
     throw error;
   }
   let manifest;
@@ -59,7 +62,7 @@ function readVerifiedRelease() {
   if (manifest.signerCertificateSha256.toLowerCase() !== env.repSignerCertificateSha256) {
     throw new HttpError(409, 'This APK was not signed by the configured approved release key.');
   }
-  return { manifest, apkSha256 };
+  return { manifest, apkSha256, artifactPath: configuredApkPath };
 }
 
 router.get('/rep-releases', (_req, res) => {
@@ -74,32 +77,43 @@ router.get('/rep-releases', (_req, res) => {
   res.set({ 'Cache-Control': 'private, no-store', Pragma: 'no-cache' }).json({ success: true, releases });
 });
 
-export function recordVerifiedRelease({ actorId, notes = null } = {}) {
-  const { manifest, apkSha256 } = readVerifiedRelease();
+export function recordVerifiedRelease({ actorId, notes = null, target = 'rep' } = {}) {
+  const { manifest, apkSha256, artifactPath } = readVerifiedRelease(target);
+  const artifactName = basename(artifactPath);
   return db.transaction(() => {
-    const existing = db.prepare('SELECT id FROM apk_releases WHERE version_code = ?').get(manifest.versionCode);
-    if (existing) throw new HttpError(409, 'This release version code has already been recorded.');
+    const existing = db.prepare('SELECT id FROM apk_releases WHERE version_code = ? AND (artifact_path = ? OR artifact_path IS NULL)').get(manifest.versionCode, artifactName);
+    if (existing) throw new HttpError(409, 'This release version code has already been recorded for this application.');
     const inserted = db.prepare(`INSERT INTO apk_releases
       (version_code, version_name, source_revision, source_tree_dirty, apk_sha256,
        signer_certificate_sha256, artifact_path, status, published_by, notes)
       VALUES (?, ?, ?, 0, ?, ?, ?, 'available', ?, ?)`)
       .run(manifest.versionCode, manifest.versionName, manifest.sourceRevision, apkSha256,
-        manifest.signerCertificateSha256.toLowerCase(), basename(repApkPath), actorId, notes);
+        manifest.signerCertificateSha256.toLowerCase(), artifactName, actorId, notes);
     const id = Number(inserted.lastInsertRowid);
-    recordAudit({ database: db, actorId, action: 'rep_release_published', entityType: 'apk_release', entityId: id,
+    recordAudit({ database: db, actorId, action: target === 'system' ? 'manager_release_published' : 'rep_release_published', entityType: 'apk_release', entityId: id,
       newValues: { version_code: manifest.versionCode, version_name: manifest.versionName,
         source_revision: manifest.sourceRevision, apk_sha256: apkSha256,
-        signer_certificate_sha256: manifest.signerCertificateSha256.toLowerCase(), artifact_path: basename(repApkPath), notes } });
+        signer_certificate_sha256: manifest.signerCertificateSha256.toLowerCase(), artifact_path: artifactName, notes } });
     return db.prepare(`SELECT id, version_code AS versionCode, version_name AS versionName,
       source_revision AS sourceRevision, apk_sha256 AS apkSha256,
       signer_certificate_sha256 AS signerCertificateSha256, status, published_at AS publishedAt,
-      notes FROM apk_releases WHERE id = ?`).get(id);
+      notes, artifact_path AS artifactPath FROM apk_releases WHERE id = ?`).get(id);
   }).immediate();
 }
 
 router.post('/rep-releases/publish', asyncHandler(async (req, res) => {
+  const target = req.query.target === 'system' ? 'system' : (req.body?.target === 'system' ? 'system' : 'rep');
   const notes = optionalText(req.body?.notes, 'notes', { maxLength: 2000 });
-  const release = recordVerifiedRelease({ actorId: req.user.id, notes });
+  const release = recordVerifiedRelease({ actorId: req.user.id, notes, target });
+  res.status(201).set({ 'Cache-Control': 'private, no-store', Pragma: 'no-cache' }).json({
+    success: true,
+    release,
+  });
+}));
+
+router.post('/manager-releases/publish', asyncHandler(async (req, res) => {
+  const notes = optionalText(req.body?.notes, 'notes', { maxLength: 2000 });
+  const release = recordVerifiedRelease({ actorId: req.user.id, notes, target: 'system' });
   res.status(201).set({ 'Cache-Control': 'private, no-store', Pragma: 'no-cache' }).json({
     success: true,
     release,

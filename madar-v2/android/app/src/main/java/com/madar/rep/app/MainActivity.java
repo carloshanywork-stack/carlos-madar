@@ -33,6 +33,7 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(RepLocationPlugin.class);
         registerPlugin(RepNativeEnginePlugin.class);
+        registerPlugin(AppUpdatePlugin.class);
         super.onCreate(savedInstanceState);
         permissionLauncher = registerForActivityResult(
             new ActivityResultContracts.RequestMultiplePermissions(),

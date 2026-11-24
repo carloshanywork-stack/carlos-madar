@@ -18,6 +18,7 @@ import PageHeader from '../../components/ui/PageHeader.jsx';
 import Toast from '../../components/ui/Toast.jsx';
 import Tabs from '../../components/ui/Tabs.jsx';
 import AuditLogPage from './AuditLogPage.jsx';
+import { isNativeApp, downloadAndInstallUpdate } from '../../lib/app-update.js';
 
 function fileSize(value) {
   if (!Number.isFinite(value)) return '—';
@@ -68,9 +69,10 @@ export default function SettingsPage() {
   const { data: health, loading, error, reload } = useApi('/api/health');
   const { data: authStatus } = useApi('/api/auth/status');
   const isAdmin = authStatus?.user?.role === 'admin';
+  const isSupervisor = ['admin', 'supervisor'].includes(authStatus?.user?.role);
   const { data: systemHealth, loading: systemHealthLoading, error: systemHealthError, reload: reloadSystemHealth } = useApi('/api/system/health', { enabled: isAdmin });
-  const { data: apkStatus, loading: apkStatusLoading, error: apkStatusError, reload: reloadApkStatus } = useApi('/download/apk/status?target=rep', { enabled: isAdmin });
-  const { data: managerApkStatus, loading: managerApkLoading, error: managerApkError, reload: reloadManagerApkStatus } = useApi('/download/apk/status?target=system', { enabled: isAdmin });
+  const { data: apkStatus, loading: apkStatusLoading, error: apkStatusError, reload: reloadApkStatus } = useApi('/download/apk/status?target=rep', { enabled: isSupervisor });
+  const { data: managerApkStatus, loading: managerApkLoading, error: managerApkError, reload: reloadManagerApkStatus } = useApi('/download/apk/status?target=system', { enabled: isSupervisor });
   const { data: users, loading: usersLoading, error: usersError, reload: reloadUsers } = useApi('/api/users', { enabled: isAdmin });
   const { data: backups, loading: backupsLoading, error: backupsError, reload: reloadBackups } = useApi('/api/system/backups', { enabled: isAdmin });
   const [userModal, setUserModal] = useState(false);
@@ -82,7 +84,33 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [progress, setProgress] = useState(0);
   const [actionError, setActionError] = useState('');
+  const [inAppUpdating, setInAppUpdating] = useState(false);
+  const [inAppProgress, setInAppProgress] = useState(null);
   const { notice, showToast, clearToast } = useToast();
+
+  const triggerInAppUpdate = async (target = 'system') => {
+    setInAppUpdating(true);
+    setInAppProgress(0);
+    try {
+      const status = target === 'system' ? managerApkStatus : apkStatus;
+      const res = await downloadAndInstallUpdate({
+        target,
+        expectedSha256: status?.releaseMetadata?.apkSha256,
+        expectedVersionCode: status?.releaseMetadata?.versionCode,
+        onProgress: (p) => setInAppProgress(p.percent),
+      });
+      if (res?.permissionRequired) {
+        showToast(res.message || 'يرجى السماح بتثبيت التطبيقات من مصادر غير معروفة للمتابعة.');
+      } else {
+        showToast('جارٍ تشغيل مثبت الحزم لتحديث التطبيق.');
+      }
+    } catch (err) {
+      showToast(err.message || 'تعذر تنزيل وتثبيت التحديث.');
+    } finally {
+      setInAppUpdating(false);
+      setInAppProgress(null);
+    }
+  };
   const desktopApp = typeof window !== 'undefined' ? window.madarDesktop : null;
   const [desktopVersion, setDesktopVersion] = useState('');
   const [desktopDiagnostics, setDesktopDiagnostics] = useState(null);
@@ -250,9 +278,16 @@ export default function SettingsPage() {
         kicker="النظام · الإصدار والتشغيل"
         title="إعدادات النظام"
         description="إدارة حسابات الدخول والنسخ الاحتياطي المحلي واستعادة النظام."
-        actions={isAdmin ? <div className="madar-inline-wrap">
+        actions={isSupervisor ? <div className="madar-inline-wrap">
           {apkStatus?.available && <a className="madar-button madar-button-primary" href="/download/apk?target=rep" download="madar-rep.apk" title="تنزيل حزمة تطبيق المندوب الميداني"><Icon name="download" size={15} /><span>تطبيق المندوب APK</span></a>}
-          {managerApkStatus?.available && <a className="madar-button madar-button-primary" href="/download/apk?target=system" download="madar-manager.apk" title="تنزيل تطبيق الإدارة والسيستم الكامل"><Icon name="download" size={15} /><span>تطبيق الإدارة APK</span></a>}
+          {managerApkStatus?.available && (isNativeApp() ? (
+            <Button variant="primary" disabled={inAppUpdating} onClick={() => triggerInAppUpdate('system')} title="تحديث وتثبيت تطبيق الإدارة مباشرة">
+              <Icon name="download" size={15} />
+              <span>{inAppUpdating ? (inAppProgress != null ? `جارٍ التنزيل (${inAppProgress}%)…` : 'جارٍ التحديث…') : 'تحديث التطبيق'}</span>
+            </Button>
+          ) : (
+            <a className="madar-button madar-button-primary" href="/download/apk?target=system" download="madar-manager.apk" title="تنزيل تطبيق الإدارة والسيستم الكامل"><Icon name="download" size={15} /><span>تطبيق الإدارة APK</span></a>
+          ))}
           {desktopStatus?.available ? <a className="madar-button madar-button-primary" href="/download/desktop" download={desktopStatus.filename || 'MADAR-Windows-Setup.exe'} title="تنزيل تطبيق MADAR لويندوز"><Icon name="download" size={15} /><span>تطبيق Windows</span></a> : <Button variant="secondary" disabled title="سيظهر التنزيل بعد تجهيز أول إصدار Windows موقّع">تطبيق Windows قريباً</Button>}
         </div> : null}
       />
@@ -288,7 +323,16 @@ export default function SettingsPage() {
               { label: 'تطبيق المندوب الميداني (MADAR Rep APK)', target: 'rep', status: apkStatus, loading: apkStatusLoading, error: apkStatusError },
               { label: 'تطبيق الإدارة والسيستم الكامل (MADAR Manager APK)', target: 'system', status: managerApkStatus, loading: managerApkLoading, error: managerApkError },
             ].map((item) => <article key={item.target} className="madar-panel madar-panel-pad">
-              <div className="madar-panel-header"><div><h3>{item.label}</h3><p>حالة الإصدار والحجم ورقم البناء</p></div>{item.status?.available && <a className="madar-button madar-button-primary" href={`/download/apk?target=${item.target}`} download={item.target === 'rep' ? 'madar-rep.apk' : 'madar-manager.apk'}><Icon name="download" size={15} /> تنزيل</a>}</div>
+              <div className="madar-panel-header"><div><h3>{item.label}</h3><p>حالة الإصدار والحجم ورقم البناء</p></div>{item.status?.available && (
+                isNativeApp() && item.target === 'system' ? (
+                  <Button variant="primary" disabled={inAppUpdating} onClick={() => triggerInAppUpdate('system')}>
+                    <Icon name="download" size={15} />
+                    <span>{inAppUpdating ? (inAppProgress != null ? `جارٍ التنزيل (${inAppProgress}%)…` : 'جارٍ التحديث…') : 'تنزيل وتثبيت التحديث'}</span>
+                  </Button>
+                ) : (
+                  <a className="madar-button madar-button-primary" href={`/download/apk?target=${item.target}`} download={item.target === 'rep' ? 'madar-rep.apk' : 'madar-manager.apk'}><Icon name="download" size={15} /> تنزيل</a>
+                )
+              )}</div>
               {item.error ? <Alert tone="error">{item.error}</Alert> : item.loading && !item.status ? <LoadingState label="جارٍ فحص ملف APK" /> : item.status && <div className="madar-stack">
                 {!item.status.available && <Alert tone="warning">{item.target === 'rep' ? apkUnavailableMessage(item.status) : item.status.reason === 'artifact_missing' ? 'لا يوجد APK للإدارة على الخادم حالياً.' : 'نسخة الإدارة غير موقعة أو غير جاهزة للتوزيع.'}</Alert>}
                 <div className="madar-health-row"><span className="madar-health-pulse" /><div><strong>{item.status.available ? item.status.artifactType === 'release' ? 'إصدار جاهز للتوزيع' : 'نسخة تجريبية' : 'غير متاح للتوزيع'}</strong><small>{item.status.releaseMetadata ? `الإصدار ${item.status.releaseMetadata.versionName} (${item.status.releaseMetadata.versionCode}) · ` : 'رقم الإصدار غير متاح · '}{fileSize(item.status.sizeBytes)}{item.status.modifiedAt ? ` · آخر تحديث ${String(item.status.modifiedAt).replace('T', ' ').slice(0, 19)}` : ''}</small></div><Badge tone={item.status.available ? 'success' : 'warning'}>{item.status.available ? 'متاح' : 'غير متاح'}</Badge></div>

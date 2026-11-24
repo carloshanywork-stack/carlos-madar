@@ -28,7 +28,7 @@ export default function Sidebar({ open, onNavigate, user }) {
   ]
     .filter((item) => item.path !== '/rep-support' || canViewSupervisor)
     .filter((item) => !['/finance', '/accounting'].includes(item.path) || canViewFinance)
-    .filter((item) => item.path !== '/settings' || user?.role === 'admin');
+    .filter((item) => item.path !== '/settings' || ['admin', 'supervisor'].includes(user?.role));
   return (
     <>
       <div className={`madar-mobile-scrim ${open ? 'visible' : ''}`} onClick={onNavigate} aria-hidden="true" />
