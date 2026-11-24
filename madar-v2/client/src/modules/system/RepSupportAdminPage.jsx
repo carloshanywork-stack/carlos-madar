@@ -9,11 +9,12 @@ import OperationalImageViewer from '../../components/ui/OperationalImageViewer.j
 import { api } from '../../lib/api.js';
 import { errorMessage } from '../../lib/format.js';
 import { useApi } from '../../lib/useApi.js';
+import RepAutomaticDiagnostics from './RepAutomaticDiagnostics.jsx';
 
 const STATUS_LABELS = { new: 'جديد', in_progress: 'قيد المعالجة', resolved: 'تم الحل', closed: 'مغلق' };
 const SEVERITY_LABELS = { low: 'منخفض', normal: 'عادي', high: 'مرتفع', critical: 'حرج' };
 
-export default function RepSupportAdminPage() {
+export default function RepSupportAdminPage({ isAdmin = false }) {
   const [view, setView] = useState('reports');
   const [status, setStatus] = useState('all');
   const [deviceFilter, setDeviceFilter] = useState('all');
@@ -128,11 +129,14 @@ export default function RepSupportAdminPage() {
       <PageHeader kicker="تطبيق المندوبين" title="الدعم ومراجعة المواقع" description="إدارة بلاغات التطبيق ومراجعة طلبات تغيير المواقع قبل تعديل بيانات الآلات." />
       <div className="madar-section" style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         <Button variant={view === 'reports' ? 'primary' : 'secondary'} onClick={() => setView('reports')}>بلاغات التطبيق</Button>
+        {isAdmin && <Button variant={view === 'diagnostics' ? 'primary' : 'secondary'} onClick={() => setView('diagnostics')}>التشخيص التلقائي</Button>}
         <Button variant={view === 'devices' ? 'primary' : 'secondary'} onClick={() => setView('devices')}>الأجهزة وإصدارات التطبيق</Button>
         <Button variant={view === 'locations' ? 'primary' : 'secondary'} onClick={() => setView('locations')}>طلبات تغيير المواقع</Button>
         <Button variant={view === 'releases' ? 'primary' : 'secondary'} onClick={() => setView('releases')}>سجل إصدارات APK</Button>
       </div>
       {error && <div className="madar-section"><Alert tone="error">{error}</Alert></div>}
+
+      {isAdmin && view === 'diagnostics' && <RepAutomaticDiagnostics />}
 
       {view === 'reports' && <>
         <section className="madar-panel madar-section">

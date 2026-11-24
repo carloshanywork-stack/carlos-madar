@@ -5,7 +5,7 @@ import { stat } from 'node:fs/promises';
 import rateLimit from 'express-rate-limit';
 import XLSX from 'xlsx';
 import { db } from '../../database/connection.js';
-import { requireSupervisorOrAdmin } from '../auth/authorization.js';
+import { requireAdmin, requireSupervisorOrAdmin } from '../auth/authorization.js';
 import { asyncHandler, HttpError } from '../http.js';
 import {
   createGitHubIssueForRepBugReport,
@@ -16,6 +16,7 @@ import {
   listRepBugReports,
   updateRepBugReport,
 } from '../rep/support.js';
+import { downloadAutomaticDiagnostic, listAutomaticDiagnostics } from '../rep/automatic-diagnostics.js';
 import {
   getRepMachineLocationChangeEvidence,
   listRepMachineLocationChangeRequests,
@@ -46,6 +47,16 @@ const locationDecisionLimiter = rateLimit({
   legacyHeaders: false,
   message: { error: 'تم تجاوز الحد المسموح لقرارات الموقع. حاول مرة أخرى بعد دقيقة.' },
 });
+
+router.get('/rep-support/diagnostics', requireAdmin, (_req, res) => {
+  res.set('Cache-Control', 'private, no-store').json({ success: true, reports: listAutomaticDiagnostics() });
+});
+
+router.get('/rep-support/diagnostics/:reportId/report.json', requireAdmin, reportExportLimiter, asyncHandler(async (req, res) => {
+  const { bytes, filename } = await downloadAutomaticDiagnostic(req.params.reportId);
+  res.set({ 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' })
+    .attachment(filename).type('application/json').send(bytes);
+}));
 
 router.get('/rep-support/reports/export.xlsx', reportExportLimiter, (req, res) => {
   const status = typeof req.query.status === 'string' ? req.query.status : 'all';

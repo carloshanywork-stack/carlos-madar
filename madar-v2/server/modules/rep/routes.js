@@ -47,6 +47,7 @@ import {
   syncRepVisit,
 } from './service.js';
 import { createRepBugReport, downloadRepBugAttachment, listMyRepBugReports } from './support.js';
+import { recordAutomaticDiagnostic } from './automatic-diagnostics.js';
 
 const router = Router();
 const syncVisitUpload = diskUploadMany({
@@ -70,6 +71,13 @@ const supportWriteLimiter = rateLimit({
   standardHeaders: 'draft-8',
   legacyHeaders: false,
   message: { error: 'تم تجاوز الحد المسموح لإرسال البلاغات. حاول مرة أخرى بعد قليل.' },
+});
+const diagnosticWriteLimiter = rateLimit({
+  windowMs: 60_000,
+  limit: 20,
+  keyGenerator: (req) => `rep-diagnostic-${req.user.id}`,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
 });
 const locationChangeLimiter = rateLimit({
   windowMs: 60 * 60_000,
@@ -388,6 +396,11 @@ router.get('/support/reports', (req, res) => {
   res.set({ 'Cache-Control': 'private, no-store', Pragma: 'no-cache' });
   res.json({ success: true, reports: listMyRepBugReports(req.user.id) });
 });
+
+router.post('/support/diagnostics', diagnosticWriteLimiter, asyncHandler(async (req, res) => {
+  const report = await recordAutomaticDiagnostic(req.user, req.body);
+  res.set('Cache-Control', 'private, no-store').status(report.idempotent ? 200 : 201).json({ success: true, report });
+}));
 
 router.get('/support/reports/:reportId/attachments/:attachmentId', asyncHandler(async (req, res) => {
   const file = await downloadRepBugAttachment(req.params.reportId, req.params.attachmentId, db, req.user.id);

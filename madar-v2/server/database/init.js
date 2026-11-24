@@ -67,6 +67,7 @@ const machineLocationConfirmationReviewMigration = '20261110-machine-location-co
 const machineCorrectionRenameRecoveryMigration = '20261104-machine-correction-rename-recovery';
 const repNativeSupportWorkflowsMigration = '20261115-rep-native-support-workflows';
 const repDeviceInstallationsMigration = '20261124-rep-device-installations';
+const repAutomaticDiagnosticsMigration = '20261124-rep-automatic-diagnostics';
 const clientProfileCrudMigration = '20261105-client-profile-crud';
 const financeAccountRolesMigration = '20261105-finance-account-roles';
 
@@ -1733,6 +1734,25 @@ export function migrateRepNativeSupportWorkflows(database) {
   migrate.immediate();
 }
 
+export function migrateRepAutomaticDiagnostics(database) {
+  database.transaction(() => {
+    if (database.prepare('SELECT 1 FROM schema_migrations WHERE version = ?').get(repAutomaticDiagnosticsMigration)) return;
+    database.exec(`
+      CREATE TABLE rep_automatic_diagnostics (
+        id INTEGER PRIMARY KEY,
+        report_uuid TEXT NOT NULL UNIQUE,
+        rep_user_id INTEGER NOT NULL REFERENCES users(id),
+        payload_json TEXT NOT NULL CHECK (json_valid(payload_json)),
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        archived_at TEXT
+      );
+      CREATE INDEX idx_rep_automatic_diagnostics_archived_id
+        ON rep_automatic_diagnostics(id DESC) WHERE archived_at IS NOT NULL;
+    `);
+    database.prepare('INSERT INTO schema_migrations (version) VALUES (?)').run(repAutomaticDiagnosticsMigration);
+  }).immediate();
+}
+
 /** Track representative app installations, OS versions, permissions, and device clock synchronization. */
 export function migrateRepDeviceInstallations(database) {
   const migrate = database.transaction(() => {
@@ -2499,6 +2519,7 @@ export function initializeDatabase({ database = db, initialAdminPassword = env.i
     migrateMachineLocationConfirmationReview(database);
     migrateMachineCorrectionRenameRecovery(database);
     migrateRepNativeSupportWorkflows(database);
+    migrateRepAutomaticDiagnostics(database);
     migrateRepDeviceInstallations(database);
     migrateGpsRetentionIndex(database);
     migrateStaffPayrollRules(database);
