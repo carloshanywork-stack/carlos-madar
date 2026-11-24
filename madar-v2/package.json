@@ -47,11 +47,19 @@
     "multer": "^2.5.0",
     "pptxgenjs": "^4.0.1",
     "sharp": "^0.35.5",
-    "xlsx": "^0.18.5",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
     "xlsx-js-style": "^1.2.0",
     "yauzl": "^3.4.0"
   },
   "devDependencies": {
     "typescript": "^5.9.3"
+  },
+  "overrides": {
+    "archiver": {
+      "readdir-glob": "^4.0.0"
+    },
+    "pptxgenjs": {
+      "image-size": "^2.1.0"
+    }
   }
 }
