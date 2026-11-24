@@ -221,6 +221,30 @@ class MadarApi(
             ?: throw MadarError.Network("لم يُرجع الخادم البلاغ المحفوظ.")
     }
 
+    fun submitAutomaticDiagnostic(token: String, diagnostic: AutomaticDiagnostic): String {
+        val body = json.encodeToString(AutomaticDiagnostic.serializer(), diagnostic)
+        val result = execute(
+            Request.Builder()
+                .url("$baseUrl/api/rep/support/diagnostics")
+                .header("Authorization", "Bearer $token")
+                .post(body.toRequestBody(JSON_MEDIA))
+                .build()
+        )
+        when (result.status) {
+            401 -> throw MadarError.SessionExpired()
+            429 -> throw MadarError.Server("بلغ إرسال البلاغات التلقائية الحد المؤقت.")
+            in 500..599 -> throw MadarError.Server("خدمة البلاغات التلقائية غير متاحة مؤقتًا.")
+            in 200..299 -> {
+                val response = runCatching { parse(result.body, AutomaticDiagnosticResponse.serializer()) }.getOrNull()
+                val report = response?.report
+                if (response?.success == true && report?.status == "received" &&
+                    report.reportUuid.equals(diagnostic.reportUuid, ignoreCase = true)) return report.reportUuid
+                throw MadarError.Network("لم يصل إقرار مطابق للبلاغ التلقائي.")
+            }
+            else -> throw MadarError.Validation("لم يقبل الخادم البلاغ التلقائي.")
+        }
+    }
+
     fun getLocationChangeRequests(token: String): List<LocationChangeRequestView> {
         val result = authorizedGet("/api/rep/location-change-requests", token)
         if (result.status !in 200..299) throw mapReadError(result)

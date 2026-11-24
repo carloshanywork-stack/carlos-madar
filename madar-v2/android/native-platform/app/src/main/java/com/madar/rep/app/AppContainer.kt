@@ -16,6 +16,8 @@ import com.madar.rep.app.data.repo.VisitRepository
 import com.madar.rep.app.data.session.SecureSessionStore
 import com.madar.rep.app.data.session.SessionController
 import com.madar.rep.app.data.session.SessionGateway
+import com.madar.rep.app.data.sync.AutomaticCrashHandoff
+import com.madar.rep.app.data.sync.AutomaticDiagnostics
 import com.madar.rep.app.data.sync.OperationsEventStream
 import com.madar.rep.app.data.sync.SyncEngine
 import com.madar.rep.app.data.sync.SyncScheduler
@@ -54,6 +56,8 @@ class AppContainer(context: Context) {
     val locationProvider = LocationProvider(appContext)
     val installationManager = InstallationManager(appContext)
     val deviceDiagnostics = DeviceDiagnostics(appContext, locationProvider, installationManager)
+    val scheduler = SyncScheduler(appContext)
+    val automaticDiagnostics = AutomaticDiagnostics(database, scheduler)
 
     val syncEngine = SyncEngine(
         context = appContext,
@@ -62,8 +66,8 @@ class AppContainer(context: Context) {
         apiFactory = apiFactory,
         onSessionExpired = { sessions.expire() },
         photoStore = photoStore,
+        diagnostics = automaticDiagnostics,
     )
-    val scheduler = SyncScheduler(appContext)
 
     val eventStream = OperationsEventStream(
         context = appContext,
@@ -91,10 +95,13 @@ class MadarApplication : android.app.Application() {
     override fun onCreate() {
         super.onCreate()
         container = AppContainer(this)
+        val crashHandoff = AutomaticCrashHandoff(noBackupFilesDir)
+        crashHandoff.install { container.sessions.session.value?.ownerScopeId }
         appScope.launch {
             container.sessions.session.collect { session ->
                 if (session != null) {
                     kotlinx.coroutines.withContext(Dispatchers.IO) {
+                        crashHandoff.restore(session.ownerScopeId, container.automaticDiagnostics)
                         container.photoStore.recoverPending().forEach { photo ->
                             runCatching {
                                 val visit = container.visitRepository.find(photo.visitUuid)

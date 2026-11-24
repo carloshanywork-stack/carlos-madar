@@ -1,6 +1,7 @@
 package com.madar.rep.app.data.sync
 
 import com.madar.rep.app.core.MadarError
+import kotlinx.coroutines.CancellationException
 
 data class SupportReportQueueItem(
     val reportUuid: String,
@@ -38,6 +39,8 @@ suspend fun flushSupportReportOutbox(
                 markSent(item)
                 sent += 1
             }
+        } catch (error: CancellationException) {
+            throw error
         } catch (error: MadarError.SessionExpired) {
             markNeedsLogin(item)
             return SupportReportFlushSummary(sent, retried, needsReview, needsLogin = true)

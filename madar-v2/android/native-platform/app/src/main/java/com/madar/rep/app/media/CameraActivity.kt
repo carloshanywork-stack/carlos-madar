@@ -65,8 +65,9 @@ import com.madar.rep.app.MadarApplication
 import com.madar.rep.app.core.MadarError
 import com.madar.rep.app.core.PhotoPolicy
 import com.madar.rep.app.core.SupportDiagnostics
-import com.madar.rep.app.data.db.SupportReportEntity
-import com.madar.rep.app.data.db.SupportReportState
+import com.madar.rep.app.data.api.DiagnosticFailure
+import com.madar.rep.app.data.api.DiagnosticOperation
+import com.madar.rep.app.data.sync.diagnosticFailureFor
 import com.madar.rep.app.data.db.VisitState
 import java.util.concurrent.Executors
 import kotlinx.coroutines.Dispatchers
@@ -137,89 +138,98 @@ class CameraActivity : ComponentActivity() {
         }
         capture.targetRotation = currentDisplayRotation()
         val container = (application as MadarApplication).container
+        val ownerRepId = container.sessions.session.value?.ownerScopeId
         val state = CaptureUiState.busy
         assignCaptureState(state)
         val capturedAt = System.currentTimeMillis()
         val frozenLocation = container.locationProvider.lastKnownValid(20_000L)
             ?: livePoint?.takeIf { it.isFresh(capturedAt, 30_000L) && !it.isMock }
-        val captureFile = container.photoStore.newCaptureFile(visitUuid, phase)
+        val captureFile = try {
+            container.photoStore.newCaptureFile(visitUuid, phase)
+        } catch (error: Exception) {
+            if (diagnosticFailureFor(error) != null) reportCaptureFailure(ownerRepId)
+            assignCaptureState(CaptureUiState.error("تعذر تجهيز ملف الصورة."))
+            return
+        }
         capture.takePicture(
             ImageCapture.OutputFileOptions.Builder(captureFile).build(),
             executor,
             object : ImageCapture.OnImageSavedCallback {
                 override fun onImageSaved(output: ImageCapture.OutputFileResults) {
-                    executor.execute {
-                        try {
-                            val visit = kotlinx.coroutines.runBlocking { container.visitRepo.find(visitUuid) }
-                                ?: throw MadarError.Validation("الزيارة غير موجودة")
-                            if (visit.state != VisitState.DRAFT) throw MadarError.Validation("الزيارة أُرسلت بالفعل")
-                            val existingPhotos = kotlinx.coroutines.runBlocking { container.visitRepo.photos(visitUuid) }
-                                .filter { it.phase == phase }
-                            if (!PhotoPolicy.validCount(existingPhotos.size + 1)) {
-                                throw MadarError.Validation("الحد الأقصى ${PhotoPolicy.MAX_PER_PHASE} صورة لكل مرحلة")
-                            }
-                            val usedPositions = existingPhotos.map { it.position }.toSet()
-                            val position = (0 until PhotoPolicy.MAX_PER_PHASE).firstOrNull { it !in usedPositions }
-                                ?: throw MadarError.Validation("بلغت الحد التقني لصور هذه المرحلة")
-                            val location = frozenLocation
+                    try {
+                        val visit = kotlinx.coroutines.runBlocking { container.visitRepo.find(visitUuid) }
+                            ?: throw MadarError.Validation("الزيارة غير موجودة")
+                        if (visit.state != VisitState.DRAFT) throw MadarError.Validation("الزيارة أُرسلت بالفعل")
+                        val existingPhotos = kotlinx.coroutines.runBlocking { container.visitRepo.photos(visitUuid) }
+                            .filter { it.phase == phase }
+                        if (!PhotoPolicy.validCount(existingPhotos.size + 1)) {
+                            throw MadarError.Validation("الحد الأقصى ${PhotoPolicy.MAX_PER_PHASE} صورة لكل مرحلة")
+                        }
+                        val usedPositions = existingPhotos.map { it.position }.toSet()
+                        val position = (0 until PhotoPolicy.MAX_PER_PHASE).firstOrNull { it !in usedPositions }
+                            ?: throw MadarError.Validation("بلغت الحد التقني لصور هذه المرحلة")
+                        val location = frozenLocation
 
-                            // Fast durable step: Commits immutable original and journal to disk immediately (<300ms)
-                            val durablePhoto = container.photoStore.commitFastDurable(
-                                visitUuid = visitUuid,
-                                phase = phase,
-                                position = position,
-                                capturedFile = captureFile,
-                                capturedAtMillis = capturedAt,
-                                location = location,
-                                machineCode = visit.machineCode,
-                                machineName = visit.machineName,
-                                regionName = visit.regionName,
-                                areaName = visit.areaName,
+                        // Fast durable step: Commits immutable original and journal to disk immediately (<300ms)
+                        val durablePhoto = container.photoStore.commitFastDurable(
+                            visitUuid = visitUuid,
+                            phase = phase,
+                            position = position,
+                            capturedFile = captureFile,
+                            capturedAtMillis = capturedAt,
+                            location = location,
+                            machineCode = visit.machineCode,
+                            machineName = visit.machineName,
+                            regionName = visit.regionName,
+                            areaName = visit.areaName,
+                        )
+                        kotlinx.coroutines.runBlocking { container.visitRepo.addPhoto(visitUuid, durablePhoto) }
+
+                        // Immediately unblock the shutter and show preview to allow the next shot
+                        runOnUiThread {
+                            setResult(
+                                RESULT_OK,
+                                Intent().putExtra("photoId", durablePhoto.id).putExtra("phase", phase)
                             )
-                            kotlinx.coroutines.runBlocking { container.visitRepo.addPhoto(visitUuid, durablePhoto) }
+                            capturedCount += 1
+                            previewPath = durablePhoto.originalPath
+                            assignCaptureState(CaptureUiState.idle)
+                        }
 
-                            // Immediately unblock the shutter and show preview to allow the next shot
-                            runOnUiThread {
-                                setResult(
-                                    RESULT_OK,
-                                    Intent().putExtra("photoId", durablePhoto.id).putExtra("phase", phase)
-                                )
-                                capturedCount += 1
-                                previewPath = durablePhoto.originalPath
-                                assignCaptureState(CaptureUiState.idle)
-                            }
-
-                            // Run watermarking, compression, SHA-256, and gallery export off-thread with bounded concurrency
-                            PhotoProcessingPipeline.enqueue(
-                                photo = durablePhoto,
-                                machineCode = visit.machineCode,
-                                container = container,
-                                onComplete = { processed ->
-                                    runOnUiThread {
-                                        if (previewPath == durablePhoto.originalPath) {
-                                            previewPath = processed.processedPath
-                                        }
-                                    }
-                                },
-                                onGalleryError = {
-                                    runOnUiThread {
-                                        Toast.makeText(this@CameraActivity, "تم حفظ الصورة داخل التطبيق، لكن تعذر نسخها إلى Pictures/MADAR.", Toast.LENGTH_LONG).show()
+                        // Run watermarking, compression, SHA-256, and gallery export off-thread with bounded concurrency
+                        PhotoProcessingPipeline.enqueue(
+                            photo = durablePhoto,
+                            machineCode = visit.machineCode,
+                            ownerRepId = visit.ownerRepId,
+                            container = container,
+                            onComplete = { processed ->
+                                runOnUiThread {
+                                    if (previewPath == durablePhoto.originalPath) {
+                                        previewPath = processed.processedPath
                                     }
                                 }
-                            )
-                        } catch (error: Exception) {
-                            // The raw capture remains durable for recovery on processing failure.
-                            val message = error.message ?: "تعذر حفظ الصورة"
-                            runOnUiThread {
-                                assignCaptureState(CaptureUiState.error(message))
+                            },
+                            onGalleryError = {
+                                runOnUiThread {
+                                    Toast.makeText(this@CameraActivity, "تم حفظ الصورة داخل التطبيق، لكن تعذر نسخها إلى Pictures/MADAR.", Toast.LENGTH_LONG).show()
+                                }
                             }
+                        )
+                    } catch (error: Exception) {
+                        if (diagnosticFailureFor(error) != null) reportCaptureFailure(ownerRepId)
+                        // The raw capture remains durable for recovery on processing failure.
+                        val message = error.message ?: "تعذر حفظ الصورة"
+                        runOnUiThread {
+                            assignCaptureState(CaptureUiState.error(message))
                         }
                     }
                 }
 
                 override fun onError(exception: ImageCaptureException) {
                     captureFile.delete()
-                    autoReportCameraError(exception)
+                    if (exception.imageCaptureError != ImageCapture.ERROR_CAMERA_CLOSED && !isFinishing && !isDestroyed) {
+                        reportCaptureFailure(ownerRepId)
+                    }
                     runOnUiThread {
                         assignCaptureState(CaptureUiState.error(exception.message ?: "تعذر التصوير"))
                     }
@@ -228,39 +238,11 @@ class CameraActivity : ComponentActivity() {
         )
     }
 
-    private fun autoReportCameraError(exception: Exception) {
+    private fun reportCaptureFailure(ownerRepId: Long?) {
         SupportDiagnostics.record("camera", "capture_err")
-        executor.execute {
-            runCatching {
-                val container = (application as MadarApplication).container
-                val session = container.sessionGateway.current() ?: return@runCatching
-                val uuid = java.util.UUID.randomUUID().toString()
-                val payload = org.json.JSONObject()
-                    .put("reportUuid", uuid)
-                    .put("category", "camera")
-                    .put("severity", "high")
-                    .put("description", "عطل تلقائي في الكاميرا أثناء التقاط الصورة: ${exception.message ?: "ImageCaptureException"}")
-                    .put("screenName", "camera/capture")
-                    .put("appVersion", "${com.madar.rep.app.BuildConfig.VERSION_NAME} (${com.madar.rep.app.BuildConfig.VERSION_CODE})")
-                    .put("deviceModel", android.os.Build.MANUFACTURER + " " + android.os.Build.MODEL)
-                    .put("androidVersion", android.os.Build.VERSION.RELEASE ?: "unknown")
-                    .put("logs", SupportDiagnostics.recentLines())
-                kotlinx.coroutines.runBlocking {
-                    container.database.supportReports().insert(
-                        SupportReportEntity(
-                            reportUuid = uuid,
-                            ownerRepId = session.ownerScopeId,
-                            payloadJson = payload.toString(),
-                            attachmentPath = null,
-                            state = SupportReportState.QUEUED,
-                            createdAt = System.currentTimeMillis(),
-                            updatedAt = System.currentTimeMillis(),
-                        )
-                    )
-                }
-                container.scheduler.enqueueNow()
-            }
-        }
+        (application as MadarApplication).container.automaticDiagnostics.recordAsync(
+            ownerRepId, DiagnosticOperation.CAMERA_CAPTURE, DiagnosticFailure.CAPTURE_FAILED,
+        )
     }
 
     @Suppress("DEPRECATION")
@@ -323,6 +305,7 @@ class CameraActivity : ComponentActivity() {
             }
         }
         LaunchedEffect(Unit) {
+            val ownerRepId = (application as MadarApplication).container.sessions.session.value?.ownerScopeId
             val future = ProcessCameraProvider.getInstance(context)
             future.addListener({
                 try {
@@ -335,7 +318,10 @@ class CameraActivity : ComponentActivity() {
                     provider.unbindAll()
                     provider.bindToLifecycle(lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, preview, imageCapture)
                 } catch (error: Exception) {
-                    Toast.makeText(context, "تعذر تشغيل الكاميرا: ${error.message}", Toast.LENGTH_LONG).show()
+                    if (!isFinishing && !isDestroyed) {
+                        if (diagnosticFailureFor(error) != null) reportCaptureFailure(ownerRepId)
+                        Toast.makeText(context, "تعذر تشغيل الكاميرا: ${error.message}", Toast.LENGTH_LONG).show()
+                    }
                 }
             }, ContextCompat.getMainExecutor(context))
         }
