@@ -117,8 +117,19 @@ test('APK distribution is governed by the recorded release registry', async () =
   assert.equal(recordedStatus.body.reason, undefined);
   assert.equal(recordedStatus.body.releaseRegistry.recorded, true);
   assert.equal(recordedStatus.body.releaseRegistry.status, 'available');
+  const releaseHead = await fetch(`${baseUrl}/download/apk`, { method: 'HEAD', headers: { cookie: adminCookie } });
+  assert.equal(releaseHead.status, 200);
+  assert.equal(releaseHead.headers.get('content-length'), String(original.length));
+  assert.equal((await releaseHead.arrayBuffer()).byteLength, 0);
+  const releaseRange = await fetch(`${baseUrl}/download/apk`, {
+    headers: { cookie: adminCookie, range: 'bytes=0-8' },
+  });
+  assert.equal(releaseRange.status, 206);
+  assert.equal(releaseRange.headers.get('content-range'), `bytes 0-8/${original.length}`);
+  assert.deepEqual(Buffer.from(await releaseRange.arrayBuffer()), original.subarray(0, 9));
   const recordedDownload = await fetch(`${baseUrl}/download/apk`, { headers: { cookie: adminCookie } });
   assert.equal(recordedDownload.status, 200);
+  assert.equal(recordedDownload.headers.get('content-length'), String(original.length));
   assert.deepEqual(Buffer.from(await recordedDownload.arrayBuffer()), original);
 
   // Rebuilding the artifact bytes under the same version code invalidates the

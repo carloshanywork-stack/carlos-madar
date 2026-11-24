@@ -328,10 +328,12 @@ function downloadApkArtifact(req, res, next, path, downloadName, { release = fal
     'Accept-Ranges': 'bytes',
   });
 
+  let start = 0;
+  let end = fileSize - 1;
   if (rangeHeader && rangeHeader.startsWith('bytes=')) {
     const parts = rangeHeader.replace(/bytes=/, '').split('-');
-    const start = parseInt(parts[0], 10);
-    const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+    start = parseInt(parts[0], 10);
+    end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
 
     if (isNaN(start) || isNaN(end) || start > end || start >= fileSize || end >= fileSize) {
       closeSync(descriptor);
@@ -339,28 +341,24 @@ function downloadApkArtifact(req, res, next, path, downloadName, { release = fal
       return;
     }
 
-    const chunkLength = end - start + 1;
-    res.status(206);
-    res.set({
-      'Content-Range': `bytes ${start}-${end}/${fileSize}`,
-      'Content-Length': String(chunkLength),
-    });
-
-    const stream = createReadStream(path, { fd: descriptor, start, end, autoClose: true, highWaterMark: 1024 * 1024 });
-    stream.on('error', (error) => {
-      if (res.headersSent) res.destroy(error);
-      else next(error);
-    });
-    stream.pipe(res);
-  } else {
-    res.set('Content-Length', String(fileSize));
-    const stream = createReadStream(path, { fd: descriptor, autoClose: true, start: 0, highWaterMark: 1024 * 1024 });
-    stream.on('error', (error) => {
-      if (res.headersSent) res.destroy(error);
-      else next(error);
-    });
-    stream.pipe(res);
+    res.status(206).set('Content-Range', `bytes ${start}-${end}/${fileSize}`);
   }
+
+  res.set('Content-Length', String(end - start + 1));
+  if (req.method === 'HEAD' || fileSize === 0) {
+    closeSync(descriptor);
+    res.end();
+    return;
+  }
+
+  // A full download must stop at the length sent in the response headers.
+  const stream = createReadStream(path, { fd: descriptor, start, end, autoClose: true, highWaterMark: 1024 * 1024 });
+  res.once('close', () => stream.destroy());
+  stream.on('error', (error) => {
+    if (res.headersSent) res.destroy(error);
+    else next(error);
+  });
+  stream.pipe(res);
 }
 
 function apkTarget(req, res) {
