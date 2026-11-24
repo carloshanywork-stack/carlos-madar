@@ -61,6 +61,7 @@ fun GeofencedArrivalCard(
     visit: VisitEntity,
     isArrivalConfirmed: Boolean,
     approvingMachineLocation: Boolean,
+    approvalProgressMessage: String? = null,
     onConfirmArrival: () -> Unit,
     onRefreshLocation: () -> Unit,
     onApproveMachineLocation: () -> Unit,
@@ -90,7 +91,7 @@ fun GeofencedArrivalCard(
                     if (approvingMachineLocation) {
                         CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = Color.White)
                         Spacer(Modifier.width(8.dp))
-                        Text("جارٍ تثبيت موقع الماكينة…")
+                        Text(approvalProgressMessage ?: "جارٍ تثبيت موقع الماكينة…")
                     } else {
                         Icon(Icons.Default.LocationOn, contentDescription = null)
                         Spacer(Modifier.width(8.dp))

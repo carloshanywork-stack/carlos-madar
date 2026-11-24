@@ -35,6 +35,7 @@ import {
   getRepFaultReasons,
   getRepTodayRoute,
   confirmRepMachineLocation,
+  recordRepDeviceHeartbeat,
   listLocationConfirmations,
   submitRepMachineLocationChange,
   listRepMachineLocationChangeRequests,
@@ -241,6 +242,11 @@ router.get('/events', (req, res) => {
   };
   res.once('close', close);
   res.once('error', close);
+});
+
+router.post('/device-heartbeat', (req, res) => {
+  const result = recordRepDeviceHeartbeat(req.user, req.body, db);
+  res.json(result);
 });
 
 router.get('/attendance/today', (req, res) => {

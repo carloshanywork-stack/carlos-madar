@@ -113,6 +113,7 @@ fun VisitScreen(
     val blockedCardId by vm.claimBlockedCardId.collectAsStateWithLifecycle()
     val blockedMessage by vm.claimBlockedMessage.collectAsStateWithLifecycle()
     val machineLocationApprovalBusyId by vm.machineLocationApprovalBusy.collectAsStateWithLifecycle()
+    val machineLocationApprovalProgress by vm.machineLocationApprovalProgress.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -321,6 +322,7 @@ fun VisitScreen(
                     visit = currentVisit,
                     isArrived = isArrived,
                     approvingMachineLocation = machineLocationApprovalBusyId == currentVisit.cardId,
+                    approvalProgressMessage = machineLocationApprovalProgress,
                     onConfirmArrival = { point -> vm.confirmArrival(currentVisit, point) },
                     onApproveMachine = {
                         if (vm.hasLocationPermission()) vm.approveFirstMachineLocation(currentVisit)

@@ -52,6 +52,7 @@ fun ProfileScreen(
     onNotifications: () -> Unit,
     onSync: () -> Unit,
     onSupport: () -> Unit,
+    onDiagnostics: () -> Unit = {},
     onMigration: () -> Unit,
     onLogout: () -> Unit,
 ) {
@@ -69,6 +70,7 @@ fun ProfileScreen(
         OutlinedButton(onClick = onNotifications, modifier = Modifier.fillMaxWidth()) { Text("الإشعارات") }
         OutlinedButton(onClick = onSync, modifier = Modifier.fillMaxWidth()) { Text("المزامنة وقائمة الرفع") }
         OutlinedButton(onClick = onSupport, modifier = Modifier.fillMaxWidth()) { Text("الدعم وبلاغات التطبيق") }
+        OutlinedButton(onClick = onDiagnostics, modifier = Modifier.fillMaxWidth()) { Text("تشخيص الجهاز والنظام (أوفلاين)") }
         OutlinedButton(onClick = onMigration, modifier = Modifier.fillMaxWidth()) { Text("استيراد البيانات المحلية القديمة") }
 
         Text("حالة الصلاحيات")

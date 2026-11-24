@@ -195,6 +195,7 @@ private fun SignedInShell(
                 onNotifications = { profilePage = "notifications" },
                 onSync = { profilePage = "sync" },
                 onSupport = { profilePage = "support" },
+                onDiagnostics = { profilePage = "diagnostics" },
                 onMigration = { context.startActivity(Intent(context, LegacyMigrationActivity::class.java)) },
                 onLogout = { vm.lock(); profilePage = null },
             )
@@ -224,12 +225,14 @@ private fun SignedInShell(
                         onOpenVisit = { visit -> visitUuid = visit.visitUuid },
                         onOpenAttendance = { profilePage = "attendance" },
                         onOpenMigration = { context.startActivity(Intent(context, LegacyMigrationActivity::class.java)) },
+                        onOpenDiagnostics = { profilePage = "diagnostics" },
                     )
                 }
             }
             "support" -> Scaffold(topBar = {
                 MadarTopBar(title = "الدعم", subtitle = "بلاغات التطبيق", onBack = { profilePage = "profile" })
             }) { padding -> Box(Modifier.fillMaxSize().padding(padding)) { SupportScreen(vm) } }
+            "diagnostics" -> DiagnosticScreen(vm = vm, onBack = { profilePage = "profile" })
         }
         return
     }

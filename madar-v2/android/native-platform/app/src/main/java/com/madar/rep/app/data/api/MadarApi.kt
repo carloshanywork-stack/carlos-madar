@@ -508,6 +508,21 @@ class MadarApi(
         throw mapReadError(result)
     }
 
+    fun sendDeviceHeartbeat(token: String, request: DeviceHeartbeatRequest): DeviceHeartbeatResponse {
+        val payload = json.encodeToString(DeviceHeartbeatRequest.serializer(), request)
+        val result = execute(
+            Request.Builder()
+                .url("$baseUrl/api/rep/device-heartbeat")
+                .header("Authorization", "Bearer $token")
+                .post(payload.toRequestBody(JSON_MEDIA))
+                .build()
+        )
+        if (result.status == 401) throw MadarError.SessionExpired()
+        if (result.status == 403) throw MadarError.AccountDisabled(errorText(result))
+        if (result.status in 200..299) return parse(result.body, DeviceHeartbeatResponse.serializer())
+        throw mapReadError(result)
+    }
+
     private fun authorizedGet(path: String, token: String): HttpResult = execute(
         Request.Builder()
             .url("$baseUrl$path")
@@ -533,7 +548,16 @@ class MadarApi(
 
     private fun execute(request: Request): HttpResult {
         try {
+            val startTime = System.currentTimeMillis()
             client.newCall(request).execute().use { response ->
+                val duration = System.currentTimeMillis() - startTime
+                val dateHeader = response.header("Date")
+                if (!dateHeader.isNullOrBlank()) {
+                    val serverTime = com.madar.rep.app.core.ServerClockTracker.parseHttpDate(dateHeader)
+                    if (serverTime != null) {
+                        com.madar.rep.app.core.ServerClockTracker.update(serverTime, duration)
+                    }
+                }
                 val body = response.body?.string().orEmpty()
                 return HttpResult(response.code, body)
             }

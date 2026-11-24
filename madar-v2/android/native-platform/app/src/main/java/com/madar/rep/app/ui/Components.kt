@@ -392,6 +392,7 @@ fun GeofencedArrivalCard(
     visit: VisitEntity,
     isArrived: Boolean,
     approvingMachineLocation: Boolean,
+    approvalProgressMessage: String? = null,
     onConfirmArrival: (GeoPoint) -> Unit,
     onApproveMachine: () -> Unit,
     onRefreshLocation: () -> Unit,
@@ -420,7 +421,7 @@ fun GeofencedArrivalCard(
                 if (approvingMachineLocation) {
                     CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = Color.White)
                     Spacer(Modifier.width(8.dp))
-                    Text("جارٍ اعتماد موقع الماكينة…")
+                    Text(approvalProgressMessage ?: "جارٍ اعتماد موقع الماكينة…")
                 } else {
                     Icon(Icons.Default.LocationOn, contentDescription = null)
                     Spacer(Modifier.width(8.dp))

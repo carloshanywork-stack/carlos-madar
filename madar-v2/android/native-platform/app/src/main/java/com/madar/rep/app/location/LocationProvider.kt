@@ -340,23 +340,23 @@ class LocationProvider(private val context: Context) {
      * Obtains a strictly fresh location fix, bypassing any cached or pre-existing readings.
      * Guaranteed to return a reading captured during or immediately before the invocation.
      */
-    suspend fun freshFix(timeoutMillis: Long = 10_000L): LocationResult {
+    suspend fun freshFix(timeoutMillis: Long = 15_000L): LocationResult {
         if (!hasPermission()) return LocationResult.PermissionDenied
         if (!hasFinePermission()) return LocationResult.ApproximateOnlyPermission
         if (!isAnyProviderEnabled()) return LocationResult.ProvidersDisabled
 
         val gpsEnabled = isGpsEnabled()
-        val minCaptureTime = System.currentTimeMillis() - 1_000L
+        val startRealtimeNanos = android.os.SystemClock.elapsedRealtimeNanos()
 
         return withContext(Dispatchers.Main) {
             val client = fusedClient
             if (client != null && playServicesAvailable) {
-                val fusedResult = acquireFreshFusedFix(client, timeoutMillis, gpsEnabled, minCaptureTime)
+                val fusedResult = acquireFreshFusedFix(client, timeoutMillis, gpsEnabled, startRealtimeNanos)
                 if (fusedResult !is LocationResult.Failure) {
                     return@withContext fusedResult
                 }
             }
-            acquireFreshNativeFix(timeoutMillis, gpsEnabled, minCaptureTime)
+            acquireFreshNativeFix(timeoutMillis, gpsEnabled, startRealtimeNanos)
         }
     }
 
@@ -365,7 +365,7 @@ class LocationProvider(private val context: Context) {
         client: FusedLocationProviderClient,
         timeoutMillis: Long,
         gpsEnabled: Boolean,
-        minCaptureTime: Long,
+        startRealtimeNanos: Long,
     ): LocationResult = withContext(Dispatchers.Main) {
         val deferred = CompletableDeferred<LocationResult>()
         val handler = Handler(Looper.getMainLooper())
@@ -378,9 +378,11 @@ class LocationProvider(private val context: Context) {
 
         val callback = object : LocationCallback() {
             override fun onLocationResult(locationResult: com.google.android.gms.location.LocationResult) {
+                val currentRealtime = android.os.SystemClock.elapsedRealtimeNanos()
                 for (location in locationResult.locations) {
                     val point = location.toGeoPoint(location.provider ?: "fused")
-                    if (point.capturedAtMillis < minCaptureTime) continue
+                    val elapsedAgeMillis = (currentRealtime - location.elapsedRealtimeNanos) / 1_000_000L
+                    if (elapsedAgeMillis > 20_000L) continue
                     latestFixRef.set(point)
                     if (bestCandidate == null || point.accuracyMeters < bestCandidate!!.accuracyMeters) {
                         bestCandidate = point
@@ -427,7 +429,7 @@ class LocationProvider(private val context: Context) {
     private suspend fun acquireFreshNativeFix(
         timeoutMillis: Long,
         gpsEnabled: Boolean,
-        minCaptureTime: Long,
+        startRealtimeNanos: Long,
     ): LocationResult = withContext(Dispatchers.Main) {
         val deferred = CompletableDeferred<LocationResult>()
         val handler = Handler(Looper.getMainLooper())
@@ -441,8 +443,10 @@ class LocationProvider(private val context: Context) {
 
         val listener = object : LocationListener {
             override fun onLocationChanged(location: Location) {
+                val currentRealtime = android.os.SystemClock.elapsedRealtimeNanos()
                 val candidate = location.toGeoPoint(location.provider ?: "native")
-                if (candidate.capturedAtMillis < minCaptureTime) return
+                val elapsedAgeMillis = (currentRealtime - location.elapsedRealtimeNanos) / 1_000_000L
+                if (elapsedAgeMillis > 20_000L) return
                 latestFixRef.set(candidate)
                 if (bestCandidate == null || candidate.accuracyMeters < bestCandidate!!.accuracyMeters) {
                     bestCandidate = candidate
@@ -616,6 +620,7 @@ class LocationProvider(private val context: Context) {
             capturedAtMillis = time,
             provider = providerName,
             isMock = mocked,
+            elapsedRealtimeNanos = elapsedRealtimeNanos,
         )
     }
 }
