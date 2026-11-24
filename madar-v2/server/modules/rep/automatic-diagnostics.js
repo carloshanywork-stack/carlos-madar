@@ -9,7 +9,7 @@ const operations = new Set([
   'photo_processing', 'photo_gallery', 'route_refresh', 'visit_submit', 'app_crash',
 ]);
 const failureCodes = new Set([
-  'network', 'server', 'protocol', 'unexpected', 'capture_failed', 'render_failed',
+  'network', 'server', 'rejected', 'protocol', 'unexpected', 'capture_failed', 'render_failed',
   'gallery_failed', 'integrity_failed', 'retry_exhausted', 'uncaught_exception',
 ]);
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;

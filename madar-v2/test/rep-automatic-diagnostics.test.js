@@ -77,7 +77,7 @@ function diagnostic() {
 }
 
 test('automatic diagnostics accept structured incidents, deduplicate retries, and protect the local JSON archive', async () => {
-  const payload = diagnostic();
+  const payload = { ...diagnostic(), failureCode: 'rejected', httpStatus: 409 };
   assert.equal((await request(repPath, null, payload)).status, 401);
   assert.equal((await request(repPath, rep, { ...payload, logs: 'password=fixture' })).status, 400);
   assert.equal((await request(repPath, rep, { ...payload, failureCode: 'password=fixture' })).status, 400);

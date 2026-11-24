@@ -23,6 +23,7 @@ const operations = {
 const failureCodes = {
   network: 'تعذّر الاتصال',
   server: 'رد الخادم بخطأ',
+  rejected: 'رفض الخادم استلام العملية',
   protocol: 'رد غير متوقع من الخادم',
   unexpected: 'خطأ غير متوقع',
   capture_failed: 'تعذّر التقاط الصورة أو حفظها',
@@ -63,10 +64,11 @@ export default function RepAutomaticDiagnostics() {
       {!loading && reports.length > 0 && (
         <div className="madar-table-wrap">
           <table className="madar-table">
-            <thead><tr><th>رقم التقرير</th><th>العملية المتأثرة</th><th>سبب الفشل المسجّل</th><th>وقت الفشل</th><th>إصدار التطبيق</th><th>الملف</th></tr></thead>
+            <thead><tr><th>رقم التقرير</th><th>رقم المندوب</th><th>العملية المتأثرة</th><th>سبب الفشل المسجّل</th><th>وقت الفشل</th><th>إصدار التطبيق</th><th>الملف</th></tr></thead>
             <tbody>{reports.map((report) => (
               <tr key={report.id}>
                 <td>{report.id}</td>
+                <td>{report.representativeId}</td>
                 <td>{operations[report.operation] ?? report.operation}</td>
                 <td>{failureCodes[report.failureCode] ?? report.failureCode}{report.httpStatus && <small dir="ltr"> · HTTP {report.httpStatus}</small>}</td>
                 <td>{new Date(report.occurredAt).toLocaleString('ar-EG')}</td>
