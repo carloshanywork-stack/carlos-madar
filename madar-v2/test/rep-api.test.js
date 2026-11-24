@@ -1242,6 +1242,13 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   const beforePhotoResponse = await fetch(`${baseUrl}${firstQa.body.visits[0].beforePhotoUrl}`, { headers: { cookie: adminCookie } });
   assert.equal(beforePhotoResponse.status, 200);
   assert.match(beforePhotoResponse.headers.get('content-type'), /image\/jpeg/);
+  const displayArea = 'الرياض — المنطقة الميدانية';
+  db.prepare('UPDATE machines SET area_name = ? WHERE id = ?').run(displayArea, otherRegionMachineId);
+  const routeWithDisplayArea = await request('/api/rep/today-route', {}, universalLogin.cookie);
+  const machineWithDisplayArea = routeWithDisplayArea.body.regions.find((region) => region.regionName === displayArea)
+    ?.machines.find((machine) => machine.cardId === otherRegionCardId);
+  assert.equal(machineWithDisplayArea?.areaName, displayArea);
+  assert.equal(machineWithDisplayArea?.visitRegionName, 'الرياض');
   const universalVisitTime = Date.now();
   const universalVisitPayload = {
     ...visitPayload,
@@ -1249,7 +1256,7 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
     visitUuid: randomUUID(),
     cardId: otherRegionCardId,
     machineCode: '2400',
-    regionName: 'الرياض',
+    regionName: displayArea,
     capturedAt: new Date(universalVisitTime).toISOString(),
     beforeCapturedAt: Array.from({ length: 1 }, (_, index) => new Date(universalVisitTime - (3 - index) * 60 * 1000).toISOString()),
     afterCapturedAt: [new Date(universalVisitTime).toISOString()],
@@ -1260,6 +1267,10 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   }), adminCookie);
   assert.equal(enableUniversalSelfApproval.response.status, 200);
   assert.equal(enableUniversalSelfApproval.body.canSelfApproveVisits, true);
+  const incorrectRegion = await request('/api/rep/sync-visit', {
+    method: 'POST', body: buildVisitForm({ ...universalVisitPayload, regionName: 'التجمع' }, 1, 1),
+  }, universalLogin.cookie);
+  assert.equal(incorrectRegion.response.status, 409, 'an unrelated route region cannot be used for this card');
   const universalVisit = await request('/api/rep/sync-visit', {
     method: 'POST', body: buildVisitForm(universalVisitPayload, 1, 1),
   }, universalLogin.cookie);
@@ -1267,6 +1278,8 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
   assert.equal(universalVisit.body.status, 'approved', 'an explicitly enabled representative self-approves an eligible visit');
   assert.equal(universalVisit.body.reviewSource, 'self_approval');
   assert.deepEqual(universalVisit.body.reasonCodes, []);
+  assert.equal(db.prepare('SELECT region_name FROM rep_visits WHERE visit_uuid = ?')
+    .get(universalVisitPayload.visitUuid).region_name, 'الرياض', 'queued display names resolve to the canonical region');
   const selfReview = db.prepare(`SELECT review.status, review.review_source, review.reviewed_by,
       review.reason_codes_json FROM rep_visit_reviews review
     JOIN rep_visits visit ON visit.id = review.visit_id WHERE visit.visit_uuid = ?`).get(universalVisitPayload.visitUuid);
@@ -1382,18 +1395,36 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
     INSERT INTO maintenance_cards (order_id, machine_id) VALUES (?, ?)
   `).run(orderId, dailyLimitMachineId).lastInsertRowid);
   const dailyLimitCapturedAt = new Date().toISOString();
+  const delayedVisitPayload = {
+    ...universalVisitPayload,
+    visitUuid: randomUUID(),
+    cardId: dailyLimitCardId,
+    machineCode: '2401',
+    regionName: 'الرياض',
+    capturedAt: dailyLimitCapturedAt,
+    beforeCapturedAt: [dailyLimitCapturedAt],
+    afterCapturedAt: [dailyLimitCapturedAt],
+    location: { ...universalVisitPayload.location, updatedAt: dailyLimitCapturedAt },
+  };
+  db.exec(`CREATE TEMP TRIGGER review_order_during_upload AFTER INSERT ON rep_visits
+    WHEN NEW.card_id = ${dailyLimitCardId} AND NEW.status = 'receiving'
+    BEGIN UPDATE maintenance_orders SET status = 'review' WHERE id = NEW.order_id; END`);
+  try {
+    const interruptedVisit = await request('/api/rep/sync-visit', {
+      method: 'POST', body: buildVisitForm(delayedVisitPayload, 1, 1),
+    }, universalLogin.cookie);
+    assert.equal(interruptedVisit.response.status, 409, 'the route is rechecked after preparing photos');
+    const interrupted = db.prepare('SELECT id, status FROM rep_visits WHERE visit_uuid = ?')
+      .get(delayedVisitPayload.visitUuid);
+    assert.equal(interrupted.status, 'failed');
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM rep_visit_photos WHERE visit_id = ?')
+      .get(interrupted.id).count, 0);
+  } finally {
+    db.exec('DROP TRIGGER review_order_during_upload');
+    db.prepare("UPDATE maintenance_orders SET status = 'in_progress' WHERE id = ?").run(orderId);
+  }
   const dailyLimitVisit = await request('/api/rep/sync-visit', {
-    method: 'POST',
-    body: buildVisitForm({
-      ...universalVisitPayload,
-      visitUuid: randomUUID(),
-      cardId: dailyLimitCardId,
-      machineCode: '2401',
-      capturedAt: dailyLimitCapturedAt,
-      beforeCapturedAt: [dailyLimitCapturedAt],
-      afterCapturedAt: [dailyLimitCapturedAt],
-      location: { ...universalVisitPayload.location, updatedAt: dailyLimitCapturedAt },
-    }, 1, 1),
+    method: 'POST', body: buildVisitForm(delayedVisitPayload, 1, 1),
   }, universalLogin.cookie);
   assert.equal(dailyLimitVisit.response.status, 200, JSON.stringify(dailyLimitVisit.body));
   assert.equal(dailyLimitVisit.body.status, 'pending_review');

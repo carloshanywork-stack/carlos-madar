@@ -1770,7 +1770,7 @@ export default function RepApp({ user, offlineOnly = false, onLogout }) {
       photoPolicyVersion: 2,
       cardId: Number(selectedMachine.cardId),
       machineCode: selectedMachine.machineCode,
-      regionName: selectedMachine.regionName,
+      regionName: selectedMachine.visitRegionName || selectedMachine.regionName,
       machineCondition,
       reasonIds,
       maintenanceLines: maintenanceLines || [],

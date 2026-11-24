@@ -190,16 +190,10 @@ function getBusinessDayRange(database, now = new Date()) {
 }
 
 export function getRepTodayRoute(rep, database = db) {
-  const locationRequests = listLocationConfirmations({ repId: rep.id, status: 'all' }, database);
-  const latestLocationByCard = new Map();
-  for (const request of locationRequests) {
-    if (!latestLocationByCard.has(request.cardId)) latestLocationByCard.set(request.cardId, request);
-  }
   const assignedRegions = Array.isArray(rep?.assignedRegions) ? rep.assignedRegions : [];
   const isUniversal = hasUniversalAccess(rep?.assignedRegions);
   const assignedByKey = new Map(assignedRegions.map((name) => [regionKey(name), name]));
 
-  const { start: dayStart, end: dayEnd } = getBusinessDayRange(database);
   const cards = database.prepare(`
     SELECT order_record.id AS order_id, order_record.order_code, order_record.status AS order_status,
       order_record.archived_at,
@@ -223,30 +217,38 @@ export function getRepTodayRoute(rep, database = db) {
       AND order_record.status = 'in_progress'
     ORDER BY machine.area COLLATE NOCASE, machine.code COLLATE NOCASE,
       order_record.created_at DESC, order_record.id DESC, card.id DESC
-  `).all(rep.id);
-  const routeCardIds = [...new Set(cards.map((row) => Number(row.card_id)))];
-  const routeCardPlaceholders = routeCardIds.map(() => '?').join(',');
+  `).all(rep.id).filter((row) => isUniversal || assignedByKey.has(regionKey(row.region_name)));
+  if (!cards.length) {
+    return { success: true, summary: { totalMachines: 0, completed: 0, pending: 0, pendingReview: 0, progress: 0 }, regions: [] };
+  }
+  const routeCardIds = JSON.stringify(cards.map((row) => row.card_id));
+  const routeMachineIds = JSON.stringify([...new Set(cards.map((row) => row.machine_id))]);
+  const locationRequests = listLocationConfirmations({ repId: rep.id, status: 'all', routeCardIds }, database);
+  const latestLocationByCard = new Map();
+  for (const request of locationRequests) {
+    if (!latestLocationByCard.has(request.cardId)) latestLocationByCard.set(request.cardId, request);
+  }
 
   const visitReviews = database.prepare(`
     SELECT visit.card_id, visit.rep_user_id, review.status AS review_status, review.review_note, visit.visit_uuid
     FROM rep_visits visit
     JOIN rep_visit_reviews review ON review.visit_id = visit.id
-    WHERE visit.status = 'completed'
+    WHERE visit.card_id IN (SELECT value FROM json_each(?)) AND visit.status = 'completed'
     ORDER BY datetime(visit.created_at) DESC, visit.id DESC
-  `).all();
+  `).all(routeCardIds);
   // Preserve distinguishable historical/default quantities for reshoots.
   // Prefer the most recent representative visit snapshot, then existing card
   // lines; do not create a client-side quantity when neither exists.
-  const latestVisitLines = routeCardIds.length ? database.prepare(`
+  const latestVisitLines = database.prepare(`
     SELECT visit.card_id, line.reason_id AS reasonId, line.reason_label_snapshot AS label,
       line.quantity, line.unit_snapshot AS unit, line.quantity_provenance AS quantityProvenance
     FROM rep_visits visit JOIN rep_visit_lines line ON line.visit_id = visit.id
-    WHERE visit.card_id IN (${routeCardPlaceholders}) AND visit.status = 'completed' AND visit.id = (
+    WHERE visit.card_id IN (SELECT value FROM json_each(?)) AND visit.status = 'completed' AND visit.id = (
       SELECT MAX(previous.id) FROM rep_visits previous
       WHERE previous.card_id = visit.card_id AND previous.status = 'completed'
     )
     ORDER BY visit.card_id, line.id
-  `).all(...routeCardIds) : [];
+  `).all(routeCardIds);
   const latestVisitLinesByCard = new Map();
   for (const line of latestVisitLines) {
     const cardId = Number(line.card_id);
@@ -256,11 +258,11 @@ export function getRepTodayRoute(rep, database = db) {
       unit: line.unit, quantityProvenance: line.quantityProvenance,
     });
   }
-  const legacyCardLines = routeCardIds.length ? database.prepare(`
+  const legacyCardLines = database.prepare(`
     SELECT card_id, reason_id AS reasonId, reason_label_snapshot AS label,
       quantity, unit_snapshot AS unit, quantity_provenance AS quantityProvenance
-    FROM maintenance_card_lines WHERE card_id IN (${routeCardPlaceholders}) ORDER BY card_id, id
-  `).all(...routeCardIds) : [];
+    FROM maintenance_card_lines WHERE card_id IN (SELECT value FROM json_each(?)) ORDER BY card_id, id
+  `).all(routeCardIds);
   const legacyLinesByCard = new Map();
   for (const line of legacyCardLines) {
     const cardId = Number(line.card_id);
@@ -275,25 +277,25 @@ export function getRepTodayRoute(rep, database = db) {
     if (!reviewByCard.has(Number(visit.card_id))) reviewByCard.set(Number(visit.card_id), visit);
   }
   const manualReviews = new Map(database.prepare(`SELECT card_id, status, review_note FROM maintenance_card_photo_reviews
-    WHERE status IN ('pending', 'approved', 'reshoot', 'empty')`).all().map((row) => [Number(row.card_id), row]));
+    WHERE card_id IN (SELECT value FROM json_each(?)) AND status IN ('pending', 'approved', 'reshoot', 'empty')`)
+    .all(routeCardIds).map((row) => [Number(row.card_id), row]));
   const correctionPendingMachineIds = new Set(database.prepare(`
     SELECT DISTINCT machine_id FROM machine_correction_requests WHERE status = 'pending'
-  `).all().map((row) => Number(row.machine_id)));
+      AND machine_id IN (SELECT value FROM json_each(?))
+  `).all(routeMachineIds).map((row) => Number(row.machine_id)));
   const activeWorkByCard = new Map(database.prepare(`
     SELECT card_id, rep_user_id, visit_uuid, expires_at_ms FROM rep_machine_work_leases
-    WHERE expires_at_ms > ?
-  `).all(Date.now()).map((row) => [Number(row.card_id), row]));
+    WHERE card_id IN (SELECT value FROM json_each(?)) AND expires_at_ms > ?
+  `).all(routeCardIds, Date.now()).map((row) => [Number(row.card_id), row]));
 
   const regionsByKey = new Map();
   let totalMachines = 0;
   let completed = 0;
   let pendingReview = 0;
   for (const row of cards) {
-    const machineRegionKey = regionKey(row.region_name);
-    if (!isUniversal && !assignedByKey.has(machineRegionKey)) continue;
     const regionName = isUniversal
       ? (row.area_name || row.region_name || 'المنطقة العامة')
-      : assignedByKey.get(machineRegionKey);
+      : assignedByKey.get(regionKey(row.region_name));
     const groupKey = regionKey(regionName) || regionKey('المنطقة العامة');
     const beforePhotos = parsePhotoList(row.before_photos_json);
     const afterPhotos = parsePhotoList(row.after_photos_json);
@@ -324,6 +326,7 @@ export function getRepTodayRoute(rep, database = db) {
       clientName: row.client_name,
       address: row.client_address ?? '',
       areaName: row.area_name || row.region_name || 'المنطقة العامة',
+      visitRegionName: row.region_name,
       maintenanceLines: latestVisitLinesByCard.get(Number(row.card_id))
         ?? legacyLinesByCard.get(Number(row.card_id)) ?? [],
       isCompleted,
@@ -687,7 +690,11 @@ function findRepVisitCard(rep, visit, database) {
   if (orderAreas.length && !orderAreas.includes(regionKey(card.machine_area))) {
     throw new HttpError(403, 'This machine is outside the work order regions.');
   }
-  if (regionKey(visit.regionName) !== regionKey(card.machine_area)
+  const submittedRegion = regionKey(visit.regionName);
+  // Older Android clients saved the route's display area in their offline queue.
+  const matchesRegion = submittedRegion === regionKey(card.machine_area)
+    || (Boolean(card.area_name) && submittedRegion === regionKey(card.area_name));
+  if (!matchesRegion
     || visit.machineCode.normalize('NFKC').toLocaleLowerCase('en-US')
     !== card.machine_code.normalize('NFKC').toLocaleLowerCase('en-US')) {
     throw new HttpError(409, 'The selected machine changed since this route was downloaded. Refresh the route and try again.');
@@ -959,12 +966,13 @@ export function confirmRepMachineLocation(rep, machineId, input, database = db) 
   }).immediate();
 }
 
-export function listLocationConfirmations({ repId = null, status = 'pending' } = {}, database = db) {
+export function listLocationConfirmations({ repId = null, status = 'pending', routeCardIds = null } = {}, database = db) {
   if (!['pending', 'approved', 'rejected', 'all'].includes(status)) throw new HttpError(400, 'Invalid review status.');
   const filters = ["request.request_type = 'location_confirmation'"];
   const params = [];
   if (repId !== null) { filters.push('request.rep_user_id = ?'); params.push(positiveId(repId, 'repId')); }
   if (status !== 'all') { filters.push('request.status = ?'); params.push(status); }
+  if (routeCardIds !== null) { filters.push('request.card_id IN (SELECT value FROM json_each(?))'); params.push(routeCardIds); }
   return database.prepare(`SELECT request.id, request.action_uuid, request.machine_id, request.card_id,
       request.rep_user_id, request.location_json, request.status, machine.code, machine.name_ar,
       machine.latitude, machine.longitude, machine.is_location_locked,
@@ -1467,21 +1475,20 @@ function persistRepVisitLines(visit, visitId, database) {
 
 function recordReceivedVisit(rep, visit, visitId, photoRows, database) {
   return database.transaction(() => {
-    const machine = database.prepare(`SELECT id, code, name_ar, area, area_name, latitude, longitude,
-      is_location_locked, geofence_radius_meters FROM machines WHERE id = ?`).get(
-      database.prepare('SELECT machine_id FROM rep_visits WHERE id = ?').get(visitId)?.machine_id,
-    );
-    if (!machine) throw new HttpError(409, 'The machine was removed while the visit was uploading.');
+    // File preparation is asynchronous. Recheck access and the route before committing the visit.
+    const machine = findRepVisitCard(rep, visit, database);
     const beforePhotos = photoRows.filter((photo) => photo.phase === 'before');
     const afterPhotos = photoRows.filter((photo) => photo.phase === 'after');
     const beforePath = beforePhotos[0]?.storedPath ?? null;
     const afterPath = afterPhotos[0]?.storedPath ?? null;
-    database.prepare(`
+    const completion = database.prepare(`
       UPDATE rep_visits SET status = 'completed', before_path = ?, after_path = ?,
         before_captured_at = ?, after_captured_at = ?,
         failure_message = NULL, updated_at = CURRENT_TIMESTAMP, completed_at = CURRENT_TIMESTAMP
-      WHERE id = ? AND status = 'receiving'
-    `).run(beforePath, afterPath, beforePhotos[0]?.capturedAt ?? null, afterPhotos[0]?.capturedAt ?? null, visitId);
+      WHERE id = ? AND status = 'receiving' AND card_id = ? AND order_id = ? AND machine_id = ?
+    `).run(beforePath, afterPath, beforePhotos[0]?.capturedAt ?? null, afterPhotos[0]?.capturedAt ?? null,
+      visitId, machine.card_id, machine.order_id, machine.machine_id);
+    if (completion.changes !== 1) throw new HttpError(409, 'The maintenance card changed while the visit was uploading.');
     const insertPhoto = database.prepare(`
       INSERT INTO rep_visit_photos (visit_id, phase, ordinal, stored_path, captured_at)
       VALUES (?, ?, ?, ?, ?)
