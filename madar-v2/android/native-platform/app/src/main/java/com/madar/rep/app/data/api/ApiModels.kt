@@ -108,6 +108,7 @@ data class RouteMachine(
     val isLocationLocked: Boolean = false,
     val geofenceRadiusMeters: Double = 50.0,
     val approvedLocation: ApprovedLocation? = null,
+    val visitRegionName: String? = null,
 )
 
 @Serializable
@@ -212,7 +213,12 @@ data class AppVersionResponse(
     val apkUrl: String? = null,
     val sha256: String? = null,
     val releaseNotes: String = "",
-)
+) {
+    fun notesFor(release: ApkReleaseMetadata): String? = releaseNotes.trim().takeIf {
+        success && latestVersionCode == release.versionCode &&
+            sha256.equals(release.apkSha256, ignoreCase = true) && it.isNotEmpty()
+    }
+}
 
 @Serializable
 data class ServerMapPoint(

@@ -30,70 +30,55 @@ data class VisitFsmState(
     val afterPhotosCount: Int,
     val hasConditionSelected: Boolean,
     val isReadyToSubmit: Boolean,
-    val distanceMeters: Double?,
-    val locationDecision: LocationDecision,
 )
 
 object VisitFsm {
-    fun evaluate(
-        visit: VisitEntity,
-        photos: List<PhotoEntity>,
-        userLocation: GeoPoint?,
-        manualArrivalConfirmed: Boolean = false,
-        nowMillis: Long = System.currentTimeMillis(),
-    ): VisitFsmState {
-        val before = photos.filter { it.phase == "before" }
-        val after = photos.filter { it.phase == "after" }
-        val beforeCount = before.size
-        val afterCount = after.size
-
-        val decision = GeoPolicy.evaluate(
-            userLocation,
+    fun arrivalDecision(visit: VisitEntity, location: GeoPoint?, nowMillis: Long = System.currentTimeMillis()): LocationDecision {
+        if (!visit.locationLocked || visit.machineLatitude == null || visit.machineLongitude == null) {
+            return LocationDecision.Invalid("موقع الماكينة غير مثبت. اعتمد موقعها أولًا.")
+        }
+        return GeoPolicy.evaluate(
+            location,
             visit.machineLatitude,
             visit.machineLongitude,
             visit.geofenceRadiusMeters,
             nowMillis = nowMillis,
+            maxAgeMillis = 30_000L,
+            maxAccuracyMeters = GeoPolicy.MAX_FIELD_CONFIRMATION_ACCURACY_METERS,
         )
+    }
 
-        val distance = if (userLocation != null && visit.machineLatitude != null && visit.machineLongitude != null) {
-            GeoPolicy.distanceMeters(
-                userLocation.latitude, userLocation.longitude,
-                visit.machineLatitude, visit.machineLongitude
-            )
-        } else null
+    fun maintenanceComplete(visit: VisitEntity): Boolean = when (visit.machineCondition) {
+        "working" -> true
+        "faulty", "preventive_maintenance" -> visit.reasonIdsCsv.isNotBlank()
+        else -> false
+    }
 
-        // Arrival is confirmed if:
-        // 1. Manually confirmed by pressing "I've Arrived"
-        // 2. Or already inside geofence (LocationDecision.Valid)
-        // 3. Or photos already exist (resuming existing draft)
-        // 4. Or machine location has not been locked by admin yet
-        val arrivalConfirmed = manualArrivalConfirmed ||
-            !visit.locationLocked ||
-            beforeCount > 0 ||
-            afterCount > 0 ||
-            decision is LocationDecision.Valid
-
-        val readyToSubmit = PhotoPolicy.validVisit(beforeCount, afterCount) &&
-            visit.locationLocked
+    fun evaluate(
+        visit: VisitEntity,
+        photos: List<PhotoEntity>,
+    ): VisitFsmState {
+        val beforeCount = photos.count { it.phase == "before" }
+        val afterCount = photos.count { it.phase == "after" }
+        val arrived = visit.locationLocked && visit.arrivalConfirmedAt != null
+        val maintenanceComplete = maintenanceComplete(visit)
 
         val determinedStep = when {
             visit.state != VisitState.DRAFT -> VisitStep.SUMMARY
-            !arrivalConfirmed && distance != null && distance > visit.geofenceRadiusMeters -> VisitStep.EN_ROUTE
+            !arrived -> VisitStep.EN_ROUTE
             beforeCount == 0 -> VisitStep.BEFORE_PHOTOS
-            visit.machineCondition.isBlank() -> VisitStep.MAINTENANCE
+            !maintenanceComplete -> VisitStep.MAINTENANCE
             afterCount == 0 -> VisitStep.AFTER_PHOTOS
             else -> VisitStep.SUMMARY
         }
 
         return VisitFsmState(
             currentStep = determinedStep,
-            isArrivalConfirmed = arrivalConfirmed,
+            isArrivalConfirmed = arrived,
             beforePhotosCount = beforeCount,
             afterPhotosCount = afterCount,
-            hasConditionSelected = visit.machineCondition.isNotBlank(),
-            isReadyToSubmit = readyToSubmit,
-            distanceMeters = distance,
-            locationDecision = decision,
+            hasConditionSelected = maintenanceComplete,
+            isReadyToSubmit = arrived && maintenanceComplete && PhotoPolicy.validVisit(beforeCount, afterCount),
         )
     }
 }

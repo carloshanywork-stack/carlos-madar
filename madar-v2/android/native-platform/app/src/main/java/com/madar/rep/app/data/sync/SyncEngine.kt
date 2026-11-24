@@ -1,5 +1,6 @@
 package com.madar.rep.app.data.sync
 
+import com.madar.rep.app.core.Hashing
 import com.madar.rep.app.core.MadarError
 import com.madar.rep.app.core.MadarTime
 import com.madar.rep.app.core.SyncPolicy
@@ -19,11 +20,13 @@ import com.madar.rep.app.location.isClockInAwaitingSync
 import com.madar.rep.app.data.db.MachineActionEntity
 import com.madar.rep.app.data.db.MachineActionState
 import com.madar.rep.app.data.db.MadarDatabase
+import com.madar.rep.app.data.db.PhotoEntity
 import com.madar.rep.app.data.db.SupportReportState
 import com.madar.rep.app.data.db.VisitEntity
 import com.madar.rep.app.data.db.VisitState
 import com.madar.rep.app.data.session.Session
 import com.madar.rep.app.data.session.SessionGateway
+import com.madar.rep.app.media.PhotoProcessingPipeline
 import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
@@ -161,6 +164,7 @@ class SyncEngine(
         }
 
         if (!needsLogin) {
+            database.actionQueue().appendLegacyVisits(session.ownerScopeId)
             val visits = database.visits().dueForSync(session.ownerScopeId, System.currentTimeMillis())
             for (visit in visits) {
                 attempted += 1
@@ -217,34 +221,21 @@ class SyncEngine(
         }
         val files = ArrayList<VisitPhotoFile>(photos.size)
         for (photo in before + after) {
-            var file = File(photo.processedPath)
-            if (photo.sha256.isBlank() || !file.isFile || file.length() <= 0L) {
-                // Background watermarking is still rendering or was interrupted by process death
-                val recovered = runCatching {
-                    val d = File(photo.originalPath).parentFile
-                    if (d != null && File(d, "capture.json").isFile) {
-                        val rendered = photoStore?.renderWatermark(photo)
-                            ?: (context.applicationContext as? com.madar.rep.app.MadarApplication)
-                                ?.container?.photoStore?.renderWatermark(photo)
-                        if (rendered != null) {
-                            database.photos().upsert(rendered)
-                            rendered
-                        } else null
-                    } else null
-                }.getOrNull()
-                file = File(recovered?.processedPath ?: photo.processedPath)
-                if (!file.isFile || file.length() <= 0L) {
-                    // Processing still in progress off-thread, defer upload safely
-                    database.visits().updateSyncState(
-                        visit.visitUuid, VisitState.PROCESSING,
-                        "جارٍ معالجة الصور وضبط العلامة المائية؛ ستُرفع فور جاهزيتها.",
-                        visit.attempts, now + 3_000L, "processing", now
-                    )
-                    return SyncSignal.PROCESSING
-                }
+            if (photo.sha256.isBlank() && PhotoProcessingPipeline.isProcessing(photo.id)) {
+                database.visits().updateSyncState(
+                    visit.visitUuid, VisitState.PROCESSING, "جارٍ تجهيز الصور للإرسال.",
+                    visit.attempts, now + 3_000L, visit.serverStatus, now,
+                )
+                return SyncSignal.PROCESSING
             }
-            if (photo.sizeBytes > 0 && file.length() != photo.sizeBytes) {
-                val message = "صورة محلية مفقودة أو تغيّر حجمها؛ الزيارة محفوظة للمراجعة."
+            val finalized = if (photo.sha256.isBlank()) recoverPhoto(photo) else photo
+            val file = finalized?.let { File(it.processedPath) }
+            val checksum = file?.takeIf { it.isFile && it.length() > 0 }?.let {
+                runCatching { Hashing.sha256File(it) }.getOrNull()
+            }
+            if (finalized == null || file == null || file.length() != finalized.sizeBytes ||
+                checksum == null || !checksum.equals(finalized.sha256, ignoreCase = true)) {
+                val message = "ملف إحدى الصور مفقود أو لم يجتز التحقق. الزيارة محفوظة للمراجعة."
                 database.visits().updateSyncState(
                     visit.visitUuid, VisitState.NEEDS_REVIEW, message, visit.attempts + 1,
                     0, visit.serverStatus, now
@@ -325,6 +316,17 @@ class SyncEngine(
                 SyncSignal.RETRY
             }
         }
+    }
+
+    private suspend fun recoverPhoto(photo: PhotoEntity): PhotoEntity? {
+        val store = photoStore ?: (context.applicationContext as? com.madar.rep.app.MadarApplication)?.container?.photoStore
+        val directory = File(photo.originalPath).parentFile
+        if (store == null || directory == null || !File(directory, "capture.json").isFile) return null
+        val finalized = runCatching { store.renderWatermark(photo) }.getOrNull() ?: return null
+        val saved = database.photos().updateProcessed(
+            finalized.id, finalized.processedPath, finalized.watermarkText, finalized.sha256, finalized.sizeBytes,
+        )
+        return finalized.takeIf { saved == 1 }
     }
 
     private suspend fun scheduleRetry(visit: VisitEntity, message: String, attempts: Int, now: Long) {

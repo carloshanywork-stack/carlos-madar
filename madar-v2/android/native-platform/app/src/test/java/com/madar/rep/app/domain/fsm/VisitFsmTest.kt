@@ -50,77 +50,51 @@ class VisitFsmTest {
     )
 
     @Test
-    fun enRouteWhenOutsideGeofenceAndNoPhotos() {
-        val visit = testVisit()
-        // Location far away (1000m away)
-        val farLocation = GeoPoint(30.0544, 31.2357, 10f, now)
-        val state = VisitFsm.evaluate(visit, emptyList(), farLocation, manualArrivalConfirmed = false, nowMillis = now)
-
+    fun nearbyFixAndLegacyPhotosDoNotConfirmArrival() {
+        val visit = testVisit().copy(latitude = 30.0444, longitude = 31.2357, locationCapturedAt = now)
+        val near = GeoPoint(30.0444, 31.2357, 10f, now)
+        assertEquals(LocationDecision.Valid, VisitFsm.arrivalDecision(visit, near, now))
+        val state = VisitFsm.evaluate(visit, listOf(photo("before"), photo("after", "2")))
         assertEquals(VisitStep.EN_ROUTE, state.currentStep)
         assertFalse(state.isArrivalConfirmed)
         assertFalse(state.isReadyToSubmit)
-        assertTrue((state.distanceMeters ?: 0.0) > 500.0)
     }
 
     @Test
-    fun transitionsToBeforePhotosWhenInsideGeofence() {
+    fun lockedLocationAndFreshAccurateNonMockFixAreRequired() {
         val visit = testVisit()
-        // Location exact match (0m away)
-        val nearLocation = GeoPoint(30.0444, 31.2357, 10f, now)
-        val state = VisitFsm.evaluate(visit, emptyList(), nearLocation, manualArrivalConfirmed = false, nowMillis = now)
-
-        assertEquals(VisitStep.BEFORE_PHOTOS, state.currentStep)
-        assertTrue(state.isArrivalConfirmed)
-        assertEquals(0, state.beforePhotosCount)
-        assertEquals(0, state.afterPhotosCount)
-        assertFalse(state.isReadyToSubmit)
+        val near = GeoPoint(30.0444, 31.2357, 10f, now)
+        assertTrue(VisitFsm.arrivalDecision(visit.copy(locationLocked = false), near, now) is LocationDecision.Invalid)
+        assertTrue(VisitFsm.arrivalDecision(visit.copy(machineLatitude = null), near, now) is LocationDecision.Invalid)
+        assertTrue(VisitFsm.arrivalDecision(visit, near.copy(latitude = 30.0544), now) is LocationDecision.Outside)
+        assertTrue(VisitFsm.arrivalDecision(visit, near.copy(accuracyMeters = 51f), now) is LocationDecision.Inaccurate)
+        assertTrue(VisitFsm.arrivalDecision(visit, near.copy(capturedAtMillis = now - 30_001), now) is LocationDecision.Stale)
+        assertEquals(LocationDecision.Mocked, VisitFsm.arrivalDecision(visit, near.copy(isMock = true), now))
     }
 
     @Test
-    fun transitionsToBeforePhotosWhenManualArrivalConfirmed() {
-        val visit = testVisit()
-        val farLocation = GeoPoint(30.0544, 31.2357, 10f, now)
-        val state = VisitFsm.evaluate(visit, emptyList(), farLocation, manualArrivalConfirmed = true, nowMillis = now)
+    fun savedArrivalResumesWithoutLiveGpsAndPhotosDoNotSkipMaintenance() {
+        val visit = testVisit().copy(arrivalConfirmedAt = now)
+        val arrival = VisitFsm.evaluate(visit, emptyList())
+        assertEquals(VisitStep.BEFORE_PHOTOS, arrival.currentStep)
+        assertTrue(arrival.isArrivalConfirmed)
+        assertFalse(arrival.isReadyToSubmit)
 
-        assertEquals(VisitStep.BEFORE_PHOTOS, state.currentStep)
-        assertTrue(state.isArrivalConfirmed)
-    }
-
-    @Test
-    fun transitionsToMaintenanceWhenBeforePhotosExist() {
-        val visit = testVisit(condition = "")
-        val nearLocation = GeoPoint(30.0444, 31.2357, 10f, now)
-        val photos = listOf(photo("before", "1"))
-        val state = VisitFsm.evaluate(visit, photos, nearLocation, nowMillis = now)
-
+        val photos = listOf(photo("before"))
+        val state = VisitFsm.evaluate(visit.copy(machineCondition = "faulty"), photos)
         assertEquals(VisitStep.MAINTENANCE, state.currentStep)
-        assertEquals(1, state.beforePhotosCount)
-        assertEquals(0, state.afterPhotosCount)
         assertFalse(state.hasConditionSelected)
         assertFalse(state.isReadyToSubmit)
+
+        val savedMaintenance = visit.copy(machineCondition = "faulty", reasonIdsCsv = "7")
+        assertEquals(VisitStep.AFTER_PHOTOS, VisitFsm.evaluate(savedMaintenance, photos).currentStep)
     }
 
     @Test
-    fun transitionsToAfterPhotosWhenMaintenanceCompleted() {
-        val visit = testVisit(condition = "working")
-        val nearLocation = GeoPoint(30.0444, 31.2357, 10f, now)
-        val photos = listOf(photo("before", "1"))
-        val state = VisitFsm.evaluate(visit, photos, nearLocation, nowMillis = now)
-
-        assertEquals(VisitStep.AFTER_PHOTOS, state.currentStep)
-        assertEquals(1, state.beforePhotosCount)
-        assertEquals(0, state.afterPhotosCount)
-        assertTrue(state.hasConditionSelected)
-        assertFalse(state.isReadyToSubmit)
-    }
-
-    @Test
-    fun transitionsToSummaryWhenBothPhasesAndConditionSatisfied() {
-        val visit = testVisit(condition = "working")
-        val nearLocation = GeoPoint(30.0444, 31.2357, 10f, now)
-        val photos = listOf(photo("before", "1"), photo("after", "2"))
-        val state = VisitFsm.evaluate(visit, photos, nearLocation, nowMillis = now)
-
+    fun bothPhotoPhasesAreNeededAfterConfirmedArrivalAndMaintenance() {
+        val visit = testVisit(condition = "working").copy(arrivalConfirmedAt = now)
+        val photos = listOf(photo("before"), photo("after", "2"))
+        val state = VisitFsm.evaluate(visit, photos)
         assertEquals(VisitStep.SUMMARY, state.currentStep)
         assertEquals(1, state.beforePhotosCount)
         assertEquals(1, state.afterPhotosCount)
@@ -129,19 +103,8 @@ class VisitFsmTest {
     }
 
     @Test
-    fun terminalVisitsEvaluateToSummary() {
+    fun submittedVisitsStillDisplayTheSummary() {
         val visit = testVisit(condition = "working", state = VisitState.APPROVED)
-        val state = VisitFsm.evaluate(visit, emptyList(), null, nowMillis = now)
-
-        assertEquals(VisitStep.SUMMARY, state.currentStep)
-    }
-
-    @Test
-    fun detectsMockLocation() {
-        val visit = testVisit()
-        val mockLocation = GeoPoint(30.0444, 31.2357, 10f, now, isMock = true)
-        val state = VisitFsm.evaluate(visit, emptyList(), mockLocation, nowMillis = now)
-
-        assertEquals(LocationDecision.Mocked, state.locationDecision)
+        assertEquals(VisitStep.SUMMARY, VisitFsm.evaluate(visit, emptyList()).currentStep)
     }
 }

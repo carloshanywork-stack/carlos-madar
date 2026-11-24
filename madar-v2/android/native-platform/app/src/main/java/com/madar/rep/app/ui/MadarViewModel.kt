@@ -38,6 +38,7 @@ import com.madar.rep.app.data.db.SupportReportState
 import com.madar.rep.app.data.repo.AttendanceView
 import com.madar.rep.app.data.repo.RouteView
 import com.madar.rep.app.data.repo.VisitForm
+import com.madar.rep.app.domain.fsm.VisitFsm
 import com.madar.rep.app.data.repo.VisitRepository
 import com.madar.rep.app.data.session.Session
 import com.madar.rep.app.data.sync.SyncRunResult
@@ -114,6 +115,7 @@ data class ApkUpdateUiState(
     val currentVersion: String = "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
     val availableVersion: String? = null,
     val updateAvailable: Boolean = false,
+    val releaseNotes: String? = null,
     val busy: Boolean = false,
     val message: String? = null,
     val downloadedApk: File? = null,
@@ -425,16 +427,19 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
         _apkUpdate.value = _apkUpdate.value.copy(busy = true, message = null, downloadedApk = null)
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val status = container.apiFactory(current.serverUrl).getApkStatus(current.token)
+                val api = container.apiFactory(current.serverUrl)
+                val status = api.getApkStatus(current.token)
                 val metadata = status.releaseMetadata
                 if (!status.available || status.artifactType != "release" || metadata == null || metadata.buildType != "release") {
-                    _apkUpdate.value = _apkUpdate.value.copy(busy = false, availableVersion = null, updateAvailable = false, message = ApkUpdateFailure.NOT_CONFIGURED.userMessage)
+                    _apkUpdate.value = _apkUpdate.value.copy(busy = false, availableVersion = null, updateAvailable = false, releaseNotes = null, message = ApkUpdateFailure.NOT_CONFIGURED.userMessage)
                 } else {
                     val newer = metadata.versionCode > BuildConfig.VERSION_CODE
+                    val notes = runCatching { api.getAppVersion().notesFor(metadata) }.getOrNull()
                     _apkUpdate.value = _apkUpdate.value.copy(
                         busy = false,
                         availableVersion = "${metadata.versionName} (${metadata.versionCode})",
                         updateAvailable = newer,
+                        releaseNotes = notes,
                         message = if (newer) "يتوفر تحديث جديد." else ApkUpdateFailure.NOT_NEWER.userMessage,
                     )
                 }
@@ -454,7 +459,8 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
                     if (required && version.versionName != null) {
                         _apkUpdate.value = _apkUpdate.value.copy(
                             availableVersion = "${version.versionName} (${version.latestVersionCode})",
-                            updateAvailable = true
+                            updateAvailable = true,
+                            releaseNotes = version.releaseNotes.trim().takeIf { it.isNotEmpty() },
                         )
                     }
                 }
@@ -605,75 +611,13 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
 
     fun confirmArrival(visit: VisitEntity, point: GeoPoint) {
         val current = session.value ?: return
-        if (visit.state != VisitState.DRAFT) return
+        if (visit.state != VisitState.DRAFT || visit.ownerRepId != current.ownerScopeId) return
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                if (point.isMock) {
-                    _messages.tryEmit("تم رفض تسجيل الوصول: تم اكتشاف أداة تزييف موقع (Mock GPS).")
-                    return@launch
-                }
-                container.visitRepository.saveForm(
-                    visit.visitUuid,
-                    VisitForm(
-                        condition = visit.machineCondition,
-                        reasons = decodeReasonIds(visit),
-                        lines = decodeLines(visit),
-                        notes = visit.notes,
-                    ),
-                    point
-                )
-                _messages.tryEmit("📍 تم تأكيد الوصول والتواجد عند الماكينة بنجاح.")
+                container.visitRepository.confirmArrival(visit.visitUuid, point)
+                _messages.tryEmit("تم تأكيد الوصول عند الماكينة.")
             } catch (error: Exception) {
                 _messages.tryEmit(human(error))
-            }
-        }
-    }
-
-    fun reportUnableToService(
-        visit: VisitEntity,
-        reasonCode: String,
-        reasonLabel: String,
-        notes: String,
-        onComplete: (Boolean) -> Unit = {},
-    ) {
-        val current = session.value ?: return
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                val now = System.currentTimeMillis()
-                val actionUuid = UUID.randomUUID().toString()
-                val fix = container.locationProvider.lastKnown()
-                val payload = JSONObject()
-                    .put("actionUuid", actionUuid)
-                    .put("cardId", visit.cardId)
-                    .put("machineCode", visit.machineCode)
-                    .put("reasonCode", reasonCode)
-                    .put("reasonLabel", reasonLabel)
-                    .put("notes", notes)
-                    .put("reportedAt", MadarTime.isoUtc(now))
-                if (fix != null) {
-                    payload.put("location", JSONObject()
-                        .put("latitude", fix.latitude)
-                        .put("longitude", fix.longitude)
-                        .put("accuracy", fix.accuracyMeters.toDouble())
-                        .put("updatedAt", MadarTime.isoUtc(fix.capturedAtMillis)))
-                }
-                val entity = MachineActionEntity(
-                    actionUuid = actionUuid,
-                    ownerRepId = current.ownerScopeId,
-                    type = "unable_to_service",
-                    machineId = visit.machineLatitude?.toLong() ?: visit.cardId,
-                    cardId = visit.cardId,
-                    payloadJson = payload.toString(),
-                    createdAt = now,
-                    updatedAt = now,
-                )
-                container.database.machineActions().upsert(entity)
-                container.scheduler.enqueueNow()
-                _messages.tryEmit("تم تسجيل تقرير تعذر الزيارة ($reasonLabel) وحفظه بنجاح للمشرف.")
-                withContext(Dispatchers.Main) { onComplete(true) }
-            } catch (error: Exception) {
-                _messages.tryEmit(human(error))
-                withContext(Dispatchers.Main) { onComplete(false) }
             }
         }
     }
@@ -846,90 +790,6 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
             } finally {
                 _machineLocationApprovalBusy.value = null
                 _machineLocationApprovalProgress.value = null
-            }
-        }
-    }
-
-    fun confirmDifferentLocationVisit(visit: VisitEntity, point: GeoPoint, reason: String) {
-        val current = session.value ?: return
-        if (visit.state != VisitState.DRAFT || _machineLocationApprovalBusy.value != null) return
-        _machineLocationApprovalBusy.value = visit.cardId
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                if (point.isMock) {
-                    _messages.tryEmit("تم رفض العملية: تم اكتشاف أداة تزييف موقع (Mock GPS).")
-                    return@launch
-                }
-                val now = System.currentTimeMillis()
-                val age = now - point.capturedAtMillis
-                if (age !in -60_000L..300_000L) {
-                    _messages.tryEmit("قراءة الموقع انتهت صلاحيتها. أعد التقاط الموقع وأنت عند الماكينة.")
-                    return@launch
-                }
-                if (point.accuracyMeters > 100f) {
-                    _messages.tryEmit("يلزم موقع GPS دقيق (حتى 100 متر) لاعتماد الزيارة.")
-                    return@launch
-                }
-
-                val machine = route.value?.route?.regions?.asSequence()?.flatMap { it.machines.asSequence() }
-                    ?.firstOrNull { it.cardId == visit.cardId }
-                    ?: throw MadarError.Validation("تعذر تحديد الماكينة من المسار الحالي.")
-
-                // 1. Locally save form & confirm draft machine location with this visit's coordinates
-                container.visitRepository.saveForm(
-                    visit.visitUuid,
-                    VisitForm(
-                        condition = visit.machineCondition,
-                        reasons = decodeReasonIds(visit),
-                        lines = decodeLines(visit),
-                        notes = visit.notes,
-                    ),
-                    point
-                )
-                container.visitRepository.confirmDraftMachineLocation(visit.visitUuid, point.latitude, point.longitude)
-
-                // 2. Queue location change / exception request tied to this visit
-                val actionUuid = UUID.randomUUID().toString()
-                val payload = JSONObject()
-                    .put("actionUuid", actionUuid)
-                    .put("cardId", machine.cardId)
-                    .put("visitUuid", visit.visitUuid)
-                    .put("location", JSONObject()
-                        .put("latitude", point.latitude)
-                        .put("longitude", point.longitude)
-                        .put("accuracy", point.accuracyMeters)
-                        .put("updatedAt", MadarTime.isoUtc(point.capturedAtMillis))
-                        .put("isMock", false))
-                    .put("actualConfirmedLocation", JSONObject()
-                        .put("latitude", point.latitude)
-                        .put("longitude", point.longitude)
-                        .put("accuracy", point.accuracyMeters)
-                        .put("updatedAt", MadarTime.isoUtc(point.capturedAtMillis))
-                        .put("isMock", false))
-                    .put("note", reason.trim().take(2000))
-                    .toString()
-
-                val action = MachineActionEntity(
-                    actionUuid = actionUuid,
-                    ownerRepId = current.ownerScopeId,
-                    type = "location_change",
-                    machineId = machine.machineId,
-                    cardId = machine.cardId,
-                    payloadJson = payload,
-                    createdAt = now,
-                    updatedAt = now,
-                ).also { container.database.machineActions().upsert(it) }
-
-                // 3. Try immediate dispatch or queue
-                container.syncEngine.dispatchMachineActionImmediate(action.actionUuid)
-                container.scheduler.enqueueNow()
-
-                applyLocationPoint(point, "تم اعتماد الموقع الحالي للزيارة وتسجيل طلب استثناء الموقع لدى الإدارة.")
-                _messages.tryEmit("📍 تم اعتماد الموقع الحالي للزيارة بنجاح. يمكنك استكمال أعمال الصيانة والتصوير.")
-            } catch (error: Exception) {
-                _messages.tryEmit(human(error))
-            } finally {
-                _machineLocationApprovalBusy.value = null
             }
         }
     }
@@ -1311,7 +1171,7 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
         viewModelScope.launch {
             try {
                 withContext(Dispatchers.IO) {
-                    container.visitRepository.saveForm(visitUuid, form, container.locationProvider.lastKnown())
+                    container.visitRepository.saveForm(visitUuid, form)
                 }
                 withContext(Dispatchers.Main) { onSaved?.invoke(true) }
             } catch (error: Exception) {
@@ -1341,7 +1201,12 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
                 }
                 if (fix != null) applyLocationPoint(fix, "تم تحديث الموقع قبل الإرسال.")
                 val result = withContext(Dispatchers.IO) {
-                    container.visitRepository.saveForm(visitUuid, form, fix)
+                    container.visitRepository.saveForm(visitUuid, form)
+                    val pendingPhotos = container.visitRepository.photos(visitUuid).filter { it.sha256.isBlank() }
+                    for (photo in pendingPhotos) {
+                        val visit = container.visitRepository.find(visitUuid) ?: break
+                        com.madar.rep.app.media.PhotoProcessingPipeline.enqueue(photo, visit.machineCode, container)
+                    }
                     container.visitRepository.queue(visitUuid, fix)
                 }
                 when (result) {
@@ -1367,14 +1232,8 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
     fun deletePhoto(photoId: String) {
         viewModelScope.launch {
             try {
-                val photo = container.visitRepository.photo(photoId) ?: return@launch
                 withContext(Dispatchers.IO) {
-                    val visit = container.visitRepository.find(photo.visitUuid)
-                    if (visit?.state != VisitState.DRAFT) {
-                        throw MadarError.Validation("لا يمكن حذف صورة بعد إرسال الزيارة")
-                    }
-                    container.photoStore.delete(photo)
-                    container.visitRepository.removePhoto(photoId)
+                    container.visitRepository.removePhoto(photoId, container.photoStore::delete)
                 }
             } catch (error: Exception) {
                 _messages.tryEmit(human(error))
@@ -1394,14 +1253,7 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
             weakSignalAccuracy = null,
         )
         viewModelScope.launch {
-            val result = withContext(Dispatchers.IO) {
-                val fastFix = container.locationProvider.lastKnownValid(15_000L)
-                if (fastFix != null) {
-                    LocationResult.Success(fastFix, gpsEnabled = true)
-                } else {
-                    container.locationProvider.currentFix(7_000)
-                }
-            }
+            val result = withContext(Dispatchers.IO) { container.locationProvider.currentFix(7_000) }
             when (result) {
                 is LocationResult.Success -> applyLocationPoint(result.point)
                 LocationResult.PermissionDenied -> {
@@ -1492,11 +1344,8 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
         forceRetry: Boolean = false,
     ) {
         val current = session.value ?: return
-        if (visit.state != VisitState.DRAFT || !visit.locationLocked) return
-        if (location == null) return
-        val now = System.currentTimeMillis()
-        val age = now - location.capturedAtMillis
-        if (location.isMock || age !in 0..300_000L || location.accuracyMeters > 120f) return
+        if (visit.state != VisitState.DRAFT || visit.arrivalConfirmedAt == null) return
+        if (location == null || VisitFsm.arrivalDecision(visit, location) != LocationDecision.Valid) return
         if (!forceRetry && _claimBlockedCardId.value == visit.cardId) return
         viewModelScope.launch(Dispatchers.IO) {
             try {

@@ -31,13 +31,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.DeleteOutline
-import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Warning
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -46,7 +43,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -71,7 +67,6 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -79,9 +74,6 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.madar.rep.app.core.GeoPoint
-import com.madar.rep.app.core.GeoPolicy
-import com.madar.rep.app.core.LocationDecision
 import com.madar.rep.app.core.MadarTime
 import com.madar.rep.app.core.PhotoPolicy
 import com.madar.rep.app.data.api.MaintenanceLine
@@ -89,10 +81,9 @@ import com.madar.rep.app.data.db.PhotoEntity
 import com.madar.rep.app.data.db.VisitEntity
 import com.madar.rep.app.data.db.VisitState
 import com.madar.rep.app.data.repo.VisitForm
+import com.madar.rep.app.domain.fsm.VisitFsm
 import com.madar.rep.app.media.CameraActivity
 import com.madar.rep.app.ui.theme.MadarDanger
-import com.madar.rep.app.ui.theme.MadarGold
-import com.madar.rep.app.ui.theme.MadarInk
 import com.madar.rep.app.ui.theme.MadarMuted
 import com.madar.rep.app.ui.theme.MadarTeal
 import com.madar.rep.app.ui.theme.MadarWarning
@@ -124,15 +115,12 @@ fun VisitScreen(
     }
 
     var initialized by remember(visitUuid) { mutableStateOf(false) }
-    var condition by remember(visitUuid) { mutableStateOf("working") }
+    var condition by remember(visitUuid) { mutableStateOf("") }
     var selectedReasons by remember(visitUuid) { mutableStateOf<Set<Long>>(emptySet()) }
     var quantities by remember(visitUuid) { mutableStateOf<Map<Long, Int>>(emptyMap()) }
     var notes by remember(visitUuid) { mutableStateOf("") }
     var previewPhoto by remember(visitUuid) { mutableStateOf<PhotoEntity?>(null) }
     var showLocationChange by rememberSaveable(visitUuid) { mutableStateOf(false) }
-    var showUnableToServiceDialog by rememberSaveable(visitUuid) { mutableStateOf(false) }
-    var showBeforeOnlyDialog by rememberSaveable(visitUuid) { mutableStateOf(false) }
-    var showDifferentLocationDialog by rememberSaveable(visitUuid) { mutableStateOf(false) }
 
     val visit = detail?.visit
     val editable = visit?.state == VisitState.DRAFT
@@ -141,7 +129,7 @@ fun VisitScreen(
     LaunchedEffect(detail?.visit?.visitUuid) {
         val loaded = detail?.visit ?: return@LaunchedEffect
         if (!initialized) {
-            condition = loaded.machineCondition.ifBlank { "working" }
+            condition = loaded.machineCondition
             selectedReasons = vm.decodeReasonIds(loaded).toSet()
             quantities = vm.decodeLines(loaded).associate { it.reasonId to it.quantity }
             notes = loaded.notes
@@ -153,10 +141,11 @@ fun VisitScreen(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { grants ->
         vm.updateBreadcrumbStartAllowed(foreground = true)
-        val granted = grants[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
-            grants[Manifest.permission.ACCESS_COARSE_LOCATION] == true
-        if (granted) visit?.let(vm::approveFirstMachineLocation)
-        else vm.showMessage("يلزم إذن الموقع لاعتماد الماكينة.")
+        if (grants[Manifest.permission.ACCESS_FINE_LOCATION] == true) {
+            val current = visit
+            if (current?.locationLocked == false) vm.approveFirstMachineLocation(current)
+            else vm.refreshLocation()
+        } else vm.showMessage("يلزم منح إذن الموقع الدقيق لتأكيد الوصول.")
     }
 
     val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -198,11 +187,11 @@ fun VisitScreen(
 
     LaunchedEffect(
         visit?.state,
-        visit?.locationLocked,
+        visit?.arrivalConfirmedAt,
         location.point?.capturedAtMillis,
     ) {
         val loaded = visit
-        if (loaded != null && loaded.state == VisitState.DRAFT && loaded.locationLocked) {
+        if (loaded != null && loaded.state == VisitState.DRAFT && loaded.arrivalConfirmedAt != null) {
             vm.claimWork(loaded, location.point)
         }
     }
@@ -210,8 +199,9 @@ fun VisitScreen(
     fun currentForm(): VisitForm {
         val lines = selectedReasons
             .mapNotNull { id ->
-                val reason = reasons.firstOrNull { it.id == id } ?: return@mapNotNull null
-                if (reason.countable != 0) MaintenanceLine(id, (quantities[id] ?: 1).coerceIn(1, 9999)) else null
+                val reason = reasons.firstOrNull { it.id == id }
+                quantities[id]?.takeIf { it > 0 && (reason == null || reason.countable != 0) }
+                    ?.let { MaintenanceLine(id, it) }
             }
             .sortedBy { it.reasonId }
         return VisitForm(
@@ -228,14 +218,14 @@ fun VisitScreen(
             onClose()
             return
         }
-        if (loaded.state == VisitState.DRAFT) {
-            vm.saveDraft(loaded.visitUuid, currentForm()) { _ ->
-                vm.releaseWork(loaded)
-                onClose()
+        if (loaded.state == VisitState.DRAFT && initialized) {
+            vm.saveDraft(loaded.visitUuid, currentForm()) { saved ->
+                if (saved) {
+                    vm.releaseWork(loaded)
+                    onClose()
+                }
             }
-        } else {
-            onClose()
-        }
+        } else onClose()
     }
 
     BackHandler(enabled = true) { if (!busy) closeScreen() }
@@ -267,6 +257,26 @@ fun VisitScreen(
             return@Scaffold
         }
 
+        val current = requireNotNull(detail)
+        val progress = VisitFsm.evaluate(current.visit, current.before + current.after)
+        val maintenanceEditable = editable && initialized && progress.isArrivalConfirmed && current.before.isNotEmpty() && !claimBlocked && !busy
+        val missingQuantity = reasons.any { it.id in selectedReasons && it.countable != 0 && (quantities[it.id] ?: 0) == 0 }
+        val maintenanceSaved = !missingQuantity && VisitFsm.maintenanceComplete(current.visit) &&
+            condition == current.visit.machineCondition && selectedReasons == vm.decodeReasonIds(current.visit).toSet() &&
+            quantities == vm.decodeLines(current.visit).associate { it.reasonId to it.quantity }
+        val canSaveMaintenance = maintenanceEditable && !missingQuantity &&
+            (condition == "working" || condition in listOf("faulty", "preventive_maintenance") && selectedReasons.isNotEmpty())
+        val beforeBlockedReason = when {
+            claimBlocked -> "التصوير متوقف بسبب تعارض حجز الماكينة. صورك محفوظة."
+            !progress.isArrivalConfirmed -> "أكّد وصولك عند الماكينة لفتح التصوير."
+            else -> null
+        }
+        val afterBlockedReason = beforeBlockedReason ?: when {
+            current.before.isEmpty() -> "التقط صورة قبل الصيانة أولًا."
+            !maintenanceSaved -> "احفظ بيانات الصيانة أولًا."
+            else -> null
+        }
+
         LazyColumn(
             Modifier
                 .fillMaxSize()
@@ -277,27 +287,16 @@ fun VisitScreen(
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             item {
-                MachineHeader(visit = detail!!.visit, badge = visitPill(detail!!.visit.state))
+                MachineHeader(visit = current.visit, badge = visitPill(current.visit.state))
             }
 
             item {
-                val currentVisit = detail!!.visit
-                val isArrived = (currentVisit.locationLocked && currentVisit.latitude != null && currentVisit.longitude != null) || !currentVisit.locationLocked
-                val beforeCount = detail!!.before.size
-                val afterCount = detail!!.after.size
-                val currentStep = when {
-                    !isArrived -> 1
-                    beforeCount == 0 -> 2
-                    condition != "working" && selectedReasons.isEmpty() -> 3
-                    afterCount == 0 -> 4
-                    else -> 5
-                }
-                VisitProgressStepper(currentStep = currentStep)
+                VisitProgressStepper(currentStep = progress.currentStep.stepNumber)
             }
 
             if (!editable) {
                 item {
-                    StatusExplanation(detail!!.visit)
+                    StatusExplanation(current.visit)
                 }
             }
             if (claimBlocked) {
@@ -307,20 +306,19 @@ fun VisitScreen(
                             "تعذّر حجز الماكينة: ${blockedMessage ?: "يوجد تعارض على الماكينة أو تغيرت حالة المسار."} الصور التي التقطتها محفوظة. حدّث المسار أو اطلب من المشرف حل التعارض قبل استكمال التصوير.",
                             MessageTone.Error,
                         )
-                        TextButton(onClick = { vm.retryMachineClaim(detail!!.visit) }) {
+                        TextButton(onClick = { vm.retryMachineClaim(current.visit) }) {
                             Text("تحديث المسار وإعادة التحقق")
                         }
                     }
                 }
             }
 
-            item {
-                val currentVisit = detail!!.visit
-                val isArrived = (currentVisit.locationLocked && currentVisit.latitude != null && currentVisit.longitude != null) || !currentVisit.locationLocked
+            if (editable) item {
+                val currentVisit = current.visit
                 GeofencedArrivalCard(
                     location = location,
                     visit = currentVisit,
-                    isArrived = isArrived,
+                    isArrived = progress.isArrivalConfirmed,
                     approvingMachineLocation = machineLocationApprovalBusyId == currentVisit.cardId,
                     approvalProgressMessage = machineLocationApprovalProgress,
                     onConfirmArrival = { point -> vm.confirmArrival(currentVisit, point) },
@@ -335,8 +333,6 @@ fun VisitScreen(
                     },
                     onRefreshLocation = { vm.refreshLocation() },
                     onRequestLocationChange = { showLocationChange = true },
-                    onReportUnableToService = { showUnableToServiceDialog = true },
-                    onConfirmDifferentLocation = { showDifferentLocationDialog = true },
                     onRequestPermission = {
                         permissionLauncher.launch(
                             arrayOf(
@@ -348,6 +344,27 @@ fun VisitScreen(
                 )
             }
 
+            item {
+                PhotoSection(
+                    title = "صور قبل الصيانة",
+                    phase = "before",
+                    photos = current.before,
+                    editable = editable && !busy,
+                    blockedReason = beforeBlockedReason,
+                    onAdd = {
+                        cameraLauncher.launch(
+                            cameraIntent(
+                                context = context,
+                                visit = current.visit,
+                                phase = "before",
+                                existingCount = current.before.size,
+                            )
+                        )
+                    },
+                    onPreview = { previewPhoto = it },
+                    onDelete = { vm.deletePhoto(it.id) },
+                )
+            }
             item {
                 SectionCard(title = "حالة الماكينة") {
                     Row(
@@ -362,7 +379,7 @@ fun VisitScreen(
                             FilterChip(
                                 selected = condition == value,
                                 onClick = {
-                                    if (editable) {
+                                    if (maintenanceEditable) {
                                         condition = value
                                         if (value == "working") {
                                             selectedReasons = emptySet()
@@ -370,13 +387,13 @@ fun VisitScreen(
                                         }
                                     }
                                 },
-                                enabled = editable,
+                                enabled = maintenanceEditable,
                                 label = { Text(label) },
                             )
                         }
                     }
 
-                    if (condition != "working") {
+                    if (condition in listOf("faulty", "preventive_maintenance")) {
                         Text(
                             "اختر أسباب الصيانة المنفذة. الأسباب القابلة للعدّ تحتاج كمية صريحة.",
                             style = MaterialTheme.typography.bodySmall,
@@ -400,16 +417,13 @@ fun VisitScreen(
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         androidx.compose.material3.Checkbox(
                                             checked = selected,
-                                            enabled = editable,
+                                            enabled = maintenanceEditable,
                                             onCheckedChange = { checked ->
-                                                if (editable) {
+                                                if (maintenanceEditable && (!checked || selectedReasons.size < 50)) {
                                                     selectedReasons = if (checked) {
                                                         selectedReasons + reason.id
                                                     } else {
                                                         selectedReasons - reason.id
-                                                    }
-                                                    if (checked && countable) {
-                                                        quantities = quantities + (reason.id to (quantities[reason.id] ?: 1))
                                                     }
                                                     if (!checked) quantities = quantities - reason.id
                                                 }
@@ -427,8 +441,8 @@ fun VisitScreen(
                                         }
                                         if (selected && countable) {
                                             QuantityStepper(
-                                                value = quantities[reason.id] ?: 1,
-                                                enabled = editable,
+                                                value = quantities[reason.id] ?: 0,
+                                                enabled = maintenanceEditable,
                                                 onChange = { quantities = quantities + (reason.id to it) },
                                             )
                                         }
@@ -436,61 +450,46 @@ fun VisitScreen(
                                 }
                             }
                         }
-                        if (selectedReasons.any { id ->
-                                reasons.firstOrNull { it.id == id }?.countable != 0 &&
-                                    (quantities[id] ?: 0) <= 0
-                            }
-                        ) {
+                        if (missingQuantity) {
                             InlineMessage("أدخل كمية صحيحة لكل سبب قابل للعدّ.", MessageTone.Error)
                         }
                     }
 
                     OutlinedTextField(
                         value = notes,
-                        onValueChange = { if (editable) notes = it.take(10_000) },
+                        onValueChange = { if (maintenanceEditable) notes = it.take(10_000) },
                         label = { Text("ملاحظات المندوب") },
                         minLines = 3,
-                        enabled = editable,
+                        enabled = maintenanceEditable,
                         modifier = Modifier.fillMaxWidth(),
                     )
+                    if (editable && !maintenanceEditable) {
+                        Text("أكّد الوصول والتقط صورة قبل الصيانة لفتح بيانات الصيانة.", style = MaterialTheme.typography.bodySmall)
+                    }
+                    if (maintenanceEditable && !maintenanceSaved) {
+                        OutlinedButton(
+                            onClick = { vm.saveDraft(visitUuid, currentForm()) },
+                            enabled = canSaveMaintenance,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text("حفظ بيانات الصيانة") }
+                    }
                 }
             }
 
             item {
                 PhotoSection(
-                    title = "صور قبل الصيانة",
-                    phase = "before",
-                    photos = detail!!.before,
-                    editable = editable,
-                    blocked = claimBlocked,
-                    onAdd = {
-                        cameraLauncher.launch(
-                            cameraIntent(
-                                context = context,
-                                visit = detail!!.visit,
-                                phase = "before",
-                                existingCount = detail!!.before.size,
-                            )
-                        )
-                    },
-                    onPreview = { previewPhoto = it },
-                    onDelete = { vm.deletePhoto(it.id) },
-                )
-            }
-            item {
-                PhotoSection(
                     title = "صور بعد الصيانة",
                     phase = "after",
-                    photos = detail!!.after,
-                    editable = editable,
-                    blocked = claimBlocked,
+                    photos = current.after,
+                    editable = editable && !busy,
+                    blockedReason = afterBlockedReason,
                     onAdd = {
                         cameraLauncher.launch(
                             cameraIntent(
                                 context = context,
-                                visit = detail!!.visit,
+                                visit = current.visit,
                                 phase = "after",
-                                existingCount = detail!!.after.size,
+                                existingCount = current.after.size,
                             )
                         )
                     },
@@ -500,8 +499,8 @@ fun VisitScreen(
             }
 
             item {
-                val beforeCount = detail!!.before.size
-                val afterCount = detail!!.after.size
+                val beforeCount = current.before.size
+                val afterCount = current.after.size
                 val countsReady = PhotoPolicy.validVisit(beforeCount, afterCount)
                 InlineMessage(
                     when {
@@ -518,18 +517,11 @@ fun VisitScreen(
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Button(
                             onClick = {
-                                val beforeCount = detail?.before?.size ?: 0
-                                val afterCount = detail?.after?.size ?: 0
-                                if (beforeCount > 0 && afterCount == 0) {
-                                    vm.saveDraft(visitUuid, currentForm())
-                                    showBeforeOnlyDialog = true
-                                    return@Button
-                                }
                                 vm.submitVisit(visitUuid, currentForm()) { success ->
                                     if (success) onClose()
                                 }
                             },
-                            enabled = !busy,
+                            enabled = !busy && !claimBlocked && progress.isReadyToSubmit && maintenanceSaved,
                             modifier = Modifier.fillMaxWidth().height(52.dp),
                             shape = RoundedCornerShape(14.dp),
                         ) {
@@ -604,61 +596,7 @@ fun VisitScreen(
     if (showLocationChange && visit != null) {
         LocationChangeDialog(vm = vm, visit = visit, onDismiss = { showLocationChange = false })
     }
-    if (showDifferentLocationDialog && visit != null) {
-        DifferentLocationVisitDialog(
-            vm = vm,
-            visit = visit,
-            location = location,
-            onDismiss = { showDifferentLocationDialog = false },
-        )
-    }
-    if (showUnableToServiceDialog && visit != null) {
-        com.madar.rep.app.ui.components.UnableToServiceDialog(
-            visit = visit,
-            onDismiss = { showUnableToServiceDialog = false },
-            onSubmitException = { reasonCode, reasonLabel, exceptionNotes ->
-                showUnableToServiceDialog = false
-                vm.reportUnableToService(visit, reasonCode, reasonLabel, exceptionNotes) { success ->
-                    if (success) closeScreen()
-                }
-            }
-        )
-    }
-    if (showBeforeOnlyDialog) {
-        AlertDialog(
-            onDismissRequest = { showBeforeOnlyDialog = false },
-            shape = RoundedCornerShape(18.dp),
-            title = {
-                Text("حفظ مرحلة ما قبل الصيانة", fontWeight = FontWeight.Bold)
-            },
-            text = {
-                Text(
-                    "تم حفظ صور (قبل الصيانة) كمسودة بنجاح. لاعتماد الزيارة وإرسالها للمزامنة النهائية، يجب التقاط صورة واحدة على الأقل لمرحلة (بعد الصيانة) عند انتهاء أعمال الصيانة.",
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-            },
-            confirmButton = {
-                Button(
-                    onClick = { showBeforeOnlyDialog = false },
-                    colors = ButtonDefaults.buttonColors(containerColor = MadarTeal),
-                    shape = RoundedCornerShape(12.dp),
-                ) {
-                    Text("استكمال التصوير", fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                OutlinedButton(
-                    onClick = {
-                        showBeforeOnlyDialog = false
-                        closeScreen()
-                    },
-                    shape = RoundedCornerShape(12.dp),
-                ) {
-                    Text("حفظ كمسودة والرجوع")
-                }
-            }
-        )
-    }
+
 }
 
 private fun cameraIntent(
@@ -742,150 +680,13 @@ private fun StatusExplanation(visit: VisitEntity) {
 }
 
 @Composable
-private fun LocationCard(
-    location: LocationUiState,
-    visit: VisitEntity,
-    approvingMachineLocation: Boolean,
-    onRefresh: () -> Unit,
-    onRequestLocationChange: () -> Unit,
-    onApproveMachine: () -> Unit,
-    onRequestPermission: () -> Unit,
-) {
-    SectionCard(
-        title = if (visit.locationLocked) "موقع الاعتماد" else null,
-        subtitle = if (visit.locationLocked) "يلزم موقع حديث بدقة 50 مترًا أو أفضل، مع احتساب هامش الدقة داخل نطاق الماكينة." else null,
-    ) {
-        if (!visit.locationLocked) {
-            val point = location.point
-            if (point != null) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        Icons.Default.LocationOn,
-                        contentDescription = null,
-                        tint = if (point.accuracyMeters <= 50f) MadarTeal else MadarWarning,
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        "إشارة GPS الحالية: ±%d م".format(point.accuracyMeters.toInt()),
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                }
-            } else {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
-                    Spacer(Modifier.width(6.dp))
-                    Text("جارٍ التقاط إشارة GPS…", style = MaterialTheme.typography.bodySmall, color = MadarMuted)
-                }
-            }
-            if (location.approximateOnly) {
-                InlineMessage("تم منح إذن الموقع التقريبي فقط. يلزم إذن الموقع الدقيق لاعتماد الماكينة.", MessageTone.Warning)
-            }
-            if (location.providersDisabled) {
-                InlineMessage("خدمة الموقع مغلقة. شغّل GPS من إعدادات الجهاز.", MessageTone.Error)
-            }
-            if (location.weakSignal) {
-                val acc = location.weakSignalAccuracy?.toInt() ?: 0
-                InlineMessage("إشارة GPS ضعيفة (±$acc م). يرجى التواجد في مكان مكشوف لتحسين دقة الإشارة.", MessageTone.Warning)
-            }
-            Spacer(Modifier.height(8.dp))
-            Button(
-                onClick = onApproveMachine,
-                enabled = !approvingMachineLocation,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                if (approvingMachineLocation) {
-                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                    Spacer(Modifier.width(8.dp))
-                    Text("جارٍ اعتماد الماكينة…")
-                } else {
-                    Text("اعتماد الماكينة")
-                }
-            }
-            if (location.permissionDenied) {
-                Spacer(Modifier.height(4.dp))
-                Button(onClick = onRequestPermission, modifier = Modifier.fillMaxWidth()) {
-                    Text("منح إذن الموقع")
-                }
-            }
-        } else {
-            val point = location.point
-            if (point == null) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Icon(Icons.Default.LocationOn, contentDescription = null, tint = MadarMuted)
-                    Text("لا توجد إشارة موقع محفوظة.", style = MaterialTheme.typography.bodySmall, color = MadarMuted)
-                }
-            } else {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.LocationOn, contentDescription = null, tint = MadarTeal)
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        "%.5f, %.5f · ±%d م".format(point.latitude, point.longitude, point.accuracyMeters.toInt()),
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                }
-                Text(
-                    "وقت الإشارة: ${MadarTime.displayTime(point.capturedAtMillis)} · المزود: ${point.provider ?: "غير معروف"}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MadarMuted,
-                )
-                val decision = GeoPolicy.evaluate(
-                    point,
-                    visit.machineLatitude,
-                    visit.machineLongitude,
-                    visit.geofenceRadiusMeters,
-                )
-                val (decisionText, tone) = when (decision) {
-                    LocationDecision.Valid -> "الموقع صالح للاعتماد داخل نطاق الماكينة." to MessageTone.Success
-                    LocationDecision.InvalidCoordinates -> "إحداثيات الموقع غير صالحة؛ حدّث GPS ولا تعتمد القراءة الحالية." to MessageTone.Error
-                    LocationDecision.Missing -> "لا يوجد موقع." to MessageTone.Error
-                    LocationDecision.Mocked -> "الموقع مزيف من النظام ولا يمكن اعتماده." to MessageTone.Error
-                    is LocationDecision.Invalid -> decision.reason to MessageTone.Error
-                    is LocationDecision.Stale -> "الإشارة قديمة (${decision.ageMillis / 1000} ثانية)." to MessageTone.Warning
-                    is LocationDecision.Inaccurate -> "الدقة ${decision.accuracyMeters.toInt()} مترًا ولا تكفي." to MessageTone.Warning
-                    is LocationDecision.Outside -> "خارج النطاق: المسافة الفعالة ${decision.effectiveDistanceMeters.toInt()} مترًا والمسموح ${decision.allowedRadiusMeters.toInt()}." to MessageTone.Error
-                }
-                InlineMessage(decisionText, tone)
-                if (point.accuracyMeters > GeoPolicy.MAX_ACCURACY_METERS) {
-                    InlineMessage("الموقع تقريبي ويُعرض للاسترشاد فقط؛ لن يُستخدم لاعتماد الزيارة.", MessageTone.Warning)
-                }
-            }
-            if (location.message != null) {
-                InlineMessage(location.message, if (location.permissionDenied || location.providersDisabled) MessageTone.Error else MessageTone.Info)
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = onRefresh, enabled = !location.busy) {
-                    if (location.busy) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                    else Text("تحديث الموقع")
-                }
-                if (location.permissionDenied) Button(onClick = onRequestPermission) { Text("منح إذن الموقع") }
-            }
-            if (location.approximateOnly) {
-                InlineMessage("تم منح إذن الموقع التقريبي فقط. يلزم إذن الموقع الدقيق لتسجيل الحضور وتحديث الزيارة.", MessageTone.Warning)
-            }
-            if (location.weakSignal) {
-                val acc = location.weakSignalAccuracy?.toInt() ?: 0
-                InlineMessage("إشارة GPS ضعيفة (±$acc م). تحرك لمكان مكشوف لتحسين دقة الإشارة.", MessageTone.Warning)
-            }
-            if (location.providersDisabled) InlineMessage("افتح إعدادات الجهاز وشغّل خدمة الموقع ثم أعد المحاولة.", MessageTone.Warning)
-            if (visit.machineLatitude != null && visit.machineLongitude != null) {
-                OutlinedButton(onClick = onRequestLocationChange, modifier = Modifier.fillMaxWidth()) {
-                    Text("طلب تغيير موقع الماكينة")
-                }
-            }
-        }
-    }
-}
-
-@Composable
 private fun QuantityStepper(value: Int, enabled: Boolean, onChange: (Int) -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        IconButton(onClick = { onChange((value - 1).coerceAtLeast(1)) }, enabled = enabled) {
+        IconButton(onClick = { onChange(value - 1) }, enabled = enabled && value > 1) {
             Icon(Icons.Default.Remove, contentDescription = "تقليل")
         }
-        Text("$value", fontWeight = FontWeight.Bold, modifier = Modifier.width(28.dp), textAlign = TextAlign.Center)
-        IconButton(onClick = { onChange((value + 1).coerceAtMost(9999)) }, enabled = enabled) {
+        Text(if (value > 0) value.toString() else "—", fontWeight = FontWeight.Bold, modifier = Modifier.width(28.dp), textAlign = TextAlign.Center)
+        IconButton(onClick = { onChange(value + 1) }, enabled = enabled && value < 9999) {
             Icon(Icons.Default.Add, contentDescription = "زيادة")
         }
     }
@@ -897,7 +698,7 @@ private fun PhotoSection(
     phase: String,
     photos: List<PhotoEntity>,
     editable: Boolean,
-    blocked: Boolean,
+    blockedReason: String?,
     onAdd: () -> Unit,
     onPreview: (PhotoEntity) -> Unit,
     onDelete: (PhotoEntity) -> Unit,
@@ -944,7 +745,7 @@ private fun PhotoSection(
                 photos.sortedBy { it.position }.forEach { photo ->
                     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Box {
-                            PhotoThumbnail(photo.processedPath, modifier = Modifier.clickable { onPreview(photo) })
+                            PhotoThumbnail(photo.previewPath, modifier = Modifier.clickable { onPreview(photo) })
                             if (editable) {
                                 IconButton(
                                     onClick = { onDelete(photo) },
@@ -956,7 +757,7 @@ private fun PhotoSection(
                                     Icon(
                                         Icons.Default.DeleteOutline,
                                         contentDescription = "حذف",
-                                        tint = androidx.compose.ui.graphics.Color.White,
+                                        tint = Color.White,
                                         modifier = Modifier.size(17.dp),
                                     )
                                 }
@@ -975,7 +776,7 @@ private fun PhotoSection(
                         color = MaterialTheme.colorScheme.primaryContainer,
                         modifier = Modifier
                             .size(86.dp)
-                            .clickable(enabled = !blocked, onClick = onAdd),
+                            .clickable(enabled = blockedReason == null, onClick = onAdd),
                     ) {
                         Column(
                             Modifier.fillMaxSize(),
@@ -992,7 +793,7 @@ private fun PhotoSection(
         if (editable && (photos.isEmpty() || photos.size < PhotoPolicy.MAX_PER_PHASE)) {
             Button(
                 onClick = onAdd,
-                enabled = !blocked,
+                enabled = blockedReason == null,
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp),
             ) {
@@ -1001,8 +802,8 @@ private fun PhotoSection(
                 Text(if (phase == "before") "تصوير قبل الصيانة" else "تصوير بعد الصيانة")
             }
         }
-        if (blocked) {
-            Text("التصوير متوقف مؤقتًا بسبب تعارض حجز الماكينة. صورك الحالية لم تُحذف.", color = MadarDanger, style = MaterialTheme.typography.bodySmall)
+        if (editable && blockedReason != null) {
+            Text(blockedReason, color = MadarMuted, style = MaterialTheme.typography.bodySmall)
         }
         if (photos.any { it.accuracy == null }) {
             InlineMessage("بعض الصور بلا موقع GPS؛ سيظل الاعتماد بحاجة إلى موقع زيارة صالح.", MessageTone.Warning)
@@ -1010,10 +811,16 @@ private fun PhotoSection(
     }
 }
 
+private val PhotoEntity.previewPath: String
+    get() = if (sha256.isBlank()) originalPath else processedPath
+
 @Composable
 private fun PhotoPreviewDialog(photo: PhotoEntity, onDismiss: () -> Unit) {
-    val bitmap = remember(photo.processedPath) {
-        runCatching { BitmapFactory.decodeFile(photo.processedPath)?.asImageBitmap() }.getOrNull()
+    val bitmap = remember(photo.previewPath) {
+        runCatching {
+            val options = BitmapFactory.Options().apply { inSampleSize = if (photo.sha256.isBlank()) 4 else 1 }
+            BitmapFactory.decodeFile(photo.previewPath, options)?.asImageBitmap()
+        }.getOrNull()
     }
     Dialog(onDismissRequest = onDismiss) {
         Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surface) {
@@ -1052,164 +859,4 @@ private fun PhotoPreviewDialog(photo: PhotoEntity, onDismiss: () -> Unit) {
             }
         }
     }
-}
-
-@Composable
-private fun DifferentLocationVisitDialog(
-    vm: MadarViewModel,
-    visit: VisitEntity,
-    location: LocationUiState,
-    onDismiss: () -> Unit,
-) {
-    val point = location.point
-    val now = System.currentTimeMillis()
-    val coordinatesValid = point != null && !point.isMock &&
-        point.accuracyMeters in 0f..GeoPolicy.MAX_FIELD_CONFIRMATION_ACCURACY_METERS &&
-        (now - point.capturedAtMillis in -60_000L..300_000L)
-    val distance = if (point != null && visit.machineLatitude != null && visit.machineLongitude != null) {
-        GeoPolicy.distanceMeters(point.latitude, point.longitude, visit.machineLatitude, visit.machineLongitude)
-    } else null
-
-    val reasons = listOf(
-        "تم نقل الماكينة إلى موقع جديد",
-        "الموقع المسجل للماكينة غير صحيح",
-        "صيانة مؤقتة في موقع خارجي / ورشة",
-        "أخرى",
-    )
-    var selectedReason by rememberSaveable(visit.cardId) { mutableStateOf(reasons[0]) }
-    var customReason by rememberSaveable(visit.cardId) { mutableStateOf("") }
-    var isSubmitting by rememberSaveable(visit.cardId) { mutableStateOf(false) }
-
-    val finalReason = if (selectedReason == "أخرى") customReason.trim() else selectedReason
-    val canSubmit = coordinatesValid && finalReason.isNotBlank() && !isSubmitting
-
-    AlertDialog(
-        onDismissRequest = { if (!isSubmitting) onDismiss() },
-        title = {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Icon(Icons.Default.Warning, contentDescription = null, tint = MadarGold)
-                Text("اعتماد موقع مختلف للزيارة", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-            }
-        },
-        text = {
-            Column(
-                Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Surface(
-                    shape = RoundedCornerShape(10.dp),
-                    color = MadarGold.copy(alpha = 0.12f),
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(
-                            "أنت في موقع مختلف عن الموقع المسجل للماكينة",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 13.sp,
-                            color = MadarInk,
-                        )
-                        Text(
-                            "المسافة عن الموقع المسجل: ${distance?.toInt() ?: "—"} متر. سيتم اعتماد موقعك الحالي للزيارة لتمكينك من إتمام العمل دون انتظار، وسيُرفع طلب للمشرف لمراجعة تغيير الموقع.",
-                            fontSize = 12.sp,
-                            color = MadarMuted,
-                        )
-                    }
-                }
-
-                Surface(
-                    shape = RoundedCornerShape(10.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("الموقع المسجل: %.6f, %.6f".format(visit.machineLatitude ?: 0.0, visit.machineLongitude ?: 0.0), fontSize = 12.sp)
-                        Text(
-                            if (point != null) "الموقع الحالي: %.6f, %.6f (±%dم)".format(point.latitude, point.longitude, point.accuracyMeters.toInt())
-                            else "الموقع الحالي: غير متاح",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                    }
-                }
-
-                if (!coordinatesValid) {
-                    val warningText = when {
-                        point == null -> "يرجى تشغيل GPS والانتظار لالتقاط الإشارة."
-                        point.isMock -> "تم اكتشاف أداة تزييف موقع (Mock GPS)! غير مسموح بها."
-                        point.accuracyMeters > GeoPolicy.MAX_FIELD_CONFIRMATION_ACCURACY_METERS -> "دقة الإشارة الحالية (±${point.accuracyMeters.toInt()}م) غير كافية (المطلوب 50م أو أفضل)."
-                        now - point.capturedAtMillis > 300_000L -> "قراءة الموقع انتهت صلاحيتها. يرجى تحديث الإشارة."
-                        else -> "إشارة الموقع غير صالحة."
-                    }
-                    InlineMessage(warningText, MessageTone.Warning)
-                    OutlinedButton(
-                        onClick = vm::refreshLocation,
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(8.dp),
-                    ) {
-                        Text("تحديث قراءة GPS")
-                    }
-                }
-
-                Text("سبب اختلاف الموقع (مطلوب):", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-
-                reasons.forEach { r ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable { selectedReason = r }
-                            .padding(vertical = 4.dp, horizontal = 2.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        RadioButton(
-                            selected = (selectedReason == r),
-                            onClick = { selectedReason = r },
-                        )
-                        Text(r, fontSize = 13.sp)
-                    }
-                }
-
-                if (selectedReason == "أخرى") {
-                    OutlinedTextField(
-                        value = customReason,
-                        onValueChange = { customReason = it.take(200) },
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text("اكتب سبب التواجد في هذا الموقع") },
-                        minLines = 2,
-                        maxLines = 3,
-                    )
-                }
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = {
-                    if (canSubmit && point != null) {
-                        isSubmitting = true
-                        vm.confirmDifferentLocationVisit(visit, point, finalReason)
-                        onDismiss()
-                    }
-                },
-                enabled = canSubmit,
-                colors = ButtonDefaults.buttonColors(containerColor = MadarTeal),
-                shape = RoundedCornerShape(10.dp),
-            ) {
-                if (isSubmitting) {
-                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = Color.White)
-                    Spacer(Modifier.width(6.dp))
-                }
-                Text("اعتماد ومتابعة الزيارة", fontWeight = FontWeight.Bold)
-            }
-        },
-        dismissButton = {
-            OutlinedButton(
-                onClick = onDismiss,
-                enabled = !isSubmitting,
-                shape = RoundedCornerShape(10.dp),
-            ) {
-                Text("إلغاء")
-            }
-        },
-    )
 }

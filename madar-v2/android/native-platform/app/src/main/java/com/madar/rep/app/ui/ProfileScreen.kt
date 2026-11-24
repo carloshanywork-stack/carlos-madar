@@ -81,7 +81,11 @@ fun ProfileScreen(
         Text("تحديث التطبيق")
         Text("المثبت: ${update.currentVersion}")
         Text("المتاح: ${update.availableVersion ?: "جارٍ التحقق أو لا يوجد إصدار أحدث"}")
-        if (!update.message.isNullOrBlank()) Text(update.message!!)
+        update.releaseNotes?.let { notes ->
+            Text("ملاحظات الإصدار", style = androidx.compose.material3.MaterialTheme.typography.titleSmall)
+            Text(notes)
+        }
+        update.message?.takeIf { it.isNotBlank() }?.let { Text(it) }
         if (update.busy) CircularProgressIndicator()
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = vm::checkForApkUpdate, enabled = !update.busy) { Text("التحقق من التحديث") }

@@ -42,9 +42,12 @@ object PhotoProcessingPipeline {
                 }
 
                 // 2. Persist processed metadata (size, hash, watermark text) to Room
-                withContext(Dispatchers.IO) {
-                    container.database.photos().upsert(processed)
+                val saved = withContext(Dispatchers.IO) {
+                    container.database.photos().updateProcessed(
+                        processed.id, processed.processedPath, processed.watermarkText, processed.sha256, processed.sizeBytes,
+                    )
                 }
+                if (saved == 0) return@launch
 
                 // 3. Export original image copy to public Pictures/MADAR/
                 val galleryResult = runCatching {
