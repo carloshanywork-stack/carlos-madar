@@ -184,6 +184,13 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
     private val _machineLocationApprovalBusy = MutableStateFlow<Long?>(null)
     val machineLocationApprovalBusy: StateFlow<Long?> = _machineLocationApprovalBusy.asStateFlow()
 
+    private val _machineLocationApprovalProgress = MutableStateFlow<String?>(null)
+    val machineLocationApprovalProgress: StateFlow<String?> = _machineLocationApprovalProgress.asStateFlow()
+
+    val diagnostics: com.madar.rep.app.core.DeviceDiagnostics get() = container.deviceDiagnostics
+    val locationProvider: com.madar.rep.app.location.LocationProvider get() = container.locationProvider
+    val installationId: String get() = container.installationManager.installationId
+
     private val _supportBusy = MutableStateFlow(false)
     val supportBusy: StateFlow<Boolean> = _supportBusy.asStateFlow()
 
@@ -675,6 +682,7 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
         val current = session.value ?: return
         if (visit.state != VisitState.DRAFT || visit.locationLocked || _machineLocationApprovalBusy.value != null) return
         _machineLocationApprovalBusy.value = visit.cardId
+        _machineLocationApprovalProgress.value = "جارٍ التحقق من إعدادات الموقع وتوقيت الهاتف…"
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val machine = route.value?.route?.regions?.asSequence()?.flatMap { it.machines.asSequence() }
@@ -685,44 +693,98 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
                     throw MadarError.Conflict("موقع الماكينة تم اعتماده بالفعل. حدّث المسار للمتابعة.")
                 }
 
+                if (com.madar.rep.app.core.ServerClockTracker.isSkewSuspicious()) {
+                    val skewDesc = com.madar.rep.app.core.ServerClockTracker.skewDescriptionArabic()
+                    container.deviceDiagnostics.recordLocationAttempt("clock_mismatch", error = skewDesc)
+                    throw MadarError.Validation(
+                        "ساعة الهاتف غير متطابقة مع توقيت الخادم ($skewDesc). " +
+                        "يرجى الانتقال لإعدادات الهاتف وتفعيل 'التاريخ والوقت التلقائي' لاعتماد موقع الماكينة بنجاح."
+                    )
+                }
+
                 val activeAction = container.database.machineActions().listForOwner(current.ownerScopeId)
                     .firstOrNull {
                         it.machineId == machine.machineId && it.type == "confirm_location" &&
                             it.state in setOf("queued", "syncing", "retry_wait", "needs_login")
                     }
-                val action = if (activeAction != null) activeAction else {
-                    val point = container.locationProvider.lastKnownValid(60_000L)
-                        ?: (container.locationProvider.currentFix(4_000) as? LocationResult.Success)?.point
-                        ?: container.locationProvider.lastKnown()
-                        ?: throw MadarError.Validation("لم يصل الموقع بعد. تأكد من تشغيل GPS وحاول اعتماد الماكينة مرة أخرى.")
-                    val now = System.currentTimeMillis()
-                    val age = now - point.capturedAtMillis
-                    if (point.isMock || age !in 0..300_000L || point.accuracyMeters > 100f) {
-                        throw MadarError.Validation("يلزم موقع GPS حديث ودقيق (حتى 100 متر) لاعتماد الماكينة.")
-                    }
-                    val actionUuid = UUID.randomUUID().toString()
-                    val payload = JSONObject()
-                        .put("actionUuid", actionUuid)
-                        .put("cardId", machine.cardId)
-                        .put("location", JSONObject()
-                            .put("latitude", point.latitude)
-                            .put("longitude", point.longitude)
-                            .put("accuracy", point.accuracyMeters)
-                            .put("updatedAt", MadarTime.isoUtc(point.capturedAtMillis)))
-                        .toString()
-                    MachineActionEntity(
-                        actionUuid = actionUuid,
-                        ownerRepId = current.ownerScopeId,
-                        type = "confirm_location",
-                        machineId = machine.machineId,
-                        cardId = machine.cardId,
-                        payloadJson = payload,
-                        createdAt = now,
-                        updatedAt = now,
-                    ).also { container.database.machineActions().upsert(it) }
+                val isStaleAction = activeAction != null && (
+                    System.currentTimeMillis() - activeAction.createdAt > 120_000L ||
+                    activeAction.attempts > 0 ||
+                    activeAction.lastError?.contains("current GPS reading is required", ignoreCase = true) == true ||
+                    activeAction.lastError?.contains("قراءة الموقع انتهت صلاحيتها") == true
+                )
+                if (activeAction != null && isStaleAction) {
+                    container.database.machineActions().updateState(
+                        activeAction.actionUuid, MachineActionState.FAILED,
+                        "تم إلغاء قراءة الموقع القديمة لإنشاء قراءة GPS جديدة", activeAction.attempts, 0,
+                        activeAction.correctionId, "expired", System.currentTimeMillis()
+                    )
                 }
 
-                // High-priority immediate decoupled dispatch
+                _machineLocationApprovalProgress.value = "جارٍ الاتصال بالأقمار الصناعية والتقاط إشارة GPS حديثة ودقيقة…"
+                val point = when (val result = container.locationProvider.freshFix(15_000L)) {
+                    is LocationResult.Success -> {
+                        container.deviceDiagnostics.recordLocationAttempt("success", accuracy = result.point.accuracyMeters)
+                        result.point
+                    }
+                    is LocationResult.ProvidersDisabled -> {
+                        container.deviceDiagnostics.recordLocationAttempt("providers_disabled", error = "خدمة GPS معطلة")
+                        throw MadarError.Validation("خدمات الموقع (GPS) معطلة على هذا الهاتف. يرجى تفعيل الموقع من إعدادات الهاتف.")
+                    }
+                    is LocationResult.ApproximateOnlyPermission -> {
+                        container.deviceDiagnostics.recordLocationAttempt("permission_approximate_only", error = "إذن موقع تقريبي فقط")
+                        throw MadarError.Validation("التطبيق يعمل بإذن موقع تقريبي فقط. يلزم منح إذن 'الموقع الدقيق' (Precise Location) لاعتماد الماكينات.")
+                    }
+                    is LocationResult.PermissionDenied -> {
+                        container.deviceDiagnostics.recordLocationAttempt("permission_denied", error = "إذن الموقع مرفوض")
+                        throw MadarError.Validation("يلزم إعطاء صلاحية الموقع للتطبيق لاعتماد الماكينة.")
+                    }
+                    is LocationResult.WeakSignal -> {
+                        container.deviceDiagnostics.recordLocationAttempt("weak_signal", accuracy = result.accuracyMeters, error = "إشارة GPS ضعيفة")
+                        throw MadarError.Validation("إشارة GPS ضعيفة (دقة ${result.accuracyMeters.toInt()} م). يلزم دقة 50 متراً أو أفضل. تحرك لمكان مكشوف بجوار الماكينة.")
+                    }
+                    is LocationResult.Timeout -> {
+                        container.deviceDiagnostics.recordLocationAttempt("timeout", error = "انتهت مهلة التقاط GPS")
+                        throw MadarError.Validation("انتهت مهلة التقاط GPS دون الحصول على إشارة دقيقة. حاول مرة أخرى وأنت بجوار الماكينة وفي مكان مكشوف.")
+                    }
+                    is LocationResult.Failure -> {
+                        container.deviceDiagnostics.recordLocationAttempt("failure", error = result.message)
+                        throw MadarError.Validation("فشل التقاط الموقع: ${result.message}")
+                    }
+                }
+
+                if (point.isMock) {
+                    container.deviceDiagnostics.recordLocationAttempt("mock_rejected", accuracy = point.accuracyMeters, error = "موقع وهمي")
+                    throw MadarError.Validation("لا يمكن اعتماد الموقع باستخدام موقع وهمي (Mock Location).")
+                }
+                if (point.accuracyMeters > 50f) {
+                    container.deviceDiagnostics.recordLocationAttempt("inaccurate_rejected", accuracy = point.accuracyMeters)
+                    throw MadarError.Validation("يلزم موقع GPS حديث ودقيق (حتى 50 متراً) لاعتماد الماكينة. الدقة الحالية: ${point.accuracyMeters.toInt()} م.")
+                }
+
+                val now = System.currentTimeMillis()
+                val actionUuid = UUID.randomUUID().toString()
+                val payload = JSONObject()
+                    .put("actionUuid", actionUuid)
+                    .put("cardId", machine.cardId)
+                    .put("location", JSONObject()
+                        .put("latitude", point.latitude)
+                        .put("longitude", point.longitude)
+                        .put("accuracy", point.accuracyMeters)
+                        .put("updatedAt", MadarTime.isoUtc(point.capturedAtMillis)))
+                    .toString()
+                val action = MachineActionEntity(
+                    actionUuid = actionUuid,
+                    ownerRepId = current.ownerScopeId,
+                    type = "confirm_location",
+                    machineId = machine.machineId,
+                    cardId = machine.cardId,
+                    payloadJson = payload,
+                    createdAt = now,
+                    updatedAt = now,
+                ).also { container.database.machineActions().upsert(it) }
+
+                _machineLocationApprovalProgress.value = "جارٍ إرسال إحداثيات الماكينة للخادم وتثبيت الموقع…"
                 val saved = container.syncEngine.dispatchMachineActionImmediate(action.actionUuid)
                     ?: container.database.machineActions().find(action.actionUuid)
 
@@ -761,8 +823,109 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
                         container.scheduler.enqueueNow()
                         _messages.tryEmit("تم حفظ طلب اعتماد الماكينة على الهاتف؛ سيُرسل تلقائيًا عند توفر الاتصال.")
                     }
-                    else -> _messages.tryEmit(saved?.lastError ?: "تعذر اعتماد موقع الماكينة. راجع حالة الإجراء في شاشة المزامنة.")
+                    else -> {
+                        val errorMsg = saved?.lastError ?: "تعذر اعتماد موقع الماكينة. راجع حالة الإجراء في شاشة المزامنة."
+                        container.deviceDiagnostics.recordLocationAttempt("server_error", error = errorMsg)
+                        if (errorMsg.contains("current GPS reading is required", ignoreCase = true) ||
+                            errorMsg.contains("A current GPS reading", ignoreCase = true)) {
+                            _messages.tryEmit("رفض الخادم قراءة الموقع: توقيت الهاتف يختلف عن توقيت الخادم، أو انتهت صلاحية الإشارة أثناء الإرسال. يرجى تفعيل ضبط التاريخ والوقت التلقائي من إعدادات الهاتف والمحاولة مجدداً.")
+                        } else {
+                            _messages.tryEmit(errorMsg)
+                        }
+                    }
                 }
+            } catch (error: Exception) {
+                val msg = error.message ?: ""
+                container.deviceDiagnostics.recordLocationAttempt("exception", error = msg)
+                if (msg.contains("current GPS reading is required", ignoreCase = true) ||
+                    msg.contains("A current GPS reading", ignoreCase = true)) {
+                    _messages.tryEmit("رفض الخادم قراءة الموقع: توقيت الهاتف غير مطابق لتوقيت الخادم. يرجى تفعيل ضبط التاريخ والوقت التلقائي من إعدادات الهاتف.")
+                } else {
+                    _messages.tryEmit(human(error))
+                }
+            } finally {
+                _machineLocationApprovalBusy.value = null
+                _machineLocationApprovalProgress.value = null
+            }
+        }
+    }
+
+    fun confirmDifferentLocationVisit(visit: VisitEntity, point: GeoPoint, reason: String) {
+        val current = session.value ?: return
+        if (visit.state != VisitState.DRAFT || _machineLocationApprovalBusy.value != null) return
+        _machineLocationApprovalBusy.value = visit.cardId
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                if (point.isMock) {
+                    _messages.tryEmit("تم رفض العملية: تم اكتشاف أداة تزييف موقع (Mock GPS).")
+                    return@launch
+                }
+                val now = System.currentTimeMillis()
+                val age = now - point.capturedAtMillis
+                if (age !in -60_000L..300_000L) {
+                    _messages.tryEmit("قراءة الموقع انتهت صلاحيتها. أعد التقاط الموقع وأنت عند الماكينة.")
+                    return@launch
+                }
+                if (point.accuracyMeters > 100f) {
+                    _messages.tryEmit("يلزم موقع GPS دقيق (حتى 100 متر) لاعتماد الزيارة.")
+                    return@launch
+                }
+
+                val machine = route.value?.route?.regions?.asSequence()?.flatMap { it.machines.asSequence() }
+                    ?.firstOrNull { it.cardId == visit.cardId }
+                    ?: throw MadarError.Validation("تعذر تحديد الماكينة من المسار الحالي.")
+
+                // 1. Locally save form & confirm draft machine location with this visit's coordinates
+                container.visitRepository.saveForm(
+                    visit.visitUuid,
+                    VisitForm(
+                        condition = visit.machineCondition,
+                        reasons = decodeReasonIds(visit),
+                        lines = decodeLines(visit),
+                        notes = visit.notes,
+                    ),
+                    point
+                )
+                container.visitRepository.confirmDraftMachineLocation(visit.visitUuid, point.latitude, point.longitude)
+
+                // 2. Queue location change / exception request tied to this visit
+                val actionUuid = UUID.randomUUID().toString()
+                val payload = JSONObject()
+                    .put("actionUuid", actionUuid)
+                    .put("cardId", machine.cardId)
+                    .put("visitUuid", visit.visitUuid)
+                    .put("location", JSONObject()
+                        .put("latitude", point.latitude)
+                        .put("longitude", point.longitude)
+                        .put("accuracy", point.accuracyMeters)
+                        .put("updatedAt", MadarTime.isoUtc(point.capturedAtMillis))
+                        .put("isMock", false))
+                    .put("actualConfirmedLocation", JSONObject()
+                        .put("latitude", point.latitude)
+                        .put("longitude", point.longitude)
+                        .put("accuracy", point.accuracyMeters)
+                        .put("updatedAt", MadarTime.isoUtc(point.capturedAtMillis))
+                        .put("isMock", false))
+                    .put("note", reason.trim().take(2000))
+                    .toString()
+
+                val action = MachineActionEntity(
+                    actionUuid = actionUuid,
+                    ownerRepId = current.ownerScopeId,
+                    type = "location_change",
+                    machineId = machine.machineId,
+                    cardId = machine.cardId,
+                    payloadJson = payload,
+                    createdAt = now,
+                    updatedAt = now,
+                ).also { container.database.machineActions().upsert(it) }
+
+                // 3. Try immediate dispatch or queue
+                container.syncEngine.dispatchMachineActionImmediate(action.actionUuid)
+                container.scheduler.enqueueNow()
+
+                applyLocationPoint(point, "تم اعتماد الموقع الحالي للزيارة وتسجيل طلب استثناء الموقع لدى الإدارة.")
+                _messages.tryEmit("📍 تم اعتماد الموقع الحالي للزيارة بنجاح. يمكنك استكمال أعمال الصيانة والتصوير.")
             } catch (error: Exception) {
                 _messages.tryEmit(human(error))
             } finally {
@@ -872,6 +1035,27 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
                 if (!persisted) attachment?.delete()
                 _supportMessage.value = human(error)
             } finally { _supportBusy.value = false }
+        }
+    }
+
+    fun sendDeviceHeartbeat(onComplete: ((Boolean, String) -> Unit)? = null) {
+        val current = session.value ?: run {
+            onComplete?.invoke(false, "يلزم تسجيل الدخول لإرسال التقرير التشخيصي للخادم.")
+            return
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val api = container.apiFactory(current.serverUrl)
+                val req = container.deviceDiagnostics.buildHeartbeatRequest()
+                val resp = api.sendDeviceHeartbeat(current.token, req)
+                if (resp.serverTime > 0L) {
+                    com.madar.rep.app.core.ServerClockTracker.update(resp.serverTime)
+                }
+                onComplete?.invoke(true, resp.message ?: "تم تسجيل بيانات الجهاز وتحديث التقرير التشخيصي بنجاح.")
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                onComplete?.invoke(false, "تعذر إرسال التقرير التشخيصي: ${e.message ?: "خطأ في الشبكة"}")
+            }
         }
     }
 

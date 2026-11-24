@@ -16,6 +16,8 @@ const SEVERITY_LABELS = { low: 'منخفض', normal: 'عادي', high: 'مرتف
 export default function RepSupportAdminPage() {
   const [view, setView] = useState('reports');
   const [status, setStatus] = useState('all');
+  const [deviceFilter, setDeviceFilter] = useState('all');
+  const [deviceSearch, setDeviceSearch] = useState('');
   const [exportCategory, setExportCategory] = useState('all');
   const [exportSeverity, setExportSeverity] = useState('all');
   const [exportFrom, setExportFrom] = useState('');
@@ -28,9 +30,29 @@ export default function RepSupportAdminPage() {
   const { data: reportData, loading: reportsLoading, error: reportsError, reload: reloadReports } = useApi(reportsUrl, { enabled: view === 'reports' });
   const { data: locationData, loading: locationsLoading, error: locationsError, reload: reloadLocations } = useApi('/api/system/rep-location-changes?status=pending', { enabled: view === 'locations' });
   const { data: releaseData, loading: releasesLoading, error: releasesError, reload: reloadReleases } = useApi('/api/system/rep-releases', { enabled: view === 'releases' });
+  const { data: devicesData, loading: devicesLoading, error: devicesError, reload: reloadDevices } = useApi('/api/system/rep-support/devices', { enabled: view === 'devices' });
   const reports = useMemo(() => reportData?.reports ?? [], [reportData]);
   const requests = useMemo(() => locationData?.requests ?? [], [locationData]);
   const releases = useMemo(() => releaseData?.releases ?? [], [releaseData]);
+  const devices = useMemo(() => devicesData?.devices ?? [], [devicesData]);
+  const latestRelease = useMemo(() => devicesData?.latestRelease ?? null, [devicesData]);
+
+  const filteredDevices = useMemo(() => {
+    return devices.filter((d) => {
+      if (deviceSearch) {
+        const query = deviceSearch.toLowerCase();
+        const matchName = (d.representativeName || '').toLowerCase().includes(query);
+        const matchUser = (d.representativeUsername || '').toLowerCase().includes(query);
+        const matchModel = `${d.deviceManufacturer || ''} ${d.deviceModel || ''}`.toLowerCase().includes(query);
+        if (!matchName && !matchUser && !matchModel) return false;
+      }
+      if (deviceFilter === 'outdated') return d.isOutdatedBuild;
+      if (deviceFilter === 'clock') return d.clockMismatchDetected;
+      if (deviceFilter === 'permission') return d.isMissingPermission;
+      if (deviceFilter === 'error') return Boolean(d.lastLocationError);
+      return true;
+    });
+  }, [devices, deviceSearch, deviceFilter]);
 
   async function updateReport(report, nextStatus) {
     const key = `report-${report.id}`;
@@ -106,6 +128,7 @@ export default function RepSupportAdminPage() {
       <PageHeader kicker="تطبيق المندوبين" title="الدعم ومراجعة المواقع" description="إدارة بلاغات التطبيق ومراجعة طلبات تغيير المواقع قبل تعديل بيانات الآلات." />
       <div className="madar-section" style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         <Button variant={view === 'reports' ? 'primary' : 'secondary'} onClick={() => setView('reports')}>بلاغات التطبيق</Button>
+        <Button variant={view === 'devices' ? 'primary' : 'secondary'} onClick={() => setView('devices')}>الأجهزة وإصدارات التطبيق</Button>
         <Button variant={view === 'locations' ? 'primary' : 'secondary'} onClick={() => setView('locations')}>طلبات تغيير المواقع</Button>
         <Button variant={view === 'releases' ? 'primary' : 'secondary'} onClick={() => setView('releases')}>سجل إصدارات APK</Button>
       </div>
@@ -208,6 +231,116 @@ export default function RepSupportAdminPage() {
             <td><div style={{ display: 'flex', gap: 6 }}><Button size="small" disabled={busy === `location-${request.id}`} onClick={() => reviewLocation(request, 'approved')}>اعتماد</Button><Button size="small" variant="danger" disabled={busy === `location-${request.id}`} onClick={() => reviewLocation(request, 'rejected')}>رفض</Button></div>{request.note && <small>{request.note}</small>}</td>
           </tr>)}
         </tbody></table></div> : <EmptyState title="لا توجد طلبات معلقة" description="طلبات تغيير المواقع الجديدة ستظهر هنا للمراجعة." />}
+      </section>}
+
+      {view === 'devices' && <section className="madar-panel madar-section">
+        <div className="madar-panel-header">
+          <div>
+            <h2>أجهزة المندوبين وإصدارات التطبيق</h2>
+            <p>مراقبة الأجهزة المستخدمة لكل حساب، التحقق من حداثة البناء ومزامنة التوقيت وصلاحيات GPS.</p>
+          </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <label>البحث <input type="text" placeholder="اسم المندوب أو طراز الهاتف…" value={deviceSearch} onChange={(e) => setDeviceSearch(e.target.value)} /></label>
+            <label>تصفية الحالة <select value={deviceFilter} onChange={(e) => setDeviceFilter(e.target.value)}>
+              <option value="all">كل الأجهزة</option>
+              <option value="outdated">إصدار قديم بحاجة لتحديث</option>
+              <option value="clock">فارق في التوقيت (&gt; 1 دقيقة)</option>
+              <option value="permission">صلاحية الموقع الدقيق مفقودة</option>
+              <option value="error">يوجد خطأ موقع مسجل</option>
+            </select></label>
+            <Button variant="secondary" onClick={reloadDevices}>تحديث</Button>
+          </div>
+        </div>
+
+        {latestRelease && (
+          <div className="madar-panel-body" style={{ paddingBottom: 0 }}>
+            <Alert tone="info">
+              الإصدار الأحدث المعتمد على الخادم: <strong>{latestRelease.version_name} (بناء {latestRelease.version_code})</strong>. يتم تنبيه المندوبين أصحاب الإصدارات القديمة عند المزامنة.
+            </Alert>
+          </div>
+        )}
+
+        {devicesError && <div className="madar-panel-body"><Alert tone="error">{devicesError}</Alert></div>}
+        {devicesLoading ? <LoadingState label="جارٍ تحميل سجل الأجهزة" /> : filteredDevices.length ? (
+          <div className="madar-table-wrap">
+            <table className="madar-table">
+              <thead>
+                <tr>
+                  <th>المندوب</th>
+                  <th>الجهاز والنظام</th>
+                  <th>إصدار MADAR</th>
+                  <th>إذن وخدمة الموقع</th>
+                  <th>فارق التوقيت</th>
+                  <th>نتيجة آخر فحص</th>
+                  <th>آخر ظهور</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredDevices.map((dev) => (
+                  <tr key={dev.id}>
+                    <td>
+                      <strong>{dev.representativeName}</strong>
+                      <div><small style={{ color: '#666' }}>@{dev.representativeUsername}</small></div>
+                      {dev.isLatestForRep && <Badge tone="success">أحدث جهاز نشط</Badge>}
+                    </td>
+                    <td>
+                      <strong>{dev.deviceManufacturer} {dev.deviceModel}</strong>
+                      <div><small>Android {dev.osVersion} (API {dev.apiLevel})</small></div>
+                    </td>
+                    <td>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span>{dev.appVersionName} <small>({dev.appVersionCode})</small></span>
+                        {dev.isOutdatedBuild ? (
+                          <Badge tone="error">قديم</Badge>
+                        ) : (
+                          <Badge tone="success">الأحدث</Badge>
+                        )}
+                      </div>
+                    </td>
+                    <td>
+                      <div>
+                        {dev.hasFinePermission ? (
+                          <Badge tone="success">موقع دقيق ✓</Badge>
+                        ) : (
+                          <Badge tone="error">تقريبي فقط ✗</Badge>
+                        )}
+                        {' '}
+                        {dev.isGpsEnabled ? (
+                          <Badge tone="neutral">GPS مفعل</Badge>
+                        ) : (
+                          <Badge tone="error">GPS معطل</Badge>
+                        )}
+                      </div>
+                      <small style={{ color: '#888' }}>مزود: {dev.locationProvider || 'غير محدد'}</small>
+                    </td>
+                    <td>
+                      {dev.clockMismatchDetected ? (
+                        <div>
+                          <Badge tone="error">فارق توقيت كبير</Badge>
+                          <div><small style={{ color: '#d32f2f' }}>{Math.round(dev.clockOffsetMs / 1000)} ثانية</small></div>
+                        </div>
+                      ) : (
+                        <div style={{ color: '#2e7d32' }}><small>متطابق ({Math.round(dev.clockOffsetMs / 1000)} ث)</small></div>
+                      )}
+                    </td>
+                    <td>
+                      {dev.lastLocationError ? (
+                        <span style={{ color: '#c62828', fontSize: '12px' }}>{dev.lastLocationError}</span>
+                      ) : (
+                        <span style={{ color: '#2e7d32', fontSize: '12px' }}>سليم ✓</span>
+                      )}
+                    </td>
+                    <td>
+                      <small>{new Date(dev.lastSeenAt).toLocaleString('ar')}</small>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <EmptyState title="لا توجد أجهزة مسجلة" description="ستظهر هنا الأجهزة بمجرد فتح تطبيق المندوبين المحدث وإرسال التقرير التشخيصي." />
+        )}
       </section>}
 
       {view === 'releases' && <section className="madar-panel madar-section">

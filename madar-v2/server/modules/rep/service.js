@@ -2076,3 +2076,73 @@ export function requireRepUsername(queryValue, authenticatedUsername) {
   }
   return username;
 }
+
+export function recordRepDeviceHeartbeat(rep, rawPayload, database) {
+  const payload = requireObject(rawPayload, 'Payload must be an object.');
+  const installationId = requireText(payload.installation_id || payload.installationId, 'Installation ID is required.');
+  const appVersionName = String(payload.app_version_name || payload.appVersionName || 'unknown').trim();
+  const appVersionCode = Number(payload.app_version_code || payload.appVersionCode) || 0;
+  const deviceManufacturer = String(payload.device_manufacturer || payload.deviceManufacturer || 'unknown').trim();
+  const deviceModel = String(payload.device_model || payload.deviceModel || 'unknown').trim();
+  const osVersion = String(payload.os_version || payload.osVersion || 'unknown').trim();
+  const apiLevel = Number(payload.api_level || payload.apiLevel) || 0;
+  const locationProvider = payload.location_provider || payload.locationProvider ? String(payload.location_provider || payload.locationProvider).trim() : null;
+  const hasFinePermission = payload.has_fine_permission ?? payload.hasFinePermission ? 1 : 0;
+  const hasCoarsePermission = payload.has_coarse_permission ?? payload.hasCoarsePermission ? 1 : 0;
+  const isGpsEnabled = payload.is_gps_enabled ?? payload.isGpsEnabled ? 1 : 0;
+  const isNetworkEnabled = payload.is_network_enabled ?? payload.isNetworkEnabled ? 1 : 0;
+  const clientTimestamp = Number(payload.client_timestamp || payload.clientTimestamp) || Date.now();
+  const lastLocationError = payload.last_location_error || payload.lastLocationError ? String(payload.last_location_error || payload.lastLocationError).trim() : null;
+
+  const clockOffsetMs = Date.now() - clientTimestamp;
+  const clockMismatchDetected = Math.abs(clockOffsetMs) > 60_000 ? 1 : 0;
+
+  database.prepare(`
+    INSERT INTO rep_device_installations (
+      installation_id, rep_user_id, app_version_name, app_version_code,
+      device_manufacturer, device_model, os_version, api_level,
+      location_provider, has_fine_permission, has_coarse_permission,
+      is_gps_enabled, is_network_enabled, clock_offset_ms,
+      clock_mismatch_detected, last_location_error, last_seen_at, updated_at
+    ) VALUES (
+      ?, ?, ?, ?,
+      ?, ?, ?, ?,
+      ?, ?, ?,
+      ?, ?, ?,
+      ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+    )
+    ON CONFLICT(installation_id, rep_user_id) DO UPDATE SET
+      app_version_name = excluded.app_version_name,
+      app_version_code = excluded.app_version_code,
+      device_manufacturer = excluded.device_manufacturer,
+      device_model = excluded.device_model,
+      os_version = excluded.os_version,
+      api_level = excluded.api_level,
+      location_provider = excluded.location_provider,
+      has_fine_permission = excluded.has_fine_permission,
+      has_coarse_permission = excluded.has_coarse_permission,
+      is_gps_enabled = excluded.is_gps_enabled,
+      is_network_enabled = excluded.is_network_enabled,
+      clock_offset_ms = excluded.clock_offset_ms,
+      clock_mismatch_detected = excluded.clock_mismatch_detected,
+      last_location_error = excluded.last_location_error,
+      last_seen_at = CURRENT_TIMESTAMP,
+      updated_at = CURRENT_TIMESTAMP
+  `).run(
+    installationId, rep.id, appVersionName, appVersionCode,
+    deviceManufacturer, deviceModel, osVersion, apiLevel,
+    locationProvider, hasFinePermission, hasCoarsePermission,
+    isGpsEnabled, isNetworkEnabled, clockOffsetMs,
+    clockMismatchDetected, lastLocationError
+  );
+
+  const latestRelease = database.prepare("SELECT version_code FROM apk_releases WHERE status = 'available' ORDER BY version_code DESC LIMIT 1").get();
+
+  return {
+    success: true,
+    serverTime: Date.now(),
+    clockOffsetMs,
+    latestApkVersionCode: latestRelease?.version_code ?? null,
+    message: 'تم تحديث بيانات تشخيص الجهاز بنجاح.',
+  };
+}

@@ -1,8 +1,10 @@
 package com.madar.rep.app
 
 import android.content.Context
+import com.madar.rep.app.core.DeviceDiagnostics
 import com.madar.rep.app.core.GovernorateCatalog
 import com.madar.rep.app.core.GovernorateIndex
+import com.madar.rep.app.core.InstallationManager
 import com.madar.rep.app.data.api.MadarApi
 import com.madar.rep.app.data.db.MadarDatabase
 import com.madar.rep.app.data.map.MapRepository
@@ -50,6 +52,8 @@ class AppContainer(context: Context) {
     val migrationManager = MigrationManager(appContext, database, governorates)
     val photoStore = PhotoStore(appContext, governorates)
     val locationProvider = LocationProvider(appContext)
+    val installationManager = InstallationManager(appContext)
+    val deviceDiagnostics = DeviceDiagnostics(appContext, locationProvider, installationManager)
 
     val syncEngine = SyncEngine(
         context = appContext,

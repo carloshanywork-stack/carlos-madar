@@ -20,6 +20,7 @@ import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.Logout
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.AlertDialog
@@ -74,6 +75,7 @@ fun SyncScreen(
     onOpenVisit: (VisitEntity) -> Unit,
     onOpenAttendance: () -> Unit,
     onOpenMigration: () -> Unit,
+    onOpenDiagnostics: () -> Unit = {},
 ) {
     val sync by vm.sync.collectAsStateWithLifecycle()
     val connected by vm.eventConnected.collectAsStateWithLifecycle()
@@ -194,6 +196,18 @@ fun SyncScreen(
                 onOpen = onOpenAttendance,
                 onRetry = vm::retryAttendance,
             )
+        }
+
+        item {
+            OutlinedButton(
+                onClick = onOpenDiagnostics,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp),
+            ) {
+                Icon(Icons.Default.Settings, contentDescription = null)
+                Spacer(Modifier.size(8.dp))
+                Text("تشخيص الجهاز والنظام (أوفلاين)")
+            }
         }
 
         item {

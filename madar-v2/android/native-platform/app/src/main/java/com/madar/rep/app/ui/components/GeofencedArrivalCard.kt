@@ -61,12 +61,14 @@ fun GeofencedArrivalCard(
     visit: VisitEntity,
     isArrivalConfirmed: Boolean,
     approvingMachineLocation: Boolean,
+    approvalProgressMessage: String? = null,
     onConfirmArrival: () -> Unit,
     onRefreshLocation: () -> Unit,
     onApproveMachineLocation: () -> Unit,
     onRequestLocationChange: () -> Unit,
     onReportUnableToService: () -> Unit,
     onRequestPermission: () -> Unit,
+    onConfirmDifferentLocation: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     SectionCard(
@@ -89,7 +91,7 @@ fun GeofencedArrivalCard(
                     if (approvingMachineLocation) {
                         CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = Color.White)
                         Spacer(Modifier.width(8.dp))
-                        Text("جارٍ تثبيت موقع الماكينة…")
+                        Text(approvalProgressMessage ?: "جارٍ تثبيت موقع الماكينة…")
                     } else {
                         Icon(Icons.Default.LocationOn, contentDescription = null)
                         Spacer(Modifier.width(8.dp))
@@ -203,6 +205,53 @@ fun GeofencedArrivalCard(
                     fontWeight = FontWeight.Bold,
                     fontSize = 15.sp,
                 )
+            }
+        }
+
+        // Outside Geofence handling: offer to confirm current location for this visit
+        if (!isInsideGeofence && !isArrivalConfirmed && !isMocked) {
+            val isAccurateEnough = point.accuracyMeters <= GeoPolicy.MAX_FIELD_CONFIRMATION_ACCURACY_METERS
+            if (!isAccurateEnough) {
+                InlineMessage(
+                    "دقة إشارة GPS الحالية (±${point.accuracyMeters.toInt()}م) غير كافية للتحقق بدقة. يرجى الوقوف في مكان مكشوف للحصول على إشارة أفضل.",
+                    MessageTone.Warning,
+                )
+            } else {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MadarGold.copy(alpha = 0.15f),
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                ) {
+                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Icon(Icons.Default.Warning, contentDescription = null, tint = MadarGold)
+                            Text(
+                                text = "أنت في موقع مختلف عن الموقع المسجل للماكينة",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp,
+                                color = MadarInk,
+                            )
+                        }
+                        Text(
+                            text = "المسافة الحالية عن الموقع المسجل: ${distance?.toInt() ?: "?"}م. إذا كانت الماكينة نُقلت أو كان الموقع المسجل غير صحيح، يمكنك اعتماد موقعك الحالي للزيارة والمتابعة فوراً.",
+                            fontSize = 12.sp,
+                            color = MadarMuted,
+                        )
+                        Button(
+                            onClick = onConfirmDifferentLocation,
+                            colors = ButtonDefaults.buttonColors(containerColor = MadarTeal, contentColor = Color.White),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.fillMaxWidth().height(46.dp),
+                        ) {
+                            Icon(Icons.Default.LocationOn, contentDescription = null, Modifier.size(18.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("اعتماد الموقع الحالي للزيارة", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        }
+                    }
+                }
             }
         }
 

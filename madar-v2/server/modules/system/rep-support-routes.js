@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { stat } from 'node:fs/promises';
 import rateLimit from 'express-rate-limit';
 import XLSX from 'xlsx';
+import { db } from '../../database/connection.js';
 import { requireSupervisorOrAdmin } from '../auth/authorization.js';
 import { asyncHandler, HttpError } from '../http.js';
 import {
@@ -203,5 +204,68 @@ router.post('/rep-location-changes/:requestId/:decision', locationDecisionLimite
   res.set({ 'Cache-Control': 'private, no-store', Pragma: 'no-cache' });
   res.json({ success: true, ...result });
 }));
+
+router.get('/rep-support/devices', asyncHandler(async (req, res) => {
+  const latestRelease = db.prepare("SELECT version_code, version_name FROM apk_releases WHERE status = 'available' ORDER BY version_code DESC LIMIT 1").get();
+  const latestVersionCode = latestRelease?.version_code ?? 0;
+
+  const rows = db.prepare(`
+    SELECT
+      d.id,
+      d.installation_id AS installationId,
+      d.rep_user_id AS repUserId,
+      u.full_name AS representativeName,
+      u.username AS representativeUsername,
+      d.app_version_name AS appVersionName,
+      d.app_version_code AS appVersionCode,
+      d.device_manufacturer AS deviceManufacturer,
+      d.device_model AS deviceModel,
+      d.os_version AS osVersion,
+      d.api_level AS apiLevel,
+      d.location_provider AS locationProvider,
+      d.has_fine_permission AS hasFinePermission,
+      d.has_coarse_permission AS hasCoarsePermission,
+      d.is_gps_enabled AS isGpsEnabled,
+      d.is_network_enabled AS isNetworkEnabled,
+      d.clock_offset_ms AS clockOffsetMs,
+      d.clock_mismatch_detected AS clockMismatchDetected,
+      d.last_location_error AS lastLocationError,
+      d.last_seen_at AS lastSeenAt,
+      d.created_at AS createdAt
+    FROM rep_device_installations d
+    JOIN users u ON u.id = d.rep_user_id
+    ORDER BY d.last_seen_at DESC
+  `).all();
+
+  const latestByRep = new Map();
+  for (const row of rows) {
+    if (!latestByRep.has(row.repUserId)) {
+      latestByRep.set(row.repUserId, row.installationId);
+    }
+  }
+
+  const devices = rows.map((row) => ({
+    ...row,
+    hasFinePermission: Boolean(row.hasFinePermission),
+    hasCoarsePermission: Boolean(row.hasCoarsePermission),
+    isGpsEnabled: Boolean(row.isGpsEnabled),
+    isNetworkEnabled: Boolean(row.isNetworkEnabled),
+    clockMismatchDetected: Boolean(row.clockMismatchDetected),
+    isLatestForRep: latestByRep.get(row.repUserId) === row.installationId,
+    isOutdatedBuild: row.appVersionCode < latestVersionCode,
+    isMissingPermission: !row.hasFinePermission,
+  }));
+
+  res.set({ 'Cache-Control': 'private, no-store', Pragma: 'no-cache' });
+  res.json({
+    devices,
+    latestRelease: latestRelease || null,
+  });
+}));
+
+router.get('/rep-devices', (req, res, next) => {
+  req.url = '/rep-support/devices';
+  router.handle(req, res, next);
+});
 
 export default router;

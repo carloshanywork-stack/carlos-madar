@@ -337,6 +337,171 @@ class LocationProvider(private val context: Context) {
     }
 
     /**
+     * Obtains a strictly fresh location fix, bypassing any cached or pre-existing readings.
+     * Guaranteed to return a reading captured during or immediately before the invocation.
+     */
+    suspend fun freshFix(timeoutMillis: Long = 15_000L): LocationResult {
+        if (!hasPermission()) return LocationResult.PermissionDenied
+        if (!hasFinePermission()) return LocationResult.ApproximateOnlyPermission
+        if (!isAnyProviderEnabled()) return LocationResult.ProvidersDisabled
+
+        val gpsEnabled = isGpsEnabled()
+        val startRealtimeNanos = android.os.SystemClock.elapsedRealtimeNanos()
+
+        return withContext(Dispatchers.Main) {
+            val client = fusedClient
+            if (client != null && playServicesAvailable) {
+                val fusedResult = acquireFreshFusedFix(client, timeoutMillis, gpsEnabled, startRealtimeNanos)
+                if (fusedResult !is LocationResult.Failure) {
+                    return@withContext fusedResult
+                }
+            }
+            acquireFreshNativeFix(timeoutMillis, gpsEnabled, startRealtimeNanos)
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private suspend fun acquireFreshFusedFix(
+        client: FusedLocationProviderClient,
+        timeoutMillis: Long,
+        gpsEnabled: Boolean,
+        startRealtimeNanos: Long,
+    ): LocationResult = withContext(Dispatchers.Main) {
+        val deferred = CompletableDeferred<LocationResult>()
+        val handler = Handler(Looper.getMainLooper())
+        var bestCandidate: GeoPoint? = null
+
+        val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 800L)
+            .setMinUpdateIntervalMillis(400L)
+            .setMaxUpdateDelayMillis(1000L)
+            .build()
+
+        val callback = object : LocationCallback() {
+            override fun onLocationResult(locationResult: com.google.android.gms.location.LocationResult) {
+                val currentRealtime = android.os.SystemClock.elapsedRealtimeNanos()
+                for (location in locationResult.locations) {
+                    val point = location.toGeoPoint(location.provider ?: "fused")
+                    val elapsedAgeMillis = (currentRealtime - location.elapsedRealtimeNanos) / 1_000_000L
+                    if (elapsedAgeMillis > 20_000L) continue
+                    latestFixRef.set(point)
+                    if (bestCandidate == null || point.accuracyMeters < bestCandidate!!.accuracyMeters) {
+                        bestCandidate = point
+                    }
+                    if (point.accuracyMeters <= 15f && !point.isMock) {
+                        handler.removeCallbacksAndMessages(null)
+                        runCatching { client.removeLocationUpdates(this) }
+                        if (deferred.isActive) deferred.complete(LocationResult.Success(point, gpsEnabled))
+                        return
+                    }
+                }
+            }
+        }
+
+        val timeoutRunnable = Runnable {
+            runCatching { client.removeLocationUpdates(callback) }
+            val candidate = bestCandidate
+            if (deferred.isActive) {
+                if (candidate != null && !candidate.isMock && candidate.accuracyMeters <= GeoPolicy.MAX_FIELD_CONFIRMATION_ACCURACY_METERS) {
+                    deferred.complete(LocationResult.Success(candidate, gpsEnabled))
+                } else if (candidate != null) {
+                    deferred.complete(LocationResult.WeakSignal(candidate, candidate.accuracyMeters))
+                } else {
+                    deferred.complete(LocationResult.Timeout)
+                }
+            }
+        }
+
+        try {
+            client.requestLocationUpdates(request, callback, Looper.getMainLooper())
+            handler.postDelayed(timeoutRunnable, timeoutMillis)
+        } catch (error: Exception) {
+            handler.removeCallbacksAndMessages(null)
+            return@withContext LocationResult.Failure(error.message ?: "فشل تشغيل محدد المواقع المدمج")
+        }
+
+        val result = deferred.await()
+        handler.removeCallbacksAndMessages(null)
+        runCatching { client.removeLocationUpdates(callback) }
+        result
+    }
+
+    @SuppressLint("MissingPermission")
+    private suspend fun acquireFreshNativeFix(
+        timeoutMillis: Long,
+        gpsEnabled: Boolean,
+        startRealtimeNanos: Long,
+    ): LocationResult = withContext(Dispatchers.Main) {
+        val deferred = CompletableDeferred<LocationResult>()
+        val handler = Handler(Looper.getMainLooper())
+        var bestCandidate: GeoPoint? = null
+
+        val providers = buildList {
+            if (hasFinePermission() && gpsEnabled) add(LocationManager.GPS_PROVIDER)
+            if (isNetworkEnabled()) add(LocationManager.NETWORK_PROVIDER)
+        }
+        if (providers.isEmpty()) return@withContext LocationResult.ProvidersDisabled
+
+        val listener = object : LocationListener {
+            override fun onLocationChanged(location: Location) {
+                val currentRealtime = android.os.SystemClock.elapsedRealtimeNanos()
+                val candidate = location.toGeoPoint(location.provider ?: "native")
+                val elapsedAgeMillis = (currentRealtime - location.elapsedRealtimeNanos) / 1_000_000L
+                if (elapsedAgeMillis > 20_000L) return
+                latestFixRef.set(candidate)
+                if (bestCandidate == null || candidate.accuracyMeters < bestCandidate!!.accuracyMeters) {
+                    bestCandidate = candidate
+                }
+                if (candidate.accuracyMeters <= 15f && !candidate.isMock) {
+                    handler.removeCallbacksAndMessages(null)
+                    runCatching { manager.removeUpdates(this) }
+                    if (deferred.isActive) deferred.complete(LocationResult.Success(candidate, gpsEnabled))
+                }
+            }
+
+            @Deprecated("Deprecated in Java")
+            @Suppress("DEPRECATION")
+            override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) = Unit
+            override fun onProviderEnabled(provider: String) = Unit
+            override fun onProviderDisabled(provider: String) {
+                if (provider == LocationManager.GPS_PROVIDER && !isNetworkEnabled()) {
+                    handler.removeCallbacksAndMessages(null)
+                    runCatching { manager.removeUpdates(this) }
+                    if (deferred.isActive) deferred.complete(LocationResult.ProvidersDisabled)
+                }
+            }
+        }
+
+        val timeoutRunnable = Runnable {
+            runCatching { manager.removeUpdates(listener) }
+            val candidate = bestCandidate
+            if (deferred.isActive) {
+                if (candidate != null && !candidate.isMock && candidate.accuracyMeters <= GeoPolicy.MAX_FIELD_CONFIRMATION_ACCURACY_METERS) {
+                    deferred.complete(LocationResult.Success(candidate, gpsEnabled))
+                } else if (candidate != null) {
+                    deferred.complete(LocationResult.WeakSignal(candidate, candidate.accuracyMeters))
+                } else {
+                    deferred.complete(LocationResult.Timeout)
+                }
+            }
+        }
+
+        try {
+            for (provider in providers) {
+                manager.requestLocationUpdates(provider, 800L, 0f, listener, Looper.getMainLooper())
+            }
+            handler.postDelayed(timeoutRunnable, timeoutMillis)
+        } catch (error: Exception) {
+            handler.removeCallbacksAndMessages(null)
+            return@withContext LocationResult.Failure(error.message ?: "تعذر تشغيل مزود الموقع")
+        }
+
+        val result = deferred.await()
+        handler.removeCallbacksAndMessages(null)
+        runCatching { manager.removeUpdates(listener) }
+        result
+    }
+
+    /**
      * Starts continuous warm location tracking bound to the active visit card lifecycle.
      * Prevents cold acquisition delays when taking photos or approving machine locations.
      */
@@ -455,6 +620,7 @@ class LocationProvider(private val context: Context) {
             capturedAtMillis = time,
             provider = providerName,
             isMock = mocked,
+            elapsedRealtimeNanos = elapsedRealtimeNanos,
         )
     }
 }

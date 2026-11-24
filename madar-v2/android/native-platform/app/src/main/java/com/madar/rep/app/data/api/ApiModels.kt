@@ -573,3 +573,30 @@ data class LocationPingEnvelope(
     val error: String? = null,
     val message: String? = null,
 )
+
+@Serializable
+data class DeviceHeartbeatRequest(
+    @SerialName("installation_id") val installationId: String,
+    @SerialName("app_version_name") val appVersionName: String,
+    @SerialName("app_version_code") val appVersionCode: Int,
+    @SerialName("device_manufacturer") val deviceManufacturer: String,
+    @SerialName("device_model") val deviceModel: String,
+    @SerialName("os_version") val osVersion: String,
+    @SerialName("api_level") val apiLevel: Int,
+    @SerialName("location_provider") val locationProvider: String,
+    @SerialName("has_fine_permission") val hasFinePermission: Boolean,
+    @SerialName("has_coarse_permission") val hasCoarsePermission: Boolean,
+    @SerialName("is_gps_enabled") val isGpsEnabled: Boolean,
+    @SerialName("is_network_enabled") val isNetworkEnabled: Boolean,
+    @SerialName("client_timestamp") val clientTimestamp: Long,
+    @SerialName("last_location_error") val lastLocationError: String? = null,
+)
+
+@Serializable
+data class DeviceHeartbeatResponse(
+    val success: Boolean = true,
+    @SerialName("server_time") val serverTime: Long = 0L,
+    @SerialName("clock_offset_ms") val clockOffsetMs: Long = 0L,
+    @SerialName("latest_apk_version_code") val latestApkVersionCode: Int? = null,
+    val message: String? = null,
+)

@@ -66,6 +66,7 @@ const machineVerificationCorrectionsMigration = '20261104-machine-verification-c
 const machineLocationConfirmationReviewMigration = '20261110-machine-location-confirmation-review';
 const machineCorrectionRenameRecoveryMigration = '20261104-machine-correction-rename-recovery';
 const repNativeSupportWorkflowsMigration = '20261115-rep-native-support-workflows';
+const repDeviceInstallationsMigration = '20261124-rep-device-installations';
 const clientProfileCrudMigration = '20261105-client-profile-crud';
 const financeAccountRolesMigration = '20261105-finance-account-roles';
 
@@ -1732,6 +1733,48 @@ export function migrateRepNativeSupportWorkflows(database) {
   migrate.immediate();
 }
 
+/** Track representative app installations, OS versions, permissions, and device clock synchronization. */
+export function migrateRepDeviceInstallations(database) {
+  const migrate = database.transaction(() => {
+    if (database.prepare('SELECT 1 FROM schema_migrations WHERE version = ?')
+      .get(repDeviceInstallationsMigration)) return;
+
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS rep_device_installations (
+        id INTEGER PRIMARY KEY,
+        installation_id TEXT NOT NULL,
+        rep_user_id INTEGER NOT NULL REFERENCES users(id),
+        app_version_name TEXT NOT NULL,
+        app_version_code INTEGER NOT NULL,
+        device_manufacturer TEXT NOT NULL,
+        device_model TEXT NOT NULL,
+        os_version TEXT NOT NULL,
+        api_level INTEGER NOT NULL,
+        location_provider TEXT,
+        has_fine_permission INTEGER NOT NULL DEFAULT 0,
+        has_coarse_permission INTEGER NOT NULL DEFAULT 0,
+        is_gps_enabled INTEGER NOT NULL DEFAULT 0,
+        is_network_enabled INTEGER NOT NULL DEFAULT 0,
+        clock_offset_ms INTEGER NOT NULL DEFAULT 0,
+        clock_mismatch_detected INTEGER NOT NULL DEFAULT 0,
+        last_location_error TEXT,
+        last_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(installation_id, rep_user_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_rep_device_installations_user
+        ON rep_device_installations(rep_user_id, last_seen_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_rep_device_installations_code
+        ON rep_device_installations(app_version_code, last_seen_at DESC);
+    `);
+
+    database.prepare('INSERT INTO schema_migrations (version) VALUES (?)')
+      .run(repDeviceInstallationsMigration);
+  });
+  migrate.immediate();
+}
+
 /** Add persistent per-account lockout fields without rebuilding users or changing IDs. */
 export function migrateAccountLoginProtection(database) {
   const migrate = database.transaction(() => {
@@ -2456,6 +2499,7 @@ export function initializeDatabase({ database = db, initialAdminPassword = env.i
     migrateMachineLocationConfirmationReview(database);
     migrateMachineCorrectionRenameRecovery(database);
     migrateRepNativeSupportWorkflows(database);
+    migrateRepDeviceInstallations(database);
     migrateGpsRetentionIndex(database);
     migrateStaffPayrollRules(database);
     migrateRepVisitMachineCondition(database);

@@ -14,9 +14,15 @@ data class GeoPoint(
     val capturedAtMillis: Long,
     val provider: String? = null,
     val isMock: Boolean = false,
+    val elapsedRealtimeNanos: Long = 0L,
 ) {
-    fun isFresh(nowMillis: Long, maxAgeMillis: Long = 30_000L): Boolean =
-        nowMillis - capturedAtMillis in 0..maxAgeMillis
+    fun isFresh(nowMillis: Long = System.currentTimeMillis(), maxAgeMillis: Long = 30_000L): Boolean {
+        if (elapsedRealtimeNanos > 0L) {
+            val elapsedAgeMillis = (android.os.SystemClock.elapsedRealtimeNanos() - elapsedRealtimeNanos) / 1_000_000L
+            return elapsedAgeMillis in 0..maxAgeMillis
+        }
+        return nowMillis - capturedAtMillis in 0..maxAgeMillis
+    }
 
     val isApproximate: Boolean get() = accuracyMeters > GeoPolicy.MAX_ACCURACY_METERS
 }
@@ -39,6 +45,7 @@ sealed interface LocationDecision {
 object GeoPolicy {
     const val MAX_FIX_AGE_MILLIS = 300_000L
     const val MAX_ACCURACY_METERS = 250f
+    const val MAX_FIELD_CONFIRMATION_ACCURACY_METERS = 50f
     const val REJECTION_COMPROMISED_ENVIRONMENT = "تم رفض تسجيل الموقع: تم اكتشاف بيئة نظام غير موثوقة أو أداة تزييف موقع"
 
     val COMMON_ROOT_PATHS: List<String> = listOf(
