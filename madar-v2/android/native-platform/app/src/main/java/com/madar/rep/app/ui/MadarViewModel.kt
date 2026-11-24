@@ -16,6 +16,7 @@ import com.madar.rep.app.data.api.ApkUpdateException
 import com.madar.rep.app.data.api.ApkUpdateFailure
 import com.madar.rep.app.data.api.ApkUpdateManager
 import com.madar.rep.app.data.api.DownloadedApk
+import com.madar.rep.app.data.api.DiagnosticOperation
 import com.madar.rep.app.data.api.FaultReason
 import com.madar.rep.app.data.api.LocationChangeRequestView
 import com.madar.rep.app.data.api.MadarApi
@@ -37,6 +38,8 @@ import com.madar.rep.app.data.db.SupportReportEntity
 import com.madar.rep.app.data.db.SupportReportState
 import com.madar.rep.app.data.repo.AttendanceView
 import com.madar.rep.app.data.repo.RouteView
+import com.madar.rep.app.data.sync.AutomaticDiagnosticPayload
+import com.madar.rep.app.data.sync.diagnosticFailureFor
 import com.madar.rep.app.data.repo.VisitForm
 import com.madar.rep.app.domain.fsm.VisitFsm
 import com.madar.rep.app.data.repo.VisitRepository
@@ -208,7 +211,9 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
     private var pendingLocationChange: PendingLocationChange? = null
 
     val supportReports: StateFlow<List<SupportReportEntity>> = session.flatMapLatest { current ->
-        if (current == null) flowOf(emptyList()) else container.database.supportReports().observeForOwner(current.ownerScopeId)
+        if (current == null) flowOf(emptyList()) else container.database.supportReports().observeManualReports(
+            current.ownerScopeId, AutomaticDiagnosticPayload.PREFIX,
+        )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val eventConnected: StateFlow<Boolean> = container.eventStream.connected
@@ -969,6 +974,10 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
             }
             _routeError.value = null
         } catch (error: Exception) {
+            if (error is CancellationException) throw error
+            diagnosticFailureFor(error)?.let { failure ->
+                container.automaticDiagnostics.record(current.ownerScopeId, DiagnosticOperation.ROUTE_REFRESH, failure, schedule = true)
+            }
             if (error is MadarError.SessionExpired || error is MadarError.AccountDisabled) {
                 _login.value = LoginUiState(error = human(error))
                 container.sessions.expire()
@@ -1188,6 +1197,7 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
         container.visitRepository.decodeReasonIds(visit.reasonIdsCsv)
 
     fun submitVisit(visitUuid: String, form: VisitForm, onComplete: (Boolean) -> Unit) {
+        val ownerRepId = session.value?.ownerScopeId ?: return
         if (_visitBusy.value) return
         _visitBusy.value = true
         viewModelScope.launch {
@@ -1202,10 +1212,12 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
                 if (fix != null) applyLocationPoint(fix, "تم تحديث الموقع قبل الإرسال.")
                 val result = withContext(Dispatchers.IO) {
                     container.visitRepository.saveForm(visitUuid, form)
-                    val pendingPhotos = container.visitRepository.photos(visitUuid).filter { it.sha256.isBlank() }
-                    for (photo in pendingPhotos) {
-                        val visit = container.visitRepository.find(visitUuid) ?: break
-                        com.madar.rep.app.media.PhotoProcessingPipeline.enqueue(photo, visit.machineCode, container)
+                    val visit = container.visitRepository.find(visitUuid)
+                    if (visit != null) {
+                        val pendingPhotos = container.visitRepository.photos(visitUuid).filter { it.sha256.isBlank() }
+                        for (photo in pendingPhotos) {
+                            com.madar.rep.app.media.PhotoProcessingPipeline.enqueue(photo, visit.machineCode, visit.ownerRepId, container)
+                        }
                     }
                     container.visitRepository.queue(visitUuid, fix)
                 }
@@ -1221,6 +1233,10 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
                     }
                 }
             } catch (error: Exception) {
+                if (error is CancellationException) throw error
+                diagnosticFailureFor(error)?.let { failure ->
+                    container.automaticDiagnostics.record(ownerRepId, DiagnosticOperation.VISIT_SUBMIT, failure, schedule = true)
+                }
                 _messages.tryEmit(human(error))
                 withContext(Dispatchers.Main) { onComplete(false) }
             } finally {

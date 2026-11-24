@@ -8,6 +8,8 @@ import com.madar.rep.app.core.SyncSignal
 import com.madar.rep.app.core.SupportDiagnostics
 import com.madar.rep.app.data.api.ApiLocation
 import com.madar.rep.app.data.api.AttendanceActionRequest
+import com.madar.rep.app.data.api.DiagnosticFailure
+import com.madar.rep.app.data.api.DiagnosticOperation
 import com.madar.rep.app.data.api.MachineActionResponse
 import com.madar.rep.app.data.api.MadarApi
 import com.madar.rep.app.data.api.MaintenanceLine
@@ -28,6 +30,7 @@ import com.madar.rep.app.data.session.Session
 import com.madar.rep.app.data.session.SessionGateway
 import com.madar.rep.app.media.PhotoProcessingPipeline
 import java.io.File
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -53,6 +56,7 @@ class SyncEngine(
     private val apiFactory: (String) -> MadarApi = { MadarApi(it) },
     private val onSessionExpired: () -> Unit = {},
     private val photoStore: com.madar.rep.app.media.PhotoStore? = null,
+    private val diagnostics: AutomaticDiagnostics,
 ) {
     private val json = Json { ignoreUnknownKeys = true; explicitNulls = false; encodeDefaults = true }
 
@@ -97,13 +101,12 @@ class SyncEngine(
         var transient = 0
         var needsLogin = false
 
-        runCatching { syncAttendance(session, api) }
-            .onFailure { if (it is MadarError.SessionExpired) needsLogin = true }
-        runCatching { syncMachineActions(session, api) }
-            .onFailure { if (it is MadarError.SessionExpired) needsLogin = true }
+        needsLogin = syncOperation(session, DiagnosticOperation.ATTENDANCE_SYNC) { syncAttendance(session, api) }
         if (!needsLogin) {
-            runCatching { syncGpsPoints(session, api) }
-                .onFailure { if (it is MadarError.SessionExpired) needsLogin = true }
+            needsLogin = syncOperation(session, DiagnosticOperation.MACHINE_SYNC) { syncMachineActions(session, api) }
+        }
+        if (!needsLogin) {
+            needsLogin = syncOperation(session, DiagnosticOperation.TRACKING_SYNC) { syncGpsPoints(session, api) }
         }
 
         if (!needsLogin) {
@@ -118,14 +121,24 @@ class SyncEngine(
             val summary = flushSupportReportOutbox(
                 pendingReports.map { SupportReportQueueItem(it.reportUuid, it.payloadJson, it.attachmentPath, it.attempts) },
                 send = { item ->
-                    val attachment = item.attachmentPath?.let { path ->
-                        File(path).takeIf(File::isFile)
-                            ?: throw MadarError.Validation("صورة البلاغ المحلية مفقودة؛ احتُفظ بالبلاغ للمراجعة.")
+                    if (item.payloadJson.startsWith(AutomaticDiagnosticPayload.PREFIX)) {
+                        val diagnostic = AutomaticDiagnosticPayload.decode(item.payloadJson)
+                            ?.takeIf { it.reportUuid == item.reportUuid && item.attachmentPath == null }
+                            ?: throw MadarError.Validation("صيغة البلاغ التلقائي المحلي غير صالحة.")
+                        api.submitAutomaticDiagnostic(session.token, diagnostic)
+                    } else {
+                        if (AutomaticDiagnosticPayload.isLegacyCameraReport(item.payloadJson)) {
+                            throw MadarError.Validation("بلاغ كاميرا قديم محفوظ محليًا للمراجعة.")
+                        }
+                        val attachment = item.attachmentPath?.let { path ->
+                            File(path).takeIf(File::isFile)
+                                ?: throw MadarError.Validation("صورة البلاغ المحلية مفقودة؛ احتُفظ بالبلاغ للمراجعة.")
+                        }
+                        api.submitSupportReport(session.token, item.payloadJson, attachment).reportUuid
                     }
-                    api.submitSupportReport(session.token, item.payloadJson, attachment).reportUuid
                 },
                 markSent = { item ->
-                    val attempts = pendingReports.first { it.reportUuid == item.reportUuid }.attempts + 1
+                    val attempts = item.attempts + 1
                     database.supportReports().updateState(
                         item.reportUuid, SupportReportState.SENT, null, attempts, 0, System.currentTimeMillis(),
                     )
@@ -133,7 +146,7 @@ class SyncEngine(
                     SupportDiagnostics.record("support", "sent")
                 },
                 markRetry = { item, message ->
-                    val attempts = pendingReports.first { it.reportUuid == item.reportUuid }.attempts + 1
+                    val attempts = item.attempts + 1
                     val retryAt = System.currentTimeMillis() + SyncPolicy.retryDelayMillis(attempts)
                     database.supportReports().updateState(
                         item.reportUuid, SupportReportState.RETRY_WAIT, message.take(500), attempts, retryAt, System.currentTimeMillis(),
@@ -141,14 +154,14 @@ class SyncEngine(
                     SupportDiagnostics.record("support", "retry_wait")
                 },
                 markNeedsReview = { item, message ->
-                    val attempts = pendingReports.first { it.reportUuid == item.reportUuid }.attempts + 1
+                    val attempts = item.attempts + 1
                     database.supportReports().updateState(
                         item.reportUuid, SupportReportState.NEEDS_REVIEW, message.take(500), attempts, 0, System.currentTimeMillis(),
                     )
                     SupportDiagnostics.record("support", "needs_review")
                 },
                 markNeedsLogin = { item ->
-                    val attempts = pendingReports.first { it.reportUuid == item.reportUuid }.attempts + 1
+                    val attempts = item.attempts + 1
                     database.supportReports().updateState(
                         item.reportUuid, SupportReportState.NEEDS_LOGIN,
                         "انتهت الجلسة؛ سجّل الدخول لاستكمال إرسال البلاغ.", attempts, 0, System.currentTimeMillis(),
@@ -197,6 +210,27 @@ class SyncEngine(
         )
     }
 
+    private suspend fun syncOperation(session: Session, operation: DiagnosticOperation, perform: suspend () -> Unit): Boolean {
+        try {
+            perform()
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: MadarError.SessionExpired) {
+            return true
+        } catch (error: Exception) {
+            recordFailure(session, operation, error)
+        }
+        return false
+    }
+
+    private suspend fun recordFailure(session: Session, operation: DiagnosticOperation, error: Exception) {
+        val failure = when (error) {
+            is MadarError.Validation, is MadarError.Conflict -> DiagnosticFailure.REJECTED
+            else -> diagnosticFailureFor(error, includeNetwork = true) ?: return
+        }
+        diagnostics.record(session.ownerScopeId, operation, failure)
+    }
+
     private suspend fun syncVisit(session: Session, api: MadarApi, visit: VisitEntity): SyncSignal {
         val now = System.currentTimeMillis()
         database.visits().updateSyncState(
@@ -212,6 +246,7 @@ class SyncEngine(
         val before = photos.filter { it.phase == "before" }.sortedBy { it.position }
         val after = photos.filter { it.phase == "after" }.sortedBy { it.position }
         if (before.isEmpty() || after.isEmpty() || before.size > 20 || after.size > 20) {
+            diagnostics.record(session.ownerScopeId, DiagnosticOperation.VISIT_SYNC, DiagnosticFailure.INTEGRITY_FAILED)
             val message = "عدد الصور لا يطابق سياسة الزيارة؛ لم تُحذف البيانات المحلية."
             database.visits().updateSyncState(
                 visit.visitUuid, VisitState.NEEDS_REVIEW, message, visit.attempts + 1,
@@ -235,6 +270,7 @@ class SyncEngine(
             }
             if (finalized == null || file == null || file.length() != finalized.sizeBytes ||
                 checksum == null || !checksum.equals(finalized.sha256, ignoreCase = true)) {
+                diagnostics.record(session.ownerScopeId, DiagnosticOperation.VISIT_SYNC, DiagnosticFailure.INTEGRITY_FAILED)
                 val message = "ملف إحدى الصور مفقود أو لم يجتز التحقق. الزيارة محفوظة للمراجعة."
                 database.visits().updateSyncState(
                     visit.visitUuid, VisitState.NEEDS_REVIEW, message, visit.attempts + 1,
@@ -255,17 +291,33 @@ class SyncEngine(
             onSessionExpired()
             return SyncSignal.NEEDS_LOGIN
         } catch (error: MadarError.Network) {
+            recordFailure(session, DiagnosticOperation.VISIT_SYNC, error)
             scheduleRetry(visit, error.message ?: "تعذر الاتصال", visit.attempts + 1, now)
             return SyncSignal.RETRY
         } catch (error: MadarError.Server) {
+            recordFailure(session, DiagnosticOperation.VISIT_SYNC, error)
             scheduleRetry(visit, error.message ?: "السيرفر غير متاح", visit.attempts + 1, now)
             return SyncSignal.RETRY
         } catch (error: MadarError) {
+            recordFailure(session, DiagnosticOperation.VISIT_SYNC, error)
             database.visits().updateSyncState(
                 visit.visitUuid, VisitState.NEEDS_REVIEW, error.message, visit.attempts + 1,
                 0, visit.serverStatus, now
             )
             return SyncSignal.NEEDS_REVIEW
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            recordFailure(session, DiagnosticOperation.VISIT_SYNC, error)
+            scheduleRetry(visit, "تعذرت مزامنة الزيارة مؤقتًا.", visit.attempts + 1, now)
+            return SyncSignal.RETRY
+        }
+        if (result.httpStatus >= 500) {
+            diagnostics.record(session.ownerScopeId, DiagnosticOperation.VISIT_SYNC, DiagnosticFailure.SERVER, result.httpStatus)
+        } else if (result.httpStatus in 200..299 && result.success == null && result.status.isNullOrBlank()) {
+            diagnostics.record(session.ownerScopeId, DiagnosticOperation.VISIT_SYNC, DiagnosticFailure.PROTOCOL)
+            scheduleRetry(visit, "لم يصل إقرار صالح للزيارة.", visit.attempts + 1, now)
+            return SyncSignal.RETRY
         }
         return when (SyncPolicy.classify(result.httpStatus, result.success, result.status, result.message)) {
             SyncSignal.ACK -> {
@@ -304,6 +356,7 @@ class SyncEngine(
                 SyncSignal.NEEDS_LOGIN
             }
             SyncSignal.NEEDS_REVIEW -> {
+                diagnostics.record(session.ownerScopeId, DiagnosticOperation.VISIT_SYNC, DiagnosticFailure.REJECTED, result.httpStatus)
                 database.visits().updateSyncState(
                     visit.visitUuid, VisitState.NEEDS_REVIEW,
                     result.message ?: "الخادم رفض الزيارة؛ بياناتها وصورها محفوظة.",
@@ -362,6 +415,8 @@ class SyncEngine(
                         action.actionUuid, "synced", null, action.attempts + 1, 0, now
                     )
                 } else {
+                    val failure = if (response.success) DiagnosticFailure.PROTOCOL else DiagnosticFailure.REJECTED
+                    diagnostics.record(session.ownerScopeId, DiagnosticOperation.ATTENDANCE_SYNC, failure)
                     database.attendanceActions().updateState(
                         action.actionUuid, AttendanceActionState.RETRY_WAIT,
                         response.message ?: response.error ?: "لم يؤكد الخادم تسجيل الحضور",
@@ -377,12 +432,14 @@ class SyncEngine(
                 )
                 throw error
             } catch (error: MadarError.Network) {
+                recordFailure(session, DiagnosticOperation.ATTENDANCE_SYNC, error)
                 database.attendanceActions().updateState(
                     action.actionUuid, AttendanceActionState.RETRY_WAIT,
                     error.message, action.attempts + 1,
                     now + SyncPolicy.retryDelayMillis(action.attempts + 1), now
                 )
             } catch (error: MadarError) {
+                recordFailure(session, DiagnosticOperation.ATTENDANCE_SYNC, error)
                 database.attendanceActions().updateState(
                     action.actionUuid, AttendanceActionState.NEEDS_REVIEW,
                     error.message, action.attempts + 1, 0, now
@@ -442,6 +499,7 @@ class SyncEngine(
                     response.status ?: action.serverStatus, now
                 )
             } else {
+                diagnostics.record(session.ownerScopeId, DiagnosticOperation.MACHINE_SYNC, DiagnosticFailure.REJECTED)
                 database.machineActions().updateState(
                     action.actionUuid, MachineActionState.RETRY_WAIT,
                     response.message ?: response.error ?: "لم يؤكد الخادم العملية",
@@ -458,12 +516,14 @@ class SyncEngine(
             )
             throw error
         } catch (error: MadarError.Network) {
+            recordFailure(session, DiagnosticOperation.MACHINE_SYNC, error)
             database.machineActions().updateState(
                 action.actionUuid, MachineActionState.RETRY_WAIT, error.message,
                 action.attempts + 1, now + SyncPolicy.retryDelayMillis(action.attempts + 1),
                 action.correctionId, action.serverStatus, now
             )
         } catch (error: MadarError) {
+            recordFailure(session, DiagnosticOperation.MACHINE_SYNC, error)
             database.machineActions().updateState(
                 action.actionUuid, MachineActionState.NEEDS_REVIEW, error.message,
                 action.attempts + 1, 0, action.correctionId, action.serverStatus, now
@@ -546,8 +606,14 @@ class SyncEngine(
                 val receipt = ack.points.firstOrNull { it.clientPointId == point.clientPointId }
                 when (receipt?.status) {
                     "accepted", "duplicate" -> GpsPointState.ACKNOWLEDGED to null
-                    "rejected" -> GpsPointState.NEEDS_REVIEW to (receipt.reason ?: "رفض الخادم نقطة الموقع.")
-                    else -> GpsPointState.NEEDS_REVIEW to "لم يصل إقرار مطابق من الخادم؛ احتُفظ بالنقطة للمراجعة."
+                    "rejected" -> {
+                        diagnostics.record(session.ownerScopeId, DiagnosticOperation.TRACKING_SYNC, DiagnosticFailure.REJECTED)
+                        GpsPointState.NEEDS_REVIEW to (receipt.reason ?: "رفض الخادم نقطة الموقع.")
+                    }
+                    else -> {
+                        diagnostics.record(session.ownerScopeId, DiagnosticOperation.TRACKING_SYNC, DiagnosticFailure.PROTOCOL)
+                        GpsPointState.NEEDS_REVIEW to "لم يصل إقرار مطابق من الخادم؛ احتُفظ بالنقطة للمراجعة."
+                    }
                 }
             } catch (error: MadarError.SessionExpired) {
                 database.gpsPoints().update(sending.copy(
@@ -558,10 +624,14 @@ class SyncEngine(
                 onSessionExpired()
                 throw error
             } catch (error: MadarError) {
+                recordFailure(session, DiagnosticOperation.TRACKING_SYNC, error)
                 when (error) {
                     is MadarError.Network, is MadarError.Server -> {
                         val attempt = sending.attempts
                         val terminal = attempt >= SyncPolicy.MAX_ATTEMPTS
+                        if (terminal) {
+                            diagnostics.record(session.ownerScopeId, DiagnosticOperation.TRACKING_SYNC, DiagnosticFailure.RETRY_EXHAUSTED)
+                        }
                         (if (terminal) GpsPointState.NEEDS_REVIEW else GpsPointState.RETRY_WAIT) to
                             (error.message ?: "تعذرت مزامنة نقطة الموقع.")
                     }

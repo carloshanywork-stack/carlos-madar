@@ -2,9 +2,12 @@ package com.madar.rep.app.media
 
 import com.madar.rep.app.AppContainer
 import com.madar.rep.app.core.SupportDiagnostics
+import com.madar.rep.app.data.api.DiagnosticFailure
+import com.madar.rep.app.data.api.DiagnosticOperation
 import com.madar.rep.app.data.db.PhotoEntity
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
@@ -27,6 +30,7 @@ object PhotoProcessingPipeline {
     fun enqueue(
         photo: PhotoEntity,
         machineCode: String,
+        ownerRepId: Long,
         container: AppContainer,
         onComplete: ((PhotoEntity) -> Unit)? = null,
         onGalleryError: ((Exception) -> Unit)? = null,
@@ -50,20 +54,32 @@ object PhotoProcessingPipeline {
                 if (saved == 0) return@launch
 
                 // 3. Export original image copy to public Pictures/MADAR/
-                val galleryResult = runCatching {
+                val galleryError = try {
                     withContext(Dispatchers.IO) {
                         container.photoStore.publishOriginalToGallery(processed, machineCode)
                     }
+                    null
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    error
                 }
-                if (galleryResult.isFailure) {
-                    val ex = galleryResult.exceptionOrNull() as? Exception ?: Exception("فشل التصدير للمعرض")
-                    SupportDiagnostics.record("gallery", "export_failed: ${ex.message}")
-                    onGalleryError?.invoke(ex)
+                if (galleryError != null) {
+                    SupportDiagnostics.record("gallery", "export_failed")
+                    container.automaticDiagnostics.record(
+                        ownerRepId, DiagnosticOperation.PHOTO_GALLERY, DiagnosticFailure.GALLERY_FAILED, schedule = true,
+                    )
+                    onGalleryError?.invoke(galleryError)
                 }
 
                 onComplete?.invoke(processed)
-            } catch (error: Exception) {
-                SupportDiagnostics.record("watermark", "render_failed: ${error.message}")
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                SupportDiagnostics.record("watermark", "render_failed")
+                container.automaticDiagnostics.record(
+                    ownerRepId, DiagnosticOperation.PHOTO_PROCESSING, DiagnosticFailure.RENDER_FAILED, schedule = true,
+                )
             } finally {
                 activeTasks.remove(photoId)
             }

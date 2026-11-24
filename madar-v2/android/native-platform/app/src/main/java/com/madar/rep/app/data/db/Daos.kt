@@ -388,8 +388,26 @@ interface SupportReportDao {
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insert(report: SupportReportEntity)
 
-    @Query("SELECT * FROM support_reports WHERE ownerRepId = :repId ORDER BY createdAt DESC")
-    fun observeForOwner(repId: Long): Flow<List<SupportReportEntity>>
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertAutomatic(report: SupportReportEntity): Long
+
+    @Query("SELECT * FROM support_reports WHERE ownerRepId = :repId AND substr(payloadJson, 1, length(:automaticPrefix)) != :automaticPrefix ORDER BY createdAt DESC")
+    fun observeManualReports(repId: Long, automaticPrefix: String): Flow<List<SupportReportEntity>>
+
+    @Query("""
+        SELECT payloadJson, createdAt FROM support_reports
+        WHERE ownerRepId = :repId AND createdAt >= :since
+          AND substr(payloadJson, 1, length(:prefix)) = :prefix
+        ORDER BY createdAt DESC LIMIT :limit
+    """)
+    suspend fun recentAutomaticPayloads(repId: Long, since: Long, limit: Int, prefix: String): List<AutomaticReportSample>
+
+    @Query("""
+        SELECT COUNT(*) FROM support_reports
+        WHERE ownerRepId = :repId AND state IN ('queued','retry_wait','syncing','needs_login')
+          AND substr(payloadJson, 1, length(:prefix)) = :prefix
+    """)
+    suspend fun countPendingAutomatic(repId: Long, prefix: String): Int
 
     @Query("SELECT * FROM support_reports WHERE ownerRepId = :repId AND state IN ('queued','retry_wait','syncing','needs_login') AND nextAttemptAt <= :now ORDER BY createdAt LIMIT :limit")
     suspend fun dueForSync(repId: Long, now: Long, limit: Int = 20): List<SupportReportEntity>
@@ -403,3 +421,5 @@ interface SupportReportDao {
     @Query("UPDATE support_reports SET state = 'queued', nextAttemptAt = :now, lastError = NULL, updatedAt = :now WHERE (ownerRepId = :repId OR ownerRepId = :scopeId) AND state = 'needs_login'")
     suspend fun requeueNeedsLogin(repId: Long, scopeId: Long = repId, now: Long = System.currentTimeMillis()): Int
 }
+
+data class AutomaticReportSample(val payloadJson: String, val createdAt: Long)
