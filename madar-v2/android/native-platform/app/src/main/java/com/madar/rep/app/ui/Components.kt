@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -51,6 +52,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.madar.rep.app.core.GeoPoint
+import com.madar.rep.app.core.GeoPolicy
 import com.madar.rep.app.core.LocationDecision
 import com.madar.rep.app.data.db.AttendanceActionState
 import com.madar.rep.app.data.db.MachineActionState
@@ -397,6 +399,7 @@ fun GeofencedArrivalCard(
     onRefreshLocation: () -> Unit,
     onRequestLocationChange: () -> Unit,
     onRequestPermission: () -> Unit,
+    onConfirmDifferentLocation: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     SectionCard(
@@ -454,6 +457,44 @@ fun GeofencedArrivalCard(
                     Text("تأكيد الوصول عند الماكينة", fontWeight = FontWeight.Bold)
                 }
                 if (decision is LocationDecision.Outside) {
+                    if (point != null && point.accuracyMeters <= GeoPolicy.MAX_FIELD_CONFIRMATION_ACCURACY_METERS && onConfirmDifferentLocation != null) {
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = MadarGold.copy(alpha = 0.15f),
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        ) {
+                            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    Icon(Icons.Default.Warning, contentDescription = null, tint = MadarGold)
+                                    Text(
+                                        text = "أنت في موقع مختلف عن الموقع المسجل للماكينة",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 14.sp,
+                                        color = MadarInk,
+                                    )
+                                }
+                                Text(
+                                    text = "المسافة الحالية عن الموقع المسجل: ${decision.distanceMeters.toInt()}م. إذا كانت الماكينة نُقلت أو كان الموقع المسجل غير صحيح، يمكنك اعتماد موقعك الحالي للزيارة والمتابعة فوراً.",
+                                    fontSize = 12.sp,
+                                    color = MadarMuted,
+                                )
+                                Button(
+                                    onClick = onConfirmDifferentLocation,
+                                    colors = ButtonDefaults.buttonColors(containerColor = MadarTeal, contentColor = Color.White),
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier.fillMaxWidth().height(46.dp),
+                                ) {
+                                    Icon(Icons.Default.LocationOn, contentDescription = null, Modifier.size(18.dp))
+                                    Spacer(Modifier.width(6.dp))
+                                    Text("اعتماد الموقع الحالي للزيارة", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                }
+                            }
+                        }
+                    }
+
                     OutlinedButton(onClick = onRequestLocationChange, modifier = Modifier.fillMaxWidth()) {
                         Text("طلب تصحيح موقع الماكينة")
                     }

@@ -799,6 +799,89 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
+    fun confirmDifferentLocationVisit(visit: VisitEntity, point: GeoPoint, reason: String) {
+        val current = session.value ?: return
+        if (visit.state != VisitState.DRAFT || _machineLocationApprovalBusy.value != null) return
+        _machineLocationApprovalBusy.value = visit.cardId
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                if (point.isMock) {
+                    _messages.tryEmit("تم رفض العملية: تم اكتشاف أداة تزييف موقع (Mock GPS).")
+                    return@launch
+                }
+                val now = System.currentTimeMillis()
+                val age = now - point.capturedAtMillis
+                if (age !in -60_000L..300_000L) {
+                    _messages.tryEmit("قراءة الموقع انتهت صلاحيتها. أعد التقاط الموقع وأنت عند الماكينة.")
+                    return@launch
+                }
+                if (point.accuracyMeters > 100f) {
+                    _messages.tryEmit("يلزم موقع GPS دقيق (حتى 100 متر) لاعتماد الزيارة.")
+                    return@launch
+                }
+
+                val machine = route.value?.route?.regions?.asSequence()?.flatMap { it.machines.asSequence() }
+                    ?.firstOrNull { it.cardId == visit.cardId }
+                    ?: throw MadarError.Validation("تعذر تحديد الماكينة من المسار الحالي.")
+
+                // 1. Locally save form & confirm arrival for this visit with actual coordinates
+                container.visitRepository.saveForm(
+                    visit.visitUuid,
+                    VisitForm(
+                        condition = visit.machineCondition,
+                        reasons = decodeReasonIds(visit),
+                        lines = decodeLines(visit),
+                        notes = visit.notes,
+                    ),
+                )
+                container.visitRepository.confirmArrivalException(visit.visitUuid, point)
+
+                // 2. Queue location change / exception request tied to this visit
+                val actionUuid = UUID.randomUUID().toString()
+                val payload = JSONObject()
+                    .put("actionUuid", actionUuid)
+                    .put("cardId", machine.cardId)
+                    .put("visitUuid", visit.visitUuid)
+                    .put("location", JSONObject()
+                        .put("latitude", point.latitude)
+                        .put("longitude", point.longitude)
+                        .put("accuracy", point.accuracyMeters)
+                        .put("updatedAt", MadarTime.isoUtc(point.capturedAtMillis))
+                        .put("isMock", false))
+                    .put("actualConfirmedLocation", JSONObject()
+                        .put("latitude", point.latitude)
+                        .put("longitude", point.longitude)
+                        .put("accuracy", point.accuracyMeters)
+                        .put("updatedAt", MadarTime.isoUtc(point.capturedAtMillis))
+                        .put("isMock", false))
+                    .put("note", reason.trim().take(2000))
+                    .toString()
+
+                val action = MachineActionEntity(
+                    actionUuid = actionUuid,
+                    ownerRepId = current.ownerScopeId,
+                    type = "location_change",
+                    machineId = machine.machineId,
+                    cardId = machine.cardId,
+                    payloadJson = payload,
+                    createdAt = now,
+                    updatedAt = now,
+                ).also { container.database.machineActions().upsert(it) }
+
+                // 3. Try immediate dispatch or queue
+                container.syncEngine.dispatchMachineActionImmediate(action.actionUuid)
+                container.scheduler.enqueueNow()
+
+                applyLocationPoint(point, "تم اعتماد الموقع الحالي للزيارة وتسجيل طلب استثناء الموقع لدى الإدارة.")
+                _messages.tryEmit("📍 تم اعتماد الموقع الحالي للزيارة بنجاح. يمكنك استكمال أعمال الصيانة والتصوير.")
+            } catch (error: Exception) {
+                _messages.tryEmit(human(error))
+            } finally {
+                _machineLocationApprovalBusy.value = null
+            }
+        }
+    }
+
     fun lock() {
         viewModelScope.launch {
             try {
