@@ -68,6 +68,7 @@ const machineCorrectionRenameRecoveryMigration = '20261104-machine-correction-re
 const repNativeSupportWorkflowsMigration = '20261115-rep-native-support-workflows';
 const repDeviceInstallationsMigration = '20261124-rep-device-installations';
 const repAutomaticDiagnosticsMigration = '20261124-rep-automatic-diagnostics';
+const repLocationExceptionRequestsMigration = '20261124-rep-location-exception-requests';
 const clientProfileCrudMigration = '20261105-client-profile-crud';
 const financeAccountRolesMigration = '20261105-finance-account-roles';
 
@@ -1689,8 +1690,11 @@ export function migrateRepNativeSupportWorkflows(database) {
         rep_user_id INTEGER NOT NULL REFERENCES users(id),
         machine_id INTEGER NOT NULL REFERENCES machines(id),
         card_id INTEGER NOT NULL REFERENCES maintenance_cards(id),
+        visit_uuid TEXT,
         old_latitude REAL,
         old_longitude REAL,
+        actual_confirmed_latitude REAL,
+        actual_confirmed_longitude REAL,
         proposed_latitude REAL NOT NULL CHECK (proposed_latitude BETWEEN -90 AND 90),
         proposed_longitude REAL NOT NULL CHECK (proposed_longitude BETWEEN -180 AND 180),
         gps_accuracy REAL NOT NULL CHECK (gps_accuracy >= 0 AND gps_accuracy <= 100000),
@@ -1699,7 +1703,7 @@ export function migrateRepNativeSupportWorkflows(database) {
         note TEXT,
         evidence_path TEXT,
         evidence_content_type TEXT CHECK (evidence_content_type IS NULL OR evidence_content_type IN ('image/jpeg', 'image/png', 'image/webp')),
-        status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+        status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected', 'exception_only')),
         reviewer_user_id INTEGER REFERENCES users(id),
         review_note TEXT,
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -1709,6 +1713,8 @@ export function migrateRepNativeSupportWorkflows(database) {
         ON rep_machine_location_change_requests(status, created_at DESC, id DESC);
       CREATE INDEX IF NOT EXISTS idx_rep_location_change_machine_status
         ON rep_machine_location_change_requests(machine_id, status, created_at DESC, id DESC);
+      CREATE INDEX IF NOT EXISTS idx_rep_location_change_visit
+        ON rep_machine_location_change_requests(visit_uuid);
 
       CREATE TABLE IF NOT EXISTS apk_releases (
         id INTEGER PRIMARY KEY,
@@ -1791,6 +1797,79 @@ export function migrateRepDeviceInstallations(database) {
 
     database.prepare('INSERT INTO schema_migrations (version) VALUES (?)')
       .run(repDeviceInstallationsMigration);
+  });
+  migrate.immediate();
+}
+
+export function migrateRepLocationExceptionRequests(database) {
+  const migrate = database.transaction(() => {
+    if (database.prepare('SELECT 1 FROM schema_migrations WHERE version = ?')
+      .get(repLocationExceptionRequestsMigration)) return;
+
+    const tableExists = database.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'rep_machine_location_change_requests'").get();
+    if (tableExists) {
+      const columns = new Set(database.pragma('table_info(rep_machine_location_change_requests)').map((col) => col.name));
+      const visitUuidCol = columns.has('visit_uuid') ? 'visit_uuid' : 'NULL AS visit_uuid';
+      const actualLatCol = columns.has('actual_confirmed_latitude') ? 'actual_confirmed_latitude' : 'NULL AS actual_confirmed_latitude';
+      const actualLngCol = columns.has('actual_confirmed_longitude') ? 'actual_confirmed_longitude' : 'NULL AS actual_confirmed_longitude';
+
+      database.exec(`
+        CREATE TABLE rep_machine_location_change_requests_rebuild (
+          id INTEGER PRIMARY KEY,
+          action_uuid TEXT NOT NULL UNIQUE,
+          payload_sha256 TEXT NOT NULL CHECK (length(payload_sha256) = 64),
+          rep_user_id INTEGER NOT NULL REFERENCES users(id),
+          machine_id INTEGER NOT NULL REFERENCES machines(id),
+          card_id INTEGER NOT NULL REFERENCES maintenance_cards(id),
+          visit_uuid TEXT,
+          old_latitude REAL,
+          old_longitude REAL,
+          actual_confirmed_latitude REAL,
+          actual_confirmed_longitude REAL,
+          proposed_latitude REAL NOT NULL CHECK (proposed_latitude BETWEEN -90 AND 90),
+          proposed_longitude REAL NOT NULL CHECK (proposed_longitude BETWEEN -180 AND 180),
+          gps_accuracy REAL NOT NULL CHECK (gps_accuracy >= 0 AND gps_accuracy <= 100000),
+          distance_meters REAL NOT NULL CHECK (distance_meters >= 0),
+          captured_at TEXT NOT NULL,
+          note TEXT,
+          evidence_path TEXT,
+          evidence_content_type TEXT CHECK (evidence_content_type IS NULL OR evidence_content_type IN ('image/jpeg', 'image/png', 'image/webp')),
+          status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected', 'exception_only')),
+          reviewer_user_id INTEGER REFERENCES users(id),
+          review_note TEXT,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          reviewed_at TEXT
+        );
+
+        INSERT INTO rep_machine_location_change_requests_rebuild (
+          id, action_uuid, payload_sha256, rep_user_id, machine_id, card_id,
+          visit_uuid, old_latitude, old_longitude, actual_confirmed_latitude, actual_confirmed_longitude,
+          proposed_latitude, proposed_longitude, gps_accuracy, distance_meters,
+          captured_at, note, evidence_path, evidence_content_type, status,
+          reviewer_user_id, review_note, created_at, reviewed_at
+        )
+        SELECT
+          id, action_uuid, payload_sha256, rep_user_id, machine_id, card_id,
+          ${visitUuidCol}, old_latitude, old_longitude, ${actualLatCol}, ${actualLngCol},
+          proposed_latitude, proposed_longitude, gps_accuracy, distance_meters,
+          captured_at, note, evidence_path, evidence_content_type, status,
+          reviewer_user_id, review_note, created_at, reviewed_at
+        FROM rep_machine_location_change_requests;
+
+        DROP TABLE rep_machine_location_change_requests;
+        ALTER TABLE rep_machine_location_change_requests_rebuild RENAME TO rep_machine_location_change_requests;
+
+        CREATE INDEX IF NOT EXISTS idx_rep_location_change_status_created
+          ON rep_machine_location_change_requests(status, created_at DESC, id DESC);
+        CREATE INDEX IF NOT EXISTS idx_rep_location_change_machine_status
+          ON rep_machine_location_change_requests(machine_id, status, created_at DESC, id DESC);
+        CREATE INDEX IF NOT EXISTS idx_rep_location_change_visit
+          ON rep_machine_location_change_requests(visit_uuid);
+      `);
+    }
+
+    database.prepare('INSERT INTO schema_migrations (version) VALUES (?)')
+      .run(repLocationExceptionRequestsMigration);
   });
   migrate.immediate();
 }
@@ -2519,6 +2598,7 @@ export function initializeDatabase({ database = db, initialAdminPassword = env.i
     migrateMachineLocationConfirmationReview(database);
     migrateMachineCorrectionRenameRecovery(database);
     migrateRepNativeSupportWorkflows(database);
+    migrateRepLocationExceptionRequests(database);
     migrateRepAutomaticDiagnostics(database);
     migrateRepDeviceInstallations(database);
     migrateGpsRetentionIndex(database);

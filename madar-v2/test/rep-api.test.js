@@ -2078,6 +2078,49 @@ test('rep login, assigned-region route sync, active fault reasons, and strict AP
     latitude: thirdLocationPayload.location.latitude, longitude: thirdLocationPayload.location.longitude,
   }, 'coordinates are applied exactly once');
 
+  // Test visit-specific location exception request and "exception_only" reviewer decision
+  const visitSpecificUuid = randomUUID();
+  const exceptionPayload = {
+    actionUuid: randomUUID(),
+    cardId: optionalAfterCardId,
+    visitUuid: visitSpecificUuid,
+    location: {
+      latitude: thirdLocationPayload.location.latitude + 0.001,
+      longitude: thirdLocationPayload.location.longitude + 0.001,
+      accuracy: 6, updatedAt: new Date().toISOString(), isMock: false,
+    },
+    actualConfirmedLocation: {
+      latitude: thirdLocationPayload.location.latitude + 0.001,
+      longitude: thirdLocationPayload.location.longitude + 0.001,
+      accuracy: 6, updatedAt: new Date().toISOString(), isMock: false,
+    },
+    note: 'زيارة استثنائية في موقع مختلف (الماكينة نُقلت مؤقتًا).',
+  };
+  const exceptionForm = new FormData();
+  exceptionForm.set('request', JSON.stringify(exceptionPayload));
+  const exceptionSub = await request(`/api/rep/machines/${optionalAfterMachineId}/location-change-requests`, {
+    method: 'POST', body: exceptionForm,
+  }, login.cookie);
+  assert.equal(exceptionSub.response.status, 201);
+  assert.equal(exceptionSub.body.status, 'pending');
+
+  const pendingList = await request('/api/system/rep-location-changes?status=pending', {}, adminCookie);
+  assert.equal(pendingList.response.status, 200);
+  const foundReq = pendingList.body.requests.find((r) => r.id === exceptionSub.body.requestId);
+  assert.ok(foundReq);
+  assert.equal(foundReq.visitUuid, visitSpecificUuid);
+  assert.ok(foundReq.actualConfirmedLocation);
+  assert.equal(foundReq.hasLocationChanged, false);
+
+  const exceptionDecision = await request(`/api/system/rep-location-changes/${exceptionSub.body.requestId}/exception_only`,
+    jsonOptions('POST', { note: 'مقبول كاستثناء لهذه الزيارة فقط دون تعديل موقع الماكينة.' }), adminCookie);
+  assert.equal(exceptionDecision.response.status, 200);
+  assert.equal(exceptionDecision.body.status, 'exception_only');
+  // Machine coordinates MUST NOT have changed
+  assert.deepEqual(db.prepare('SELECT latitude, longitude FROM machines WHERE id = ?').get(optionalAfterMachineId), {
+    latitude: thirdLocationPayload.location.latitude, longitude: thirdLocationPayload.location.longitude,
+  }, 'exception_only decision leaves registered machine coordinates untouched');
+
   const adminOnlyRoutes = [
     ['GET', '/api/system/rep-support/reports'],
     ['GET', '/api/system/rep-support/reports/export.xlsx'],

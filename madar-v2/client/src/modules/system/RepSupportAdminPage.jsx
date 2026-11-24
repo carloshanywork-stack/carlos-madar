@@ -1,4 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 import Alert from '../../components/ui/Alert.jsx';
 import Badge from '../../components/ui/Badge.jsx';
 import Button from '../../components/ui/Button.jsx';
@@ -13,6 +15,119 @@ import RepAutomaticDiagnostics from './RepAutomaticDiagnostics.jsx';
 
 const STATUS_LABELS = { new: 'جديد', in_progress: 'قيد المعالجة', resolved: 'تم الحل', closed: 'مغلق' };
 const SEVERITY_LABELS = { low: 'منخفض', normal: 'عادي', high: 'مرتفع', critical: 'حرج' };
+const LOCATION_STATUS_LABELS = {
+  pending: 'قيد المراجعة',
+  approved: 'معتمد كموقع أساسي جديد',
+  exception_only: 'استثناء للزيارة فقط',
+  rejected: 'مرفوض',
+};
+
+function LocationDiffMapModal({ isOpen, onClose, request }) {
+  const mapRef = useRef(null);
+  const mapInstanceRef = useRef(null);
+
+  useEffect(() => {
+    if (!isOpen || !request || !mapRef.current) return;
+    if (mapInstanceRef.current) {
+      mapInstanceRef.current.remove();
+      mapInstanceRef.current = null;
+    }
+
+    const oldLat = request.oldLocation?.latitude;
+    const oldLng = request.oldLocation?.longitude;
+    const propLat = request.proposedLocation.latitude;
+    const propLng = request.proposedLocation.longitude;
+
+    const map = L.map(mapRef.current);
+    mapInstanceRef.current = map;
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '© OpenStreetMap',
+    }).addTo(map);
+
+    const bounds = [];
+
+    // Red pin for registered location
+    if (oldLat != null && oldLng != null) {
+      bounds.push([oldLat, oldLng]);
+      const oldIcon = L.divIcon({
+        className: 'madar-map-pin-old',
+        html: '<div style="background:#d32f2f;color:#fff;border-radius:50%;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:bold;border:2px solid white;box-shadow:0 2px 5px rgba(0,0,0,0.4)">📍</div>',
+        iconSize: [28, 28],
+        iconAnchor: [14, 14],
+      });
+      L.marker([oldLat, oldLng], { icon: oldIcon })
+        .addTo(map)
+        .bindPopup(`<b>الموقع المسجل للماكينة</b><br/>${oldLat.toFixed(6)}, ${oldLng.toFixed(6)}`);
+    }
+
+    // Green pin for proposed / confirmed visit location
+    bounds.push([propLat, propLng]);
+    const propIcon = L.divIcon({
+      className: 'madar-map-pin-prop',
+      html: '<div style="background:#007A3D;color:#fff;border-radius:50%;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:bold;border:2px solid white;box-shadow:0 2px 5px rgba(0,0,0,0.4)">✨</div>',
+      iconSize: [28, 28],
+      iconAnchor: [14, 14],
+    });
+    L.marker([propLat, propLng], { icon: propIcon })
+      .addTo(map)
+      .bindPopup(`<b>الموقع الفعلي / المقترح للزيارة</b><br/>${propLat.toFixed(6)}, ${propLng.toFixed(6)}<br/>دقة: ±${Math.round(request.proposedLocation.accuracy)} م`);
+
+    if (oldLat != null && oldLng != null) {
+      L.polyline([[oldLat, oldLng], [propLat, propLng]], {
+        color: '#ff9800',
+        dashArray: '5, 10',
+        weight: 3,
+      }).addTo(map);
+    }
+
+    if (bounds.length > 1) {
+      map.fitBounds(bounds, { padding: [40, 40], maxZoom: 17 });
+    } else {
+      map.setView([propLat, propLng], 16);
+    }
+
+    return () => {
+      if (mapInstanceRef.current) {
+        mapInstanceRef.current.remove();
+        mapInstanceRef.current = null;
+      }
+    };
+  }, [isOpen, request]);
+
+  if (!isOpen || !request) return null;
+
+  return (
+    <div className="madar-modal-backdrop" onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div className="madar-modal" onClick={(e) => e.stopPropagation()} style={{ background: '#fff', borderRadius: '12px', width: '90%', maxWidth: '750px', padding: '20px', display: 'flex', flexDirection: 'column', gap: '14px', maxHeight: '90vh' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <h3 style={{ margin: 0 }}>مقارنة المواقع الجغرافية للماكينة</h3>
+            <p style={{ margin: '4px 0 0', color: '#666', fontSize: '13px' }}>
+              ماكينة {request.machineCode} · {request.machineName} (المسافة المحسوبة بين الموقعين: {Math.round(request.distanceMeters)} متر)
+            </p>
+          </div>
+          <Button variant="ghost" onClick={onClose}>✕</Button>
+        </div>
+        <div style={{ display: 'flex', gap: '16px', fontSize: '13px', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span style={{ width: 12, height: 12, borderRadius: '50%', background: '#d32f2f', display: 'inline-block' }} />
+            <span>الموقع المسجل: {request.oldLocation ? `${request.oldLocation.latitude.toFixed(6)}, ${request.oldLocation.longitude.toFixed(6)}` : 'غير محدد'}</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span style={{ width: 12, height: 12, borderRadius: '50%', background: '#007A3D', display: 'inline-block' }} />
+            <span>الموقع الفعلي للزيارة: {request.proposedLocation.latitude.toFixed(6)}, {request.proposedLocation.longitude.toFixed(6)} (دقة: ±{Math.round(request.proposedLocation.accuracy)}م)</span>
+          </div>
+        </div>
+        <div ref={mapRef} style={{ width: '100%', height: '380px', borderRadius: '8px', border: '1px solid #ddd' }} />
+        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <Button onClick={onClose}>إغلاق الخريطة</Button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function RepSupportAdminPage({ isAdmin = false }) {
   const [view, setView] = useState('reports');
@@ -27,9 +142,11 @@ export default function RepSupportAdminPage({ isAdmin = false }) {
   const [error, setError] = useState('');
   const [releaseNotes, setReleaseNotes] = useState('');
   const [viewingSupportPhoto, setViewingSupportPhoto] = useState(null);
+  const [locationStatus, setLocationStatus] = useState('pending');
+  const [mapModalRequest, setMapModalRequest] = useState(null);
   const reportsUrl = `/api/system/rep-support/reports?status=${encodeURIComponent(status)}`;
   const { data: reportData, loading: reportsLoading, error: reportsError, reload: reloadReports } = useApi(reportsUrl, { enabled: view === 'reports' });
-  const { data: locationData, loading: locationsLoading, error: locationsError, reload: reloadLocations } = useApi('/api/system/rep-location-changes?status=pending', { enabled: view === 'locations' });
+  const { data: locationData, loading: locationsLoading, error: locationsError, reload: reloadLocations } = useApi(`/api/system/rep-location-changes?status=${encodeURIComponent(locationStatus)}`, { enabled: view === 'locations' });
   const { data: releaseData, loading: releasesLoading, error: releasesError, reload: reloadReleases } = useApi('/api/system/rep-releases', { enabled: view === 'releases' });
   const { data: devicesData, loading: devicesLoading, error: devicesError, reload: reloadDevices } = useApi('/api/system/rep-support/devices', { enabled: view === 'devices' });
   const reports = useMemo(() => reportData?.reports ?? [], [reportData]);
@@ -99,13 +216,32 @@ export default function RepSupportAdminPage({ isAdmin = false }) {
   }
 
   async function reviewLocation(request, decision) {
-    const note = window.prompt(decision === 'approved' ? 'ملاحظة اعتماد الموقع (اختياري)' : 'سبب رفض تغيير الموقع (اختياري)');
+    if (decision === 'approved' && request.hasLocationChanged) {
+      const confirmPermanent = window.confirm(
+        '⚠️ تحذير: موقع الماكينة المسجل في النظام تغيّر بعد إنشاء هذا الطلب!\n\n' +
+        `الموقع وقت تقديم الطلب: ${request.oldLocation ? `${request.oldLocation.latitude}, ${request.oldLocation.longitude}` : 'غير محدد'}\n` +
+        `الموقع المسجل حالياً: ${request.currentMachineLocation ? `${request.currentMachineLocation.latitude}, ${request.currentMachineLocation.longitude}` : 'غير محدد'}\n\n` +
+        'هل أنت متأكد من اعتماد هذا الموقع كموقع أساسي جديد واستبدال إحداثيات الماكينة الحالية؟'
+      );
+      if (!confirmPermanent) return;
+    }
+    const promptMessage = decision === 'approved'
+      ? 'ملاحظة اعتماد الموقع كموقع أساسي جديد (اختياري)'
+      : (decision === 'exception_only'
+        ? 'ملاحظة تسجيل استثناء لهذه الزيارة فقط دون تغيير موقع الماكينة (اختياري)'
+        : 'سبب رفض تغيير الموقع (اختياري)');
+    const note = window.prompt(promptMessage);
     if (note === null) return;
     const key = `location-${request.id}`;
     setBusy(key); setError('');
-    try { await api.post(`/api/system/rep-location-changes/${request.id}/${decision}`, { note }); await reloadLocations(); }
-    catch (caught) { setError(errorMessage(caught)); }
-    finally { setBusy(''); }
+    try {
+      await api.post(`/api/system/rep-location-changes/${request.id}/${decision}`, { note });
+      await reloadLocations();
+    } catch (caught) {
+      setError(errorMessage(caught));
+    } finally {
+      setBusy('');
+    }
   }
 
   async function publishRelease() {
@@ -131,7 +267,7 @@ export default function RepSupportAdminPage({ isAdmin = false }) {
         <Button variant={view === 'reports' ? 'primary' : 'secondary'} onClick={() => setView('reports')}>بلاغات التطبيق</Button>
         {isAdmin && <Button variant={view === 'diagnostics' ? 'primary' : 'secondary'} onClick={() => setView('diagnostics')}>التشخيص التلقائي</Button>}
         <Button variant={view === 'devices' ? 'primary' : 'secondary'} onClick={() => setView('devices')}>الأجهزة وإصدارات التطبيق</Button>
-        <Button variant={view === 'locations' ? 'primary' : 'secondary'} onClick={() => setView('locations')}>طلبات تغيير المواقع</Button>
+        <Button variant={view === 'locations' ? 'primary' : 'secondary'} onClick={() => setView('locations')}>تغييرات مواقع الماكينات</Button>
         <Button variant={view === 'releases' ? 'primary' : 'secondary'} onClick={() => setView('releases')}>سجل إصدارات APK</Button>
       </div>
       {error && <div className="madar-section"><Alert tone="error">{error}</Alert></div>}
@@ -206,35 +342,167 @@ export default function RepSupportAdminPage({ isAdmin = false }) {
       </>}
 
       {view === 'locations' && <section className="madar-panel madar-section">
-        <div className="madar-panel-header"><div><h2>طلبات تغيير مواقع الآلات</h2><p>لن يتغير الموقع المثبت حتى يعتمد المدير الطلب.</p></div><Button variant="secondary" onClick={reloadLocations}>تحديث</Button></div>
+        <div className="madar-panel-header">
+          <div>
+            <h2>تغييرات مواقع الماكينات</h2>
+            <p>مراجعة التغييرات والاستثناءات الجغرافية المقدمة من المندوبين أثناء الزيارات الميدانية.</p>
+          </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <label>تصفية الحالة:
+              <select value={locationStatus} onChange={(event) => setLocationStatus(event.target.value)} style={{ marginRight: 6 }}>
+                <option value="pending">قيد المراجعة (معلق)</option>
+                <option value="approved">معتمد كموقع أساسي</option>
+                <option value="exception_only">استثناء للزيارة فقط</option>
+                <option value="rejected">مرفوض</option>
+                <option value="all">الكل</option>
+              </select>
+            </label>
+            <Button variant="secondary" onClick={reloadLocations}>تحديث</Button>
+          </div>
+        </div>
         {locationsError && <div className="madar-panel-body"><Alert tone="error">{locationsError}</Alert></div>}
-        {locationsLoading ? <LoadingState label="جارٍ تحميل طلبات المواقع" /> : requests.length ? <div className="madar-table-wrap"><table className="madar-table"><thead><tr><th>الآلة / أمر الصيانة</th><th>المندوب</th><th>الموقع الحالي</th><th>الموقع المقترح</th><th>الدليل</th><th>قرار الإدارة</th></tr></thead><tbody>
-          {requests.map((request) => <tr key={request.id}><td>{request.machineCode} · {request.machineName}<br /><small>{request.orderCode}</small></td><td>{request.representativeName}</td>
-            <td>{request.oldLocation ? `${request.oldLocation.latitude}, ${request.oldLocation.longitude}` : '—'}</td>
-            <td>{request.proposedLocation.latitude}, {request.proposedLocation.longitude}<br /><small>دقة GPS: {request.proposedLocation.accuracy} م · بُعد: {Math.round(request.distanceMeters)} م</small></td>
-            <td>{request.hasEvidence ? (
-              <Button
-                size="small"
-                variant="ghost"
-                onClick={() => setViewingSupportPhoto({
-                  title: `دليل تغيير موقع: ${request.machineCode}`,
-                  subtitle: `${request.machineName} · ${request.representativeName}`,
-                  machineCode: request.machineCode,
-                  phaseLabel: 'تغيير موقع',
-                  photos: [{
-                    id: `loc-${request.id}`,
-                    url: `/api/system/rep-location-changes/${request.id}/evidence`,
-                    filename: `MADAR_${request.machineCode}_location_evidence.jpg`,
-                    caption: `إحداثيات مقترحة: ${request.proposedLocation.latitude}, ${request.proposedLocation.longitude}`
-                  }]
-                })}
-              >
-                عرض الصورة
-              </Button>
-            ) : 'لا يوجد'}</td>
-            <td><div style={{ display: 'flex', gap: 6 }}><Button size="small" disabled={busy === `location-${request.id}`} onClick={() => reviewLocation(request, 'approved')}>اعتماد</Button><Button size="small" variant="danger" disabled={busy === `location-${request.id}`} onClick={() => reviewLocation(request, 'rejected')}>رفض</Button></div>{request.note && <small>{request.note}</small>}</td>
-          </tr>)}
-        </tbody></table></div> : <EmptyState title="لا توجد طلبات معلقة" description="طلبات تغيير المواقع الجديدة ستظهر هنا للمراجعة." />}
+        {locationsLoading ? <LoadingState label="جارٍ تحميل تغييرات المواقع" /> : requests.length ? <div className="madar-table-wrap"><table className="madar-table">
+          <thead>
+            <tr>
+              <th>الآلة / أمر الصيانة</th>
+              <th>المندوب ووقت الالتقاط</th>
+              <th>الموقع المسجل للماكينة</th>
+              <th>الموقع الفعلي / المقترح</th>
+              <th>السبب / الملاحظات</th>
+              <th>الصور والخريطة</th>
+              <th>قرار الإدارة</th>
+            </tr>
+          </thead>
+          <tbody>
+            {requests.map((request) => (
+              <tr key={request.id}>
+                <td>
+                  <strong>{request.machineCode} · {request.machineName}</strong>
+                  <br /><small>{request.orderCode}</small>
+                  {request.visitUuid && <div><small className="madar-muted">مرتبط بزيارة: {request.visitUuid.slice(0, 8)}…</small></div>}
+                </td>
+                <td>
+                  <div>{request.representativeName}</div>
+                  <small className="madar-muted">{new Date(request.capturedAt).toLocaleString('ar')}</small>
+                </td>
+                <td>
+                  {request.oldLocation ? `${request.oldLocation.latitude.toFixed(6)}, ${request.oldLocation.longitude.toFixed(6)}` : '—'}
+                  {request.hasLocationChanged && (
+                    <div style={{ marginTop: 4 }}>
+                      <span style={{ background: '#ffebee', color: '#c62828', padding: '2px 6px', borderRadius: 4, fontSize: 11, fontWeight: 'bold' }}>
+                        ⚠️ تغيّر الموقع المسجل بعد الطلب!
+                      </span>
+                      {request.currentMachineLocation && (
+                        <div style={{ fontSize: 11, color: '#c62828' }}>
+                          الحالي: {request.currentMachineLocation.latitude.toFixed(6)}, {request.currentMachineLocation.longitude.toFixed(6)}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </td>
+                <td>
+                  <strong>{request.proposedLocation.latitude.toFixed(6)}, {request.proposedLocation.longitude.toFixed(6)}</strong>
+                  <br /><small>دقة GPS: ±{Math.round(request.proposedLocation.accuracy)} م · بُعد: {Math.round(request.distanceMeters)} م</small>
+                </td>
+                <td>
+                  {request.note ? <span>{request.note}</span> : <span className="madar-muted">—</span>}
+                </td>
+                <td>
+                  <div style={{ display: 'grid', gap: 6 }}>
+                    <Button size="small" variant="secondary" onClick={() => setMapModalRequest(request)}>
+                      🗺️ عرض على الخريطة
+                    </Button>
+                    {request.hasEvidence && (
+                      <Button
+                        size="small"
+                        variant="ghost"
+                        onClick={() => setViewingSupportPhoto({
+                          title: `دليل تغيير موقع: ${request.machineCode}`,
+                          subtitle: `${request.machineName} · ${request.representativeName}`,
+                          machineCode: request.machineCode,
+                          phaseLabel: 'دليل الموقع',
+                          photos: [{
+                            id: `loc-ev-${request.id}`,
+                            url: `/api/system/rep-location-changes/${request.id}/evidence`,
+                            filename: `MADAR_${request.machineCode}_location_evidence.jpg`,
+                            caption: `إحداثيات مقترحة: ${request.proposedLocation.latitude}, ${request.proposedLocation.longitude}`
+                          }]
+                        })}
+                      >
+                        📷 صورة الدليل
+                      </Button>
+                    )}
+                    {request.visitPhotos && request.visitPhotos.length > 0 && (
+                      <Button
+                        size="small"
+                        variant="ghost"
+                        onClick={() => setViewingSupportPhoto({
+                          title: `صور الزيارة: ${request.machineCode}`,
+                          subtitle: `${request.machineName} · ${request.representativeName}`,
+                          machineCode: request.machineCode,
+                          photos: request.visitPhotos.map((vp, idx) => ({
+                            id: vp.id || `vp-${idx}`,
+                            url: vp.url,
+                            filename: `MADAR_${request.machineCode}_visit_${idx + 1}.jpg`,
+                            caption: `${vp.phase || ''} (${new Date(vp.capturedAt).toLocaleString('ar')})`
+                          }))
+                        })}
+                      >
+                        📸 صور الزيارة ({request.visitPhotos.length})
+                      </Button>
+                    )}
+                  </div>
+                </td>
+                <td>
+                  {request.status === 'pending' ? (
+                    <div style={{ display: 'grid', gap: 6, minWidth: 160 }}>
+                      <Button
+                        size="small"
+                        variant="primary"
+                        disabled={busy === `location-${request.id}`}
+                        onClick={() => reviewLocation(request, 'approved')}
+                      >
+                        اعتماد كموقع أساسي جديد
+                      </Button>
+                      <Button
+                        size="small"
+                        variant="secondary"
+                        disabled={busy === `location-${request.id}`}
+                        onClick={() => reviewLocation(request, 'exception_only')}
+                      >
+                        تسجيل كاستثناء للزيارة فقط
+                      </Button>
+                      <Button
+                        size="small"
+                        variant="danger"
+                        disabled={busy === `location-${request.id}`}
+                        onClick={() => reviewLocation(request, 'rejected')}
+                      >
+                        رفض تغيير الموقع
+                      </Button>
+                    </div>
+                  ) : (
+                    <div>
+                      <Badge tone={request.status === 'approved' ? 'success' : (request.status === 'exception_only' ? 'info' : 'error')}>
+                        {LOCATION_STATUS_LABELS[request.status] ?? request.status}
+                      </Badge>
+                      {request.reviewerName && (
+                        <div style={{ fontSize: 11, color: '#666', marginTop: 4 }}>
+                          بواسطة: {request.reviewerName}
+                        </div>
+                      )}
+                      {request.reviewNote && (
+                        <div style={{ fontSize: 11, fontStyle: 'italic', marginTop: 2 }}>
+                          «{request.reviewNote}»
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table></div> : <EmptyState title="لا توجد طلبات في هذه الحالة" description="تغييرات واستثناءات مواقع الماكينات ستظهر هنا للمراجعة." />}
       </section>}
 
       {view === 'devices' && <section className="madar-panel madar-section">
@@ -369,6 +637,14 @@ export default function RepSupportAdminPage({ isAdmin = false }) {
           machineCode={viewingSupportPhoto.machineCode}
           phaseLabel={viewingSupportPhoto.phaseLabel}
           photos={viewingSupportPhoto.photos}
+        />
+      )}
+
+      {mapModalRequest && (
+        <LocationDiffMapModal
+          isOpen={Boolean(mapModalRequest)}
+          onClose={() => setMapModalRequest(null)}
+          request={mapModalRequest}
         />
       )}
     </div>

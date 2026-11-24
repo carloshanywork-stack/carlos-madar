@@ -769,7 +769,19 @@ function evaluateSelfApproval(repId, visit, machine, beforePhotos, afterPhotos, 
       const distance = calculateDistanceMeters(location.latitude, location.longitude, machine.latitude, machine.longitude);
       const effectiveDistance = Math.max(0, distance - location.accuracy);
       const radius = Math.max(1, Number(machine.geofence_radius_meters) || 50);
-      if (effectiveDistance > radius) reasons.push('OUTSIDE_GEOFENCE');
+      if (effectiveDistance > radius) {
+        const machineId = machine.machine_id ?? machine.id;
+        const hasLocationException = database.prepare(`
+          SELECT 1 FROM rep_machine_location_change_requests
+          WHERE machine_id = ? AND (visit_uuid = ? OR action_uuid = ?)
+          LIMIT 1
+        `).get(machineId, visit.visitUuid, visit.visitUuid);
+        if (hasLocationException) {
+          reasons.push('LOCATION_EXCEPTION_PENDING');
+        } else {
+          reasons.push('OUTSIDE_GEOFENCE');
+        }
+      }
     }
   }
 
@@ -998,7 +1010,7 @@ export function listLocationConfirmations({ repId = null, status = 'pending', ro
 export async function submitRepMachineLocationChange(rep, machineId, input, evidenceFile, database = db) {
   if (rep?.role !== 'rep') throw new HttpError(403, 'Field representative access is required.');
   const body = requireObject(input, 'location change request');
-  allowOnlyKeys(body, ['actionUuid', 'cardId', 'location', 'note']);
+  allowOnlyKeys(body, ['actionUuid', 'cardId', 'location', 'note', 'visitUuid', 'actualConfirmedLocation']);
   const uuid = actionUuid(body.actionUuid);
   const cardId = positiveId(body.cardId, 'cardId');
   const id = positiveId(machineId, 'machineId');
@@ -1010,6 +1022,9 @@ export async function submitRepMachineLocationChange(rep, machineId, input, evid
   const ageMs = Date.now() - Date.parse(location.updatedAt);
   if (ageMs > 5 * 60 * 1000 || ageMs < -60 * 1000) throw new HttpError(400, 'A current GPS reading is required.');
   const note = optionalText(body.note, 'note', { maxLength: 2000 });
+  const visitUuid = body.visitUuid ? String(body.visitUuid).trim() : null;
+  const actualConfirmedLocation = body.actualConfirmedLocation ? normalizeRepLocation(body.actualConfirmedLocation) : location;
+
   const machine = findAssignedRepMachine(rep, id, cardId, database);
   if (Number(machine.is_location_locked) !== 1
     || !Number.isFinite(machine.latitude) || !Number.isFinite(machine.longitude)) {
@@ -1023,8 +1038,10 @@ export async function submitRepMachineLocationChange(rep, machineId, input, evid
   }
   const payloadHash = actionPayloadHash({
     repId: Number(rep.id), machineId: id, cardId, location, note,
+    visitUuid, actualConfirmedLocation,
     evidenceSha256: evidence ? createHash('sha256').update(evidence.buffer).digest('hex') : null,
   });
+
   const existing = database.prepare(`SELECT id, action_uuid, rep_user_id, machine_id, payload_sha256
     FROM rep_machine_location_change_requests WHERE action_uuid = ?`).get(uuid);
   if (existing) {
@@ -1032,6 +1049,16 @@ export async function submitRepMachineLocationChange(rep, machineId, input, evid
       throw new HttpError(409, 'This action UUID was already used with different content.');
     }
     return { success: true, idempotent: true, requestId: Number(existing.id), status: database.prepare('SELECT status FROM rep_machine_location_change_requests WHERE id = ?').get(existing.id).status };
+  }
+
+  if (visitUuid) {
+    const existingVisitRequest = database.prepare(`SELECT id, action_uuid, rep_user_id, machine_id, payload_sha256
+      FROM rep_machine_location_change_requests WHERE visit_uuid = ?`).get(visitUuid);
+    if (existingVisitRequest) {
+      if (Number(existingVisitRequest.rep_user_id) === Number(rep.id) && Number(existingVisitRequest.machine_id) === id) {
+        return { success: true, idempotent: true, requestId: Number(existingVisitRequest.id), status: database.prepare('SELECT status FROM rep_machine_location_change_requests WHERE id = ?').get(existingVisitRequest.id).status };
+      }
+    }
   }
 
   const evidencePath = evidence ? storageDirectory('rep-support', 'location-evidence', `${uuid}.jpg`) : null;
@@ -1044,16 +1071,17 @@ export async function submitRepMachineLocationChange(rep, machineId, input, evid
         || current.latitude !== machine.latitude || current.longitude !== machine.longitude) {
         throw new HttpError(409, 'The machine location changed; refresh and submit a new request.');
       }
-      if (database.prepare(`SELECT 1 FROM rep_machine_location_change_requests
-        WHERE machine_id = ? AND status = 'pending' LIMIT 1`).get(id)) {
+      if (!visitUuid && database.prepare(`SELECT 1 FROM rep_machine_location_change_requests
+        WHERE machine_id = ? AND status = 'pending' AND visit_uuid IS NULL LIMIT 1`).get(id)) {
         throw new HttpError(409, 'A location change request is already awaiting administrator review.');
       }
       const result = database.prepare(`INSERT INTO rep_machine_location_change_requests
-        (action_uuid, payload_sha256, rep_user_id, machine_id, card_id, old_latitude, old_longitude,
-         proposed_latitude, proposed_longitude, gps_accuracy, distance_meters, captured_at, note,
-         evidence_path, evidence_content_type)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-        .run(uuid, payloadHash, rep.id, id, cardId, machine.latitude, machine.longitude,
+        (action_uuid, payload_sha256, rep_user_id, machine_id, card_id, visit_uuid, old_latitude, old_longitude,
+         actual_confirmed_latitude, actual_confirmed_longitude, proposed_latitude, proposed_longitude,
+         gps_accuracy, distance_meters, captured_at, note, evidence_path, evidence_content_type)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(uuid, payloadHash, rep.id, id, cardId, visitUuid, machine.latitude, machine.longitude,
+          actualConfirmedLocation.latitude, actualConfirmedLocation.longitude,
           location.latitude, location.longitude, location.accuracy,
           calculateDistanceMeters(location.latitude, location.longitude, machine.latitude, machine.longitude),
           location.updatedAt, note, evidencePath, evidence ? 'image/jpeg' : null);
@@ -1061,7 +1089,9 @@ export async function submitRepMachineLocationChange(rep, machineId, input, evid
       recordAudit({
         database, actorId: rep.id, action: 'created', entityType: 'rep_machine_location_change', entityId: insertedId,
         newValues: {
-          machine_id: id, card_id: cardId, old_latitude: machine.latitude, old_longitude: machine.longitude,
+          machine_id: id, card_id: cardId, visit_uuid: visitUuid,
+          old_latitude: machine.latitude, old_longitude: machine.longitude,
+          actual_confirmed_latitude: actualConfirmedLocation.latitude, actual_confirmed_longitude: actualConfirmedLocation.longitude,
           proposed_latitude: location.latitude, proposed_longitude: location.longitude, gps_accuracy: location.accuracy,
           distance_meters: calculateDistanceMeters(location.latitude, location.longitude, machine.latitude, machine.longitude),
           evidence_attached: Boolean(evidencePath), status: 'pending'
@@ -1090,13 +1120,14 @@ export async function getMyRepMachineLocationChangeEvidence(requestIdValue, repI
 }
 
 export function listRepMachineLocationChangeRequests({ status = 'pending', repId = null } = {}, database = db) {
-  if (!['pending', 'approved', 'rejected', 'all'].includes(status)) throw new HttpError(400, 'Invalid request status.');
+  if (!['pending', 'approved', 'rejected', 'exception_only', 'all'].includes(status)) throw new HttpError(400, 'Invalid request status.');
   const clauses = [];
   const parameters = [];
   if (status !== 'all') { clauses.push('request.status = ?'); parameters.push(status); }
   if (repId !== null) { clauses.push('request.rep_user_id = ?'); parameters.push(positiveId(repId, 'repId')); }
   const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
-  return database.prepare(`SELECT request.*, machine.code AS machine_code, machine.name_ar AS machine_name,
+  const rows = database.prepare(`SELECT request.*, machine.code AS machine_code, machine.name_ar AS machine_name,
+      machine.latitude AS current_machine_latitude, machine.longitude AS current_machine_longitude,
       representative.full_name AS representative_name, reviewer.full_name AS reviewer_name,
       order_record.order_code
     FROM rep_machine_location_change_requests request
@@ -1105,23 +1136,75 @@ export function listRepMachineLocationChangeRequests({ status = 'pending', repId
     JOIN maintenance_cards card ON card.id = request.card_id
     JOIN maintenance_orders order_record ON order_record.id = card.order_id
     LEFT JOIN users reviewer ON reviewer.id = request.reviewer_user_id
-    ${where} ORDER BY request.id DESC`).all(...parameters).map((row) => ({
-    id: Number(row.id), requestId: Number(row.id), actionUuid: row.action_uuid,
-    representativeId: Number(row.rep_user_id), representativeName: row.representative_name,
-    machineId: Number(row.machine_id), machineCode: row.machine_code, machineName: row.machine_name,
-    cardId: Number(row.card_id), orderCode: row.order_code, status: row.status,
-    oldLocation: row.old_latitude === null || row.old_longitude === null ? null : { latitude: row.old_latitude, longitude: row.old_longitude },
-    proposedLocation: { latitude: row.proposed_latitude, longitude: row.proposed_longitude, accuracy: row.gps_accuracy },
-    distanceMeters: row.distance_meters, capturedAt: row.captured_at, note: row.note,
-    hasEvidence: Boolean(row.evidence_path), reviewerName: row.reviewer_name, reviewNote: row.review_note,
-    createdAt: row.created_at, reviewedAt: row.reviewed_at,
-  }));
+    ${where} ORDER BY request.id DESC`).all(...parameters);
+
+  return rows.map((row) => {
+    let visitPhotos = [];
+    if (row.visit_uuid) {
+      const visitRow = database.prepare('SELECT id, before_path, after_path, before_captured_at, after_captured_at, captured_at FROM rep_visits WHERE visit_uuid = ?').get(row.visit_uuid);
+      if (visitRow) {
+        const photoRows = database.prepare('SELECT phase, ordinal, stored_path, captured_at FROM rep_visit_photos WHERE visit_id = ? ORDER BY phase DESC, ordinal ASC').all(visitRow.id);
+        if (photoRows.length) {
+          visitPhotos = photoRows.map((p) => ({
+            id: `vphoto-${p.phase}-${p.ordinal}`,
+            url: `/api/supervisor/visits/${visitRow.id}/photos/${p.phase}/${p.ordinal + 1}`,
+            phase: p.phase === 'before' ? 'قبل الصيانة' : 'بعد الصيانة',
+            phaseLabel: p.phase === 'before' ? 'قبل الصيانة' : 'بعد الصيانة',
+            capturedAt: p.captured_at,
+          }));
+        } else {
+          if (visitRow.before_path) {
+            visitPhotos.push({
+              id: 'vphoto-before-0',
+              url: `/api/supervisor/visits/${visitRow.id}/photos/before/1`,
+              phase: 'قبل الصيانة',
+              phaseLabel: 'قبل الصيانة',
+              capturedAt: visitRow.before_captured_at ?? visitRow.captured_at,
+            });
+          }
+          if (visitRow.after_path) {
+            visitPhotos.push({
+              id: 'vphoto-after-0',
+              url: `/api/supervisor/visits/${visitRow.id}/photos/after/1`,
+              phase: 'بعد الصيانة',
+              phaseLabel: 'بعد الصيانة',
+              capturedAt: visitRow.after_captured_at ?? visitRow.captured_at,
+            });
+          }
+        }
+      }
+    }
+
+    const hasLocationChanged = Boolean(
+      row.old_latitude !== null && row.old_longitude !== null &&
+      row.current_machine_latitude !== null && row.current_machine_longitude !== null &&
+      (Math.abs(row.current_machine_latitude - row.old_latitude) > 0.000001 ||
+       Math.abs(row.current_machine_longitude - row.old_longitude) > 0.000001)
+    );
+
+    return {
+      id: Number(row.id), requestId: Number(row.id), actionUuid: row.action_uuid,
+      visitUuid: row.visit_uuid ?? null,
+      representativeId: Number(row.rep_user_id), representativeName: row.representative_name,
+      machineId: Number(row.machine_id), machineCode: row.machine_code, machineName: row.machine_name,
+      cardId: Number(row.card_id), orderCode: row.order_code, status: row.status,
+      oldLocation: row.old_latitude === null || row.old_longitude === null ? null : { latitude: row.old_latitude, longitude: row.old_longitude },
+      actualConfirmedLocation: row.actual_confirmed_latitude === null || row.actual_confirmed_longitude === null ? null : { latitude: row.actual_confirmed_latitude, longitude: row.actual_confirmed_longitude },
+      currentMachineLocation: row.current_machine_latitude === null || row.current_machine_longitude === null ? null : { latitude: row.current_machine_latitude, longitude: row.current_machine_longitude },
+      hasLocationChanged,
+      proposedLocation: { latitude: row.proposed_latitude, longitude: row.proposed_longitude, accuracy: row.gps_accuracy },
+      distanceMeters: row.distance_meters, capturedAt: row.captured_at, note: row.note,
+      hasEvidence: Boolean(row.evidence_path), reviewerName: row.reviewer_name, reviewNote: row.review_note,
+      visitPhotos,
+      createdAt: row.created_at, reviewedAt: row.reviewed_at,
+    };
+  });
 }
 
 export async function reviewRepMachineLocationChange(requestIdValue, input, actorId, decision, database = db) {
   const requestId = positiveId(requestIdValue, 'requestId');
   const actor = positiveId(actorId, 'actorId');
-  if (!['approved', 'rejected'].includes(decision)) throw new HttpError(400, 'Invalid location change decision.');
+  if (!['approved', 'rejected', 'exception_only'].includes(decision)) throw new HttpError(400, 'Invalid location change decision.');
   const body = requireObject(input ?? {});
   allowOnlyKeys(body, ['note']);
   const note = optionalText(body.note, 'note', { maxLength: 2000 });
