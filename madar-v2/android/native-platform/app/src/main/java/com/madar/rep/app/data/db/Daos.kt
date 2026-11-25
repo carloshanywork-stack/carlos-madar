@@ -66,6 +66,12 @@ interface VisitDao {
     @Query("UPDATE visits SET state = 'queued', nextAttemptAt = :now, lastError = NULL, updatedAt = :now WHERE visitUuid = :uuid AND state IN ('needs_login','needs_review','retry_wait','failed')")
     suspend fun retryNow(uuid: String, now: Long): Int
 
+    @Query("UPDATE visits SET state = 'queued', nextAttemptAt = :now, updatedAt = :now WHERE ownerRepId = :repId AND state = 'retry_wait'")
+    suspend fun wakeAllRetryWait(repId: Long, now: Long): Int
+
+    @Query("UPDATE visits SET state = 'queued', nextAttemptAt = :now, updatedAt = :now WHERE ownerRepId = :repId AND cardId = :cardId AND state = 'retry_wait'")
+    suspend fun wakeRetryWaitForCard(repId: Long, cardId: Long, now: Long): Int
+
     @Query("SELECT COUNT(*) FROM visits WHERE ownerRepId = :repId AND state = :state")
     fun observeCountByState(repId: Long, state: String): Flow<Int>
 
@@ -260,6 +266,9 @@ interface MachineActionDao {
 
     @Query("UPDATE machine_actions SET state = 'queued', nextAttemptAt = :now, lastError = NULL, updatedAt = :now WHERE actionUuid = :uuid AND state IN ('needs_login','needs_review','retry_wait','failed')")
     suspend fun retryNow(uuid: String, now: Long): Int
+
+    @Query("UPDATE machine_actions SET state = 'queued', nextAttemptAt = :now, updatedAt = :now WHERE ownerRepId = :repId AND state = 'retry_wait'")
+    suspend fun wakeAllRetryWait(repId: Long, now: Long): Int
 }
 
 @Dao

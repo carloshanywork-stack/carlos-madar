@@ -1561,7 +1561,7 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
         _sync.value = _sync.value.copy(running = true, note = null)
         viewModelScope.launch {
             try {
-                val result = container.syncEngine.run()
+                val result = container.syncEngine.run(forceRetryWait = showSummary)
                 _sync.value = SyncUiState(
                     running = false,
                     last = result,

@@ -72,11 +72,11 @@ class SyncEngine(
      */
     private val runMutex = Mutex()
 
-    suspend fun run(): SyncRunResult = runMutex.withLock {
-        withContext(Dispatchers.IO) { runOnce() }
+    suspend fun run(forceRetryWait: Boolean = false): SyncRunResult = runMutex.withLock {
+        withContext(Dispatchers.IO) { runOnce(forceRetryWait) }
     }
 
-    private suspend fun runOnce(): SyncRunResult {
+    private suspend fun runOnce(forceRetryWait: Boolean = false): SyncRunResult {
         var session = sessionGateway.current() ?: return SyncRunResult(
             attempted = 0, acknowledged = 0, processing = 0, needsReview = 0,
             transientFailures = 0, needsLogin = true, remaining = 0
@@ -100,6 +100,11 @@ class SyncEngine(
         }
         val api = apiFactory(session.serverUrl)
         recoverStuckLocationSync(session.ownerScopeId)
+        if (forceRetryWait) {
+            val wakeNow = System.currentTimeMillis()
+            database.machineActions().wakeAllRetryWait(session.ownerScopeId, wakeNow)
+            database.visits().wakeAllRetryWait(session.ownerScopeId, wakeNow)
+        }
         var attempted = 0
         var acknowledged = 0
         var processing = 0
@@ -472,9 +477,16 @@ class SyncEngine(
     }
 
     private suspend fun syncMachineActions(session: Session, api: MadarApi) {
-        val actions = database.machineActions().dueForSync(session.ownerScopeId, System.currentTimeMillis())
-        for (action in actions) {
-            executeSingleMachineAction(action, session, api)
+        val processed = mutableSetOf<String>()
+        while (processed.size < 200) {
+            val batch = database.machineActions()
+                .dueForSync(session.ownerScopeId, System.currentTimeMillis(), limit = 25)
+                .filterNot { processed.contains(it.actionUuid) }
+            if (batch.isEmpty()) break
+            for (action in batch) {
+                processed.add(action.actionUuid)
+                executeSingleMachineAction(action, session, api)
+            }
         }
     }
 
@@ -554,6 +566,11 @@ class SyncEngine(
                     response.correctionId ?: response.id ?: action.correctionId,
                     response.status ?: action.serverStatus, now
                 )
+                if (action.type == "confirm_location" &&
+                    state in setOf(MachineActionState.APPROVED, MachineActionState.PENDING_APPROVAL)
+                ) {
+                    database.visits().wakeRetryWaitForCard(session.ownerScopeId, action.cardId, now)
+                }
             } else {
                 diagnostics.record(session.ownerScopeId, DiagnosticOperation.MACHINE_SYNC, DiagnosticFailure.REJECTED)
                 database.machineActions().updateState(
@@ -754,10 +771,12 @@ class SyncEngine(
         ownerScopeId: Long,
         now: Long = System.currentTimeMillis(),
     ) {
-        val markerKey = "recover-stuck-location-sync-v45:$ownerScopeId"
+        val markerKey = "recover-stuck-location-sync-v46:$ownerScopeId"
         if (database.migration().get(markerKey) != null) return
         database.withTransaction {
             if (database.migration().get(markerKey) != null) return@withTransaction
+            database.machineActions().wakeAllRetryWait(ownerScopeId, now)
+            database.visits().wakeAllRetryWait(ownerScopeId, now)
             val actions = database.machineActions().listForOwner(ownerScopeId)
             val activeConfirmCards = mutableSetOf<Long>()
             val latestConfirmByCard = mutableMapOf<Long, MachineActionEntity>()
