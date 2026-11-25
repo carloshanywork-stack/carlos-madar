@@ -82,6 +82,22 @@ class VisitRepository(
             ))
         }
 
+    suspend fun confirmArrivalException(visitUuid: String, point: GeoPoint, now: Long = System.currentTimeMillis()) =
+        database.withTransaction {
+            val visit = database.visits().find(visitUuid) ?: throw MadarError.Validation("الزيارة غير موجودة")
+            if (visit.state != VisitState.DRAFT) throw MadarError.Validation("الزيارة غير قابلة للتعديل")
+            database.visits().upsert(visit.copy(
+                arrivalConfirmedAt = now,
+                latitude = point.latitude,
+                longitude = point.longitude,
+                locationAccuracy = point.accuracyMeters,
+                locationCapturedAt = point.capturedAtMillis,
+                locationProvider = point.provider,
+                governorate = governorates.find(point.latitude, point.longitude)?.nameAr,
+                updatedAt = now,
+            ))
+        }
+
     fun observeVisit(uuid: String): Flow<VisitEntity?> = database.visits().observe(uuid)
 
     suspend fun photos(uuid: String): List<PhotoEntity> = database.photos().forVisit(uuid)
