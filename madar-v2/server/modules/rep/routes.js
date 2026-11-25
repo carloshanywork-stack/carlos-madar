@@ -425,7 +425,10 @@ router.post('/machines/:machineId/confirm-location', (req, res, next) => {
   try {
     const result = confirmRepMachineLocation(req.user, req.params.machineId, req.body);
     if (!result.idempotent) {
-      publishOperationsEvent('rep.machine.location-reviewed', {
+      const eventName = result.status === 'pending'
+        ? 'rep.machine.location-requested'
+        : 'rep.machine.location-reviewed';
+      publishOperationsEvent(eventName, {
         userId: req.user.id,
         machineId: result.machine.id,
         machineCode: result.machine.code,

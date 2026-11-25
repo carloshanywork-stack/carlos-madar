@@ -1,5 +1,6 @@
 package com.madar.rep.app.data.sync
 
+import androidx.room.withTransaction
 import com.madar.rep.app.core.Hashing
 import com.madar.rep.app.core.MadarError
 import com.madar.rep.app.core.MadarTime
@@ -13,6 +14,7 @@ import com.madar.rep.app.data.api.DiagnosticOperation
 import com.madar.rep.app.data.api.MachineActionResponse
 import com.madar.rep.app.data.api.MadarApi
 import com.madar.rep.app.data.api.MaintenanceLine
+import com.madar.rep.app.data.api.RouteResponse
 import com.madar.rep.app.data.api.VisitPhotoFile
 import com.madar.rep.app.data.api.VisitUpload
 import com.madar.rep.app.data.db.AttendanceActionEntity
@@ -22,6 +24,7 @@ import com.madar.rep.app.location.isClockInAwaitingSync
 import com.madar.rep.app.data.db.MachineActionEntity
 import com.madar.rep.app.data.db.MachineActionState
 import com.madar.rep.app.data.db.MadarDatabase
+import com.madar.rep.app.data.db.MigrationEntity
 import com.madar.rep.app.data.db.PhotoEntity
 import com.madar.rep.app.data.db.SupportReportState
 import com.madar.rep.app.data.db.VisitEntity
@@ -30,12 +33,14 @@ import com.madar.rep.app.data.session.Session
 import com.madar.rep.app.data.session.SessionGateway
 import com.madar.rep.app.media.PhotoProcessingPipeline
 import java.io.File
+import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import org.json.JSONObject
 
 data class SyncRunResult(
     val attempted: Int,
@@ -94,6 +99,7 @@ class SyncEngine(
             }
         }
         val api = apiFactory(session.serverUrl)
+        recoverStuckLocationSync(session.ownerScopeId)
         var attempted = 0
         var acknowledged = 0
         var processing = 0
@@ -356,13 +362,30 @@ class SyncEngine(
                 SyncSignal.NEEDS_LOGIN
             }
             SyncSignal.NEEDS_REVIEW -> {
-                diagnostics.record(session.ownerScopeId, DiagnosticOperation.VISIT_SYNC, DiagnosticFailure.REJECTED, result.httpStatus)
-                database.visits().updateSyncState(
-                    visit.visitUuid, VisitState.NEEDS_REVIEW,
-                    result.message ?: "الخادم رفض الزيارة؛ بياناتها وصورها محفوظة.",
-                    visit.attempts + 1, 0, result.status, now
-                )
-                SyncSignal.NEEDS_REVIEW
+                val message = result.message ?: "الخادم رفض الزيارة؛ بياناتها وصورها محفوظة."
+                val waitingOnMachineLocation = message.contains("تثبيت موقع الماكينة") &&
+                    database.machineActions().listForOwner(session.ownerScopeId).any {
+                        it.cardId == visit.cardId &&
+                            it.type == "confirm_location" &&
+                            it.state in setOf(
+                                MachineActionState.QUEUED,
+                                MachineActionState.SYNCING,
+                                MachineActionState.RETRY_WAIT,
+                                MachineActionState.PENDING_APPROVAL,
+                            )
+                    }
+                if (waitingOnMachineLocation) {
+                    scheduleRetry(visit, "بانتظار اعتماد موقع الماكينة على الخادم قبل رفع الزيارة.", visit.attempts + 1, now)
+                    SyncSignal.RETRY
+                } else {
+                    diagnostics.record(session.ownerScopeId, DiagnosticOperation.VISIT_SYNC, DiagnosticFailure.REJECTED, result.httpStatus)
+                    database.visits().updateSyncState(
+                        visit.visitUuid, VisitState.NEEDS_REVIEW,
+                        message,
+                        visit.attempts + 1, 0, result.status, now
+                    )
+                    SyncSignal.NEEDS_REVIEW
+                }
             }
             SyncSignal.RETRY -> {
                 scheduleRetry(visit, result.message ?: "لم يؤكد الخادم الزيارة", visit.attempts + 1, now)
@@ -463,10 +486,43 @@ class SyncEngine(
         )
         try {
             val response = when (action.type) {
-                "confirm_location" -> api.confirmMachineLocation(session.token, action.machineId, action.payloadJson)
+                "confirm_location" -> {
+                    val preparedPayload = withPendingReviewIfDelayed(action.payloadJson)
+                    try {
+                        api.confirmMachineLocation(session.token, action.machineId, preparedPayload.json)
+                    } catch (error: MadarError.Validation) {
+                        if (!preparedPayload.usedPendingReviewFlag &&
+                            error.message?.contains("current GPS reading", ignoreCase = true) == true
+                        ) {
+                            api.confirmMachineLocation(
+                                session.token,
+                                action.machineId,
+                                withPendingReviewFlag(action.payloadJson),
+                            )
+                        } else {
+                            throw error
+                        }
+                    }
+                }
                 "location_change" -> {
                     val evidence = action.evidencePath?.let { File(it) }?.takeIf { it.isFile }
-                    val submitResp = api.submitLocationChangeRequest(session.token, action.machineId, action.payloadJson, evidence)
+                    val preparedPayload = withPendingReviewIfDelayed(action.payloadJson)
+                    val submitResp = try {
+                        api.submitLocationChangeRequest(session.token, action.machineId, preparedPayload.json, evidence)
+                    } catch (error: MadarError.Validation) {
+                        if (!preparedPayload.usedPendingReviewFlag &&
+                            error.message?.contains("current GPS reading", ignoreCase = true) == true
+                        ) {
+                            api.submitLocationChangeRequest(
+                                session.token,
+                                action.machineId,
+                                withPendingReviewFlag(action.payloadJson),
+                                evidence,
+                            )
+                        } else {
+                            throw error
+                        }
+                    }
                     MachineActionResponse(
                         success = submitResp.success,
                         status = submitResp.status,
@@ -694,7 +750,195 @@ class SyncEngine(
         database.gpsPoints().requeueNeedsLogin(ownerScopeId, repId)
     }
 
+    internal suspend fun recoverStuckLocationSync(
+        ownerScopeId: Long,
+        now: Long = System.currentTimeMillis(),
+    ) {
+        val markerKey = "recover-stuck-location-sync-v45:$ownerScopeId"
+        if (database.migration().get(markerKey) != null) return
+        database.withTransaction {
+            if (database.migration().get(markerKey) != null) return@withTransaction
+            val actions = database.machineActions().listForOwner(ownerScopeId)
+            val activeConfirmCards = mutableSetOf<Long>()
+            val latestConfirmByCard = mutableMapOf<Long, MachineActionEntity>()
+            for (action in actions) {
+                when (action.type) {
+                    "confirm_location" -> {
+                        if (!latestConfirmByCard.containsKey(action.cardId)) {
+                            latestConfirmByCard[action.cardId] = action
+                        }
+                        if (action.state in DelayedLocationSyncPolicy.ACTIVE_CONFIRM_STATES) {
+                            activeConfirmCards.add(action.cardId)
+                        }
+                        if (action.state in setOf(MachineActionState.NEEDS_REVIEW, MachineActionState.FAILED) &&
+                            DelayedLocationSyncPolicy.isRecoverableMachineActionError(action.type, action.lastError)
+                        ) {
+                            database.machineActions().retryNow(action.actionUuid, now)
+                            activeConfirmCards.add(action.cardId)
+                        }
+                    }
+
+                    "location_change" -> {
+                        if (action.state in setOf(MachineActionState.NEEDS_REVIEW, MachineActionState.FAILED) &&
+                            DelayedLocationSyncPolicy.isRecoverableMachineActionError(action.type, action.lastError)
+                        ) {
+                            database.machineActions().retryNow(action.actionUuid, now)
+                        }
+                    }
+                }
+            }
+
+            var cachedRouteMachinesByCard: Map<Long, Long>? = null
+            suspend fun routeMachinesByCard(): Map<Long, Long> {
+                cachedRouteMachinesByCard?.let { return it }
+                val snapshot = database.routes().get(ownerScopeId)?.routeJson
+                val parsed = if (snapshot != null) {
+                    runCatching { json.decodeFromString(RouteResponse.serializer(), snapshot) }
+                        .getOrNull()
+                        ?.regions
+                        ?.flatMap { it.machines }
+                        ?.associate { it.cardId to it.machineId }
+                        .orEmpty()
+                } else {
+                    emptyMap()
+                }
+                cachedRouteMachinesByCard = parsed
+                return parsed
+            }
+
+            val visits = database.visits().listForOwner(ownerScopeId)
+            for (visit in visits) {
+                if (visit.state in setOf(VisitState.NEEDS_REVIEW, VisitState.FAILED) &&
+                    visit.lastError?.contains("تثبيت موقع الماكينة") == true
+                ) {
+                    if (!activeConfirmCards.contains(visit.cardId)) {
+                        val priorConfirm = latestConfirmByCard[visit.cardId]
+                        if (priorConfirm != null) {
+                            database.machineActions().retryNow(priorConfirm.actionUuid, now)
+                            activeConfirmCards.add(visit.cardId)
+                        } else {
+                            val machineId = routeMachinesByCard()[visit.cardId]
+                            val lat = visit.latitude
+                            val lon = visit.longitude
+                            if (machineId != null && lat != null && lon != null) {
+                                val capturedAt = visit.locationCapturedAt ?: visit.capturedAt
+                                val actionUuid = UUID.randomUUID().toString()
+                                val payload = JSONObject()
+                                    .put("actionUuid", actionUuid)
+                                    .put("cardId", visit.cardId)
+                                    .put("allowPendingReview", true)
+                                    .put(
+                                        "location",
+                                        JSONObject()
+                                            .put("latitude", lat)
+                                            .put("longitude", lon)
+                                            .put("accuracy", visit.locationAccuracy ?: 25f)
+                                            .put("updatedAt", MadarTime.isoUtc(capturedAt)),
+                                    )
+                                    .toString()
+                                database.machineActions().upsert(
+                                    MachineActionEntity(
+                                        actionUuid = actionUuid,
+                                        ownerRepId = ownerScopeId,
+                                        type = "confirm_location",
+                                        machineId = machineId,
+                                        cardId = visit.cardId,
+                                        payloadJson = payload,
+                                        state = MachineActionState.QUEUED,
+                                        nextAttemptAt = now,
+                                        createdAt = now,
+                                        updatedAt = now,
+                                    ),
+                                )
+                                activeConfirmCards.add(visit.cardId)
+                            }
+                        }
+                    }
+                    database.visits().retryNow(visit.visitUuid, now)
+                }
+            }
+            database.actionQueue().appendLegacyVisits(ownerScopeId)
+            database.migration().put(MigrationEntity(key = markerKey, value = now.toString(), updatedAt = now))
+        }
+    }
+
+    internal fun withPendingReviewIfDelayed(
+        payloadJson: String,
+        nowMillis: Long = System.currentTimeMillis(),
+    ): PreparedLocationPayload = DelayedLocationSyncPolicy.preparePayloadIfDelayed(payloadJson, nowMillis)
+
+    internal fun withPendingReviewFlag(payloadJson: String): String =
+        DelayedLocationSyncPolicy.withPendingReviewFlag(payloadJson)
+
+    internal data class PreparedLocationPayload(
+        val json: String,
+        val usedPendingReviewFlag: Boolean,
+    )
+
     companion object {
         private const val GPS_RETENTION_MS = 90L * 24 * 60 * 60 * 1000
+    }
+}
+
+internal object DelayedLocationSyncPolicy {
+    const val DELAYED_LOCATION_REVIEW_THRESHOLD_MS = 240_000L
+
+    val ACTIVE_CONFIRM_STATES = setOf(
+        MachineActionState.QUEUED,
+        MachineActionState.SYNCING,
+        MachineActionState.RETRY_WAIT,
+        MachineActionState.PENDING_APPROVAL,
+        MachineActionState.APPROVED,
+    )
+
+    fun preparePayloadIfDelayed(
+        payloadJson: String,
+        nowMillis: Long = System.currentTimeMillis(),
+    ): SyncEngine.PreparedLocationPayload {
+        val parsed = runCatching { JSONObject(payloadJson) }.getOrNull()
+            ?: return SyncEngine.PreparedLocationPayload(payloadJson, usedPendingReviewFlag = false)
+        if (parsed.optBoolean("allowPendingReview", false)) {
+            return SyncEngine.PreparedLocationPayload(payloadJson, usedPendingReviewFlag = true)
+        }
+        val updatedAt = parsed.optJSONObject("location")?.optString("updatedAt")?.takeIf { it.isNotBlank() }
+        val capturedMillis = updatedAt?.let { MadarTime.parseIso(it) }
+        val delayed = capturedMillis != null && (nowMillis - capturedMillis) > DELAYED_LOCATION_REVIEW_THRESHOLD_MS
+        return if (delayed) {
+            SyncEngine.PreparedLocationPayload(
+                json = parsed.put("allowPendingReview", true).toString(),
+                usedPendingReviewFlag = true,
+            )
+        } else {
+            SyncEngine.PreparedLocationPayload(payloadJson, usedPendingReviewFlag = false)
+        }
+    }
+
+    fun withPendingReviewFlag(payloadJson: String): String =
+        JSONObject(payloadJson).put("allowPendingReview", true).toString()
+
+    fun isRecoverableMachineActionError(type: String, lastError: String?): Boolean {
+        if (lastError.isNullOrBlank()) return false
+        return when (type) {
+            "confirm_location" ->
+                lastError.contains("current GPS reading", ignoreCase = true) ||
+                    lastError.contains("انتهت صلاحيتها")
+            "location_change" ->
+                lastError.contains("visitUuid", ignoreCase = true) ||
+                    lastError.contains("current GPS reading", ignoreCase = true)
+            else -> false
+        }
+    }
+
+    fun shouldRetryVisitWaitingOnLocation(
+        visitError: String?,
+        actionsForOwner: List<MachineActionEntity>,
+        cardId: Long,
+    ): Boolean {
+        if (visitError?.contains("تثبيت موقع الماكينة") != true) return false
+        return actionsForOwner.any {
+            it.cardId == cardId &&
+                it.type == "confirm_location" &&
+                it.state in ACTIVE_CONFIRM_STATES
+        }
     }
 }

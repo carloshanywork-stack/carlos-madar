@@ -379,10 +379,12 @@ class LocationProvider(private val context: Context) {
         val callback = object : LocationCallback() {
             override fun onLocationResult(locationResult: com.google.android.gms.location.LocationResult) {
                 val currentRealtime = android.os.SystemClock.elapsedRealtimeNanos()
+                val nowWallMillis = System.currentTimeMillis()
                 for (location in locationResult.locations) {
                     val point = location.toGeoPoint(location.provider ?: "fused")
                     val elapsedAgeMillis = (currentRealtime - location.elapsedRealtimeNanos) / 1_000_000L
-                    if (elapsedAgeMillis > 20_000L) continue
+                    val wallAgeMillis = nowWallMillis - point.capturedAtMillis
+                    if (elapsedAgeMillis > 20_000L || wallAgeMillis !in -30_000L..60_000L) continue
                     latestFixRef.set(point)
                     if (bestCandidate == null || point.accuracyMeters < bestCandidate!!.accuracyMeters) {
                         bestCandidate = point
@@ -446,7 +448,8 @@ class LocationProvider(private val context: Context) {
                 val currentRealtime = android.os.SystemClock.elapsedRealtimeNanos()
                 val candidate = location.toGeoPoint(location.provider ?: "native")
                 val elapsedAgeMillis = (currentRealtime - location.elapsedRealtimeNanos) / 1_000_000L
-                if (elapsedAgeMillis > 20_000L) return
+                val wallAgeMillis = System.currentTimeMillis() - candidate.capturedAtMillis
+                if (elapsedAgeMillis > 20_000L || wallAgeMillis !in -30_000L..60_000L) return
                 latestFixRef.set(candidate)
                 if (bestCandidate == null || candidate.accuracyMeters < bestCandidate!!.accuracyMeters) {
                     bestCandidate = candidate

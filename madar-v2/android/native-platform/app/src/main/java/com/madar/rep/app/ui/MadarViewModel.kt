@@ -756,7 +756,7 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
                         }
                         _messages.tryEmit("تم اعتماد موقع الماكينة بنجاح من الخادم.")
                     }
-                    MachineActionState.QUEUED, MachineActionState.RETRY_WAIT, MachineActionState.SYNCING -> {
+                    MachineActionState.QUEUED, MachineActionState.RETRY_WAIT, MachineActionState.SYNCING, MachineActionState.PENDING_APPROVAL -> {
                         val location = JSONObject(action.payloadJson).getJSONObject("location")
                         val latitude = location.getDouble("latitude")
                         val longitude = location.getDouble("longitude")
@@ -768,9 +768,19 @@ class MadarViewModel(private val container: AppContainer) : ViewModel() {
                             capturedAtMillis = MadarTime.parseIso(location.getString("updatedAt")) ?: System.currentTimeMillis(),
                             provider = "GPS",
                             isMock = false,
-                        ), "تم حفظ الاعتماد على هذا الجهاز. يمكنك المتابعة وسيُزامن مع الخادم عند توفر الاتصال.")
+                        ), if (saved?.state == MachineActionState.PENDING_APPROVAL) {
+                            "تم إرسال إحداثيات الماكينة للمراجعة لدى المشرف. يمكنك متابعة الزيارة الآن."
+                        } else {
+                            "تم حفظ الاعتماد على هذا الجهاز. يمكنك المتابعة وسيُزامن مع الخادم عند توفر الاتصال."
+                        })
                         container.scheduler.enqueueNow()
-                        _messages.tryEmit("تم حفظ طلب اعتماد الماكينة على الهاتف؛ سيُرسل تلقائيًا عند توفر الاتصال.")
+                        _messages.tryEmit(
+                            if (saved?.state == MachineActionState.PENDING_APPROVAL) {
+                                "تم إرسال موقع الماكينة لمراجعة المشرف ويمكنك استكمال الزيارة."
+                            } else {
+                                "تم حفظ طلب اعتماد الماكينة على الهاتف؛ سيُرسل تلقائيًا عند توفر الاتصال."
+                            }
+                        )
                     }
                     else -> {
                         val errorMsg = saved?.lastError ?: "تعذر اعتماد موقع الماكينة. راجع حالة الإجراء في شاشة المزامنة."

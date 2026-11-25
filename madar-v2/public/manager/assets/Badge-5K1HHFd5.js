@@ -1,0 +1,1 @@
+import{j as o}from"./react-vendor-D1It5uYK.js";import{s as m,c as n}from"./Alert-BcuZ03Hm.js";function c({status:a,children:s,tone:e}){const r=s??m[a]??a;return o.jsx("span",{className:`madar-badge madar-badge-${e??n(a)}`,children:r})}export{c as B};

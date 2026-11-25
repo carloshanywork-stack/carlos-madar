@@ -325,3 +325,80 @@ test('bulk visit approval is admin-only, idempotent, atomic, and does not archiv
     WHERE event_type='rep.visit.reviewed' AND json_extract(payload_json,'$.visitId') IN (?, ?)`)
     .get(third.visitId, fourth.visitId).n, 0);
 });
+
+test('delayed offline location confirmation queues pending review, unblocks visit sync, and locks on supervisor approval', async () => {
+  const photo = await sharp({ create: { width: 80, height: 60, channels: 3, background: '#336699' } }).jpeg().toBuffer();
+  const f = fixture();
+  const delayedCapturedAt = new Date(Date.now() - 25 * 60 * 1000).toISOString();
+  const delayedPayload = {
+    actionUuid: randomUUID(),
+    cardId: f.cardId,
+    allowPendingReview: true,
+    location: {
+      latitude: 30.0445,
+      longitude: 31.2358,
+      accuracy: 9,
+      updatedAt: delayedCapturedAt,
+    },
+  };
+
+  // Delayed offline confirmation preserves capture timestamp and enters supervisor review without locking immediately
+  const pendingConfirm = await request(`/api/rep/machines/${f.machineId}/confirm-location`, owner.cookie, delayedPayload);
+  assert.equal(pendingConfirm.status, 201, JSON.stringify(pendingConfirm.body));
+  assert.equal(pendingConfirm.body.status, 'pending');
+  const beforeApprovalMachine = db.prepare('SELECT is_location_locked, latitude, longitude FROM machines WHERE id=?').get(f.machineId);
+  assert.equal(beforeApprovalMachine.is_location_locked, 0);
+
+  // Route card does not hide the machine as a wrong-machine identity issue
+  const routeRes = await fetch(base + '/api/rep/today-route', {
+    headers: { cookie: owner.cookie, 'X-App-Version-Code': '45' },
+  });
+  assert.equal(routeRes.status, 200);
+  const routeBody = await routeRes.json();
+  const routeCard = routeBody.regions.flatMap((r) => r.machines).find((m) => Number(m.cardId) === Number(f.cardId));
+  assert.ok(routeCard);
+  assert.equal(routeCard.correctionPending, false);
+
+  // Syncing the completed visit while location confirmation is pending review succeeds as pending_review
+  const visitUuid = randomUUID();
+  const now = Date.now();
+  const visit = {
+    visitUuid,
+    cardId: f.cardId,
+    machineCode: f.code,
+    regionName: 'Cairo',
+    machineCondition: 'working',
+    reasonIds: [],
+    capturedAt: new Date(now - 20 * 60 * 1000).toISOString(),
+    location: delayedPayload.location,
+    beforeCapturedAt: [24, 23, 22].map((minutes) => new Date(now - minutes * 60000).toISOString()),
+    afterCapturedAt: [21, 20, 19].map((minutes) => new Date(now - minutes * 60000).toISOString()),
+  };
+  const form = new FormData();
+  form.append('visit', JSON.stringify(visit));
+  for (const phase of ['before', 'after']) {
+    for (let index = 0; index < 3; index += 1) {
+      form.append(`${phase}Photo`, new Blob([photo], { type: 'image/jpeg' }), `${phase}-${index}.jpg`);
+    }
+  }
+  const uploadRes = await fetch(base + '/api/rep/sync-visit', {
+    method: 'POST',
+    headers: { cookie: owner.cookie, 'X-App-Version-Code': '45' },
+    body: form,
+  });
+  const uploadText = await uploadRes.text();
+  assert.equal(uploadRes.status, 200, uploadText);
+  const uploadBody = JSON.parse(uploadText);
+  assert.equal(uploadBody.status, 'pending_review');
+  const visitRow = db.prepare('SELECT id, status FROM rep_visits WHERE visit_uuid=?').get(visitUuid);
+  assert.equal(visitRow.status, 'completed');
+
+  // Supervisor approval of the pending location confirmation locks the machine coordinates
+  const correctionId = pendingConfirm.body.correctionId;
+  const approveRes = await request(`/api/supervisor/corrections/${correctionId}/approve`, admin, {});
+  assert.equal(approveRes.status, 200, JSON.stringify(approveRes.body));
+  const afterApprovalMachine = db.prepare('SELECT is_location_locked, latitude, longitude FROM machines WHERE id=?').get(f.machineId);
+  assert.equal(afterApprovalMachine.is_location_locked, 1);
+  assert.equal(afterApprovalMachine.latitude, 30.0445);
+  assert.equal(afterApprovalMachine.longitude, 31.2358);
+});
